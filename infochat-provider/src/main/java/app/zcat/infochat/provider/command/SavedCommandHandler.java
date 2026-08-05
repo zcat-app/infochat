@@ -391,8 +391,9 @@ public class SavedCommandHandler implements CommandHandler {
         // page's cache-miss rows to untranslated (the listing itself
         // stays cheap and usable). The per-page translator budget then
         // bounds the invocation's generative count; rows beyond it
-        // render untranslated, unbracketed (the M1-747 degraded-cluster
-        // precedent).
+        // render untranslated — and therefore bracketed, since the primary
+        // line is then not in the reader's language (M1-759); the bracket
+        // costs no generative call.
         boolean llmTokenHeld = false;
         int translationBudget = translationMaxPerPage;
         for (Row row : rows) {
@@ -410,15 +411,23 @@ public class SavedCommandHandler implements CommandHandler {
             // legit-slash title like TCP/IP), and opens no DB connection
             // unless it actually redacts. The bot-authored uid and relative
             // age are not sanitized.
-            String headline = DisplayHeadline.of(row.title, row.body, llmOutputSanitizer);
+            // The anchor is ALWAYS absent here: this is a pure snapshot read
+            // and saved_post carries no title_en/body_en, so /saved can only
+            // render the anchor-absent form — the original in the primary
+            // slot, bracketed when it is not in the reader's language.
+            // Snapshotting the anchor needs a migration (M1-765).
+            DisplayHeadline.AnchoredHeadline headline = DisplayHeadline.anchorFirst(
+                    row.title, row.body, null, null, llmOutputSanitizer);
+            String primary = headline.originalLine();
+            TranslationPipeline.DisplayHit hit = TranslationPipeline.skipped(primary);
             if (!headline.isEmpty()
                     && !"en".equalsIgnoreCase(scopeLanguage)
                     && !row.sourceLanguage.equalsIgnoreCase(scopeLanguage)) {
                 // Display-hit translation (M1-755): a no-op for en scopes,
                 // same-language hits, and null source language — the
                 // pipeline owns the decision, the controls (pre-bound →
-                // flatten → sanitizer-2 → re-truncate → bracketed original
-                // line) and the fallback. Input is the DisplayHeadline OUTPUT, so the
+                // flatten → sanitizer-2 → re-truncate) and the
+                // fallback. Input is the DisplayHeadline OUTPUT, so the
                 // headline is capped before the translator call by
                 // construction. The cache partition is per-USER
                 // (hit/saved/<userId>/<effectiveLanguage>) — the list is
@@ -436,7 +445,7 @@ public class SavedCommandHandler implements CommandHandler {
                 // generative call.
                 String displayHitKey = TranslationPipeline.displayHitCacheLanguage(
                         "saved", userId, scopeLanguage);
-                boolean cacheHit = translationCache.get(headline, displayHitKey).isPresent();
+                boolean cacheHit = translationCache.get(primary, displayHitKey).isPresent();
                 if (!cacheHit && !llmTokenHeld) {
                     llmTokenHeld = true;
                     if (!llmRateCap.tryAcquire(userId)) {
@@ -450,12 +459,12 @@ public class SavedCommandHandler implements CommandHandler {
                 // A cache miss consumes one budget slot — the row that
                 // spends the last slot still calls.
                 if (cacheHit) {
-                    headline = translationPipeline.runForDisplayHit(
-                            headline, row.sourceLanguage, "saved", userId, scopeLanguage);
+                    hit = translationPipeline.runForDisplayHit(
+                            primary, row.sourceLanguage, false, "saved", userId, scopeLanguage);
                 } else if (translationBudget > 0) {
                     translationBudget--;
-                    headline = translationPipeline.runForDisplayHit(
-                            headline, row.sourceLanguage, "saved", userId, scopeLanguage);
+                    hit = translationPipeline.runForDisplayHit(
+                            primary, row.sourceLanguage, false, "saved", userId, scopeLanguage);
                 }
             }
             // An empty headline means the snapshot carries no renderable text
@@ -463,6 +472,18 @@ public class SavedCommandHandler implements CommandHandler {
             // token together with its separator, which needs the second
             // template — interpolating "" into lineTemplate would leave a
             // doubled separator where the headline was.
+            // The primary carries the note when the translation failed, so
+            // the "saved … tags:" metadata stays on the line it describes.
+            // The bracketed original then follows the WHOLE formatted line
+            // rather than riding in the headline slot — interpolating a
+            // two-line block into {1} would strand the metadata on the
+            // subordinate line (M1-759).
+            String primaryToken = DisplayHeadline.primaryFor(hit.headline(),
+                    TranslationPipeline.primaryInReaderLanguage(
+                            hit, false, row.sourceLanguage, scopeLanguage));
+            if (hit.note() != null) {
+                primaryToken = primaryToken + "\n" + hit.note();
+            }
             String line = headline.isEmpty()
                     ? MessageFormat.format(noHeadlineTemplate,
                             row.postUid,
@@ -470,9 +491,14 @@ public class SavedCommandHandler implements CommandHandler {
                             llmOutputSanitizer.sanitize(tagJoined))
                     : MessageFormat.format(lineTemplate,
                             row.postUid,
-                            headline,
+                            primaryToken,
                             relativeAge(row.savedAt),
                             llmOutputSanitizer.sanitize(tagJoined));
+            String subordinate = DisplayHeadline.subordinateFor(
+                    hit.headline(), headline.originalLine());
+            if (!headline.isEmpty() && !subordinate.isEmpty()) {
+                line = line + "\n" + subordinate;
+            }
             body.append('\n').append(line);
         }
         return body.toString();

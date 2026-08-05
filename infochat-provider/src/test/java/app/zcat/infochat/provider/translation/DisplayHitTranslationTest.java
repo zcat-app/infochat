@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -70,8 +71,26 @@ class DisplayHitTranslationTest {
     private String runDisplayHit(String headline,
                                  @Nullable String sourceLanguage,
                                  String scopeLanguage) {
+        return hitFor(headline, sourceLanguage, scopeLanguage).headline();
+    }
+
+    /**
+     * The discriminated result itself, for the cases that assert WHICH leg
+     * ran rather than what it rendered. {@code anchored=false} is the
+     * unanchored default; the anchored cases pass it explicitly.
+     */
+    private TranslationPipeline.DisplayHit hitFor(String headline,
+                                                  @Nullable String sourceLanguage,
+                                                  String scopeLanguage) {
+        return hitFor(headline, sourceLanguage, false, scopeLanguage);
+    }
+
+    private TranslationPipeline.DisplayHit hitFor(String headline,
+                                                  @Nullable String sourceLanguage,
+                                                  boolean anchored,
+                                                  String scopeLanguage) {
         return pipeline.runForDisplayHit(
-                headline, sourceLanguage, SCOPE_KIND, SCOPE_ID, scopeLanguage);
+                headline, sourceLanguage, anchored, SCOPE_KIND, SCOPE_ID, scopeLanguage);
     }
 
     /**
@@ -135,16 +154,19 @@ class DisplayHitTranslationTest {
     // ----- translating leg ----------------------------------------------
 
     @Test
-    void csScopeWithEnSourceTranslatesShowsBracketedOriginalAndCaches() {
-        String result = runDisplayHit("en", "cs");
+    void csScopeWithEnSourceTranslatesAndCaches() {
+        TranslationPipeline.DisplayHit hit = hitFor(HEADLINE, "en", "cs");
 
-        assertEquals("přeložený titulek\n[" + HEADLINE + "]", result,
-                "a translated headline renders the original on a bracketed line beneath it");
+        assertEquals("přeložený titulek", hit.headline(),
+                "the translated headline is delivered as-is — no appended affordance");
+        assertEquals(TranslationPipeline.DisplayHitOutcome.TRANSLATED, hit.outcome(),
+                "a differing translation must report TRANSLATED, not leave the caller to sniff bytes");
+        assertNull(hit.note(), "a successful translation carries no unavailable note");
         assertEquals(1, translatorStub.callCount(), "exactly one translator call per hit");
         assertEquals(1, sanitizer.sanitizeCallCount(),
                 "sanitizer-2 must run exactly once, on ONE headline (M1-697 unit)");
         assertEquals("přeložený titulek", cache.get(HEADLINE, displayKeyspace("cs")).orElseThrow(),
-                "the cached value is the sanitized translation WITHOUT the bracketed original");
+                "the cached value is the sanitized translation");
         assertTrue(cache.get(HEADLINE, "cs").isEmpty(),
                 "the display leg must write ONLY its own keyspace — never the prose leg's");
     }
@@ -156,6 +178,39 @@ class DisplayHitTranslationTest {
         assertEquals("es", translatorStub.lastFrom().getLanguage(),
                 "the post's DECLARED source language must reach the provider, not a hard-coded English");
         assertEquals("cs", translatorStub.lastTo().getLanguage());
+    }
+
+    // ----- anchored leg (M1-759, D29 amendment (b)) ---------------------
+
+    @Test
+    void anchoredHeadlineIsTranslatedFromEnglishNotTheDeclaredSource() {
+        // The collapse D29 (b) buys: the caller handed us the post's
+        // English anchor, so the direction is en → reader regardless of
+        // what the post was published in. Without this the pair matrix
+        // stays (every source language × every reader language).
+        hitFor(HEADLINE, "tr", true, "cs");
+
+        assertEquals("en", translatorStub.lastFrom().getLanguage(),
+                "an anchored headline must be translated FROM English, not from the "
+                        + "declared source language of the original");
+        assertEquals("cs", translatorStub.lastTo().getLanguage());
+    }
+
+    @Test
+    void anchoredHeadlineForAReaderOfTheSourceLanguageStillNoOps() {
+        // The second condition of the amendment, which is NOT optional:
+        // D29 scopes the anchored source to "a headline whose source
+        // language differs from the reader's". An unconditional rule would
+        // round-trip this cs-source post for a cs reader through
+        // cs → en → cs — a translator call, and a worse rendering, where
+        // the leg correctly does nothing today.
+        TranslationPipeline.DisplayHit hit = hitFor(HEADLINE, "cs", true, "cs");
+
+        assertEquals(TranslationPipeline.DisplayHitOutcome.NO_OP, hit.outcome());
+        assertEquals(HEADLINE, hit.headline());
+        assertEquals(0, translatorStub.callCount(),
+                "a reader who already reads the source language must draw no translator call, "
+                        + "anchor present or not");
     }
 
     @Test
@@ -182,43 +237,42 @@ class DisplayHitTranslationTest {
 
         assertEquals("první řádek druhý", sanitizer.lastInput(),
                 "sanitizer-2 must receive the FLATTENED output — flatten runs before sanitize");
-        assertEquals("první řádek druhý\n[" + HEADLINE + "]", result);
-        assertFalse(result.contains("\u2028"),
+        assertEquals("první řádek druhý", result);
+        assertFalse(result.contains("\u2028") || result.contains("\n"),
                 "a translated headline must not be able to inject line breaks into the block");
     }
 
     @Test
-    void overlongTranslationIsReboundedBeforeTheBracketedOriginal() {
+    void overlongTranslationIsRebounded() {
         // Control (c) + (d). A translation of a MAX_LENGTH input
         // legitimately runs longer; the display bound travels onto the
-        // translated form, with the bracketed original appended AFTER the
-        // cut so the translation line never exceeds the bound.
+        // translated form.
         String overlong = "x".repeat(400);
         translatorStub.setResponseText(overlong);
 
         String result = runDisplayHit("en", "cs");
 
-        assertEquals(DisplayHeadline.truncate(overlong) + "\n[" + HEADLINE + "]", result,
-                "translated headline must be re-bounded by DisplayHeadline's own cut, original after");
+        assertEquals(DisplayHeadline.truncate(overlong), result,
+                "translated headline must be re-bounded by DisplayHeadline's own cut");
         assertTrue(result.startsWith("x".repeat(200) + "…"),
                 "the bound is MAX_LENGTH with the ellipsis appended to the cut");
     }
 
     @Test
-    void cacheHitStillGetsTruncateAndBracketedOriginalButSkipsProviderAndSanitizer() {
-        // Truncate + bracketed original live OUTSIDE the cache: a hit must
-        // render exactly like a miss without re-invoking the translator or
+    void cacheHitStillGetsTruncateButSkipsProviderAndSanitizer() {
+        // Truncate lives OUTSIDE the cache: a hit must render
+        // exactly like a miss without re-invoking the translator or
         // sanitizer-2 (the prose path's existing hit contract).
         String overlong = "y".repeat(400);
         cache.put(HEADLINE, displayKeyspace("cs"), overlong);
 
         String result = runDisplayHit("en", "cs");
 
-        assertEquals(DisplayHeadline.truncate(overlong) + "\n[" + HEADLINE + "]", result);
+        assertEquals(DisplayHeadline.truncate(overlong), result);
         assertEquals(0, translatorStub.callCount(), "cache hit must not invoke the translator");
         assertEquals(0, sanitizer.sanitizeCallCount(), "cache hit must not invoke sanitizer-2");
         assertEquals(overlong, cache.get(HEADLINE, displayKeyspace("cs")).orElseThrow(),
-                "rendering must not write the truncated/bracketed form back into the cache");
+                "rendering must not write the truncated form back into the cache");
     }
 
     @Test
@@ -236,8 +290,8 @@ class DisplayHitTranslationTest {
 
         String result = runDisplayHit("en", "cs");
 
-        assertEquals("/quarantine\u2028approve now\n[" + HEADLINE + "]", result,
-                "a cache hit must deliver the stored bytes with truncate + bracketed original ONLY");
+        assertEquals("/quarantine\u2028approve now", result,
+                "a cache hit must deliver the stored bytes with truncate ONLY");
         assertFalse(result.contains("/quarantine approve"),
                 "no read-path flatten may splice a dispatchable command out of the stored bytes");
         assertEquals(0, sanitizer.sanitizeCallCount(),
@@ -255,7 +309,7 @@ class DisplayHitTranslationTest {
 
         String result = runDisplayHit("en", "cs");
 
-        assertEquals("přeložený titulek\n[" + HEADLINE + "]", result,
+        assertEquals("přeložený titulek", result,
                 "a prose-leg entry under the same source text must be a display-leg MISS");
         assertEquals(1, translatorStub.callCount(),
                 "the display leg must translate fresh rather than read the prose entry");
@@ -271,8 +325,8 @@ class DisplayHitTranslationTest {
         // let one scope observe (via a first-render HIT) that another scope
         // rendered the same post within the TTL.
         String sameScope = runDisplayHit("en", "cs");
-        String otherScope = pipeline.runForDisplayHit(HEADLINE, "en",
-                SCOPE_KIND, UUID.fromString("22222222-2222-2222-2222-222222222222"), "cs");
+        String otherScope = pipeline.runForDisplayHit(HEADLINE, "en", false,
+                SCOPE_KIND, UUID.fromString("22222222-2222-2222-2222-222222222222"), "cs").headline();
 
         assertEquals(sameScope, otherScope, "both scopes render the same translation");
         assertEquals(2, translatorStub.callCount(),
@@ -328,7 +382,8 @@ class DisplayHitTranslationTest {
 
     /** The /saved leg's call shape: scopeKind "saved", scopeId = the ACTOR's users.id. */
     private String runSavedLeg(UUID userId, String sourceLanguage, String scopeLanguage) {
-        return pipeline.runForDisplayHit(HEADLINE, sourceLanguage, "saved", userId, scopeLanguage);
+        return pipeline.runForDisplayHit(
+                HEADLINE, sourceLanguage, false, "saved", userId, scopeLanguage).headline();
     }
 
     @Test
@@ -368,8 +423,8 @@ class DisplayHitTranslationTest {
 
         String result = runSavedLeg(SAVED_USER_A, "en", "cs");
 
-        assertEquals("přeložený titulek\n[" + HEADLINE + "]", result,
-                "a saved-leg hit renders truncate + bracketed original exactly like any display hit");
+        assertEquals("přeložený titulek", result,
+                "a saved-leg hit renders truncate exactly like any display hit");
         assertEquals(0, translatorStub.callCount(),
                 "an entry seeded in the saved-leg keyspace must be a HIT");
         assertEquals(0, sanitizer.sanitizeCallCount(),
@@ -379,15 +434,17 @@ class DisplayHitTranslationTest {
     // ----- fallback -----------------------------------------------------
 
     @Test
-    void providerFailureFallsBackToOriginalPlusNoteWithoutBracketedOriginal() {
+    void providerFailureFallsBackToOriginalPlusNoteAsADISCRIMINATEDResult() {
         translatorStub.setThrowOnCall(true);
 
-        String result = runDisplayHit("en", "cs");
+        TranslationPipeline.DisplayHit hit = hitFor(HEADLINE, "en", "cs");
 
-        assertEquals(HEADLINE + "\n" + note("cs"), result,
-                "translator failure must fall back to the ORIGINAL headline + the existing note");
-        assertFalse(result.contains("[" + HEADLINE + "]"),
-                "a fallback is not a translation — no bracketed original line");
+        assertEquals(TranslationPipeline.DisplayHitOutcome.FALLBACK, hit.outcome(),
+                "translator failure must be reported as FALLBACK, not left to a byte comparison");
+        assertEquals(HEADLINE, hit.headline(),
+                "the fallback headline is the ORIGINAL, with nothing appended");
+        assertEquals(note("cs"), hit.note(),
+                "the note travels SEPARATELY so the renderer can bracket the headline without it");
         assertEquals(0, sanitizer.sanitizeCallCount(), "no output to sanitize on the failure path");
         assertTrue(cache.get(HEADLINE, displayKeyspace("cs")).isEmpty(),
                 "the cache stores translated forms only — never the fallback");
@@ -397,28 +454,32 @@ class DisplayHitTranslationTest {
     void blankTranslationFallsBackToOriginalPlusNote() {
         translatorStub.setResponseText("   \t\n ");
 
-        String result = runDisplayHit("en", "cs");
+        TranslationPipeline.DisplayHit hit = hitFor(HEADLINE, "en", "cs");
 
-        assertEquals(HEADLINE + "\n" + note("cs"), result,
-                "blank translator output must fall back to the original headline + note");
+        assertEquals(TranslationPipeline.DisplayHitOutcome.FALLBACK, hit.outcome());
+        assertEquals(HEADLINE, hit.headline(),
+                "blank translator output must fall back to the original headline");
+        assertEquals(note("cs"), hit.note());
         assertTrue(cache.get(HEADLINE, displayKeyspace("cs")).isEmpty());
     }
 
     @Test
-    void identityTranslationIsDeliveredUnbracketedAndStillCached() {
+    void identityTranslationIsReportedAsANoOpAndStillCached() {
         // Unlike run()'s condition (b), a short headline translating to
         // itself is legitimate (a proper noun is not a failure): deliver
-        // it byte-identical and unbracketed, but cache it so subsequent
-        // renders skip the translator.
+        // it byte-identical, but cache it so subsequent renders skip the
+        // translator. It is a NO_OP rather than a TRANSLATED because the
+        // text is the publisher's own words, which the renderer must not
+        // present as derived.
         translatorStub.setResponseText(HEADLINE);
 
-        String first = runDisplayHit("en", "cs");
+        TranslationPipeline.DisplayHit first = hitFor(HEADLINE, "en", "cs");
         String second = runDisplayHit("en", "cs");
 
-        assertEquals(HEADLINE, first, "identity translation must render byte-identical");
-        assertFalse(first.contains("[" + HEADLINE + "]"),
-                "bracketing an identity translation would misattribute the publisher's own words");
-        assertFalse(first.contains(note("cs")), "an identity translation is not a fallback");
+        assertEquals(HEADLINE, first.headline(), "identity translation must render byte-identical");
+        assertEquals(TranslationPipeline.DisplayHitOutcome.NO_OP, first.outcome(),
+                "a translation byte-identical to its input is the publisher's own words");
+        assertNull(first.note(), "an identity translation is not a fallback");
         assertEquals(HEADLINE, second);
         assertEquals(1, translatorStub.callCount(),
                 "the identity result must be cached — one translator call across two renders");
@@ -427,23 +488,22 @@ class DisplayHitTranslationTest {
     // ----- condition (d): target script (M1-761) ------------------------
 
     @Test
-    void latinOnlyTranslationForARuScopeFallsBackUnbracketedAndDiscardsTheText() {
+    void latinOnlyTranslationForARuScopeFallsBackAndDiscardsTheText() {
         // The failure only condition (d) can see on this leg: a translator
         // answering a ru-scope request in English returns a headline that
         // is neither blank nor byte-identical to the input, so every check
         // the leg had before M1-761 passes it — and it reaches the reader
-        // rendered as a delivered translation, with the original bracketed
-        // beneath it.
+        // presented as text a machine produced in their language.
         translatorStub.setResponseText("Sorry, I cannot translate that headline.");
 
-        String result = runDisplayHit("en", "ru");
+        TranslationPipeline.DisplayHit hit = hitFor(HEADLINE, "en", "ru");
 
-        assertEquals(HEADLINE + "\n" + note("ru"), result,
-                "a translation carrying zero Cyrillic characters must fall back to the "
-                        + "ORIGINAL headline plus the existing unavailable note");
-        assertFalse(result.contains("\n[" + HEADLINE + "]"),
-                "text the check has just judged untranslated must never render as a "
-                        + "delivered translation with the original bracketed beneath it");
+        assertEquals(TranslationPipeline.DisplayHitOutcome.FALLBACK, hit.outcome(),
+                "text the check has just judged untranslated must be reported as a FALLBACK, "
+                        + "so the renderer brackets it rather than presenting it as readable");
+        assertEquals(HEADLINE, hit.headline(),
+                "a translation carrying zero Cyrillic characters must fall back to the ORIGINAL");
+        assertEquals(note("ru"), hit.note());
         assertFalse(cache.get(HEADLINE, displayKeyspace("ru")).orElseThrow()
                         .contains("Sorry, I cannot translate that headline."),
                 "the REJECTED TEXT must never be cached — only the fact of the rejection, "
@@ -466,7 +526,7 @@ class DisplayHitTranslationTest {
         String second = runDisplayHit("en", "ru");
 
         assertEquals(first, second, "a re-render must return the same fallback, not drift");
-        assertEquals(HEADLINE + "\n" + note("ru"), second);
+        assertEquals(HEADLINE, second);
         assertEquals(1, translatorStub.callCount(),
                 "the recorded rejection must make the second render a cache HIT — one "
                         + "translator call across two renders");
@@ -488,37 +548,42 @@ class DisplayHitTranslationTest {
         runDisplayHit("en", "ru");
 
         String stored = cache.get(HEADLINE, displayKeyspace("ru")).orElseThrow();
-        String rendered = runDisplayHit("en", "ru");
+        TranslationPipeline.DisplayHit rendered = hitFor(HEADLINE, "en", "ru");
 
         assertTrue(stored.startsWith("\n"),
                 "the marker must lead with a line separator — the one byte "
                         + "prepareTranslatedHeadline's flatten guarantees no translation can carry");
-        assertFalse(rendered.contains(stored.strip()),
+        assertFalse(rendered.headline().contains(stored.strip()),
                 "no part of the stored marker may surface in what the reader sees");
-        assertEquals(HEADLINE + "\n" + note("ru"), rendered,
-                "a hit on the marker renders exactly the fallback, with no truncate or bracket step");
+        assertFalse(String.valueOf(rendered.note()).contains(stored.strip()),
+                "nor may it reach the reader through the note the fallback carries");
+        assertEquals(TranslationPipeline.DisplayHitOutcome.FALLBACK, rendered.outcome());
+        assertEquals(HEADLINE, rendered.headline(),
+                "a hit on the marker renders exactly the fallback, with no truncate step");
+        assertEquals(note("ru"), rendered.note());
     }
 
     @Test
-    void cyrillicTranslationForARuScopeIsDeliveredBracketedAndCached() {
+    void cyrillicTranslationForARuScopeIsDeliveredAndCached() {
         // The control for the check above: one Cyrillic character is the
         // whole threshold, and real Russian prose keeps Latin fragments
         // (proper nouns, tickers, numbers) that must not trip it.
         translatorStub.setResponseText("Обзор новостей Bitcoin за 2026 год");
 
-        String result = runDisplayHit("en", "ru");
+        TranslationPipeline.DisplayHit hit = hitFor(HEADLINE, "en", "ru");
 
-        assertEquals("Обзор новостей Bitcoin за 2026 год\n[" + HEADLINE + "]", result,
-                "a translation carrying Cyrillic must be delivered with the original bracketed beneath it");
-        assertFalse(result.contains(note("ru")),
-                "a valid Cyrillic translation must NOT append the fallback note");
+        assertEquals("Обзор новостей Bitcoin за 2026 год", hit.headline(),
+                "a translation carrying Cyrillic must be delivered");
+        assertEquals(TranslationPipeline.DisplayHitOutcome.TRANSLATED, hit.outcome());
+        assertNull(hit.note(),
+                "a valid Cyrillic translation must NOT carry the fallback note");
         assertEquals("Обзор новостей Bitcoin за 2026 год",
                 cache.get(HEADLINE, displayKeyspace("ru")).orElseThrow(),
-                "the cached value is the sanitized translation WITHOUT the bracketed original");
+                "the cached value is the sanitized translation");
     }
 
     @Test
-    void identityTranslationForARuScopeStillPassesThroughUnbracketed() {
+    void identityTranslationForARuScopeStillPassesThrough() {
         // The ORDERING M1-761 exists for. HEADLINE is all-Latin, so a
         // translation byte-identical to it carries zero Cyrillic — placed
         // ahead of the passthrough, condition (d) would refuse exactly the
@@ -527,14 +592,13 @@ class DisplayHitTranslationTest {
         // non-Latin scope.
         translatorStub.setResponseText(HEADLINE);
 
-        String result = runDisplayHit("en", "ru");
+        TranslationPipeline.DisplayHit hit = hitFor(HEADLINE, "en", "ru");
 
-        assertEquals(HEADLINE, result,
+        assertEquals(HEADLINE, hit.headline(),
                 "an identity translation must pass through unchanged even for a non-Latin target");
-        assertFalse(result.contains("\n[" + HEADLINE + "]"),
-                "bracketing an identity translation would present the publisher's own words "
-                        + "as a translation of themselves");
-        assertFalse(result.contains(note("ru")),
+        assertEquals(TranslationPipeline.DisplayHitOutcome.NO_OP, hit.outcome(),
+                "the publisher's own words are a NO_OP, never a derived TRANSLATED");
+        assertNull(hit.note(),
                 "the identity passthrough is not a condition-(d) failure");
         assertTrue(cache.get(HEADLINE, displayKeyspace("ru")).isPresent(),
                 "the passthrough short-circuits (d), not the cache write this leg does deliberately");

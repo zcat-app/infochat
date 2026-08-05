@@ -122,6 +122,15 @@ public class EligiblePostQuery {
      * (the window function evaluates before LIMIT, like
      * {@code total_count}). Only {@link ClusterProminence} reads them;
      * the /summary render is unchanged.
+     *
+     * <p>The last two components are the M1-759 English anchor
+     * ({@code post.title_en}/{@code post.body_en}, V74). Projected RAW
+     * and nullable rather than as a SQL {@code coalesce}: the render
+     * needs anchor PRESENCE to pick the display translator's source
+     * language and to decide bracketing, and a SQL-side coalesce
+     * collapses exactly that bit. The {@code coalesce(title_en, title)}
+     * semantics D29 describes are applied in Java, by
+     * {@code DisplayHeadline}.
      */
     public record Post(
             UUID id,
@@ -138,7 +147,9 @@ public class EligiblePostQuery {
             @Nullable Integer likes,
             @Nullable String sourceKind,
             @Nullable Integer sourceWindowPosts,
-            @Nullable String sourceLanguage) {
+            @Nullable String sourceLanguage,
+            @Nullable String titleEn,
+            @Nullable String bodyEn) {
         /**
          * Pre-M1-724 shape: every prominence signal absent. Keeps the
          * ~26 construction sites that predate the ranking (tests,
@@ -186,6 +197,38 @@ public class EligiblePostQuery {
             this(id, uid, sourceId, sourceDisplayName, title, url, body,
                     publishedAt, tags, classification, reposts, likes,
                     sourceKind, sourceWindowPosts, null);
+        }
+
+        /**
+         * Pre-M1-759 shape: source language present, English anchor
+         * absent. Keeps the M1-747-era construction sites compiling
+         * unchanged — 13 of the 16 test files holding a
+         * {@code new Post(...)} sit outside this ticket's scope, and the
+         * two older compat constructors above delegate through this
+         * arity. A NULL anchor is also the CORRECT default for a
+         * hand-built fixture: it is what the ingest translator leaves on
+         * a post it has not reached (or has given up on), so the
+         * anchor-absent render path is what a fixture without an
+         * explicit anchor exercises.
+         */
+        public Post(UUID id,
+                    String uid,
+                    UUID sourceId,
+                    String sourceDisplayName,
+                    String title,
+                    String url,
+                    String body,
+                    @Nullable Instant publishedAt,
+                    List<String> tags,
+                    List<String> classification,
+                    @Nullable Integer reposts,
+                    @Nullable Integer likes,
+                    @Nullable String sourceKind,
+                    @Nullable Integer sourceWindowPosts,
+                    @Nullable String sourceLanguage) {
+            this(id, uid, sourceId, sourceDisplayName, title, url, body,
+                    publishedAt, tags, classification, reposts, likes,
+                    sourceKind, sourceWindowPosts, sourceLanguage, null, null);
         }
     }
 
@@ -283,6 +326,7 @@ public class EligiblePostQuery {
         sql.append("SELECT p.id, p.uid, p.source_id, s.display_name, p.title, ")
            .append("       p.url, p.body, p.published_at, p.tags, p.classification, ")
            .append("       p.reposts, p.likes, s.kind, s.language, ")
+           .append("       p.title_en, p.body_en, ")
            .append("       COUNT(*) OVER (PARTITION BY p.source_id)::int AS source_window_posts, ")
            .append("       COUNT(*) OVER () AS total_count ")
            .append("  FROM post p ")
@@ -373,12 +417,18 @@ public class EligiblePostQuery {
                     // inferred from the body — drives the display-hit
                     // translation no-op decision (M1-747).
                     String sourceLanguage = rs.getString("language");
+                    // The English anchor, NULL until the ingest translator
+                    // writes it (and permanently NULL once it gives up).
+                    // Read raw so the render can tell "translated" from
+                    // "never translated" — see the Post javadoc (M1-759).
+                    String titleEn = rs.getString("title_en");
+                    String bodyEn = rs.getString("body_en");
                     // Same value on every row; zero rows → total stays 0.
                     totalBeforeCap = rs.getInt("total_count");
                     out.add(new Post(id, uid, sourceId, displayName, title, url, body,
                             publishedAt, tags, classification,
                             reposts, likes, sourceKind, sourceWindowPosts,
-                            sourceLanguage));
+                            sourceLanguage, titleEn, bodyEn));
                 }
                 return new Selection(out, totalBeforeCap);
             }

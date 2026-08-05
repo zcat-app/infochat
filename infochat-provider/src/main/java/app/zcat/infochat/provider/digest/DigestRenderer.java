@@ -160,10 +160,14 @@ public class DigestRenderer {
      * is the sole meter on one route and an inner bound on the other; it
      * is never a substitute for caps that "do not apply to the digest".
      *
-     * <p>Rows past the budget render untranslated AND unbracketed: an
-     * untranslated headline in the reader's list is a degradation, not a
-     * translation to be attributed. Field-initialized to the documented
-     * default — the {@link #categoryHeadlineCount} pattern.
+     * <p>Rows past the budget render untranslated, and therefore
+     * BRACKETED: the primary line is then in a language the reader did not
+     * ask for, and D29 (c)'s invariant — an unbracketed line is always in
+     * the reader's language — has to hold on the degraded path too, or a
+     * budget exhaustion silently produces exactly the bare foreign line
+     * the bracket exists to distinguish. The bracket is punctuation the
+     * renderer adds; it costs no provider call. Field-initialized to the
+     * documented default — the {@link #categoryHeadlineCount} pattern.
      */
     @ConfigProperty(name = "infochat.digest.translation-max-per-render", defaultValue = "5")
     int translationMaxPerRender = 5;
@@ -906,9 +910,10 @@ public class DigestRenderer {
     /**
      * The NORMAL-mode headline block (M1-732): up to
      * {@link #categoryHeadlineCount} bare headlines, one per cluster (the
-     * cluster's first post is the representative), each a
-     * {@link DisplayHeadline} title plus its URL and NO prose.
-     * {@code DisplayHeadline.of} carries flatten → sanitize → truncate with
+     * cluster's first post is the representative), each an anchor-first
+     * {@link DisplayHeadline} block plus its URL on its own line and NO
+     * prose, entries separated by a blank line (M1-759).
+     * {@code DisplayHeadline} carries flatten → sanitize → truncate with
      * ONE author's field per call, so the M1-697 redaction travels onto
      * this path — required, because the section bytes are persisted
      * post-sanitize and replayed verbatim (the boundary DigestWorker pins).
@@ -923,15 +928,16 @@ public class DigestRenderer {
      * (M1-756) — the SAME entry point, no-op legs, §10 controls, fallback
      * and cache {@code /summary} uses, over the {@link DisplayHeadline}
      * OUTPUT, so the translator's input is sanitized and capped by
-     * construction. A translated headline renders as two lines — the
-     * translation, then the bracketed original — with the URL on its own
-     * line beneath; an untranslated one keeps the single-line
-     * "headline  url" shape.
+     * construction. What it is handed is the PRIMARY line — the English
+     * anchor when the reader does not already read the source language —
+     * so the translation direction collapses to en → reader (D29).
      *
      * <p>Metering: a cache hit makes no provider call and so renders free,
      * while a miss spends one slot of {@code translationBudget} (the row
      * that spends the last slot still calls). Past the budget the headline
-     * renders untranslated. Returns the REMAINING budget so
+     * renders untranslated — and therefore BRACKETED, since the primary
+     * line is then in a language the reader did not ask for; the bracket
+     * costs no provider call. Returns the REMAINING budget so
      * one allowance covers the whole render across sections.
      */
     private int appendHeadlines(StringBuilder sb, CategorySection section,
@@ -941,8 +947,19 @@ public class DigestRenderer {
         int budgetLeft = translationBudget;
         for (int i = 0; i < shown; i++) {
             EligiblePostQuery.Post p = section.clusters().get(i).posts().getFirst();
-            String headline = DisplayHeadline.of(p, llmOutputSanitizer);
-            if (translatesUnderThisScope(headline, p.sourceLanguage(), langCode)) {
+            DisplayHeadline.AnchoredHeadline headline =
+                    DisplayHeadline.anchorFirst(p, llmOutputSanitizer);
+            boolean usesAnchor = DisplayHeadline.usesAnchor(
+                    headline, p.sourceLanguage(), langCode);
+            // The primary line — the anchor for a reader who does not
+            // already read the source language, the publisher's own words
+            // otherwise. This is what the translator sees and what the
+            // cache is probed with; probing the pre-anchor string instead
+            // would miss on every anchored row and re-spend the generative
+            // budget on rows that cost nothing.
+            String primary = usesAnchor ? headline.readerLine() : headline.originalLine();
+            TranslationPipeline.DisplayHit hit = TranslationPipeline.skipped(primary);
+            if (translatesUnderThisScope(primary, p.sourceLanguage(), langCode)) {
                 // The cache probe is what keeps an already-converged digest
                 // from being throttled by its own history: the pipeline
                 // would serve these from the cache without a provider call,
@@ -957,13 +974,13 @@ public class DigestRenderer {
                 // reachable from feed content.
                 String displayHitKey = TranslationPipeline.displayHitCacheLanguage(
                         SCOPE_KIND, groupId, langCode);
-                boolean cacheHit = translationCache.get(headline, displayHitKey).isPresent();
+                boolean cacheHit = translationCache.get(primary, displayHitKey).isPresent();
                 if (cacheHit || budgetLeft > 0) {
                     if (!cacheHit) {
                         budgetLeft--;
                     }
-                    headline = translationPipeline.runForDisplayHit(
-                            headline, p.sourceLanguage(), SCOPE_KIND, groupId, langCode);
+                    hit = translationPipeline.runForDisplayHit(
+                            primary, p.sourceLanguage(), usesAnchor, SCOPE_KIND, groupId, langCode);
                 }
             }
             String url = p.url();
@@ -971,15 +988,20 @@ public class DigestRenderer {
             if (headline.isEmpty() && !hasUrl) {
                 continue;
             }
+            // The bullet marks the ENTRY, so it stays on the primary line
+            // alone: the bracketed original and the URL are continuation
+            // lines of the same entry, and a bullet on either would make an
+            // entry read — and count — as several.
             StringBuilder line = new StringBuilder("· ");
             if (!headline.isEmpty()) {
-                line.append(headline);
+                line.append(DisplayHeadline.anchorBlock(
+                        hit.headline(),
+                        TranslationPipeline.primaryInReaderLanguage(
+                                hit, usesAnchor, p.sourceLanguage(), langCode),
+                        headline.originalLine(),
+                        hit.note()));
                 if (hasUrl) {
-                    // A translated headline is two lines (translation, then
-                    // the bracketed original), so the URL drops to its own
-                    // line beneath them; an untranslated one keeps the
-                    // inline "headline  url" shape.
-                    line.append(headline.contains("\n") ? "\n" : "  ");
+                    line.append("\n");
                 }
             }
             if (hasUrl) {
@@ -988,7 +1010,10 @@ public class DigestRenderer {
             lines.add(line.toString());
         }
         if (!lines.isEmpty()) {
-            sb.append("\n\n").append(String.join("\n", lines));
+            // Entries are separated by a BLANK line now that each spans
+            // several: on a one-line-per-entry list "\n" was enough, but a
+            // three-line block needs the gap to stay scannable.
+            sb.append("\n\n").append(String.join("\n\n", lines));
         }
         return budgetLeft;
     }

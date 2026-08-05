@@ -227,6 +227,90 @@ public class TranslationPipeline {
         return text.codePoints().anyMatch(codePoint -> UnicodeScript.of(codePoint) == script);
     }
 
+    /** What the display-hit leg did, so the renderer never has to guess from bytes. */
+    public enum DisplayHitOutcome {
+        /** The provider returned a translation differing from the input. */
+        TRANSLATED,
+        /**
+         * No translation was needed or none was applied: an {@code en}
+         * scope, an unknown or non-ISO source language, a source already
+         * in the reader's language, an empty headline, or a translation
+         * byte-identical to its input. In every case the headline is the
+         * publisher's own words or already in the reader's language.
+         */
+        NO_OP,
+        /** A translation was ATTEMPTED AND FAILED; {@code note} says so. */
+        FALLBACK
+    }
+
+    /**
+     * The display-hit leg's result.
+     *
+     * @param headline the text for the primary slot — the translation on
+     *     TRANSLATED, the untouched input otherwise
+     * @param note     the localized translation-unavailable note, non-null
+     *     on FALLBACK only. Kept OUT of {@code headline} so the renderer
+     *     can bracket one without bracketing the other
+     */
+    public record DisplayHit(DisplayHitOutcome outcome, String headline, @Nullable String note) {
+    }
+
+    /**
+     * The result a caller reports when it SKIPPED the leg rather than
+     * calling it — a degraded cluster, an exhausted per-render translator
+     * budget, a rejected {@code LlmRateCap} draw. Modelled as a NO_OP so
+     * every surface composes its block the same way; whether the line is
+     * bracketed is then decided by
+     * {@link #primaryInReaderLanguage(DisplayHit, boolean, String, String)},
+     * which does NOT assume a skipped leg means the text is readable.
+     */
+    public static DisplayHit skipped(String headline) {
+        return noOp(headline);
+    }
+
+    /**
+     * THE bracketing decision, in one place for all four render surfaces:
+     * is the primary line known to be in the reader's language?
+     *
+     * <p>The outcome alone cannot answer it, which is the trap this method
+     * exists to close. {@link DisplayHitOutcome#NO_OP} conflates two very
+     * different states — "no translation was needed" (a source already in
+     * the reader's language, or an unknown one) and "this leg
+     * short-circuits for {@code en} scopes and looked at nothing" — and
+     * the second says nothing at all about what language the text is in.
+     * Reading NO_OP as "readable" would render every foreign headline bare
+     * to the default reader: exactly the indistinguishability D29 (c)'s
+     * bracket invariant exists to remove.
+     *
+     * <p>So NO_OP defers to the declared languages, and the same rule
+     * covers every path that skips the leg — an exhausted budget, a
+     * rejected rate-cap draw, a degraded cluster — which would otherwise
+     * each leak a bare foreign line to a non-English reader.
+     *
+     * <p>An unknown or non-ISO source language counts as readable and
+     * renders BARE: D29 declares languages and never infers them, so an
+     * undeclared source is not evidence of foreignness. The ISO shape test
+     * is the same one the no-op gate applies, deliberately kept beside it
+     * so the two cannot drift.
+     *
+     * @param usesAnchor whether the primary line is the English anchor
+     *                   rather than the post's own text
+     */
+    public static boolean primaryInReaderLanguage(DisplayHit hit,
+                                                  boolean usesAnchor,
+                                                  @Nullable String sourceLanguage,
+                                                  String scopeLanguage) {
+        return switch (hit.outcome()) {
+            case TRANSLATED -> true;
+            case FALLBACK -> false;
+            case NO_OP -> usesAnchor
+                    ? scopeLanguage.equalsIgnoreCase("en")
+                    : sourceLanguage == null
+                            || !ISO_639_SHAPE.matcher(sourceLanguage).matches()
+                            || sourceLanguage.equalsIgnoreCase(scopeLanguage);
+        };
+    }
+
     /**
      * Display-hit leg (M1-747): translate a retrieved post's rendered
      * headline — the {@link DisplayHeadline} output, already flattened,
@@ -243,8 +327,8 @@ public class TranslationPipeline {
      *
      * <p>Translating leg, order load-bearing: translator call → pre-bound
      * at {@link DisplayHeadline#BODY_SCAN_LIMIT} → flatten to one line →
-     * sanitizer-2 → target-script check → cache write → truncate →
-     * bracketed original line. The pre-bound runs
+     * sanitizer-2 → target-script check → cache write → truncate.
+     * The pre-bound runs
      * FIRST because the reply is otherwise bounded only by the provider's
      * 1-8 MiB body cap, and a hostile endpoint's in-cap reply must not buy
      * megabytes of NFKC + closed-list scanning before the 200-char display
@@ -259,16 +343,15 @@ public class TranslationPipeline {
      * so the audit sees the full output. The sanitize unit is ONE post's
      * headline per call (M1-697).
      *
-     * <p>The CACHE-HIT path applies NO transform: truncate + bracketed
-     * original only, or — for a stored
-     * {@link #REJECTED_BY_TARGET_SCRIPT_CHECK} — the fallback with note
-     * and nothing else. Every value this leg can read back was written by
-     * this leg — hence already flattened AND sanitized — because
-     * display-hit entries occupy a keyspace disjoint from the prose leg's
-     * (see {@link #displayHitCacheLanguage}). A read-path rewrite of a
-     * sanitized value is exactly the post-sanitize-rewrite ordering
-     * {@link DisplayHeadline} forbids. [redteam 2026-08-03,
-     * medium/INJECTION]
+     * <p>The CACHE-HIT path applies NO transform: truncate only, or — for
+     * a stored {@link #REJECTED_BY_TARGET_SCRIPT_CHECK} — the
+     * fallback with note and nothing else. Every value this leg can read
+     * back was written by this leg — hence already flattened AND
+     * sanitized — because display-hit entries occupy a keyspace disjoint
+     * from the prose leg's (see {@link #displayHitCacheLanguage}). A
+     * read-path rewrite of a sanitized value is exactly the
+     * post-sanitize-rewrite ordering {@link DisplayHeadline} forbids.
+     * [redteam 2026-08-03, medium/INJECTION]
      *
      * @param displayHeadline  the rendered headline; never null (may be
      *     empty — the renderer's omission contract)
@@ -279,35 +362,41 @@ public class TranslationPipeline {
      *     group}) — a cache-partition dimension; never null
      * @param scopeId  the rendering scope's id — a cache-partition
      *     dimension; never null
+     * @param anchored  whether {@code displayHeadline} is the post's
+     *     English anchor rather than its original text. Sets the
+     *     translation's SOURCE locale (D29's collapse); it does NOT gate
+     *     the no-op decision below, which keeps reading the DECLARED
+     *     source language — an unconditional anchored rule would
+     *     round-trip a cs-source post for a cs reader through cs → en → cs
+     *     where the leg correctly no-ops today
      * @param scopeLanguage  ISO 639-1 code from
      *     {@code scope_preferences.language}; never null
-     * @return the translated, sanitized, bounded headline with the original
-     *     headline on a bracketed line beneath it; the input unchanged on
-     *     any no-op leg (or when the translation is byte-identical to the
-     *     input);
-     *     or, on translator failure, blank output, or — for a non-Latin
-     *     target — a differing translation carrying no character of the
-     *     target script, the original headline plus the one-line
-     *     unavailable note. Never null, never empty for a non-empty
-     *     input.
+     * @return a {@link DisplayHit} discriminating TRANSLATED from NO_OP
+     *     from FALLBACK. The outcome is returned rather than left for the
+     *     caller to infer from the bytes: {@link #fallbackWithNote}'s
+     *     shape means a renderer comparing the result against its input
+     *     cannot tell a failed translation from an untranslated headline,
+     *     and would render the headline twice. Never null; the headline
+     *     component is never empty for a non-empty input.
      */
-    public String runForDisplayHit(String displayHeadline,
-                                   @Nullable String sourceLanguage,
-                                   String scopeKind,
-                                   UUID scopeId,
-                                   String scopeLanguage) {
+    public DisplayHit runForDisplayHit(String displayHeadline,
+                                       @Nullable String sourceLanguage,
+                                       boolean anchored,
+                                       String scopeKind,
+                                       UUID scopeId,
+                                       String scopeLanguage) {
         if (scopeLanguage.equalsIgnoreCase("en")
                 || sourceLanguage == null
                 || !ISO_639_SHAPE.matcher(sourceLanguage).matches()
                 || sourceLanguage.equalsIgnoreCase(scopeLanguage)
                 || displayHeadline.isEmpty()) {
-            return displayHeadline;
+            return noOp(displayHeadline);
         }
 
         String cacheLanguage = displayHitCacheLanguage(scopeKind, scopeId, scopeLanguage);
 
         // Cache hit: deliver the stored bytes with NO transform — truncate
-        // + bracketed original only, both applied OUTSIDE the cache. The disjoint,
+        // only, applied OUTSIDE the cache. The disjoint,
         // per-scope keyspace guarantees the value was written by this leg,
         // i.e. flattened before sanitizer-2 ran, so there is nothing left
         // to rewrite — and rewriting here would be a rewrite AFTER
@@ -321,7 +410,7 @@ public class TranslationPipeline {
             // unrenderable: it can never be truncated, bracketed, or reach
             // a reader.
             return REJECTED_BY_TARGET_SCRIPT_CHECK.equals(cached.get())
-                    ? fallbackWithNote(displayHeadline, scopeLanguage)
+                    ? displayFallback(displayHeadline, scopeLanguage)
                     : finishDisplayHit(displayHeadline, cached.get());
         }
 
@@ -329,19 +418,25 @@ public class TranslationPipeline {
         try {
             translated = translationProvider.translate(
                     displayHeadline,
-                    Locale.of(sourceLanguage),
+                    // D29's collapse: when the caller handed us the English
+                    // anchor, the translation direction is en → reader, not
+                    // source → reader — one measured direction per reader
+                    // language instead of one per (source, reader) pair.
+                    // A literal Locale.ENGLISH also keeps the anchored leg
+                    // clear of the Locale.of parse ISO_639_SHAPE guards.
+                    anchored ? Locale.ENGLISH : Locale.of(sourceLanguage),
                     Locale.of(scopeLanguage));
         } catch (RuntimeException e) {
             SafeLog.warn(LOG, "TranslationPipeline: display-hit translator failed for target_language="
                     + scopeLanguage + "; falling back to the original headline with a note", e);
-            return fallbackWithNote(displayHeadline, scopeLanguage);
+            return displayFallback(displayHeadline, scopeLanguage);
         }
 
         if (translated.isBlank()) {
             LOG.warn("TranslationPipeline: display-hit translator returned blank output for "
                     + "target_language={}; falling back to the original headline with a note",
                     scopeLanguage);
-            return fallbackWithNote(displayHeadline, scopeLanguage);
+            return displayFallback(displayHeadline, scopeLanguage);
         }
 
         // One call, not three: DisplayHeadline owns the bound → flatten →
@@ -379,7 +474,7 @@ public class TranslationPipeline {
                 // [redteam 2026-08-04, low/DOS]
                 translationCache.put(displayHeadline, cacheLanguage,
                         REJECTED_BY_TARGET_SCRIPT_CHECK);
-                return fallbackWithNote(displayHeadline, scopeLanguage);
+                return displayFallback(displayHeadline, scopeLanguage);
             }
         }
 
@@ -427,31 +522,41 @@ public class TranslationPipeline {
 
     /**
      * Shared tail of the display-hit fresh and cached paths: bound the
-     * flattened, sanitized translation at {@code DisplayHeadline.MAX_LENGTH},
-     * then put the ORIGINAL headline on a bracketed line beneath it
-     * (docs/spec/llm.md §D29 display leg). The bracket implies one
-     * direction only: a bracketed line means the line above it is this
-     * leg's translation. The converse — an unbracketed line means the text
-     * is already in the reader's language — describes the D29 TARGET
-     * render (M1-759), not this leg: {@link #runForDisplayHit}'s entry
-     * guard returns the input untouched when the source language is absent
-     * or malformed, and a caller whose per-render translation budget is
-     * spent skips this leg entirely, both rendering source-language text
-     * with no bracket. The original is the leg's input — already bounded,
-     * flattened and sanitized by
-     * {@link DisplayHeadline} — so the brackets wrap publisher text that
-     * needs no further transform, and no bundle-resolved label is involved:
-     * the bracketed line carries no claim about who produced the
-     * translation. A translation byte-identical to the input is delivered
-     * unchanged and unbracketed — there is nothing to attribute.
+     * flattened, sanitized translation at {@code DisplayHeadline.MAX_LENGTH}
+     * with the marker-safe cut.
+     *
+     * <p>A translation byte-identical to its input is reported as a
+     * {@link DisplayHitOutcome#NO_OP}, not a translation — a short headline
+     * can translate to itself legitimately (a proper noun is not a
+     * failure), and those are the publisher's own words, which the renderer
+     * must not label as derived.
      */
-    private String finishDisplayHit(String displayHeadline,
-                                    String flattenedSanitized) {
+    private DisplayHit finishDisplayHit(String displayHeadline, String flattenedSanitized) {
         if (flattenedSanitized.equals(displayHeadline)) {
-            return displayHeadline;
+            return noOp(displayHeadline);
         }
-        String bounded = DisplayHeadline.truncate(flattenedSanitized);
-        return bounded + "\n[" + displayHeadline + "]";
+        return new DisplayHit(DisplayHitOutcome.TRANSLATED,
+                DisplayHeadline.truncate(flattenedSanitized), null);
+    }
+
+    private static DisplayHit noOp(String displayHeadline) {
+        return new DisplayHit(DisplayHitOutcome.NO_OP, displayHeadline, null);
+    }
+
+    /**
+     * The display-hit leg's fallback. Unlike {@link #fallbackWithNote} it
+     * returns the note SEPARATELY from the headline rather than joined on a
+     * newline: the renderer brackets the headline (a failed translation
+     * leaves the primary line in a language the reader did not ask for)
+     * and must not bracket the bot-authored note with it. Returning the
+     * joined string is also what would force the renderer to infer "was
+     * this translated?" by comparing bytes against the leg's input — the
+     * inference that double-prints the headline once as the failed line
+     * and once as the bracketed original.
+     */
+    private DisplayHit displayFallback(String displayHeadline, String scopeLanguage) {
+        return new DisplayHit(DisplayHitOutcome.FALLBACK, displayHeadline,
+                unavailableNote(scopeLanguage));
     }
 
     /**
@@ -468,7 +573,10 @@ public class TranslationPipeline {
      * what lets that leg converge rather than re-translate every render.
      */
     private String fallbackWithNote(String originalText, String scopeLanguage) {
-        String note = bundleLoader.get(BundleKeys.REPLY_TRANSLATION_UNAVAILABLE, scopeLanguage);
-        return originalText + "\n" + note;
+        return originalText + "\n" + unavailableNote(scopeLanguage);
+    }
+
+    private String unavailableNote(String scopeLanguage) {
+        return bundleLoader.get(BundleKeys.REPLY_TRANSLATION_UNAVAILABLE, scopeLanguage);
     }
 }

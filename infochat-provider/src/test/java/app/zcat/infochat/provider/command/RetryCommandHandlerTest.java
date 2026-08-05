@@ -297,6 +297,37 @@ class RetryCommandHandlerTest {
     }
 
     @Test
+    void flatReplayProjectsTheEnglishAnchorSoTheReplayedHeadlineMatchesTheSummary() {
+        // D19/D36 byte-identical replay, extended to the anchor (M1-759).
+        // /retry re-PROJECTS the post rather than replaying stored bytes,
+        // so SELECT_POSTS_BY_UIDS omitting title_en would make the replayed
+        // primary line the Turkish original where the /summary --flat it
+        // replays rendered the English anchor. The flat form is the one
+        // that matters here: --full and --bare route to
+        // renderSummarySections, which renders prose and no headline at all.
+        List<String> postUids = List.of(PREFIX + "anchored1");
+        String json = "[{\"topicId\":\"t-anchored\",\"postUids\":[\"" + postUids.get(0) + "\"]}]";
+        anchorRepo.seedAnchor(USER_ID, USER_ID, "summary --flat", "flat", "hash", postUids, json);
+
+        Post anchoredPost = new Post(
+                UUID.randomUUID(), PREFIX + "anchored1", UUID.randomUUID(), "TRT",
+                "Türkçe başlık", "https://example.com/anchored1", "gövde",
+                Instant.now(), List.of("test-tag"), List.of("unknown"),
+                null, null, null, null, "tr",
+                "Turkish headline", null);
+        handler.dataSource = stubUserAndPostsDataSource(USER_ID, List.of(anchoredPost));
+        proseGenerator.responseText = "Anchored prose.";
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(PREFIX + "anchored"), "/retry");
+
+        assertTrue(reply.text().contains("[topic_id=t-anchored]\nTurkish headline\n[Türkçe başlık]"),
+                "the flat replay must render the anchor unbracketed above the bracketed "
+                        + "original — the same derivation /summary --flat performs. Got: "
+                        + reply.text());
+    }
+
+    @Test
     void defaultAnchorReplaysCategorized() {
         List<String> postUids = List.of(PREFIX + "cat1");
         String json = "[{\"topicId\":\"t-cat\",\"postUids\":[\"" + postUids.get(0) + "\"]}]";
@@ -941,6 +972,12 @@ class RetryCommandHandlerTest {
                             // language; compat-constructed fixtures answer
                             // null = unknown, the never-translate leg.
                             case "source_language" -> p.sourceLanguage();
+                            // M1-759: mapPost reads the projected English
+                            // anchor. Compat-constructed fixtures answer
+                            // null = never translated, the anchor-absent
+                            // render.
+                            case "title_en" -> p.titleEn();
+                            case "body_en" -> p.bodyEn();
                             default -> throw new UnsupportedOperationException("col: " + col);
                         };
                     }

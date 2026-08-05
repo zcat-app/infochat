@@ -5,6 +5,8 @@ import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import org.jspecify.annotations.Nullable;
 
+import java.util.regex.Pattern;
+
 /**
  * Derives the bounded one-line headline that labels a post in the four
  * user-visible render surfaces ({@code ClusterBlockRenderer}, {@code
@@ -154,7 +156,7 @@ public final class DisplayHeadline {
      * still render as itself. (M1-729.)
      */
     private static String headlineSource(String title, @Nullable String body) {
-        if (!title.isBlank() && !IngestTextNormalizer.UNTITLED_TITLE.equals(title)) {
+        if (titleIsRenderable(title)) {
             return title;
         }
         if (body == null || body.isBlank()) {
@@ -163,6 +165,282 @@ public final class DisplayHeadline {
         // Unlike the title, the body has no write-boundary length cap, so it is
         // bounded here BEFORE the sanitizer is handed it. See BODY_SCAN_LIMIT.
         return boundForScan(body);
+    }
+
+    /**
+     * The title-vs-body field choice, as a predicate, so the two entry
+     * points cannot drift on it. Extracted for {@link #anchorFirst}, which
+     * must make the SAME choice against the ORIGINAL pair and then take
+     * that field's anchor — see that method for why choosing against the
+     * anchor instead would resurrect a dead headline. (M1-729 states the
+     * sentinel rule; M1-759 gave it a second reader.)
+     */
+    private static boolean titleIsRenderable(String title) {
+        return !title.isBlank() && !IngestTextNormalizer.UNTITLED_TITLE.equals(title);
+    }
+
+    /**
+     * The two lines of an anchor-first headline block (D29, amended
+     * 2026-08-04): the text a reader of the corpus anchor language sees,
+     * and the publisher's own words.
+     *
+     * @param readerLine   the English anchor when one exists, else the
+     *                     original — so a NULL anchor degrades to the
+     *                     original rather than to an empty headline, the
+     *                     {@code coalesce(title_en, title)} shape
+     *                     {@code EmbeddingWorker} already reads by
+     * @param originalLine the publisher's own words, always
+     * @param anchored     whether {@code readerLine} came from the anchor.
+     *                     Carried as a flag rather than inferred by
+     *                     comparing the two strings: an anchor that
+     *                     translates to itself (a proper noun) is
+     *                     byte-equal to its original and would sniff as
+     *                     "not anchored"
+     */
+    public record AnchoredHeadline(String readerLine, String originalLine, boolean anchored) {
+
+        /** Neither field carried renderable text; the caller omits the whole block. */
+        public boolean isEmpty() {
+            return readerLine.isEmpty();
+        }
+    }
+
+    /** As {@link #anchorFirst(String, String, String, String, LlmOutputSanitizer)}, for a projected post. */
+    public static AnchoredHeadline anchorFirst(Post post, LlmOutputSanitizer llmOutputSanitizer) {
+        return anchorFirst(post.title(), post.body(), post.titleEn(), post.bodyEn(),
+                llmOutputSanitizer);
+    }
+
+    /**
+     * Derive the anchor-first block's two lines, each through the same
+     * bound &rarr; flatten &rarr; sanitize &rarr; truncate order
+     * {@link #of(String, String, LlmOutputSanitizer)} applies — the anchor
+     * enters at the point the original does, never wrapped around an
+     * already-sanitized value.
+     *
+     * <p><b>The field is chosen from the ORIGINAL, then that field's
+     * anchor is taken.</b> Choosing from the anchor instead would
+     * resurrect a headline M1-729 killed: {@code IngestTranslationWorker}
+     * has no sentinel guard — it skips only {@code source.language='en'}
+     * and requires a non-empty translated title — so a titleless
+     * non-English post carries {@code title = }
+     * {@link IngestTextNormalizer#UNTITLED_TITLE} and a {@code title_en}
+     * that is a TRANSLATION of that sentinel. A translated sentinel is not
+     * byte-equal to the sentinel, so {@link #titleIsRenderable} would pass
+     * it through and the body fallback would never fire.
+     *
+     * <p><b>Sanitize unit: still ONE author's field per call (M1-697).</b>
+     * The two lines are two derivations from two separately stored values
+     * and each takes its own {@link LlmOutputSanitizer#sanitize} call. They
+     * are never concatenated before the sanitizer sees them: the
+     * flag-bearing closed-list entries delete the span from command word
+     * to flag token, so a widened input would let a command word on one
+     * line and a flag on the other erase everything between them.
+     *
+     * @param titleEn the English anchor for the title, or null when the
+     *                ingest translator has not written one (or gave up)
+     * @param bodyEn  the English anchor for the body, same contract.
+     *                Bounded at {@link #BODY_SCAN_LIMIT} like every other
+     *                operand with no write-boundary cap — the anchor
+     *                columns are LLM-authored and capped nowhere
+     */
+    public static AnchoredHeadline anchorFirst(String title, @Nullable String body,
+                                               @Nullable String titleEn, @Nullable String bodyEn,
+                                               LlmOutputSanitizer llmOutputSanitizer) {
+        if (titleIsRenderable(title)) {
+            return derive(title, titleEn, llmOutputSanitizer);
+        }
+        if (body == null || body.isBlank()) {
+            return new AnchoredHeadline("", "", false);
+        }
+        return derive(body, bodyEn, llmOutputSanitizer);
+    }
+
+    /** Both lines of one chosen field, each through the full order, independently. */
+    private static AnchoredHeadline derive(String original, @Nullable String anchor,
+                                           LlmOutputSanitizer llmOutputSanitizer) {
+        String originalLine = renderLine(original, llmOutputSanitizer);
+        if (anchor == null || anchor.isBlank()) {
+            return new AnchoredHeadline(originalLine, originalLine, false);
+        }
+        return new AnchoredHeadline(renderLine(anchor, llmOutputSanitizer), originalLine, true);
+    }
+
+    private static String renderLine(String source, LlmOutputSanitizer llmOutputSanitizer) {
+        return truncate(llmOutputSanitizer.sanitize(flattenToOneLine(boundForScan(source))));
+    }
+
+    /**
+     * Whether the English anchor is what this reader should see in the
+     * primary slot. True only when an anchor exists AND the reader does
+     * not already read the post's declared source language: for a Czech
+     * reader of a Czech-source post the publisher's own words ARE the
+     * reader-language line, and promoting the anchor would show that
+     * reader English. D29's collapse is scoped to "a headline whose source
+     * language differs from the reader's" for exactly this reason.
+     *
+     * <p>A NULL or non-ISO source language does NOT suppress the anchor:
+     * unknown means "never translate", not "never anchor", and the anchor
+     * is a column read either way.
+     */
+    public static boolean usesAnchor(AnchoredHeadline headline,
+                                     @Nullable String sourceLanguage,
+                                     String scopeLanguage) {
+        return headline.anchored()
+                && !(sourceLanguage != null && sourceLanguage.equalsIgnoreCase(scopeLanguage));
+    }
+
+    /**
+     * Compose the block every surface in scope renders: the primary line,
+     * then the publisher's own words bracketed beneath it.
+     *
+     * <p><b>The bracket is the invariant</b> (D29 (c)): an UNBRACKETED
+     * line always means "this is already in your language". So the primary
+     * line is bracketed whenever it is NOT known to be in the reader's
+     * language — the anchor-absent case, and every path where the display
+     * translation was skipped or failed. Leaving those bare is precisely
+     * the indistinguishability the bracket exists to remove.
+     *
+     * <p>The subordinate line is SUPPRESSED when it would repeat the
+     * primary, which is what keeps an already-in-the-reader's-language
+     * post at one line and stops the anchor-absent case (where primary and
+     * original are the same string) printing twice.
+     *
+     * <p>Bracket wrapping happens AFTER {@link #truncate} — deliberately
+     * outside it — so a display cut can never drop the closing bracket.
+     * The two added chars are allowed to exceed {@link #MAX_LENGTH}.
+     *
+     * <p>Both operands reach here already flattened, so no feed-authored
+     * byte can introduce a line break: every newline in the returned block
+     * is authored by this method. That is what makes it safe to turn a
+     * one-line entry into a two-line one on a group broadcast surface.
+     *
+     * @param primaryLine            the line in the primary slot — the
+     *                               anchor, a display translation, or the
+     *                               original, per the surface
+     * @param primaryInReaderLanguage whether {@code primaryLine} is known
+     *                               to be in the reader's language
+     * @param note                   the display-hit leg's
+     *                               translation-unavailable note, or null.
+     *                               Placed between the primary and the
+     *                               subordinate line, and never bracketed:
+     *                               it is bot-authored prose reporting
+     *                               that a translation was ATTEMPTED AND
+     *                               FAILED, which position cannot convey,
+     *                               so it is not redundant with the
+     *                               bracket
+     */
+    public static String anchorBlock(String primaryLine, boolean primaryInReaderLanguage,
+                                     String originalLine, @Nullable String note) {
+        StringBuilder block = new StringBuilder(primaryFor(primaryLine, primaryInReaderLanguage));
+        if (note != null) {
+            block.append('\n').append(note);
+        }
+        String subordinate = subordinateFor(primaryLine, originalLine);
+        if (!subordinate.isEmpty()) {
+            block.append('\n').append(subordinate);
+        }
+        return block.toString();
+    }
+
+    /**
+     * The primary line alone, bracketed per {@link #anchorBlock}'s
+     * invariant. Split out for {@code /saved}, whose line is a
+     * {@code MessageFormat} template with the headline in a middle slot:
+     * interpolating a whole two-line block there would leave the
+     * "saved … tags:" metadata attached to the SUBORDINATE line instead of
+     * the primary one. It threads the primary through the template and
+     * appends {@link #subordinateFor} after the formatted line, which is
+     * the same composition {@link #anchorBlock} performs — just around a
+     * template rather than a bare line.
+     */
+    public static String primaryFor(String primaryLine, boolean primaryInReaderLanguage) {
+        return primaryInReaderLanguage ? primaryLine : bracketed(primaryLine);
+    }
+
+    /**
+     * The bracketed original beneath the primary, or the empty string when
+     * it is suppressed for repeating the primary line.
+     */
+    public static String subordinateFor(String primaryLine, String originalLine) {
+        return originalLine.isEmpty() || originalLine.equals(primaryLine)
+                ? ""
+                : bracketed(originalLine);
+    }
+
+    /**
+     * Wrap a rendered line as the subordinate original. Punctuation, not
+     * localized text — deliberately NOT a bundle key (D43 is unaffected;
+     * the ticket that introduced this weighed a localized {@code originál:}
+     * label and left it to a separate decision).
+     *
+     * <p><b>The wrap must not complete a system-marker impersonation.</b>
+     * {@code docs/spec/security.md} commits two bracketed literals as
+     * byte-identical so prose, snapshot bodies, tests and an operator
+     * triaging output all recognise them by EXACT MATCH:
+     * {@link LlmOutputSanitizer#REDACTED_COMMAND_REPLACEMENT} and the
+     * Stage 1 {@code [REDACTED:<id>]} placeholder. Because this method
+     * supplies the brackets around wholly publisher-controlled text, a
+     * feed title of bare {@code redacted command} would otherwise render
+     * byte-identical to a real redaction — for a post that was never
+     * flagged and produced no {@code LLM_OUTPUT_SANITIZED} audit row, so
+     * an operator correlating rendered markers against {@code audit_log}
+     * sees a phantom. The spec names the per-row {@code <id>}
+     * randomization as what stops a pre-crafted placeholder, and that
+     * argument holds only while the attacker must supply the brackets too.
+     *
+     * <p>On collision the wrap inserts ONE renderer-authored space inside
+     * EACH bracket. The break is unforgeable — every operand arrives
+     * through {@link #flattenToOneLine}, whose {@code strip()} removes
+     * leading and trailing whitespace, so no feed text can reproduce it —
+     * while leaving the publisher's words readable, which matters because
+     * they are the point of the subordinate line. Both brackets are broken
+     * because either one can be the complicit half: a title ending
+     * {@code x [redacted command} is completed by the CLOSING bracket just
+     * as {@code redacted command] x} is completed by the opening one. After
+     * the break neither literal can span a renderer bracket at all — one
+     * would have to begin {@code [r} / {@code [R} at index 0 or end
+     * {@code d]} / {@code <id>]} at the last index, and both positions now
+     * hold a space.
+     *
+     * <p>Exact-match recognition of a genuine marker is unaffected: the
+     * break only adds characters at the ends, so a REAL redaction survives
+     * byte-exact wherever it sits — a redacted whole headline wraps as
+     * {@code [[redacted command]]}, which does not collide.
+     * (Redteam 2026-08-04, low/INJECTION; round 2 for the second bracket.)
+     */
+    public static String bracketed(String line) {
+        String wrapped = "[" + line + "]";
+        return wrapSynthesizedASystemMarker(wrapped) ? "[ " + line + " ]" : wrapped;
+    }
+
+    /**
+     * Whether the wrap SYNTHESIZED one of the two bracketed literals
+     * {@code docs/spec/security.md} commits — i.e. whether an occurrence in
+     * {@code wrapped} is built from a bracket this class supplied rather
+     * than from one the publisher wrote. Such an occurrence must start at
+     * index 0 or end at the last index, because those are the only two
+     * positions the renderer's brackets occupy; an occurrence strictly
+     * inside was already in the feed text, which is the pre-existing
+     * forgery class (a title carrying {@code [redacted command]} in full
+     * renders those bytes on every surface today) that this wrap neither
+     * creates nor is charged with closing.
+     *
+     * <p>Whole-string equality is NOT sufficient, and was the round-1 gap:
+     * a title carrying its own {@code ]} pairs with the opening bracket and
+     * leaves the literal as a SUBSTRING — {@code redacted command] x} wraps
+     * to {@code [redacted command] x]}.
+     *
+     * <p>The Stage 1 placeholder carries a per-row random {@code <id>}, so
+     * it is matched by SHAPE rather than by value — the point is that the
+     * rendered bytes read as a placeholder to a reader, which does not
+     * require guessing the id.
+     */
+    private static boolean wrapSynthesizedASystemMarker(String wrapped) {
+        return wrapped.startsWith(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT)
+                || wrapped.endsWith(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT)
+                || STAGE1_PLACEHOLDER_SHAPE.matcher(wrapped).lookingAt()
+                || STAGE1_PLACEHOLDER_SHAPE_AT_END.matcher(wrapped).find();
     }
 
     /**
@@ -245,6 +523,37 @@ public final class DisplayHeadline {
      * (Redteam 2026-07-30, out-of-model.)
      */
     private static final String STAGE1_REDACTION_PREFIX = "[REDACTED:";
+
+    /**
+     * {@code [REDACTED:<id>]} as a shape, for
+     * {@link #wrapSynthesizedASystemMarker} — applied with
+     * {@link java.util.regex.Matcher#lookingAt()} for an occurrence built
+     * from the renderer's OPENING bracket, and in the {@code _AT_END} twin
+     * (anchored with {@code \z}, which unlike {@code $} cannot also match
+     * before a trailing line terminator) for one built from its CLOSING
+     * bracket.
+     *
+     * <p>The id class excludes whitespace, which the genuine id never
+     * carries — {@code PlaceholderIds} emits base32, canonical regex
+     * {@code ^\[REDACTED:[A-Z2-7]{26}\]$}. That exclusion is what makes
+     * {@link #bracketed}'s space break effective rather than cosmetic: with
+     * whitespace admitted, a broken {@code [REDACTED:<id> ]} would still
+     * satisfy this shape and the break would close nothing. It stays LOOSER
+     * than the canonical regex on everything else on purpose — a reader
+     * does not verify the id, so a wrong-shaped id still reads as a
+     * redaction.
+     *
+     * <p>Both are declared AFTER {@link #STAGE1_REDACTION_PREFIX} on
+     * purpose: static initializers run in declaration order, so building
+     * these patterns above that constant would compile and then quote a
+     * null at class-init.
+     */
+    private static final Pattern STAGE1_PLACEHOLDER_SHAPE =
+            Pattern.compile(Pattern.quote(STAGE1_REDACTION_PREFIX) + "[^\\]\\s]*\\]");
+
+    /** {@link #STAGE1_PLACEHOLDER_SHAPE} anchored at the end of input. */
+    private static final Pattern STAGE1_PLACEHOLDER_SHAPE_AT_END =
+            Pattern.compile(Pattern.quote(STAGE1_REDACTION_PREFIX) + "[^\\]\\s]*\\]\\z");
 
     /**
      * Bound the headline at {@link #MAX_LENGTH}, appending {@link #ELLIPSIS}

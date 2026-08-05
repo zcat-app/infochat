@@ -1667,7 +1667,10 @@ share a cost profile share a bucket:
   fully-converged page never draw), plus a per-page translator-call
   budget (`infochat.save.translation-max-per-page`, default 5) bounding
   the per-invocation generative count — rows beyond the budget render
-  untranslated, unbracketed, and a rejected draw degrades the page's
+  untranslated but BRACKETED (D29 (c): an unbracketed line always means
+  the reader's own language, and the bracket is renderer-added
+  punctuation with no generative cost — M1-759), and a rejected draw
+  degrades the page's
   cache-miss rows the same way (cached translations still render: they
   cost no generative call). In group scope the D47 per-group LLM
   sub-bucket is drawn alongside the per-user token (the
@@ -1693,9 +1696,12 @@ share a cost profile share a bucket:
   budget (`infochat.digest.translation-max-per-render`, default 5)
   capping how many raw feed headlines one render sends to
   `ModelTask.TRANSLATOR` — headlines beyond the budget render
-  untranslated and unbracketed, the same degraded shape the `/saved` page
-  uses, and cached translations still render because they cost no
-  generative call. Stated here because the control ships in code: a
+  untranslated and, per D29 (c), BRACKETED, the same degraded shape the
+  `/saved` page uses: an unbracketed line always means the reader's own
+  language, so a budget exhaustion must not silently emit a bare foreign
+  line (M1-759). The bracket is renderer-added punctuation and costs no
+  generative call, and cached translations still render because they
+  cost no generative call either. Stated here because the control ships in code: a
   budget documented only as an exposure note under §Secrets handling
   could be widened or removed without a spec amendment, which is the
   dangerous direction for a limit whose whole job is bounding

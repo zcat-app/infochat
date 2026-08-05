@@ -402,8 +402,9 @@ class SavedCommandHandlerTest {
         // called; only this proves the /saved renderer calls it. The saved
         // row's snapshot language ('en', the V76 default) differs from the
         // cs scope, so the headline routes through the translating leg and
-        // renders the translated headline with the bracketed original
-        // through the REAL pipeline (real cache, real sanitizer-2).
+        // renders the translated headline through the REAL pipeline (real
+        // cache, real sanitizer-2), with the publisher's own words on the
+        // bracketed line beneath it (M1-759).
         String contactId = PREFIX + "xlate-actor";
         inboundContext.setEffectiveLanguage("cs");
         UUID userId = seedUser(contactId);
@@ -419,12 +420,12 @@ class SavedCommandHandlerTest {
 
         assertTrue(reply.text().contains("Přeložený titulek"),
                 "cs-scope /saved must render the translated headline; got: " + reply.text());
-        assertTrue(reply.text().contains("Přeložený titulek\n[Original title]"),
-                "the translated headline must render over the bracketed original; got: "
-                        + reply.text());
-        assertFalse(reply.text().contains("] Original title"),
-                "the English headline must move to the bracketed line, not stay primary; got: "
-                        + reply.text());
+        assertTrue(reply.text().contains("\n[Original title]"),
+                "the publisher's own words must render on the bracketed subordinate line, so "
+                        + "the original stays reachable (D29 (c)); got: " + reply.text());
+        assertFalse(reply.text().contains("[Přeložený titulek]"),
+                "a successful translation IS in the reader's language, so the primary line "
+                        + "must stay unbracketed; got: " + reply.text());
         assertEquals(1, mockLlm.callCount(),
                 "one row, one translator call — the cs-scope render must exercise the leg");
         mockLlm.reset();

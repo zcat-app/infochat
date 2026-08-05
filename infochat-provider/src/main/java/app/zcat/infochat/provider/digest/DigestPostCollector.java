@@ -141,7 +141,14 @@ public class DigestPostCollector {
                 // to NULL, which means "unknown, never translate", so a
                 // projection without it would leave the digest permanently
                 // untranslated with no error anywhere (M1-756).
-                rs.getString("language"));
+                rs.getString("language"),
+                // The English anchor (V74), NULL until the ingest
+                // translator writes it. Same load-bearing-arity point as
+                // the language above: both digest SQL blocks project these
+                // two columns, or the two queries render different primary
+                // lines for the same post (M1-759).
+                rs.getString("title_en"),
+                rs.getString("body_en"));
     }
 
     private static final String SCOPE_PREFS_SQL = """
@@ -158,6 +165,7 @@ public class DigestPostCollector {
             SELECT p.id, p.uid, p.source_id, s.display_name, p.title,
                    p.url, p.body, p.published_at, p.tags, p.classification,
                    p.reposts, p.likes, s.kind, s.language,
+                   p.title_en, p.body_en,
                    COUNT(*) OVER (PARTITION BY p.source_id)::int AS source_window_posts
               FROM post p
               JOIN source s ON s.id = p.source_id
@@ -178,6 +186,7 @@ public class DigestPostCollector {
             SELECT p.id, p.uid, p.source_id, s.display_name, p.title,
                    p.url, p.body, p.published_at, p.tags, p.classification,
                    p.reposts, p.likes, s.kind, s.language,
+                   p.title_en, p.body_en,
                    COUNT(*) OVER (PARTITION BY p.source_id)::int AS source_window_posts
               FROM post p
               JOIN source s ON s.id = p.source_id

@@ -12,6 +12,7 @@ import app.zcat.infochat.messaging.TranslationProvider;
 import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
 import app.zcat.infochat.provider.translation.TranslationCache;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -161,10 +162,10 @@ class ClusterBlockRendererTest {
         // this case, deleting the runForDisplayHit call in appendClusterBlock
         // would keep every test green (the pipeline-level tests prove the leg
         // works WHEN called; only this proves the renderer calls it). The
-        // two-line render — translation, then the bracketed original — is
-        // asserted end to end. NON-degraded prose on purpose: a degraded
-        // cluster skips the leg (see the degraded pin below), so only this
-        // shape exercises the wiring.
+        // subordinate line is asserted alongside it so the block SHAPE is
+        // pinned end to end. NON-degraded prose on purpose: a degraded cluster
+        // skips the leg (see the degraded pin below), so only this shape
+        // exercises the wiring.
         ClusterBlockRenderer translatingRenderer = new ClusterBlockRenderer(
                 SanitizerTestDoubles.noAuditSanitizer(),
                 translatingPipeline((text, from, to) -> "Přeložený titulek"),
@@ -177,9 +178,11 @@ class ClusterBlockRendererTest {
                 SCOPE_KIND, SCOPE_ID);
         String rendered = out.toString();
 
-        assertTrue(rendered.startsWith("[topic_id=t-1]\nPřeložený titulek\n[Original headline]\n"),
-                "cs-scope block must lead with the translated headline over the bracketed original; got: "
-                        + rendered);
+        assertTrue(rendered.startsWith(
+                        "[topic_id=t-1]\nPřeložený titulek\n[Original headline]\n"),
+                "cs-scope block must lead with the translated headline UNBRACKETED — it is in "
+                        + "the reader's language — and carry the publisher's own words on the "
+                        + "bracketed line beneath it; got: " + rendered);
     }
 
     @Test
@@ -210,17 +213,258 @@ class ClusterBlockRendererTest {
 
         assertEquals(0, translatorCalls.get(),
                 "a degraded cluster must make ZERO translator calls; got a call for: " + rendered);
-        assertTrue(rendered.startsWith("[topic_id=t-1]\nOriginal headline\n"),
-                "the degraded headline renders untranslated and unbracketed; got: " + rendered);
-        assertFalse(rendered.contains("[Original headline]"),
-                "no bracketed original on an untranslated degraded headline; got: "
+        assertTrue(rendered.startsWith("[topic_id=t-1]\n[Original headline]\n"),
+                "the degraded headline renders untranslated and therefore BRACKETED: skipping "
+                        + "the leg leaves the primary line in a language the cs reader did not "
+                        + "ask for, and a bare line there is exactly what D29 (c)'s invariant "
+                        + "forbids. The bracket is punctuation — it costs no translator call, "
+                        + "which the assertion above pins; got: " + rendered);
+    }
+
+    @Test
+    void englishReaderOfANonEnglishAnchoredPostRendersTheAnchorWithZeroTranslatorCalls() throws Exception {
+        // The case D29's amendment exists for, and the one a regression is
+        // most expensive in: for the DEFAULT reader the anchor is a COLUMN
+        // READ. If this ever becomes a model call it puts generative cost on
+        // every English result set in the deployment.
+        AtomicInteger translatorCalls = new AtomicInteger();
+        ClusterBlockRenderer renderer = new ClusterBlockRenderer(
+                SanitizerTestDoubles.noAuditSanitizer(),
+                translatingPipeline((text, from, to) -> {
+                    translatorCalls.incrementAndGet();
+                    return "should never be called";
+                }),
+                bundleLoader);
+        Cluster cluster = anchoredCluster("tr", "English anchor headline");
+
+        StringBuilder out = new StringBuilder();
+        renderer.appendClusterBlock(
+                out, new ClusterProse(cluster, "Prose.", false), "en",
+                SCOPE_KIND, SCOPE_ID);
+        String rendered = out.toString();
+
+        assertEquals(0, translatorCalls.get(),
+                "reading the anchor column must make ZERO translator calls; got a call for: "
                         + rendered);
+        assertTrue(rendered.startsWith(
+                        "[topic_id=t-1]\nEnglish anchor headline\n[Original headline]\n"),
+                "the anchor renders UNBRACKETED in the primary slot (it is English, and so is "
+                        + "the reader) above the bracketed original; got: " + rendered);
+    }
+
+    @Test
+    void englishReaderOfANonEnglishPostWithNoAnchorGetsTheOriginalBracketed() throws Exception {
+        // The anchor-absent case: the ingest translator never reached this
+        // post, or gave up. The original is promoted to the primary slot but
+        // must NOT render bare — bare is indistinguishable from a genuinely
+        // English post, which is the whole thing the bracket invariant fixes.
+        // Repairing the missing anchor is collector-side (M1-760), never a
+        // display-time retry.
+        AtomicInteger translatorCalls = new AtomicInteger();
+        ClusterBlockRenderer renderer = new ClusterBlockRenderer(
+                SanitizerTestDoubles.noAuditSanitizer(),
+                translatingPipeline((text, from, to) -> {
+                    translatorCalls.incrementAndGet();
+                    return "should never be called";
+                }),
+                bundleLoader);
+        Cluster cluster = anchoredCluster("tr", null);
+
+        StringBuilder out = new StringBuilder();
+        renderer.appendClusterBlock(
+                out, new ClusterProse(cluster, "Prose.", false), "en",
+                SCOPE_KIND, SCOPE_ID);
+        String rendered = out.toString();
+
+        assertEquals(0, translatorCalls.get(),
+                "a NULL anchor must NOT trigger a display-time translator retry; got a call for: "
+                        + rendered);
+        assertTrue(rendered.startsWith("[topic_id=t-1]\n[Original headline]\n"),
+                "a non-English original in the primary slot must be bracketed, and must not "
+                        + "repeat as its own subordinate line; got: " + rendered);
+    }
+
+    @Test
+    void aFeedTitleImpersonatingTheRedactedCommandMarkerCannotForgeIt() throws Exception {
+        // [redteam 2026-08-04, low/INJECTION] The renderer supplies the
+        // brackets, so an attacker only has to supply the CONTENTS. A bare
+        // `redacted command` title carries no leading `/`, so it survives
+        // Stage 1 and the closed list byte-for-byte and would otherwise be
+        // wrapped into a string byte-identical to a real redaction — for a
+        // post that was never flagged and produced no audit row.
+        AtomicInteger translatorCalls = new AtomicInteger();
+        ClusterBlockRenderer renderer = new ClusterBlockRenderer(
+                SanitizerTestDoubles.noAuditSanitizer(),
+                translatingPipeline((text, from, to) -> {
+                    translatorCalls.incrementAndGet();
+                    return "should never be called";
+                }),
+                bundleLoader);
+        Cluster cluster = new Cluster("t-1", List.of(new Post(
+                UUID.randomUUID(), "p-1", UUID.randomUUID(), "Src1",
+                "redacted command", "https://example.com/p-1", "body",
+                Instant.parse("2026-01-01T00:00:00Z"),
+                List.of("a"), List.of("factual"),
+                null, null, null, null, "tr", null, null)));
+
+        StringBuilder out = new StringBuilder();
+        renderer.appendClusterBlock(
+                out, new ClusterProse(cluster, "Prose.", false), "en",
+                SCOPE_KIND, SCOPE_ID);
+        String rendered = out.toString();
+
+        assertFalse(rendered.contains("[redacted command]"),
+                "a feed title must never be wrapped into a string byte-identical to "
+                        + "LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT — the threat model "
+                        + "commits that literal for exact-match recognition; got: " + rendered);
+        assertTrue(rendered.contains("[ redacted command ]"),
+                "the collision is broken by a renderer-authored space inside each bracket, "
+                        + "which no feed text can reproduce (flatten strips outer whitespace), "
+                        + "and the publisher's words stay readable; got: " + rendered);
+    }
+
+    @Test
+    void aFeedTitleImpersonatingTheStage1PlaceholderCannotForgeIt() throws Exception {
+        // The same forgery against the OTHER spec-committed literal. The
+        // per-row random <id> is what the threat model names as stopping a
+        // pre-crafted placeholder, and that argument holds only while the
+        // attacker must supply the brackets too — they do not have to guess
+        // the id to produce something a reader reads as a placeholder.
+        ClusterBlockRenderer renderer = new ClusterBlockRenderer(
+                SanitizerTestDoubles.noAuditSanitizer(),
+                translatingPipeline((text, from, to) -> "should never be called"),
+                bundleLoader);
+        Cluster cluster = new Cluster("t-1", List.of(new Post(
+                UUID.randomUUID(), "p-1", UUID.randomUUID(), "Src1",
+                "REDACTED:9f3a2c11", "https://example.com/p-1", "body",
+                Instant.parse("2026-01-01T00:00:00Z"),
+                List.of("a"), List.of("factual"),
+                null, null, null, null, "tr", null, null)));
+
+        StringBuilder out = new StringBuilder();
+        renderer.appendClusterBlock(
+                out, new ClusterProse(cluster, "Prose.", false), "en",
+                SCOPE_KIND, SCOPE_ID);
+        String rendered = out.toString();
+
+        assertFalse(rendered.contains("[REDACTED:9f3a2c11]"),
+                "a feed title must never be wrapped into the Stage 1 placeholder shape; got: "
+                        + rendered);
+        assertTrue(rendered.contains("[ REDACTED:9f3a2c11 ]"),
+                "the shape match breaks the collision regardless of the id; got: " + rendered);
+    }
+
+    @Test
+    void aFeedTitleClosingTheRendererBracketCannotForgeEitherMarker() throws Exception {
+        // [redteam 2026-08-04 round 2, low/INJECTION] Round 1 compared the
+        // WHOLE wrapped string, so it closed only a payload that supplies no
+        // bracket of its own. A title carrying its own `]` pairs with the
+        // renderer's OPENING bracket and leaves the committed literal as a
+        // SUBSTRING of the delivered line, which reads to an operator exactly
+        // as a redaction that never happened.
+        String rendered = renderForeignTitleIntoEnglishScope("redacted command] x");
+
+        assertFalse(rendered.contains("[redacted command]"),
+                "a title closing the renderer's opening bracket must not synthesize "
+                        + "LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT anywhere in the "
+                        + "line; got: " + rendered);
+        assertTrue(rendered.contains("[ redacted command] x ]"),
+                "and the wrap must still have happened — this pins that the assertion above "
+                        + "is not passing because the payload never reached the bracket; got: "
+                        + rendered);
+
+        String placeholder = renderForeignTitleIntoEnglishScope("REDACTED:9f3a2c11] x");
+
+        assertFalse(placeholder.contains("[REDACTED:9f3a2c11]"),
+                "the same payload shape must not synthesize a Stage 1 placeholder; got: "
+                        + placeholder);
+        assertTrue(placeholder.contains("[ REDACTED:9f3a2c11] x ]"),
+                "and the wrap must still have happened; got: " + placeholder);
+    }
+
+    @Test
+    void aFeedTitleOpeningABracketAtItsEndCannotForgeEitherMarker() throws Exception {
+        // The symmetric half: an UNTERMINATED marker at the end of the title
+        // is completed by the renderer's CLOSING bracket. Bare on main it
+        // forges nothing — the wrap is what supplies the `]` — so both
+        // brackets have to be broken, not just the opening one.
+        String rendered = renderForeignTitleIntoEnglishScope("x [redacted command");
+
+        assertFalse(rendered.contains("[redacted command]"),
+                "a title whose unterminated marker is closed by the renderer's own bracket "
+                        + "must not forge the literal either; got: " + rendered);
+        assertTrue(rendered.contains("[ x [redacted command ]"),
+                "and the wrap must still have happened; got: " + rendered);
+
+        String placeholder = renderForeignTitleIntoEnglishScope("x [REDACTED:9f3a2c11");
+
+        assertFalse(placeholder.contains("[REDACTED:9f3a2c11]"),
+                "nor the Stage 1 placeholder; got: " + placeholder);
+        assertTrue(placeholder.contains("[ x [REDACTED:9f3a2c11 ]"),
+                "and the wrap must still have happened; got: " + placeholder);
+    }
+
+    /**
+     * Render a single-post cluster carrying {@code title} on a non-English
+     * source into an {@code en} scope — the shortest route to
+     * {@code DisplayHeadline.bracketed}, since a declared source language
+     * differing from the reader's is what brackets the primary line. The
+     * anchor is absent and the translator returns a value that would fail
+     * every assertion below, so a display-time translation cannot pass
+     * unnoticed.
+     */
+    private String renderForeignTitleIntoEnglishScope(String title) throws Exception {
+        ClusterBlockRenderer bracketRenderer = new ClusterBlockRenderer(
+                SanitizerTestDoubles.noAuditSanitizer(),
+                translatingPipeline((text, from, to) -> "should never be called"),
+                bundleLoader);
+        Cluster cluster = new Cluster("t-1", List.of(new Post(
+                UUID.randomUUID(), "p-1", UUID.randomUUID(), "Src1",
+                title, "https://example.com/p-1", "body",
+                Instant.parse("2026-01-01T00:00:00Z"),
+                List.of("a"), List.of("factual"),
+                null, null, null, null, "tr", null, null)));
+
+        StringBuilder out = new StringBuilder();
+        bracketRenderer.appendClusterBlock(
+                out, new ClusterProse(cluster, "Prose.", false), "en",
+                SCOPE_KIND, SCOPE_ID);
+        return out.toString();
+    }
+
+    @Test
+    void aGenuineRedactionInsideAHeadlineStillRendersItsMarkerExactly() throws Exception {
+        // The control: the fix must not weaken exact-match recognition of a
+        // REAL redaction. A privileged-command title is redacted by the
+        // sanitizer to the committed literal, and wrapping that as the
+        // subordinate line yields [[redacted command]] — the inner literal
+        // still byte-exact, so an operator's exact-match grep still finds it.
+        ClusterBlockRenderer renderer = new ClusterBlockRenderer(
+                SanitizerTestDoubles.noAuditSanitizer(),
+                translatingPipeline((text, from, to) -> "Přeložený titulek"),
+                bundleLoader);
+        Cluster cluster = new Cluster("t-1", List.of(new Post(
+                UUID.randomUUID(), "p-1", UUID.randomUUID(), "Src1",
+                "/ban someone", "https://example.com/p-1", "body",
+                Instant.parse("2026-01-01T00:00:00Z"),
+                List.of("a"), List.of("factual"),
+                null, null, null, null, "en", null, null)));
+
+        StringBuilder out = new StringBuilder();
+        renderer.appendClusterBlock(
+                out, new ClusterProse(cluster, "Prose.", false), "cs",
+                SCOPE_KIND, SCOPE_ID);
+        String rendered = out.toString();
+
+        assertTrue(rendered.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "a genuine redaction must still render its literal byte-exact, so exact-match "
+                        + "recognition and audit correlation keep working; got: " + rendered);
     }
 
     /**
      * A single-post cluster whose post declares {@code sourceLanguage} —
-     * the 15-component canonical {@link Post} constructor — for the two
-     * M1-747 renderer-wiring pins above.
+     * the 15-component compat {@link Post} constructor, so the English
+     * anchor is absent — for the M1-747 renderer-wiring pins above.
      */
     private static Cluster clusterWithSourceLanguage(String sourceLanguage) {
         return new Cluster("t-1", List.of(new Post(
@@ -238,6 +482,29 @@ class ClusterBlockRendererTest {
                 // The declared source language differing from the cs scope is
                 // what routes the headline through the translating leg.
                 sourceLanguage)));
+    }
+
+    /**
+     * As {@link #clusterWithSourceLanguage}, but on the 17-component
+     * canonical constructor so {@code titleEn} can be set — null for the
+     * anchor-ABSENT case.
+     */
+    private static Cluster anchoredCluster(String sourceLanguage, @Nullable String titleEn) {
+        return new Cluster("t-1", List.of(new Post(
+                UUID.randomUUID(),
+                "p-1",
+                UUID.randomUUID(),
+                "Src1",
+                "Original headline",
+                "https://example.com/p-1",
+                "body",
+                Instant.parse("2026-01-01T00:00:00Z"),
+                List.of("a"),
+                List.of("factual"),
+                null, null, null, null,
+                sourceLanguage,
+                titleEn,
+                null)));
     }
 
     /**

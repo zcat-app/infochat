@@ -90,7 +90,7 @@ public class RetryCommandHandler implements CommandHandler {
     private static final String SELECT_POSTS_BY_UIDS = """
             SELECT p.id, p.uid, p.source_id, s.display_name AS source_display_name,
                    p.title, p.url, p.body, p.published_at, p.tags, p.classification,
-                   s.language AS source_language
+                   s.language AS source_language, p.title_en, p.body_en
             FROM post p
             JOIN source s ON s.id = p.source_id
             WHERE p.uid = ANY(?) AND p.status = 'READY'
@@ -478,7 +478,13 @@ public class RetryCommandHandler implements CommandHandler {
                 // a non-en-scope flat replay translates the same headlines
                 // the original render did (M1-747 replay parity).
                 null, null, null, null,
-                rs.getString("source_language"));
+                rs.getString("source_language"),
+                // The English anchor rides along for the same replay-parity
+                // reason: a flat replay renders through ClusterBlockRenderer,
+                // so without it the replayed primary line would differ from
+                // the /summary --flat it replays (M1-759).
+                rs.getString("title_en"),
+                rs.getString("body_en"));
     }
 
     private Optional<UUID> resolveUserId(ScopeRef scope) {

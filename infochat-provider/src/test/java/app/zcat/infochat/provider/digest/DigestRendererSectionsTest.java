@@ -234,8 +234,8 @@ class DigestRendererSectionsTest {
         assertTrue(text.contains("thirteen-story synthesis"),
                 "the roll-up synthesis renders: " + text);
         for (int i = 0; i < 5; i++) {
-            assertTrue(text.contains("· Story sec " + i + "  https://example.com/sec-" + i),
-                    "headline " + i + " renders as bare title + URL: " + text);
+            assertTrue(text.contains("· Story sec " + i + "\nhttps://example.com/sec-" + i),
+                    "headline " + i + " renders as bare title then URL on its own line: " + text);
         }
         assertFalse(text.contains("Story sec 5"),
                 "the 6th headline is capped off by category-headline-count: " + text);

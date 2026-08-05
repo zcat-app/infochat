@@ -142,19 +142,67 @@ class DigestPostCollectorTest {
         }
     }
 
+    @Test
+    void collectForGroup_projectsTheEnglishAnchorInBothTagModes() throws SQLException {
+        // M1-759, the same silent-failure shape M1-756 pinned above: there
+        // are TWO post SELECTs (POSTS_ALL_SQL and POSTS_EXPLICIT_SQL) and
+        // adding the columns to only one makes the digest render a
+        // different primary line depending on the group's tag mode, with
+        // no error anywhere. A missing anchor reads as "never translated",
+        // which is a legitimate state, so nothing downstream complains.
+        for (String tagMode : List.of("ALL", "EXPLICIT")) {
+            StubDataSource dataSource = new StubDataSource(
+                    tagMode, 1L, 1L,
+                    List.of(new PostRow(UUID.randomUUID(), "uid-tr", UUID.randomUUID(), "TRT",
+                            "Türkçe başlık", "https://trt.example/1", "gövde",
+                            Instant.parse("2026-05-25T10:00:00Z"),
+                            new String[]{"security"}, new String[]{"factual"},
+                            null, null, null, null, "tr",
+                            "Turkish headline", "body text")));
+            collector.dataSource = dataSource;
+
+            DigestPostCollector.CollectionResult result =
+                    collector.collectForGroup(GROUP_ID, SINCE);
+
+            assertEquals(1, result.posts().size());
+            assertEquals("Turkish headline", result.posts().getFirst().titleEn(),
+                    "mode " + tagMode + ": the English anchor reaches the Post");
+            assertEquals("body text", result.posts().getFirst().bodyEn(),
+                    "mode " + tagMode + ": the body anchor reaches the Post too");
+            assertTrue(dataSource.lastPostsSql().contains("p.title_en"),
+                    "mode " + tagMode + ": the post SELECT must project p.title_en; got: "
+                            + dataSource.lastPostsSql());
+            assertTrue(dataSource.lastPostsSql().contains("p.body_en"),
+                    "mode " + tagMode + ": the post SELECT must project p.body_en; got: "
+                            + dataSource.lastPostsSql());
+        }
+    }
+
     // ----- JDBC stubs (no Mockito) -----------------------------------------
 
     record PostRow(UUID id, String uid, UUID sourceId, String displayName,
                    String title, String url, String body, Instant publishedAt,
                    String[] tags, String[] classification,
                    Integer reposts, Integer likes, String kind,
-                   Integer sourceWindowPosts, String language) {
+                   Integer sourceWindowPosts, String language,
+                   String titleEn, String bodyEn) {
         /** Pre-M1-724 shape: no prominence signals (all NULL). */
         PostRow(UUID id, String uid, UUID sourceId, String displayName,
                 String title, String url, String body, Instant publishedAt,
                 String[] tags) {
             this(id, uid, sourceId, displayName, title, url, body, publishedAt,
                     tags, new String[]{"unknown"}, null, null, null, null, "en");
+        }
+
+        /** Pre-M1-759 shape: no English anchor. */
+        PostRow(UUID id, String uid, UUID sourceId, String displayName,
+                String title, String url, String body, Instant publishedAt,
+                String[] tags, String[] classification,
+                Integer reposts, Integer likes, String kind,
+                Integer sourceWindowPosts, String language) {
+            this(id, uid, sourceId, displayName, title, url, body, publishedAt,
+                    tags, classification, reposts, likes, kind, sourceWindowPosts,
+                    language, null, null);
         }
 
         /** Pre-M1-756 shape: no declared source language. */
@@ -300,6 +348,8 @@ class DigestPostCollectorTest {
                                 case "body" -> row.body();
                                 case "kind" -> row.kind();
                                 case "language" -> row.language();
+                                case "title_en" -> row.titleEn();
+                                case "body_en" -> row.bodyEn();
                                 default -> null;
                             };
                         }

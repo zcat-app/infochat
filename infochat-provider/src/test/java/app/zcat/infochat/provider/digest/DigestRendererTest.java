@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.digest;
 
 import app.zcat.infochat.messaging.TranslationProvider;
+import app.zcat.infochat.core.ingest.IngestTextNormalizer;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.digest.DigestRenderer.DigestMode;
 import app.zcat.infochat.provider.summary.ClusterTraversal;
@@ -483,8 +484,8 @@ class DigestRendererTest {
     void normalModeHeadlinesTranslateForNonEnScope() throws Exception {
         // The digest reaches parity with /summary and /saved: a cs group
         // reading en-source headlines gets them through the display-hit
-        // leg — translation first, the bracketed original beneath it, and
-        // the URL on its own line.
+        // leg, in the anchor-first block — translated line, publisher's own
+        // words bracketed beneath, URL on its own line.
         AtomicInteger calls = new AtomicInteger();
         wireTranslator(calls, "Přeložený titulek");
         List<Post> posts = taggedPosts(3, "en", "ai");
@@ -493,19 +494,26 @@ class DigestRendererTest {
 
         assertEquals(3, calls.get(), "one translator call per rendered headline");
         assertTrue(result.contains(
-                "· Přeložený titulek\n[Headline ai 0]\nhttps://example.com/ai0"),
-                "a translated headline renders over the bracketed original with the URL beneath; got: "
-                        + result);
+                        "· Přeložený titulek\n[Headline ai 0]\nhttps://example.com/ai0"),
+                "the translated headline leads the block UNBRACKETED, the original follows "
+                        + "bracketed, and the URL takes its own line; got: " + result);
         assertFalse(result.contains("· Headline ai 0"),
-                "the untranslated source headline must not render as the primary line; got: " + result);
+                "the untranslated source headline must not also occupy a PRIMARY slot — it "
+                        + "renders once, as the subordinate original; got: " + result);
     }
 
     @Test
-    void enScopeMakesZeroTranslatorCallsAndRendersHeadlinesVerbatim() throws Exception {
-        // The M1-747 acceptance property, extended to the digest: an en
-        // scope short-circuits in the pipeline, so the provider spy must
-        // see nothing and the bytes must be the source headlines exactly —
-        // this is what keeps every persisted-section byte pin valid.
+    void enScopeMakesZeroTranslatorCallsAndBracketsAnAnchorlessForeignHeadline() throws Exception {
+        // The M1-747 zero-call property, extended to the digest and still
+        // load-bearing: an en scope short-circuits in the pipeline, so the
+        // provider spy must see nothing.
+        //
+        // What the bytes are has changed. These cs-source posts carry NO
+        // anchor (the compat constructor leaves it null), so this is the
+        // anchor-absent case: the original is promoted to the primary slot
+        // BRACKETED. Rendering it bare would make it indistinguishable
+        // from a genuinely English headline — the exact defect D29 (c)'s
+        // invariant closes — and no bracket costs a provider call.
         AtomicInteger calls = new AtomicInteger();
         wireTranslator(calls, "Přeložený titulek");
         List<Post> posts = taggedPosts(3, "cs", "ai");
@@ -514,10 +522,59 @@ class DigestRendererTest {
 
         assertEquals(0, calls.get(),
                 "an en scope must make ZERO translator calls; got: " + result);
-        assertTrue(result.contains("· Headline ai 0  https://example.com/ai0"),
-                "en headlines render byte-identical to the source; got: " + result);
-        assertFalse(result.contains("[Headline ai 0]"),
-                "no bracketed original on an untranslated headline; got: " + result);
+        assertTrue(result.contains("· [Headline ai 0]\nhttps://example.com/ai0"),
+                "a cs-source headline with no anchor renders bracketed for an en reader; got: "
+                        + result);
+    }
+
+    @Test
+    void enScopeRendersTheAnchorUnbracketedWithZeroTranslatorCalls() throws Exception {
+        // The case D29's amendment exists for. The anchor is a COLUMN
+        // READ: the default reader gets English at zero generative cost.
+        // A regression turning this into a model call would put LLM cost
+        // on every English result set in the deployment, which is why the
+        // spy assertion sits alongside the byte one.
+        AtomicInteger calls = new AtomicInteger();
+        wireTranslator(calls, "Přeložený titulek");
+        List<Post> posts = anchoredPosts(3, "cs", "ai");
+
+        String result = renderJoined(posts, DigestMode.NORMAL, "en");
+
+        assertEquals(0, calls.get(),
+                "reading the anchor column must make ZERO translator calls; got: " + result);
+        assertTrue(result.contains(
+                        "· Anchor ai 0\n[Headline ai 0]\nhttps://example.com/ai0"),
+                "the anchor renders unbracketed above the bracketed original; got: " + result);
+    }
+
+    @Test
+    void untitledSentinelPostChoosesTheFieldFromTheORIGINALNotTheAnchor() throws Exception {
+        // M1-729's body fallback, against the shape that defeats it if the
+        // field is chosen from the anchor. IngestTranslationWorker has no
+        // sentinel guard, so a titleless non-English post can carry a
+        // title_en that is a TRANSLATION of "untitled" — not byte-equal to
+        // the sentinel, so an anchor-first field choice would pass it
+        // through and resurrect the dead headline the body fallback exists
+        // to replace.
+        AtomicInteger calls = new AtomicInteger();
+        wireTranslator(calls, "Přeložený titulek");
+        List<Post> posts = List.of(new Post(
+                UUID.randomUUID(), "s1", UUID.randomUUID(), "TestSrc",
+                IngestTextNormalizer.UNTITLED_TITLE, "https://example.com/s1",
+                "Body carries the headline", Instant.now(),
+                List.of("ai"), List.of("unknown"),
+                null, null, null, null, "cs",
+                // A translated sentinel: not byte-equal to UNTITLED_TITLE.
+                "Untitled", null));
+
+        String result = renderJoined(posts, DigestMode.NORMAL, "en");
+
+        assertTrue(result.contains("Body carries the headline"),
+                "the field must be chosen from the ORIGINAL, so the sentinel title falls back "
+                        + "to the body; got: " + result);
+        assertFalse(result.contains("Untitled"),
+                "the translated sentinel must never render — choosing the field from the anchor "
+                        + "is what would resurrect it; got: " + result);
     }
 
     @Test
@@ -536,8 +593,10 @@ class DigestRendererTest {
 
         assertEquals(0, calls.get(),
                 "a null source language must never reach the translator; got: " + result);
-        assertTrue(result.contains("· Headline 0  https://example.com/n1"),
-                "the headline renders untranslated; got: " + result);
+        assertTrue(result.contains("· Headline 0\nhttps://example.com/n1"),
+                "the headline renders untranslated AND unbracketed — D29 declares languages "
+                        + "and never infers them, so an undeclared source is not evidence of "
+                        + "foreignness; got: " + result);
     }
 
     @Test
@@ -547,7 +606,7 @@ class DigestRendererTest {
         // is this budget. It is per RENDER, not per section — two sections
         // of three translatable headlines each must still spend only the
         // configured allowance, and the rows past it render untranslated
-        // AND unbracketed.
+        // (and therefore bracketed — punctuation, not a provider call).
         // The lead is disabled: at 6 clusters it would fire, and its
         // per-cluster PROSE runs through the translator too — a different
         // leg whose calls would confound this leg's accounting.
@@ -563,10 +622,17 @@ class DigestRendererTest {
 
         assertEquals(2, calls.get(),
                 "the budget bounds the WHOLE render, not each section; got: " + result);
-        assertEquals(2, countOccurrences(result, "[Headline "),
-                "exactly the budgeted headlines carry the bracketed original; got: " + result);
-        assertTrue(result.contains("Headline crypto 2"),
-                "a headline past the budget renders untranslated; got: " + result);
+        // The witness for "exactly N headlines were translated" is now the
+        // translated text in a PRIMARY slot. It carries the same control
+        // the marker count did — the budget bounds the generative surface
+        // of a scheduled broadcast — without depending on a removed
+        // affordance.
+        assertEquals(2, countOccurrences(result, "· Přeložený titulek"),
+                "exactly the budgeted headlines render a translated primary line; got: " + result);
+        assertTrue(result.contains("· [Headline crypto 2]"),
+                "a headline past the budget renders untranslated, and therefore bracketed — "
+                        + "the budget must not be able to produce a bare foreign line; got: "
+                        + result);
     }
 
     @Test
@@ -613,7 +679,11 @@ class DigestRendererTest {
         assertEquals(0, degradedCalls.get(),
                 "a degraded cluster must make ZERO translator calls; got: " + degraded);
         assertFalse(degraded.contains("[Sec 1]"),
-                "no bracketed original on degraded output; got: " + degraded);
+                "and no bracketed original: these fixtures declare NO source language, and D29 "
+                        + "declares languages rather than inferring them, so an undeclared "
+                        + "source renders bare on the degraded arm as everywhere else — the "
+                        + "bracket follows the declared language, never the degraded state; "
+                        + "got: " + degraded);
 
         AtomicInteger healthyCalls = new AtomicInteger();
         wireTranslator(healthyCalls, "Přeložená próza");
@@ -670,6 +740,24 @@ class DigestRendererTest {
                     "Headline " + tag + " " + i, "https://example.com/" + uid, "body",
                     Instant.now(), List.of(tag), List.of("unknown"),
                     null, null, null, null, sourceLanguage));
+        }
+        return posts;
+    }
+
+    /**
+     * As {@link #taggedPosts}, on the 17-component canonical constructor so
+     * each post carries an English anchor — the M1-759 column read.
+     */
+    private static List<Post> anchoredPosts(int count, String sourceLanguage, String tag) {
+        List<Post> posts = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            String uid = tag + i;
+            posts.add(new Post(
+                    UUID.randomUUID(), uid, UUID.randomUUID(), "TestSrc",
+                    "Headline " + tag + " " + i, "https://example.com/" + uid, "body",
+                    Instant.now(), List.of(tag), List.of("unknown"),
+                    null, null, null, null, sourceLanguage,
+                    "Anchor " + tag + " " + i, null));
         }
         return posts;
     }

@@ -50,11 +50,13 @@ import java.util.UUID;
  * runs the display-hit translation leg (M1-747), which carries the same
  * cache/provider temporal variance the {@code summary:} field's translation
  * already has — replay parity is preserved because /retry re-projects the
- * post's source language (not because the leg is pure). Degraded clusters
- * are excepted: they render the headline untranslated and unbracketed, because
- * the degraded branch exists precisely because the LLM path failed and
+ * post's source language and its English anchor (not because the leg is
+ * pure). Degraded clusters are excepted from the TRANSLATION only: they
+ * render the headline untranslated, because the degraded branch exists
+ * precisely because the LLM path failed and
  * {@code security.md} §Failure handling pins its shape as zero LLM calls
- * (redteam 2026-08-03, low/DOS). The order of the
+ * (redteam 2026-08-03, low/DOS). They are NOT excepted from the anchor or
+ * the bracket — both are column reads and cost no call (M1-759). The order of the
  * steps inside {@link DisplayHeadline} is load-bearing for the sanitizer's
  * guarantees and is documented there — never re-apply one of them from a
  * caller. A legit-slash title (TCP/IP) is returned byte-identical.
@@ -113,25 +115,38 @@ final class ClusterBlockRenderer {
         // the line is omitted rather than emitted blank (M1-714) — the block
         // is still identified by the topic_id above and the covered-by line
         // below.
-        String headline = DisplayHeadline.of(first, llmOutputSanitizer);
+        DisplayHeadline.AnchoredHeadline headline =
+                DisplayHeadline.anchorFirst(first, llmOutputSanitizer);
         if (!headline.isEmpty()) {
+            boolean usesAnchor = DisplayHeadline.usesAnchor(
+                    headline, first.sourceLanguage(), scopeLanguage);
+            String primary = usesAnchor ? headline.readerLine() : headline.originalLine();
             // Display-hit translation (M1-747): a no-op for en scopes,
             // same-language hits, and null source language — the pipeline
             // owns the decision, the controls (pre-bound → flatten →
-            // sanitizer-2 → re-truncate → bracketed original line) and the
-            // fallback. Input is the DisplayHeadline OUTPUT, so the snippet
-            // is capped before the translator call by construction. A
-            // DEGRADED cluster skips the leg outright — untranslated,
-            // unbracketed:
+            // sanitizer-2 → re-truncate) and the fallback. Input
+            // is the DisplayHeadline OUTPUT, so the snippet is capped
+            // before the translator call by construction. A DEGRADED
+            // cluster skips the leg outright — untranslated:
             // the branch exists because the LLM path failed, and turning
             // the cost-shedding path into one translator round-trip per
             // cluster would invert it (security.md §Failure handling pins
             // degraded = headlines + URLs + UIDs, no LLM calls; redteam
-            // 2026-08-03, low/DOS).
-            out.append(cp.degraded()
-                    ? headline
+            // 2026-08-03, low/DOS). Skipping it does NOT make the line
+            // bare: a degraded cluster whose source language differs from
+            // the reader's is bracketed like any other untranslated
+            // primary, which costs no LLM call (M1-759).
+            TranslationPipeline.DisplayHit hit = cp.degraded()
+                    ? TranslationPipeline.skipped(primary)
                     : translationPipeline.runForDisplayHit(
-                            headline, first.sourceLanguage(), scopeKind, scopeId, scopeLanguage))
+                            primary, first.sourceLanguage(), usesAnchor,
+                            scopeKind, scopeId, scopeLanguage);
+            out.append(DisplayHeadline.anchorBlock(
+                            hit.headline(),
+                            TranslationPipeline.primaryInReaderLanguage(
+                                    hit, usesAnchor, first.sourceLanguage(), scopeLanguage),
+                            headline.originalLine(),
+                            hit.note()))
                .append("\n");
         }
         // covered by: source display name (uid p-...), ...
