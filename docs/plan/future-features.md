@@ -463,3 +463,72 @@ flag on `CapabilityFlags`), so this would force clunky command-based hacks with
 uneven cross-adapter support — over-engineering risk for marginal signal. Revisit
 only if a media/reaction SPI extension (see §B) lands and exposes native
 reactions. **Verdict: `parked`.**
+
+---
+
+## G. External integrations
+
+> **New category (added 2026-08-05).** Every entry in §A–§F is either about
+> infochat's own data or about widening the adapter SPI. This section is for
+> integrations with a **third-party service that has its own user identity
+> model** — which is the part that needs design work, not the API call.
+
+### G1. `/jellyfin` — search a local media server
+**What:** `/jellyfin [audio | movie | show | book] <search term>` queries a
+self-hosted [Jellyfin](https://github.com/jellyfin/jellyfin) media server and
+returns matching items. The bare form searches all types.
+
+**Current state — does NOT exist; zero substrate.** No Jellyfin reference
+anywhere in the repo (verified 2026-08-05). Jellyfin's side is the easy half and
+is ready to use as-is: `GET /Search/Hints` (the endpoint the web UI's search box
+drives) and `GET /Items?searchTerm=…&recursive=true` both accept
+`includeItemTypes`, so the four subcommands map to `Audio,MusicAlbum,MusicArtist`
+/ `Movie` / `Series,Episode` / `Book,AudioBook`.
+
+**Shape:** asset-command-shaped, not post-shaped. Like `/zcash` and `/monero`,
+results are an external live fetch with **no Stage 1/2 evaluation, no tagging, no
+embedding, and no `post` rows** — `docs/design/10-asset-commands.md` is the
+template, not the ingest pipeline. The reply names its data source, per the same
+attribution rule.
+
+**Prerequisites / tensions:**
+
+1. **Identity bridging is the unsolved part.** Jellyfin enforces per-user library
+   access (Dashboard → Users → Library Access), and its search honours it:
+   `/Search/Hints` and `/Items` both resolve the caller via
+   `RequestHelpers.GetUserId`, and a non-admin token cannot pass another user's
+   id (`"User must be administrator to access another user"`). So the isolation
+   is real and server-side — but infochat users are adapter contact ids, not
+   Jellyfin accounts, and *something* has to bind the two. Three credential
+   shapes, none clearly right:
+   - **(a) One operator API key, no mapping.** Simplest; every infochat user
+     searches the whole library. Discards the per-user isolation entirely.
+   - **(b) Operator API key + per-user `jellyfin_user_id` mapping.** Every call
+     passes `userId=`, yielding that user's exact view. **Best of the three** —
+     the only one where the stored-secret count stays at one, with no password
+     handling and no token expiry. *Trap:* a Dashboard API key is a server-level
+     credential bound to no user, so a call that omits `userId` is **not**
+     user-filtered and silently returns everything. The mapping would have to be
+     mandatory, not defaulted.
+   - **(c) Per-user access tokens via Quick Connect.** `POST
+     /QuickConnect/Initiate` returns a secret + short code, the user enters the
+     code in their own Jellyfin client, and the secret is then exchanged for that
+     user's token — real per-user auth with no password reaching the bot. Costs
+     N secrets at rest plus expiry handling; that surface would need justifying.
+
+   Open question either way: is the binding **operator-configured** (admin sets
+   the mapping) or **user-driven** (a link/pair flow)? That choice, not the
+   search call, is what this entry is waiting on.
+
+2. **DM-only.** A group reply renders one member's library view into a room
+   transcript everyone can read — under (b) the sender's own view, which is
+   exactly the per-(user, scope) leak the isolation rule forbids. Restrict to DM,
+   mirroring how saves are scoped.
+
+3. **Search quality ceiling.** Jellyfin's search is substring/prefix matching
+   over titles and a little metadata — not full-text over lyrics, book contents,
+   or subtitles. Setting expectations is part of the design, not a later fix.
+
+**Verdict: `needs-analysis`.** The API surface is trivial and the command shape
+has a clean precedent; the identity-bridging model is the blocker and no option
+is convincing enough to commit to yet.
