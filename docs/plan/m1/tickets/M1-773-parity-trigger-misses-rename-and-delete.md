@@ -1,7 +1,7 @@
 ---
 id: M1-773
 title: "Parity-gate trigger misses a rename or delete"
-status: pending
+status: done
 created: 2026-08-05
 last_updated: 2026-08-05
 blocked_by: []
@@ -67,12 +67,29 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 21
+      removed: 15
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-05
+  verdict: PASS
+  warnings: []
+  blockers: []
 escalation_reason:
 ---
 

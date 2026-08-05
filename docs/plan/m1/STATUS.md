@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 782 |
+| done | 783 |
 | deferred | 0 |
 | abandoned | 23 |
 | **total** | **808** |
@@ -27,7 +27,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-771 — Echo check on the ingest anchor write (complexity: low, risk: medium)
 - M1-772 — Audit the anchor/original pair as a span (complexity: medium, risk: medium)
-- M1-773 — Parity-gate trigger misses a rename or delete (complexity: low, risk: low)
 
 ---
 
@@ -63,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-773 | Parity-gate trigger misses a rename or delete | 2026-08-05 | round 1 APPROVE |
 | M1-770 | Doc-only commits must run the parity gates | 2026-08-05 | round 2 APPROVE |
 | M1-769 | Render-scoped exact LLM call accounting and per-call bound for the digest budget | 2026-08-05 | round 1 APPROVE |
 | M1-767 | Aggregate system LLM budget for the unmetered scheduled digest | 2026-08-05 | round 2 APPROVE |
@@ -72,7 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-759 | Anchor-first headline display: reader-language line, bracketed original beneath | 2026-08-05 | round 1 APPROVE |
 | M1-768 | Redteam run-gate must always diff working tree vs fork point | 2026-08-04 | round 1 APPROVE |
 | M1-764 | Pin the LLM transport's interrupt contract with a test | 2026-08-04 | round 1 APPROVE |
-| M1-763 | Timed-out digest render is never cancelled and keeps spending LLM calls | 2026-08-04 | round 1 APPROVE |
 
 ---
 
@@ -1022,5 +1021,5 @@ M1-768 (done)
 M1-770 (done)
 M1-771 (pending) ← runnable
 M1-772 (pending) ← runnable
-M1-773 (pending) ← runnable
+M1-773 (done)
 ```
