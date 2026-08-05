@@ -304,10 +304,11 @@ The ticket flow exists for code, tests, migrations, and spec changes coordinated
 | `spec:` | Pure spec/design edit under `docs/spec/` or `docs/design/`, no code change | ticket-readiness pre-flight, reviewer, `mvn verify`, STATUS regen |
 | `process:` | Edit under `.claude/`, `docs/process/`, `docs/plan/`, `CLAUDE.md`, or the agent-tooling surface (`AGENTS.md`, `.agents/`, `.opencode/`, `.codex/`, `CONTRIBUTING.md`), no code change | ticket-readiness pre-flight, reviewer, `mvn verify`, STATUS regen |
 | `text:` | **Zero-behavior text inside a source file** — comments, javadoc, and message-only string literals (assertion messages, log messages). Every `+`/`-` line must lie inside a comment or a string literal; no executable line changes. See rule 8 | ticket-readiness pre-flight, reviewer, `mvn verify`, STATUS regen |
+| `fix:` | **Minimal repair of a red `main` that no ticket owns.** See rule 9 | ticket-readiness pre-flight, reviewer, STATUS regen — **NOT** `mvn verify` |
 
 ### Rules
 
-1. **Touch code → ticket.** Any commit that adds, deletes, or modifies a file under `infochat-*/`, a module's `src/`, a `pom.xml`, or `db/migration/` is a ticket and uses `M<N>-NNN:` — unless it qualifies for `text:` under rule 8. The `spec:` and `process:` prefixes are pure-doc only.
+1. **Touch code → ticket.** Any commit that adds, deletes, or modifies a file under `infochat-*/`, a module's `src/`, a `pom.xml`, or `db/migration/` is a ticket and uses `M<N>-NNN:` — unless it qualifies for `text:` under rule 8 or `fix:` under rule 9. The `spec:` and `process:` prefixes are pure-doc only.
 2. **Touch spec coordinated with code → ticket.** If a spec amendment is *paired* with the code change it justifies, both land in the same `M<N>-NNN:` commit. The `spec:` prefix is for amendments that stand alone — clarifications, decision-log entries, formatting fixes, refinements with no code consequence yet.
 3. **Dominant-path prefix.** If a `process:` commit incidentally fixes a typo in a spec file, it stays `process:` — pick the prefix that names the load-bearing change. Co-prefixing (`spec+process:`) is forbidden; if the change is genuinely split across both surfaces, make two commits.
 4. **Grep safety.** `git log --grep "^M<N>-"` continues to enumerate implementation-ticket work cleanly because no non-ticket prefix starts with `M`. Tools that build the Done table from `git log` (the status regenerator or its replacement) keep working unchanged.
@@ -320,6 +321,12 @@ The ticket flow exists for code, tests, migrations, and spec changes coordinated
    - **The mechanical gate.** Every `+` and `-` line in the diff lies inside a comment or a string literal, and the file's executable lines are byte-identical. `git diff -w` showing only comment/string hunks is the check; a changed declaration, modifier, value, or control-flow line disqualifies the commit immediately.
    - **`mvn verify` is not required** (nothing it can catch — the bytecode is unchanged except for constant-pool strings), and no STATUS regen applies. Compilation is still on the author: an unterminated comment or a broken string concatenation is a real break, so eyeball the hunk.
    - **When the same edit is already inside a ticket's scope, it belongs to the ticket** — `text:` is for standalone text defects, not a side door around an open ticket's `out_of_scope`.
+9. **`fix:` — minimal repair of a red `main`.** Rule 1 sends every code change to the ticket flow, which assumes `main` is green to fork from. When `main` itself is red and no ticket owns the breakage — in practice, collateral damage from an earlier non-ticket commit — the ticket flow cannot run cleanly: every ticket forked from that commit inherits a red baseline and cannot satisfy its own "`mvn verify` is green" acceptance item. `fix:` restores green so the ticket flow works again. It is narrow:
+   - **Admissible.** The smallest change that makes the failing test pass *on its own terms* — the remedy the failing assertion's own message prescribes. A ledger/exemption entry, a corrected path or name, a missing test resource.
+   - **Not admissible.** Weakening, disabling, narrowing or deleting the failing test; that is the §8 test-integrity violation regardless of prefix, and being on a red `main` is not an exception. Nor is a `fix:` a licence to make the change you think the code *should* have had: if the repair is not obvious and minimal, it is a ticket.
+   - **`mvn verify` IS required**, green from the repo root, BEFORE the commit lands — this is the one non-ticket prefix that can touch code or a test resource, so it does not inherit the pure-doc verify bypass. The commit body records the result.
+   - **The root cause is a follow-up ticket, never folded in.** A `fix:` repairs the symptom so work can continue; the process gap or design defect that produced it gets a ticket named in the commit body. Fixing both in one commit is the scope expansion §"Better alternatives surface as proposals" forbids.
+   - **If a ticket DOES own the breakage, it is not a `fix:`** — it is that ticket's rework, or a new ticket. `fix:` is for orphaned breakage only.
 
 ### When in doubt
 

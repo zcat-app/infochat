@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 779 |
 | deferred | 0 |
 | abandoned | 23 |
-| **total** | **804** |
+| **total** | **805** |
 
 ---
 
@@ -27,6 +27,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-765 — Anchor snapshot for saved posts (complexity: medium, risk: medium)
 - M1-766 — Anchor-first degraded renderers (complexity: low, risk: low)
+- M1-770 — Doc-only commits must run the parity gates (complexity: low, risk: low)
 
 ---
 
@@ -1018,4 +1019,5 @@ M1-764 (done)
 M1-767 (done)
   └── M1-769 (done)
 M1-768 (done)
+M1-770 (pending) ← runnable
 ```
