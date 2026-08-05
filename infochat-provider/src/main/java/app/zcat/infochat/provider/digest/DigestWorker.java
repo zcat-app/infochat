@@ -240,7 +240,7 @@ public class DigestWorker {
             // inside a render that then issues nothing.
             if (remaining.isNegative() || remaining.isZero()
                     || !systemLlmBudget.canStartRender(slot.groupId())) {
-                content = degradedRenderer.render(collection.posts());
+                content = degradedRenderer.render(collection.posts(), meta.language());
                 isDegraded = true;
             } else {
                 // submit(), NOT CompletableFuture.supplyAsync(): the latter's
@@ -285,7 +285,7 @@ public class DigestWorker {
                     // is discarded here — the property this buys is zero further
                     // provider calls, not a promptly-dead thread. (M1-763)
                     renderFuture.cancel(true);
-                    content = degradedRenderer.render(collection.posts());
+                    content = degradedRenderer.render(collection.posts(), meta.language());
                     isDegraded = true;
                 }
             }

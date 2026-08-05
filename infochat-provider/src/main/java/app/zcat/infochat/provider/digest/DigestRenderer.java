@@ -605,7 +605,7 @@ public class DigestRenderer {
                 // the `](` no-link guarantee is carried at OutboundDelivery
                 // (M1-691), not here.
                 sb.append(cp.degraded()
-                        ? SummaryProseGenerator.degradedProseFor(cp.cluster(), llmOutputSanitizer)
+                        ? SummaryProseGenerator.degradedProseFor(cp.cluster(), llmOutputSanitizer, langCode)
                         : translationPipeline.run(
                                 llmOutputSanitizer.sanitize(cp.prose()), langCode));
             }
@@ -684,7 +684,7 @@ public class DigestRenderer {
                 clustersDegraded += section.clusters().size();
                 for (Cluster c : section.clusters()) {
                     out.append("\n\n").append(
-                            SummaryProseGenerator.degradedProseFor(c, llmOutputSanitizer));
+                            SummaryProseGenerator.degradedProseFor(c, llmOutputSanitizer, langCode));
                 }
             }
             out.append("\n\n").append(shortFooter(section, langCode));
@@ -876,7 +876,7 @@ public class DigestRenderer {
             // a different ModelTask.TRANSLATOR route than the summarizer
             // whose failure produced this branch, and a cache hit makes no
             // provider call at all.
-            sb.append(SummaryProseGenerator.degradedProseFor(cp.cluster(), llmOutputSanitizer));
+            sb.append(SummaryProseGenerator.degradedProseFor(cp.cluster(), llmOutputSanitizer, langCode));
         } else {
             String sanitized = llmOutputSanitizer.sanitize(cp.prose());
             // No draw here (M1-769): the en-scope short-circuit and a cache

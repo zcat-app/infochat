@@ -321,7 +321,7 @@ public class SummaryCommandHandler implements CommandHandler {
             // takes prose, it does not generate it).
             List<ClusterProse> overCapProse = overCapClusters.stream()
                     .map(cluster -> new ClusterProse(
-                            cluster, SummaryProseGenerator.degradedProseFor(cluster, llmOutputSanitizer), true))
+                            cluster, SummaryProseGenerator.degradedProseFor(cluster, llmOutputSanitizer, scopeLanguage), true))
                     .toList();
             StringBuilder overCapPrefixes = new StringBuilder();
             appendWindowPrefixes(overCapPrefixes, result);
@@ -599,7 +599,7 @@ public class SummaryCommandHandler implements CommandHandler {
         // the whole point of this branch.
         List<ClusterProse> degradedProse = clusters.stream()
                 .map(cluster -> new ClusterProse(
-                        cluster, SummaryProseGenerator.degradedProseFor(cluster, llmOutputSanitizer), true))
+                        cluster, SummaryProseGenerator.degradedProseFor(cluster, llmOutputSanitizer, scopeLanguage), true))
                 .toList();
         out.append(renderFlatBody(degradedProse, scopeLanguage, scopeKind, scopeId));
         return out.toString().stripTrailing();

@@ -6,8 +6,10 @@ import java.util.List;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.render.DisplayHeadline;
 import app.zcat.infochat.provider.summary.EligiblePostQuery;
+import app.zcat.infochat.provider.translation.TranslationPipeline;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Produces a headlines-only digest (no LLM call) — the degraded fallback
@@ -48,9 +50,20 @@ import jakarta.inject.Inject;
  * {@code ClusterBlockRenderer} cites for its own degraded skip. The cost
  * argument alone would not carry: the translator is a different
  * {@code ModelTask.TRANSLATOR} route than the summarizer whose failure
- * fell back here, and a cache hit makes no provider call at all. A reader
- * in a non-English scope therefore sees source-language headlines when a
- * slot degrades; that is the degradation, and it is intended.
+ * fell back here, and a cache hit makes no provider call at all.
+ *
+ * <p><b>The English anchor is not a translation (M1-766)</b>, which is
+ * why this renderer promotes it even under that pin. {@code title_en} /
+ * {@code body_en} were computed once at ingest and are read here as
+ * plain columns off the projection the caller already holds — no
+ * provider call, on the one path guaranteed not to have a working
+ * model. So a reader whose language differs from the source no longer
+ * gets a bare foreign headline: they get the anchor with the
+ * publisher's own words bracketed beneath, and an UNBRACKETED line
+ * still means "already in your language" (D29 (c)). What remains
+ * degraded is display-time translation INTO a non-English scope
+ * language: for a Czech reader the anchor is English, so it brackets
+ * like any other line the reader cannot be assumed to read.
  */
 @ApplicationScoped
 public class DegradedDigestRenderer {
@@ -62,7 +75,7 @@ public class DegradedDigestRenderer {
     @Inject
     LlmOutputSanitizer llmOutputSanitizer;
 
-    public String render(List<EligiblePostQuery.Post> posts) {
+    public String render(List<EligiblePostQuery.Post> posts, String scopeLanguage) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < posts.size(); i++) {
             if (i > 0) sb.append("\n\n");
@@ -72,18 +85,54 @@ public class DegradedDigestRenderer {
             // so this line may return ]( verbatim. See the class javadoc before
             // "fixing" this locally — running the full sanitizer over a url
             // would rewrite ordinary feed paths to [redacted command].
+            DisplayHeadline.AnchoredHeadline headline =
+                    DisplayHeadline.anchorFirst(p, llmOutputSanitizer);
+            // The subordinate line is composed inside the headline branch but
+            // emitted AFTER the source display name, because " — <source>"
+            // belongs to the primary line: interpolating the whole two-line
+            // block here would attach the source name to the publisher's own
+            // words instead. Same split, and the same reason, as /saved's
+            // primaryFor + subordinateFor composition (M1-730).
+            String subordinate = "";
             // An empty headline means the post carries no renderable text, so
             // the token AND its separator drop out and the entry leads with
-            // the source display name (M1-714) — never a dangling " — ".
-            String headline = DisplayHeadline.of(p, llmOutputSanitizer);
+            // the source display name (M1-714) — never a dangling " — ". The
+            // subordinate stays empty in that branch, so no bare [] either.
             if (!headline.isEmpty()) {
-                sb.append(headline).append(" — ");
+                boolean usesAnchor = DisplayHeadline.usesAnchor(
+                        headline, p.sourceLanguage(), scopeLanguage);
+                String primary = usesAnchor ? headline.readerLine() : headline.originalLine();
+                sb.append(DisplayHeadline.primaryFor(primary, inReaderLanguage(
+                                primary, usesAnchor, p.sourceLanguage(), scopeLanguage)))
+                  .append(" — ");
+                subordinate = DisplayHeadline.subordinateFor(primary, headline.originalLine());
             }
             sb.append(p.sourceDisplayName());
+            if (!subordinate.isEmpty()) {
+                sb.append('\n').append(subordinate);
+            }
             if (p.url() != null && !p.url().isEmpty()) {
                 sb.append('\n').append(p.url());
             }
         }
         return sb.toString();
+    }
+
+    /**
+     * The bracketing decision, deferred to the one place all four surfaces
+     * share it. The leg is reported as SKIPPED rather than translated
+     * because this renderer makes no translator call at all — and
+     * {@link TranslationPipeline#primaryInReaderLanguage} is written for
+     * exactly that: a skipped leg is NOT read as "the text is readable",
+     * so a foreign headline still brackets for a reader who cannot read
+     * it. Both calls are static and allocate a record; neither reaches a
+     * provider, which is what keeps the degraded path's no-LLM guarantee
+     * intact while still honouring D29 (c).
+     */
+    private static boolean inReaderLanguage(String primary, boolean usesAnchor,
+                                            @Nullable String sourceLanguage,
+                                            String scopeLanguage) {
+        return TranslationPipeline.primaryInReaderLanguage(
+                TranslationPipeline.skipped(primary), usesAnchor, sourceLanguage, scopeLanguage);
     }
 }

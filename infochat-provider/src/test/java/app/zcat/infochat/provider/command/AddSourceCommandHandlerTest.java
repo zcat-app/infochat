@@ -557,6 +557,55 @@ class AddSourceCommandHandlerTest {
     }
 
     @Test
+    void nameCarryingACommandFlagTokenIsDiscarded() {
+        // Redteam 2026-08-05, medium/INJECTION. The slash rule removes the
+        // command-WORD half of a copy-pasteable line; the FLAG half needs no
+        // slash. A stored "Acme --all News" rendered beside a post title of
+        // "/list-sources" composes a complete dispatchable line from two
+        // fields that never share one sanitize input — so neither redacts and
+        // no LLM_OUTPUT_SANITIZED row exists to correlate. Rejected at the
+        // same write boundary, for the same reason, as the slash.
+        dataSource.seedUser("m1-766-flag", /* isAdmin */ false, /* isBanned */ false);
+        urlProbe.setProbe("https://example.com/m1-766-flag.xml",
+                ProbeResult.success(200, Optional.of("application/rss+xml")));
+        sourceUpsertService.setOutcome(Outcome.FRESH_INSERT);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm("m1-766-flag"),
+                "/add-source https://example.com/m1-766-flag.xml --tags m1-766-news "
+                        + "--name \"Acme --all News\"");
+
+        String body = reply.text();
+        // Asserted on the NAME, not on "--all": the reply's own bot-authored
+        // note cites `/list-sources --all` verbatim, so a bare token match
+        // would pass on the wrong bytes.
+        assertFalse(body.contains("Acme"),
+                "a name carrying a command-flag token must be discarded — got: " + body);
+        assertTrue(body.contains("example.com"),
+                "the discarded override must fall back to the host-derived name — got: " + body);
+    }
+
+    @Test
+    void ordinaryNameWithAnEmDashIsStillReflected() {
+        // The flag rule is blunt but not indiscriminate: it fires on a token
+        // opening with two ASCII hyphens, so ordinary punctuation between
+        // words is untouched. Pinned so a future tightening cannot quietly
+        // start discarding legitimate names.
+        dataSource.seedUser("m1-766-dash", /* isAdmin */ false, /* isBanned */ false);
+        urlProbe.setProbe("https://example.com/m1-766-dash.xml",
+                ProbeResult.success(200, Optional.of("application/rss+xml")));
+        sourceUpsertService.setOutcome(Outcome.FRESH_INSERT);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm("m1-766-dash"),
+                "/add-source https://example.com/m1-766-dash.xml --tags m1-766-news "
+                        + "--name \"Acme — Daily News\"");
+
+        assertTrue(reply.text().contains("Acme — Daily News"),
+                "an ordinary name must still be reflected — got: " + reply.text());
+    }
+
+    @Test
     void overLongDisplayNameFallsBackToTheHostDerivedName() {
         // Bounds how much attacker-chosen text a group admin can push into
         // a reply that is broadcast to every group member.

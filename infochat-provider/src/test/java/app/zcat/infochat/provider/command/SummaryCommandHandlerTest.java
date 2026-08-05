@@ -1516,7 +1516,10 @@ class SummaryCommandHandlerTest {
                 callCount.incrementAndGet();
                 boolean degraded = degradedMode || (degradeFirstN > 0 && i < degradeFirstN);
                 out.add(new ClusterProse(c,
-                        degraded ? SummaryProseGenerator.degradedProseFor(c, degradedSanitizer) : responseText,
+                        degraded
+                                ? SummaryProseGenerator.degradedProseFor(
+                                        c, degradedSanitizer, scopeLanguage)
+                                : responseText,
                         degraded));
             }
             return out;

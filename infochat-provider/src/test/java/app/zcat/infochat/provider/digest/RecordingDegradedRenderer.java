@@ -16,7 +16,7 @@ final class RecordingDegradedRenderer extends DegradedDigestRenderer {
     int callCount() { return calls; }
 
     @Override
-    public String render(List<Post> posts) {
+    public String render(List<Post> posts, String scopeLanguage) {
         calls++;
         return response;
     }

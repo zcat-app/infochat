@@ -9,6 +9,7 @@ import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.render.DisplayHeadline;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
+import app.zcat.infochat.provider.translation.TranslationPipeline;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.slf4j.Logger;
@@ -113,7 +114,7 @@ public class SummaryProseGenerator {
         } catch (RuntimeException e) {
             SafeLog.warn(LOG, "SUMMARIZER provider unresolvable; degrading every cluster", e);
             return clusters.stream()
-                    .map(c -> new ClusterProse(c, degradedProseFor(c, llmOutputSanitizer), true))
+                    .map(c -> new ClusterProse(c, degradedProseFor(c, llmOutputSanitizer, scopeLanguage), true))
                     .collect(Collectors.toList());
         }
 
@@ -133,18 +134,18 @@ public class SummaryProseGenerator {
                     // (or any LLM-authored prose) to the user.
                     LOG.warn("SUMMARIZER returned refusal marker for topic {}; degrading",
                             cluster.topicId());
-                    out.add(new ClusterProse(cluster, degradedProseFor(cluster, llmOutputSanitizer), true));
+                    out.add(new ClusterProse(cluster, degradedProseFor(cluster, llmOutputSanitizer, scopeLanguage), true));
                 } else if (text.isEmpty()) {
                     LOG.warn("SUMMARIZER returned empty text for topic {}; degrading",
                             cluster.topicId());
-                    out.add(new ClusterProse(cluster, degradedProseFor(cluster, llmOutputSanitizer), true));
+                    out.add(new ClusterProse(cluster, degradedProseFor(cluster, llmOutputSanitizer, scopeLanguage), true));
                 } else {
                     out.add(new ClusterProse(cluster, text, false));
                 }
             } catch (RuntimeException e) {
                 SafeLog.warn(LOG, "SUMMARIZER call failed for topic " + cluster.topicId() + "; degrading",
                         e);
-                out.add(new ClusterProse(cluster, degradedProseFor(cluster, llmOutputSanitizer), true));
+                out.add(new ClusterProse(cluster, degradedProseFor(cluster, llmOutputSanitizer, scopeLanguage), true));
             }
         }
         return out;
@@ -222,15 +223,59 @@ public class SummaryProseGenerator {
      * closed-list token (a stored url leads with {@code http}), and the
      * {@code ](} no-link guarantee is carried once at {@code
      * OutboundDelivery} (M1-691), not here.
+     *
+     * <p><b>Anchor-first, and still no LLM call (M1-766).</b> Each entry
+     * leads with the English anchor when the reader's language differs
+     * from the source's, and carries the publisher's own words bracketed
+     * on a continuation line. That costs nothing this branch cannot
+     * afford: {@code title_en} / {@code body_en} were computed at ingest
+     * and arrive on the projection, so promoting one is a field read, not
+     * a translation — which matters precisely BECAUSE this method exists
+     * for the case where no usable model is available.
+     *
+     * <p>The sanitize unit is one author's field PAIR: inside
+     * {@link DisplayHeadline} the anchor and the original take ONE
+     * {@code sanitize} call together, joined by a renderer-authored
+     * newline. Per-line calls let a flag-bearing closed-list entry
+     * straddle the pair unredacted and unaudited (redteam 2026-08-05).
+     * Still one post and one author, never a multi-post concatenation —
+     * that bound is what keeps M1-697's cross-post span bug closed.
+     *
+     * @param scopeLanguage the reader's language, needed to decide whether
+     *                      the anchor belongs in the primary slot and
+     *                      whether that slot is bracketed (D29 (c)). It is
+     *                      a display decision only — no operand of the
+     *                      prose is translated
      */
-    public static String degradedProseFor(Cluster cluster, LlmOutputSanitizer llmOutputSanitizer) {
+    public static String degradedProseFor(Cluster cluster, LlmOutputSanitizer llmOutputSanitizer,
+                                          String scopeLanguage) {
         StringBuilder sb = new StringBuilder();
         for (Post p : cluster.posts()) {
+            DisplayHeadline.AnchoredHeadline anchored =
+                    DisplayHeadline.anchorFirst(p, llmOutputSanitizer);
+            String headline = "";
+            String subordinate = "";
+            if (!anchored.isEmpty()) {
+                boolean usesAnchor = DisplayHeadline.usesAnchor(
+                        anchored, p.sourceLanguage(), scopeLanguage);
+                String primary = usesAnchor ? anchored.readerLine() : anchored.originalLine();
+                // The leg is reported as SKIPPED, not translated: this method
+                // makes no provider call (that is the whole point of the
+                // degraded branch), and primaryInReaderLanguage deliberately
+                // does NOT read a skipped leg as "readable", so a foreign
+                // headline still brackets for a reader who cannot read it.
+                headline = DisplayHeadline.primaryFor(primary,
+                        TranslationPipeline.primaryInReaderLanguage(
+                                TranslationPipeline.skipped(primary), usesAnchor,
+                                p.sourceLanguage(), scopeLanguage));
+                subordinate = DisplayHeadline.subordinateFor(primary, anchored.originalLine());
+            }
             // Absent operands drop out together with their separator, so a
             // post with no renderable text opens the line with its url rather
             // than a dangling " — " or a blank span (M1-714). The uid always
-            // follows, so the line is identified even when both drop out.
-            String headline = DisplayHeadline.of(p, llmOutputSanitizer);
+            // follows, so the line is identified even when both drop out —
+            // and an absent headline leaves the subordinate empty too, so the
+            // omission can never surface as a bare [].
             String url = p.url() == null ? "" : p.url();
             String lead = Stream.of(headline, url)
                     .filter(operand -> !operand.isEmpty())
@@ -238,7 +283,14 @@ public class SummaryProseGenerator {
             if (!lead.isEmpty()) {
                 sb.append(lead).append(' ');
             }
+            // The uid closes the PRIMARY line, so the entry stays identified
+            // by its first line; the publisher's own words follow beneath as
+            // a continuation of the same entry, never carrying the uid away
+            // from it.
             sb.append("(uid ").append(p.uid()).append(")\n");
+            if (!subordinate.isEmpty()) {
+                sb.append(subordinate).append('\n');
+            }
         }
         return sb.toString().stripTrailing();
     }

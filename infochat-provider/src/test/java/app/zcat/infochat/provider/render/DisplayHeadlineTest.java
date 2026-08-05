@@ -374,6 +374,109 @@ class DisplayHeadlineTest {
                 "sentinel title + blank body must yield no headline at all");
     }
 
+    @Test
+    void anchorFirstSanitizesThePairAsOneUnitAndSplitsTheLinesBack() {
+        // The ordinary case: no closed-list match, so the renderer-authored
+        // newline survives the sanitize call and both lines come back whole.
+        DisplayHeadline.AnchoredHeadline headline = DisplayHeadline.anchorFirst(
+                "Bitcoin dosáhl 100 tisíc", "telo", "Bitcoin hits $100k", null, sanitizer);
+
+        assertEquals("Bitcoin hits $100k", headline.readerLine());
+        assertEquals("Bitcoin dosáhl 100 tisíc", headline.originalLine());
+        assertTrue(headline.anchored(), "an anchor was supplied");
+    }
+
+    @Test
+    void anchorFirstRedactsAClosedListEntryStraddlingThePair() {
+        // Redteam 2026-08-05, medium/INJECTION. Per-line sanitize calls matched
+        // neither half of `/list-sources --all` when the command word sat on
+        // the anchor and the flag on the original, so the pair shipped
+        // dispatchable with no marker and no audit row.
+        DisplayHeadline.AnchoredHeadline headline = DisplayHeadline.anchorFirst(
+                "--all", "body", "/list-sources", null, sanitizer);
+
+        assertTrue(headline.readerLine().contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "the straddling entry must redact; got: " + headline.readerLine());
+        assertFalse(headline.readerLine().contains("/list-sources"),
+                "the command word must not survive; got: " + headline.readerLine());
+    }
+
+    @Test
+    void aSpanThatSwallowsTheSeparatorCollapsesToOneUnanchoredLine() {
+        // The flag-span deletion runs from command word to flag token, so a
+        // full-pair match consumes the joining newline itself. The block then
+        // reports as UNANCHORED with both lines equal, which is what makes the
+        // caller's subordinateFor suppress the duplicate — the redacted text
+        // renders once, not twice.
+        DisplayHeadline.AnchoredHeadline headline = DisplayHeadline.anchorFirst(
+                "--all", "body", "/list-sources", null, sanitizer);
+
+        assertEquals(headline.readerLine(), headline.originalLine(),
+                "a collapsed pair reports one line in both slots");
+        assertFalse(headline.anchored(),
+                "reporting it as anchored would bracket a line that is purely a "
+                        + "redaction marker");
+        assertEquals("", DisplayHeadline.subordinateFor(
+                        headline.readerLine(), headline.originalLine()),
+                "the subordinate is suppressed, so the marker is not printed twice");
+    }
+
+    @Test
+    void feedTextCannotForgeTheSeparatorThatJoinsThePair() {
+        // The split back into two lines is only safe because the newline is
+        // renderer-authored: every operand goes through flattenToOneLine first,
+        // which collapses \n, \r, U+0085, U+2028 and U+2029 to a space. Without
+        // that, an anchor carrying its own line break would split into a THIRD
+        // line and let feed bytes forge an apparent "publisher's own words"
+        // line the publisher never wrote.
+        DisplayHeadline.AnchoredHeadline headline = DisplayHeadline.anchorFirst(
+                "Original words", "body",
+                "Anchor line\nForged original Another forgery", null, sanitizer);
+
+        assertEquals("Anchor line Forged original Another forgery", headline.readerLine(),
+                "every feed-authored line break collapses to a space before the join");
+        assertEquals("Original words", headline.originalLine(),
+                "the real original is still the second line, not a forged one");
+    }
+
+    @Test
+    void aZeroWidthOnlyAnchorDegradesToTheOriginalRatherThanSuppressingTheHeadline() {
+        // Redteam 2026-08-05 round 2, out-of-model. A zero-width-only anchor
+        // is NOT blank (those codepoints are not whitespace), so it passes
+        // derive's isBlank() guard. It survives while nothing matches, because
+        // sanitize returns the caller's own bytes on a no-match — but as soon
+        // as a closed-list token matches elsewhere in the pair, sanitize
+        // returns the CANONICAL form, where the anchor has been stripped to
+        // nothing. Reporting that as the reader line would make
+        // AnchoredHeadline.isEmpty() true and drop the surviving original with
+        // it, suppressing the whole headline.
+        DisplayHeadline.AnchoredHeadline headline = DisplayHeadline.anchorFirst(
+                "/promote is discussed here", "body", "​‌", null, sanitizer);
+
+        assertFalse(headline.isEmpty(),
+                "the surviving original must not be dropped along with the vanished anchor");
+        assertFalse(headline.anchored(),
+                "an anchor that canonicalized away is not an anchor");
+        assertEquals(headline.readerLine(), headline.originalLine(),
+                "the block degrades to the anchor-absent shape");
+        assertTrue(headline.readerLine().contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "the redaction that triggered canonicalization still applies; got: "
+                        + headline.readerLine());
+    }
+
+    @Test
+    void aZeroWidthOnlyAnchorIsUntouchedWhenNothingInThePairMatches() {
+        // The other half of the same mechanism, pinned so the fix above is not
+        // mistaken for unconditional: with no closed-list match the sanitizer
+        // returns the input verbatim, so the anchor survives as its own line
+        // and the pair stays anchored.
+        DisplayHeadline.AnchoredHeadline headline = DisplayHeadline.anchorFirst(
+                "Ordinary title", "body", "​‌", null, sanitizer);
+
+        assertTrue(headline.anchored(), "no match, so the anchor is returned untouched");
+        assertEquals("Ordinary title", headline.originalLine());
+    }
+
     private static void assertNoUnpairedSurrogate(String s) {
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);

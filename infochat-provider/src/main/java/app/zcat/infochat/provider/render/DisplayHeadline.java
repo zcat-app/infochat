@@ -47,11 +47,15 @@ import java.util.regex.Pattern;
  * silently drop the audit coverage for the removed tail and shrink what the
  * sanitizer sees. {@link #truncate} is therefore last.
  *
- * <p><b>Sanitize unit: ONE author's field per call (M1-697).</b> The helper
- * selects title OR body and sanitizes that single field. It must never
- * concatenate the two, because the flag-bearing closed-list entries delete the
- * span from command word to flag token, so a widened input lets a command word
- * in one field and a flag in another erase everything between them.
+ * <p><b>Sanitize unit: ONE author's field per call (M1-697)</b> — or, on
+ * the anchor-first path, one author's field PAIR (that field's stored text
+ * plus its ingest translation; see {@link #derive}). The helper selects
+ * title OR body and never concatenates the two, and never joins bytes from
+ * two posts or two authors, because the flag-bearing closed-list entries
+ * delete the span from command word to flag token: a widened input lets a
+ * command word in one field and a flag in another erase everything between
+ * them. The pair is the widest safe unit precisely because its flag-span
+ * can reach nothing but the one post's own two rendered lines.
  */
 public final class DisplayHeadline {
 
@@ -229,13 +233,17 @@ public final class DisplayHeadline {
      * byte-equal to the sentinel, so {@link #titleIsRenderable} would pass
      * it through and the body fallback would never fire.
      *
-     * <p><b>Sanitize unit: still ONE author's field per call (M1-697).</b>
-     * The two lines are two derivations from two separately stored values
-     * and each takes its own {@link LlmOutputSanitizer#sanitize} call. They
-     * are never concatenated before the sanitizer sees them: the
-     * flag-bearing closed-list entries delete the span from command word
-     * to flag token, so a widened input would let a command word on one
-     * line and a flag on the other erase everything between them.
+     * <p><b>Sanitize unit: ONE author's field PAIR per call</b> (M1-697,
+     * widened by the 2026-08-05 redteam). The two lines are two
+     * derivations of the SAME publisher's field — its stored text and its
+     * ingest translation — and they take ONE {@link
+     * LlmOutputSanitizer#sanitize} call together, joined by a
+     * renderer-authored newline. Per-line calls left a flag-bearing
+     * closed-list entry able to straddle the pair unredacted and
+     * unaudited. Widening this far and no further is the point: the join
+     * never spans two POSTS or two AUTHORS, so the flag-span deletion can
+     * only reach this post's own two lines and never erases another
+     * publisher's bytes. See {@link #derive}.
      *
      * @param titleEn the English anchor for the title, or null when the
      *                ingest translator has not written one (or gave up)
@@ -256,14 +264,77 @@ public final class DisplayHeadline {
         return derive(body, bodyEn, llmOutputSanitizer);
     }
 
-    /** Both lines of one chosen field, each through the full order, independently. */
+    /**
+     * Both lines of one chosen field, through ONE sanitize call over the
+     * PAIR.
+     *
+     * <p><b>The unit is the field pair, not the line</b> (redteam
+     * 2026-08-05, medium/INJECTION). Sanitizing the two lines
+     * independently left a split a flag-bearing closed-list entry could
+     * ride: the command word in {@code title_en} and the flag in
+     * {@code title} match neither call, so the pair rendered adjacent in
+     * one delivered message with no {@code [redacted command]} marker and
+     * no {@code LLM_OUTPUT_SANITIZED} row. {@code docs/spec/security.md}
+     * accepts exactly that residual ACROSS POSTS — but only because
+     * merging THERE would let one publisher's flag-span delete another
+     * publisher's bytes. Here both operands are one publisher's own field
+     * and its ingest translation, so widening to the pair can only ever
+     * consume that post's own two lines. M1-697's cross-post span bug
+     * stays closed: the join never spans posts or authors.
+     *
+     * <p><b>The separator is a renderer-authored {@code \n}, and that is
+     * what makes the split back out safe.</b> Both operands have already
+     * been through {@link #flattenToOneLine}, which collapses every
+     * whitespace run — including {@code \R} — to a single space, so no
+     * feed byte can reproduce the newline. The sanitizer treats it as an
+     * ordinary ASCII separator, which is precisely what lets a closed-list
+     * entry match ACROSS it and be redacted and audited.
+     *
+     * <p>A flag-span deletion that consumes the separator collapses the
+     * pair to ONE line. That is not a failure to handle but the redaction
+     * working: the caller then gets a single line with no subordinate, so
+     * the block renders the redacted text once rather than emitting a
+     * half-deleted line twice.
+     */
     private static AnchoredHeadline derive(String original, @Nullable String anchor,
                                            LlmOutputSanitizer llmOutputSanitizer) {
-        String originalLine = renderLine(original, llmOutputSanitizer);
         if (anchor == null || anchor.isBlank()) {
+            String originalLine = renderLine(original, llmOutputSanitizer);
             return new AnchoredHeadline(originalLine, originalLine, false);
         }
-        return new AnchoredHeadline(renderLine(anchor, llmOutputSanitizer), originalLine, true);
+        // Reader line first, matching the delivered order, so a closed-list
+        // entry reads to the sanitizer in the same direction it reads to a
+        // copy-pasting admin: command word above, flag below.
+        String sanitized = llmOutputSanitizer.sanitize(
+                flattenToOneLine(boundForScan(anchor))
+                        + '\n'
+                        + flattenToOneLine(boundForScan(original)));
+        String[] lines = sanitized.split("\n", 2);
+        if (lines.length < 2) {
+            // The redaction swallowed the separator: one line survives, and it
+            // carries the marker. Report it as an UNANCHORED single line so the
+            // caller's subordinate is suppressed rather than duplicating it.
+            String collapsed = truncate(sanitized);
+            return new AnchoredHeadline(collapsed, collapsed, false);
+        }
+        if (lines[0].isEmpty()) {
+            // The anchor canonicalized away. An anchor of only zero-width
+            // codepoints (U+200B/C/D, U+FEFF) passes the isBlank() guard above
+            // — those are not whitespace, so neither isBlank() nor
+            // flattenToOneLine's strip() removes them — and survives untouched
+            // while nothing in the pair matches, because sanitize returns the
+            // caller's own bytes on a no-match. The moment ANY closed-list
+            // token matches elsewhere in the pair, sanitize returns the
+            // CANONICAL form instead, in which stripBidiAndZeroWidth has
+            // erased the anchor entirely. Degrade to the anchor-absent shape
+            // rather than reporting an empty reader line: AnchoredHeadline
+            // .isEmpty() keys off readerLine alone, so an empty one would make
+            // every caller drop the surviving original with it and suppress the
+            // whole headline. (Redteam 2026-08-05 round 2, out-of-model.)
+            String originalLine = truncate(lines[1]);
+            return new AnchoredHeadline(originalLine, originalLine, false);
+        }
+        return new AnchoredHeadline(truncate(lines[0]), truncate(lines[1]), true);
     }
 
     private static String renderLine(String source, LlmOutputSanitizer llmOutputSanitizer) {

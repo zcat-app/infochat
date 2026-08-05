@@ -59,7 +59,7 @@ class SummaryProseRefusalDegradeTest {
         ClusterProse refusing = result.get(0);
         assertTrue(refusing.degraded(),
                 "refusal marker must route through the degraded path");
-        assertEquals(SummaryProseGenerator.degradedProseFor(refusingCluster, sanitizer), refusing.prose(),
+        assertEquals(SummaryProseGenerator.degradedProseFor(refusingCluster, sanitizer, "en"), refusing.prose(),
                 "refusing cluster's prose must be the canonical degraded form");
         assertFalse(refusing.prose().contains("[REFUSAL:"),
                 "the [REFUSAL: ...] literal MUST NOT appear in user-visible output");

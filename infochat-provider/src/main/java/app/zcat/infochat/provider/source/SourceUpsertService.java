@@ -398,10 +398,55 @@ public class SourceUpsertService {
         String stripped = IngestTextNormalizer.stripMetadataField(normalized).trim();
         if (stripped.isEmpty()
                 || containsSlash(stripped)
+                || containsFlagToken(stripped)
                 || stripped.length() > MAX_DISPLAY_NAME_LENGTH) {
             return Optional.empty();
         }
         return Optional.of(stripped);
+    }
+
+    /**
+     * Does the name carry a token shaped like a command FLAG?
+     *
+     * <p>The slash test above removes the command-WORD half of a
+     * copy-pasteable line. It does not remove the FLAG half, and that half
+     * needs no slash: the closed-list entries that matter most are
+     * flag-bearing ({@code /list-sources --all},
+     * {@code /list-sources --include-deleted}), and
+     * {@code ListSourcesCommandHandler.ListSourcesArgs.parse} sets its
+     * flag from a bare {@code --all} token at ANY position in the argument
+     * run, ignoring tokens it does not recognise. So a display name of
+     * {@code Acme --all News} rendered beside a post title of
+     * {@code /list-sources} composes a complete, dispatchable line —
+     * assembled from two fields that never share one
+     * {@code LlmOutputSanitizer} input, so neither is redacted and no
+     * {@code LLM_OUTPUT_SANITIZED} row is written for an operator to
+     * correlate. (Redteam 2026-08-05, medium/INJECTION.)
+     *
+     * <p>Rejecting here rather than at the render sites is what
+     * {@code docs/spec/security.md} §"LLM output sanitizer" already
+     * commits to for this value — the echo "is closed at the write
+     * boundary alone ... constraining the single produced value covers
+     * every surface that later renders it" — and it is why this sits
+     * beside {@link #containsSlash} rather than in a renderer. Reject,
+     * never rewrite, for the reason the enclosing javadoc gives: stripping
+     * the dashes leaves the word intact.
+     *
+     * <p>Deliberately blunt, like the slash rule: ANY whitespace-delimited
+     * token that opens with two ASCII hyphens and carries at least one
+     * more character disqualifies the whole override. A display name has
+     * no legitimate need for one, and a test that tried to judge which
+     * flags are "real" would have to track the argument parsers it is
+     * defending — the coupling the slash rule was made absolute to avoid.
+     * An em-dash or a bare {@code --} between words is untouched.
+     */
+    private static boolean containsFlagToken(String name) {
+        for (String token : name.split("\\s+")) {
+            if (token.length() > 2 && token.startsWith("--")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

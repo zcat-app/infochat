@@ -178,7 +178,7 @@ final class ClusterBlockRenderer {
         // through sanitizer-1 (one LLM-authored value — the correct unit)
         // then the translation pipeline (sanitizer-2 + cache inside).
         String summaryText = cp.degraded()
-                ? SummaryProseGenerator.degradedProseFor(cluster, llmOutputSanitizer)
+                ? SummaryProseGenerator.degradedProseFor(cluster, llmOutputSanitizer, scopeLanguage)
                 : translationPipeline.run(
                         llmOutputSanitizer.sanitize(cp.prose()), scopeLanguage);
         out.append(bundleLoader.get(BundleKeys.REPLY_SUMMARY_CLUSTER_SUMMARY_LABEL, scopeLanguage))

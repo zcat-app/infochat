@@ -519,23 +519,48 @@ Whitespace is read the way the parser's `split("\s+")` reads it — every
 ASCII `\s` character is a token separator, so `/list-sources` and
 `--all` separated by a bare `\r` or by newlines match, mirroring the
 dispatch. **The span's justification holds because every caller's unit of input is
-one author's field** (restoring the invariant the categorized-render
+one author's field, or that field paired with its own ingest
+translation** (restoring the invariant the categorized-render
 work briefly widened). The argument below — that a collapsed span only ever swallows
 bot-authored bytes — requires every sanitize call over feed-derived text
 to be scoped to a *single* author's field, and every call site is built
-that way: `ClusterBlockRenderer` passes one post title,
-`DegradedDigestRenderer` one title per post, the `/saved` reply one
+that way: `ClusterBlockRenderer` passes one post's chosen field,
+`DegradedDigestRenderer` one field per post, the `/saved` reply one
 row's title OR up to `BODY_SCAN_LIMIT` chars of its body, plus one
 row's tags, and degraded prose is DERIVED from the
-cluster at render and sanitized per post title
-(`SummaryProseGenerator.degradedProseFor`) — the renderers never trust
+cluster at render and sanitized per post
+(`SummaryProseGenerator.degradedProseFor`) — where "one field" means
+that field TOGETHER WITH its ingest anchor on the anchor-first
+surfaces, the one-step widening the next paragraph defines — the renderers never trust
 the prose bytes a `ClusterProse` record carries, so a hand-assembled
 record cannot smuggle unsanitized titles past them (redteam,
 2026-07-25) — so no caller hands the sanitizer a multi-post
-concatenation. The whole-message
-span guarantee is therefore scoped **within one author's field**: a
+concatenation. **The anchor-first surfaces widen the unit by exactly one
+step, to the field PAIR** (`DisplayHeadline.derive`): a headline rendered
+as an English anchor above the publisher's own words is two derivations
+of the SAME field — its stored text and its ingest translation — and they
+take ONE sanitize call together, joined by a renderer-authored newline no
+feed byte can forge (every operand is flattened first). Per-line calls
+left a flag-bearing entry able to straddle the pair unredacted and
+unaudited, with the two halves delivered adjacent in one message (redteam,
+2026-08-05). The pair is the widest safe unit: its flag-span can reach
+nothing but that one post's two rendered lines, so the swallow-another-
+publisher's-bytes objection below does not arise. **"Pair" means the
+INGEST anchor specifically** — the `title_en` / `body_en` column computed
+once at ingest — and not the PRESENTATION translation: the display-hit
+leg sanitizes the translator's reply by itself, through
+`DisplayHeadline.prepareTranslatedHeadline`, which is a separate call
+from the pair call in `derive`. So a command word introduced by the
+presentation translator and a flag in the bracketed original beneath it
+share no sanitize input and neither redacts. That is the same
+across-derivations residual accepted below, on the same `is_admin`
+dispatch bound, and it is named here because this paragraph is where a
+reader would otherwise infer the display-hit derivation was covered.
+The whole-message
+span guarantee is therefore scoped **within one author's field (or its
+ingest pair)**: a
 flag-bearing entry redacts only when its command word and flag appear in
-the same field. The converse residual is accepted and deliberate: a
+the same field or in that field's ingest anchor. The converse residual is accepted and deliberate: a
 privileged command split ACROSS two posts' fields — `/list-sources` in
 one title, `--all` in another — is **neither redacted nor audited**,
 because the two tokens never share one sanitize input. That is the
@@ -1425,7 +1450,14 @@ rules:
 - **`/summary` (and `/retry --digest`) summarizer unreachable** →
   fall back to the headlines + URLs + post UIDs degraded form (the
   same fallback as a saturated periodic digest per decision D17).
-  No prose, deterministic post selection unchanged. The friendly
+  No prose, deterministic post selection unchanged. A headline in
+  this form is the anchor-first block, not a bare line: where the
+  reader's language differs from the source's, the English anchor
+  leads and the publisher's own words follow bracketed beneath (D29
+  (c)). That costs no LLM call — the anchor is a column computed at
+  ingest, which is what makes it affordable on the one path defined
+  by having no usable model — so the "no LLM calls" property of this
+  form is unchanged. The friendly
   notice is a localization-bundle string (D43); the user is not
   shown a hung response. `/retry` after recovery re-rolls the
   prose with the original frozen post selection. See
