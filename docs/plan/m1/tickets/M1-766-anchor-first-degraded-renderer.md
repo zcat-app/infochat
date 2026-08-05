@@ -3,16 +3,27 @@ id: M1-766
 title: "Anchor-first degraded renderers"
 status: pending
 created: 2026-08-04
-last_updated: 2026-08-04
+last_updated: 2026-08-05
 blocked_by:
   - M1-759
-files_budget: 5
+files_budget: 16
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DegradedDigestRenderer.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/summary/SummaryProseGenerator.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestWorker.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestRenderer.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/command/SummaryCommandHandler.java
+  - infochat-provider/src/main/java/app/zcat/infochat/provider/command/ClusterBlockRenderer.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DegradedDigestRendererTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/summary/SummaryProseGeneratorTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/summary/SummaryProseRefusalDegradeTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/RecordingDegradedRenderer.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestWorkerClockTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestBudgetScopingTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestRendererTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/SummaryCommandHandlerTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/command/ClusterBlockRendererTest.java
 complexity: low
 risk: low
 round_cap: 2
@@ -25,8 +36,16 @@ out_of_scope:
     takes `List<EligiblePostQuery.Post>` and
     `SummaryProseGenerator.degradedProseFor` iterates `cluster.posts()` —
     and M1-759 already added the anchor to that record and to all three
-    projections that populate it. This ticket is a render-side switch
-    only; no SQL changes.
+    projections that populate it. No SQL changes.
+  - >-
+    CALLER BEHAVIOUR BEYOND PASSING THE LANGUAGE. The four caller files
+    are in `files_scope` for the `scopeLanguage` argument and nothing
+    else: each already holds the value, so the edit is one added
+    argument per call site. Their own rendering, budgeting, degradation
+    and translation decisions are untouched — in particular
+    `DigestRenderer.appendHeadlines`' display-hit leg and translation
+    budget, and `ClusterBlockRenderer`'s degraded skip, stay exactly as
+    M1-759 / M1-769 left them.
   - >-
     ANY TRANSLATOR CALL. The degraded path exists BECAUSE the LLM is
     unavailable or refused. Reading the anchor column is free and is the
@@ -54,6 +73,18 @@ out_of_scope:
     of the original-only entry point are prompt builders, which must
     keep it.
 acceptance:
+  - >-
+    THE READER LANGUAGE REACHES BOTH SURFACES. Neither
+    `DegradedDigestRenderer.render(List<Post>)` nor
+    `SummaryProseGenerator.degradedProseFor(Cluster, sanitizer)` takes a
+    scope language today, and `DisplayHeadline.usesAnchor` /
+    `primaryFor` cannot be called without one — so each grows a
+    `scopeLanguage` parameter and every caller passes the value it
+    ALREADY holds (`DigestWorker` `meta.language()`; `DigestRenderer`
+    `langCode` at all three sites; `SummaryCommandHandler` and
+    `ClusterBlockRenderer` `scopeLanguage`). Parameter-threading only:
+    no caller resolves, defaults, or derives a language it did not
+    already have, and no other signature changes.
   - >-
     BOTH SURFACES SWITCH to the anchor-aware entry point M1-759 added,
     so a non-English post renders its English anchor with the bracketed
@@ -134,9 +165,25 @@ today sees raw foreign headlines with no recourse; after this ticket they
 see the English anchor that was already computed at ingest, with the
 publisher's own words bracketed beneath.
 
-This is a render-side switch only. M1-759 already added the anchor to
-`EligiblePostQuery.Post` and to all three projections that populate it,
-and both surfaces here take that record.
+M1-759 already added the anchor to `EligiblePostQuery.Post` and to all
+three projections that populate it, and both surfaces here take that
+record — so no SQL and no new projection is needed.
+
+**What the filing pass missed** (found at `start`, 2026-08-05; scope
+widened 5 → 16 files by user decision). The anchor-aware entry point is
+not a drop-in for `DisplayHeadline.of`: `usesAnchor(headline,
+sourceLanguage, scopeLanguage)` and `primaryFor(primary,
+primaryInReaderLanguage)` both need the READER's language, and neither
+degraded surface receives one — `render(List<Post>)` has no language
+parameter and `degradedProseFor` is `static` with none either. Without
+it the bracket invariant cannot be honoured: promoting the anchor
+unconditionally shows a Czech reader English for a Czech-source post
+(exactly what `usesAnchor` exists to suppress), and bracketing
+unconditionally brackets every English headline in an English digest,
+which inverts D29 (c)'s "unbracketed means already in your language".
+So both signatures grow a `scopeLanguage` parameter and the six call
+sites across four caller files pass the value they already hold. That
+threading, not the anchor switch, is the bulk of the diff.
 
 ## Census
 
