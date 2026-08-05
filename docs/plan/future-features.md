@@ -532,3 +532,161 @@ attribution rule.
 **Verdict: `needs-analysis`.** The API surface is trivial and the command shape
 has a clean precedent; the identity-bridging model is the blocker and no option
 is convincing enough to commit to yet.
+
+---
+
+## H. User-to-user routing
+
+> **New category (added 2026-08-06).** §A–§F are about infochat's own data or
+> about widening the adapter SPI; §G is about third-party services. This section
+> is for the bot carrying traffic **between two of its own users** — a different
+> thing again, because it is the one feature class that deliberately breaks the
+> per-(user, scope) isolation invariant rather than working within it.
+
+### H1. `/bridge` — cross-adapter user-to-user channel
+
+**What:** two infochat users on different adapters get a bot-mediated channel.
+Sketched shape (user proposal, 2026-08-06): Alice sends `/bridge open`, receives
+a token, passes it to Bob out-of-band; Bob sends `/bridge connect <token>`, which
+raises an approval prompt to Alice; on approval a channel exists until burned
+(`/bridge close`, expiry, or revocation).
+
+**Current state — does NOT exist; zero substrate, and the codebase actively
+guards against the thing it would do.** There is no cross-user message path of
+any kind. `MessagingAdapter`'s javadoc pins **`(adapter, contact_id)` as the
+cross-adapter isolation join key**; `InboundRouter` and `InterruptibleDispatcher`
+both carry comments naming a worker-side read of another user's state as "exactly
+the cross-user leak." Ban is enforced per-`(adapter, contact_id)` at intake.
+`CapabilityFlags` has no relay-relevant flag. So this is not a module that slots
+in — it is a **designed exception to a stated invariant, and needs a decision
+(D-number) plus a spec amendment before any code**.
+
+**Prerequisites / tensions:**
+
+1. **The bot becomes a MITM between two humans, and no crypto fixes it.** Today
+   infochat is a *counterparty* — users talk *to* the bot and everyone
+   understands the bot reads it. A relay silently converts "Signal E2EE between
+   Alice and Bob" into two E2EE legs with a plaintext hop on the VPS. This is
+   inherent to protocol bridging, not an implementation flaw (Matrix bridges have
+   had it unsolved for a decade). **Mixnets do not help**: they distribute the
+   `Alice→Bob` fact across independent nodes precisely because mix nodes are dumb
+   forwarders needing only next-hop. A bridge must decrypt, read plaintext,
+   resolve the peer's id on the target adapter, and re-encrypt — every step
+   requires the knowledge a mixnet exists to withhold. Same for PIR / oblivious
+   mailboxes (Pung, Talek, Vuvuzela): those hide *storage and retrieval* of
+   opaque blobs, and stop applying the moment the server must transform the blob.
+   General rule: cryptography can hide data from a node that need not read it,
+   never from a node whose job is to read it. Consequence for naming and copy:
+   the feature must **not** be called a "secure" or "private" channel, and should
+   carry a per-message not-end-to-end-encrypted marker.
+
+2. **It builds a cross-network correlation database.** Routing requires storing
+   `alice@signal ↔ alice@simplex` plus the pairwise edges. That artifact exists
+   nowhere today and no single messenger operator can produce it. Mitigations
+   shrink it but cannot remove it (routing *is* knowing who talks to whom): no
+   directory and no discovery of any kind; edges only by explicit mutual opt-in;
+   store `(edge_id, adapter_a, contact_a, adapter_b, contact_b)` with no names
+   and no "user → their contacts" query path; local-only aliases; zero content
+   retention; per-edge revocation and default expiry.
+
+3. **Ban evasion is reintroduced.** Ban is per-`(adapter, contact_id)`, so a user
+   banned on Signal reaches the same victim over SimpleX through the bridge.
+   Closing that requires unifying ban across adapters — which requires the
+   correlation database from (2). Circular; pick deliberately. Ban must be
+   re-checked on open, on connect, **and on every relayed message** (ban state
+   changes mid-bridge).
+
+4. **Trust laundering across adapter trust levels.** A `LOW`-trust adapter's
+   message relayed into a `HIGH`-trust user's DM arrives indistinguishable from
+   any other. `AdapterTrustLevel` is currently a registration-time gate, not a
+   per-message property; a relay would have to carry and render it per message,
+   unstrippably.
+
+5. **Token handling — the invite precedent is the trap, not logging.** A grep
+   found **no** command-argument logging, so the "password appears in logs" worry
+   is unfounded as the code stands. The real hazard is the opposite one:
+   `InviteCommandHandler` writes the **minted invite code itself** into the audit
+   row (`AuditAction.INVITE_CREATE`, audit-before-effect). A bridge token
+   following that precedent would be persisted in plaintext in `audit_log`. It
+   needs the D37 `connectContact()` treatment instead — never logged at any
+   level, never persisted — which means auditing the *event* with an edge id, not
+   the token.
+
+6. **User-chosen passwords are the wrong primitive.** The sketch's
+   `--password 'pswd'` gives low entropy, and because the token namespace is
+   global across open bridges, `/bridge connect` becomes a *probe*: spray common
+   passwords, harvest approval prompts from strangers. Bot-generated, high-entropy,
+   single-use, one-guess-per-token, rate-limited per requester. The pattern worth
+   copying is **Magic Wormhole's** codes (`7-crossover-clockwork`) — short and
+   human-transcribable, SPAKE2-backed so observing the code channel does not yield
+   the key. Its derived short authentication string also answers the residual
+   impersonation gap (Alice approves *whoever knew the token*, not provably Bob).
+
+7. **UX: separate establishment from use.** Re-approval per reconnect — the
+   sketch's stated shape — makes it unusable; nobody accepts a handshake per
+   conversation. Approve once → durable pairing; burn is explicit or on
+   inactivity; keep single-use as an opt-in mode. Prefer **inactivity expiry over
+   message counts** (a bridge dying mid-conversation at message N is baffling).
+   Do not offer "forever": the edge list would then only ever grow, which is the
+   artifact (2) is trying to bound.
+
+8. **The value/security inversion — the reason this is not obviously worth
+   building.** The token must travel out-of-band. If Alice and Bob already have a
+   private channel to carry it, they could carry a SimpleX invite link through
+   that same channel instead and get real E2EE with no plaintext hop — the bridge
+   adds nothing. The bridge only earns its existence when the out-of-band channel
+   is *public or low-bandwidth* (a code read aloud, or posted), which is exactly
+   where the token is weakest and enumeration risk highest. **The materially
+   simpler alternative is a rendezvous, not a relay:** the bot brokers a one-time
+   contact-link exchange between two consenting users, deletes the edge, and gets
+   out of the way — no plaintext, no persistent graph, no ban-evasion path, and
+   the conversation then rides SimpleX's own design (no user identifiers,
+   unidirectional queues deliberately split across two servers so neither sees
+   both directions), which is a production relay that genuinely does not learn the
+   social graph. Its one limit is real and unfixable: it only works when both
+   parties already share a protocol. **Cross-protocol translation and metadata
+   privacy are mutually exclusive** — closer to a theorem than an engineering gap.
+
+**Briar as a third adapter — separate question, answered; do not re-derive.**
+Raised alongside the bridge, and the answer is independent of it. `briar-headless`
+is a genuine REST + WebSocket API (bearer token from `~/.briar/auth_token`;
+`GET /v1/contacts/add/link`, `POST /v1/contacts/add/pending`,
+`POST /v1/messages/{contactId}`, `WS /v1/ws` with
+`ConversationMessageReceivedEvent`), and it maps cleanly onto `send` /
+`setInboundHandler` / `start` / `stop` / `connected`, with `connectContact()`
+fitting `add/link` exactly. Three blockers and one finding:
+
+- **The finding that decides it: Briar's mesh property does not transfer to a
+  server-hosted bot.** BLE/Wi-Fi mesh only reaches physically-nearby peers; the
+  Provider is a server, so reaching it always needs internet. A Briar adapter
+  therefore buys *a second Tor-transported, no-phone-number channel* — not
+  shutdown resilience — and SimpleX already covers that ground with better
+  ergonomics and an actively-developed codebase. Evaluate on that basis, not on
+  the mesh story. (The same collapse applies to H1: if both users must reach the
+  VPS, the architecture is internet-dependent whatever it speaks.)
+- **`contactId` is a node-local integer**, not key-anchored — restore the node
+  from backup or re-handshake and integer `3` can be a different human, i.e.
+  silent privilege transfer, exactly what `isWellFormedContactId` exists to
+  prevent. `pendingContactId` *is* a base64 hash of the handshake public key but
+  only exists pre-confirmation, so the adapter would have to capture the peer key
+  at `ContactAddedEvent` and hold its own mapping. Until then it is honestly
+  `AdapterTrustLevel.LOW` and Provider gates it out of admin paths.
+- **No groups in the headless REST surface** (private messages and blogs only) —
+  a permanent capability gap against the groups milestone, not a temporary one.
+- **No reusable invite link**: every contact is a mutual `briar://` exchange plus
+  a Tor handshake needing both nodes online, so onboarding is a per-user
+  out-of-band round trip.
+
+Briar entered **maintenance mode 2026-07-09** (security and bugfixes only,
+volunteer-run, no dedicated funding). That is close to neutral here — the API
+will not grow, but it will not churn either.
+
+**Verdict: `needs-analysis`.** The proposed shape is structurally sound
+(capability token, mutual opt-in, no directory, burnable) and the fixes in (5)–(7)
+are known. What is unresolved is whether the feature should exist at all, given
+(1) — the bot reads everything and cannot be made not to — and (8) — the
+rendezvous alternative delivers most of the value at a fraction of the risk for
+same-protocol pairs, leaving the relay to justify itself on the cross-protocol
+case alone. Sequencing if it does proceed: rendezvous first; relay second, opt-in,
+Signal↔SimpleX only (both `HIGH` trust, both already working); Briar last, and
+only for its own reasons.
