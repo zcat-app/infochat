@@ -1,7 +1,7 @@
 ---
 id: M1-760
 title: "Re-drive posts whose ingest translation exhausted its attempts"
-status: pending
+status: done
 created: 2026-08-04
 last_updated: 2026-08-05
 blocked_by: []
@@ -140,12 +140,65 @@ spec_refs:
   - docs/spec/llm.md §Translation flow
 decision_refs:
   - D29
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 832
+      removed: 9
+  - round: 2
+    date: 2026-08-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 8
+      added: 880
+      removed: 10
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-05
+  verdict: WARN
+  warnings:
+    - >-
+      lint-ticket.py: PASS (0 blockers, 0 warnings), re-run clean after
+      the refine.
+    - >-
+      Self-check finding (resolved by refine c7c2e7cb): the declared test
+      surface could not prove the acceptance items. All of them are
+      DB-backed and IngestTranslationWorkerTest is a no-DB unit class
+      IntegrationTestNamingGuardTest forbids from injecting a DataSource.
+      IngestTranslationWorkerIT added to files_scope; test_plan.adds split
+      per class.
+    - >-
+      Ticket-vs-code spot-checks all TRUE: the four persistTranslation
+      callers are :270 (English short-circuit), :293 (TRANSLATED, which
+      covers the no-body case), :523 (releaseRefused), :543
+      (releaseNull); the refusal-never-retried decision is at :296-300;
+      the "mechanically excludes quarantined posts" note is at :79-80;
+      V7__joins_post.sql:222 grants the collector table-level UPDATE on
+      post; V66 is the additive attempt-column precedent.
+    - >-
+      Scan-window arithmetic confirmed: PARTITION_SCAN_SLACK is 2 days and
+      %pi retention is 14, so the ladder must fit inside 16 days (384h).
+      M1-754's own values (first-delay 6h, factor 2.0, ceiling 4d, cap 10)
+      sum to ~666h and would overrun it, exactly as the ticket warns.
+  blockers: []
 escalation_reason:
 ---
 

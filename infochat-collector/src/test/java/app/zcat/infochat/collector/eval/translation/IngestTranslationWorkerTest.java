@@ -1,9 +1,17 @@
 package app.zcat.infochat.collector.eval.translation;
 
+import app.zcat.infochat.collector.eval.PartitionScan;
+import io.smallrye.config.PropertiesConfigSource;
+import io.smallrye.config.SmallRyeConfig;
+import io.smallrye.config.SmallRyeConfigBuilder;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
+import java.net.URL;
+import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -23,6 +31,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * — IntegrationTestNamingGuardTest forbids a DataSource-injecting
  * {@code *Test} class, and the naming baseline is outside this ticket's
  * files_scope.
+ *
+ * <p>M1-760's re-drive ladder contributes its pure half here: the backoff
+ * arithmetic, and the guard that the whole shipped ladder finishes inside
+ * every profile's partition scan window. That guard reads the collector's
+ * MAIN {@code application.properties} off the filesystem rather than the
+ * test classpath — the values that ship are the ones that matter, and the
+ * test config deliberately turns the scheduler off. Everything else about
+ * the ladder is DB state, and lives in {@link IngestTranslationWorkerIT}.
  *
  * <p>The worker is constructed directly and its {@code @PostConstruct}
  * {@code init()} run by hand so the parse path's {@code ObjectMapper}
@@ -139,6 +155,80 @@ class IngestTranslationWorkerTest {
             "the title is spliced verbatim, never reinterpreted as template syntax");
         assertEquals(1, rendered.split("THE-BODY-TEXT", -1).length - 1,
             "the body appears exactly once — in its own slot");
+    }
+
+    @Test
+    void redriveLadder_rungsFollowTheBackoffFactorAndClampAtTheCeiling() {
+        Duration firstDelay = Duration.ofHours(6);
+        Duration ceiling = Duration.ofHours(48);
+        assertEquals(Duration.ofHours(12),
+            IngestTranslationWorker.backoffAfter(firstDelay, 2.0, ceiling, 1),
+            "the gap after the first attempt is first-delay * factor");
+        assertEquals(Duration.ofHours(24),
+            IngestTranslationWorker.backoffAfter(firstDelay, 2.0, ceiling, 2));
+        assertEquals(ceiling,
+            IngestTranslationWorker.backoffAfter(firstDelay, 2.0, ceiling, 3),
+            "the third gap reaches the ceiling exactly");
+        assertEquals(ceiling,
+            IngestTranslationWorker.backoffAfter(firstDelay, 2.0, ceiling, 9),
+            "every later rung is clamped, so the ladder cannot run away");
+
+        assertEquals(firstDelay,
+            IngestTranslationWorker.ladderSpan(firstDelay, 2.0, ceiling, 1),
+            "a one-attempt ladder is exactly the first delay — no gaps");
+        assertEquals(Duration.ofHours(6 + 12 + 24 + 48 + 48 + 48),
+            IngestTranslationWorker.ladderSpan(firstDelay, 2.0, ceiling, 6),
+            "a six-attempt ladder is the first delay plus its five gaps");
+    }
+
+    @Test
+    void redriveLadder_shippedConfigurationFinishesInsideEveryProfileScanWindow()
+            throws Exception {
+        // A rung scheduled past the partition scan floor is SILENTLY
+        // unreachable: the post drops out of the re-drive enumeration with
+        // its stamp still set and nothing reports it. %pi is the tightest
+        // window (14 retention days + 2 slack), and the reprobe ladder this
+        // one borrows its shape from would overrun it — hence this guard on
+        // the values actually shipped, not on the ones a test invents.
+        Duration tightestWindow = null;
+        for (String profile : List.of("laptop", "vps", "pi", "remote-llm")) {
+            SmallRyeConfig config = mainConfigFor(profile);
+            int cap = config.getValue("infochat.llm.translator.redrive.cap", Integer.class);
+            assertTrue(cap >= 2,
+                "profile " + profile + " must ship a multi-rung ladder, else this test is vacuous");
+            Duration span = IngestTranslationWorker.ladderSpan(
+                config.getValue("infochat.llm.translator.redrive.first-delay", Duration.class),
+                config.getValue("infochat.llm.translator.redrive.backoff-factor", Double.class),
+                config.getValue("infochat.llm.translator.redrive.backoff-ceiling", Duration.class),
+                cap);
+            Duration window = Duration
+                .ofDays(config.getValue("infochat.partitions.retention-days.post", Integer.class))
+                .plus(PartitionScan.PARTITION_SCAN_SLACK);
+            assertTrue(span.compareTo(window) < 0,
+                "profile " + profile + ": the whole re-drive ladder (" + span
+                    + ") must finish inside the partition scan window (" + window + ")");
+            if (tightestWindow == null || window.compareTo(tightestWindow) < 0) {
+                tightestWindow = window;
+            }
+        }
+        assertEquals(Duration.ofDays(16), tightestWindow,
+            "%pi is expected to be the tightest window; if this moved, re-check the ladder");
+    }
+
+    /**
+     * A config view over ONLY the collector's MAIN application.properties
+     * with the given profile active, so the test-classpath properties (which
+     * turn the re-drive scheduler off) cannot shadow the shipped values. The
+     * surefire working directory is the module basedir — the assumption
+     * {@code ReevalConfigKeysResolutionTest} already relies on.
+     */
+    private static SmallRyeConfig mainConfigFor(String profile) throws Exception {
+        URL url = Path.of("src/main/resources/application.properties").toUri().toURL();
+        return new SmallRyeConfigBuilder()
+            .addDiscoveredConverters()
+            .withProfile(profile)
+            .withSources(new PropertiesConfigSource(url))
+            .build();
     }
 
     private static <T> T require(@Nullable T value) {

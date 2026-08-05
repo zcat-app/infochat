@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 778 |
+| done | 779 |
 | deferred | 0 |
 | abandoned | 23 |
 | **total** | **804** |
@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-760 — Re-drive posts whose ingest translation exhausted its attempts (complexity: medium, risk: medium)
 - M1-765 — Anchor snapshot for saved posts (complexity: medium, risk: medium)
 - M1-766 — Anchor-first degraded renderers (complexity: low, risk: low)
 
@@ -65,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 |---|---|---|---|
 | M1-769 | Render-scoped exact LLM call accounting and per-call bound for the digest budget | 2026-08-05 | round 1 APPROVE |
 | M1-767 | Aggregate system LLM budget for the unmetered scheduled digest | 2026-08-05 | round 2 APPROVE |
+| M1-760 | Re-drive posts whose ingest translation exhausted its attempts | 2026-08-05 | round 2 APPROVE |
 | M1-759 | Anchor-first headline display: reader-language line, bracketed original beneath | 2026-08-05 | round 1 APPROVE |
 | M1-768 | Redteam run-gate must always diff working tree vs fork point | 2026-08-04 | round 1 APPROVE |
 | M1-764 | Pin the LLM transport's interrupt contract with a test | 2026-08-04 | round 1 APPROVE |
@@ -72,7 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-762 | Localization cleanup after Turkish enablement | 2026-08-04 | round 1 APPROVE |
 | M1-761 | Extend the translator target-script check to the display-hit leg | 2026-08-04 | round 1 APPROVE |
 | M1-758 | Correct every operator-facing LLM exposure disclosure | 2026-08-04 | round 1 APPROVE |
-| M1-756 | Display-time hit translation for digest headlines and the degraded renderers | 2026-08-04 | round 1 APPROVE |
 
 ---
 
@@ -1012,7 +1011,7 @@ M1-756 (done)
         ├── M1-765 (pending) ← runnable
         └── M1-766 (pending) ← runnable
 M1-757 (done)
-M1-760 (pending) ← runnable
+M1-760 (done)
 M1-762 (done)
 M1-763 (done)
 M1-764 (done)

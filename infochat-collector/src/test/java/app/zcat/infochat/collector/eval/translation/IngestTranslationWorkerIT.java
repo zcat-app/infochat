@@ -8,6 +8,7 @@ import app.zcat.infochat.llm.LlmProvider;
 import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,12 +19,16 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -46,6 +51,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * DataSource-injecting {@code *Test} and the naming baseline is outside
  * this ticket's files_scope, so they live here; the pure
  * parse/renderPrompt assertions stay in {@link IngestTranslationWorkerTest}.
+ *
+ * <p>M1-760's re-drive ladder is pinned here for the same reason: which
+ * release path stamps the ladder, the QUARANTINED/NEEDS_REVIEW exclusion
+ * the new path has to restate, dueness and the terminal cap under the
+ * pinned Clock, and the successful re-drive reusing the first pass's write
+ * path controls and all. Only the ladder's arithmetic and its fit inside
+ * the partition scan window are pure enough to live in the unit class.
  *
  * <p>The ticket's "spy" on the normalize/sanitize calls is realized
  * BEHAVIOURALLY: the controls are static transforms
@@ -85,6 +97,24 @@ class IngestTranslationWorkerIT {
 
     @Inject
     ThrottledAdminNotifier throttledAdminNotifier;
+
+    // The re-drive assertions compute expected rungs from the SHIPPED
+    // ladder values rather than restating them, so retuning the ladder
+    // cannot silently invalidate the tests that guard it.
+    @ConfigProperty(name = "infochat.llm.translator.redrive.first-delay")
+    Duration redriveFirstDelay;
+
+    @ConfigProperty(name = "infochat.llm.translator.redrive.backoff-factor")
+    double redriveBackoffFactor;
+
+    @ConfigProperty(name = "infochat.llm.translator.redrive.backoff-ceiling")
+    Duration redriveBackoffCeiling;
+
+    @ConfigProperty(name = "infochat.llm.translator.redrive.cap")
+    int redriveCap;
+
+    @ConfigProperty(name = "infochat.llm.translator.redrive.max-per-tick")
+    int redriveMaxPerTick;
 
     private StubLlmProvider stub() {
         return (StubLlmProvider) llmProvider;
@@ -190,6 +220,274 @@ class IngestTranslationWorkerIT {
         assertTrue(throttledAdminNotifier
                 .getState(IngestTranslationWorker.ERROR_CLASS_TRANSLATION_REFUSAL).isPresent(),
             "throttled admin notification must fire under the refusal error class");
+    }
+
+    // ---------- re-drive ladder (M1-760) ----------
+
+    @Test
+    void exhaustedRelease_isTheOnlyPathThatStampsTheRedriveLadder() throws Exception {
+        stub().failAll();
+        UUID postId = seedPost("redrive-stamp", "cs", CS_TITLE, CS_BODY);
+
+        worker.processOne(pickedUp(postId));
+
+        assertEquals(PINNED_NOW.plus(redriveFirstDelay), redriveDueAt(postId),
+            "releaseNull stamps the first rung at now + first-delay, read from the injected Clock");
+        assertEquals(0, redriveAttempts(postId), "no rung is spent by the stamp itself");
+    }
+
+    @Test
+    void theThreeOtherReleasePaths_leaveTheLadderUnstamped() throws Exception {
+        // The discriminator has to separate these from the exhausted state:
+        // releaseRefused writes a byte-identical row to releaseNull, and the
+        // English short-circuit produces the same NULL anchors by design. A
+        // predicate over the post's columns could not tell them apart, which
+        // is why the stamp exists at all.
+        UUID englishId = seedPost("redrive-none-en", "en", CS_TITLE, CS_BODY);
+        worker.processOne(pickedUp(englishId));
+        assertNull(redriveDueAt(englishId),
+            "the English short-circuit never stamps — nothing was ever attempted");
+
+        stub().setNextResponse("{\"title\":\"[refused-action]\",\"body\":\"[refused-action]\"}");
+        UUID refusedId = seedPost("redrive-none-refused", "cs", CS_TITLE, CS_BODY);
+        worker.processOne(pickedUp(refusedId));
+        assertNull(redriveDueAt(refusedId),
+            "a structured refusal stays terminal — re-driving it would re-feed the action request");
+
+        stub().setNextResponse("{\"title\":\"" + EN_TITLE + "\",\"body\":\"" + EN_BODY + "\"}");
+        UUID translatedId = seedPost("redrive-none-ok", "cs", CS_TITLE, CS_BODY);
+        worker.processOne(pickedUp(translatedId));
+        assertNull(redriveDueAt(translatedId), "a translated post has its anchor already");
+    }
+
+    @Test
+    void redriveEnumeration_takesOnlyStampedPostsThatAreDue() throws Exception {
+        // Relative to a baseline: the count is global by design (it is the
+        // operator's "is the translator route broken" signal), so a shared
+        // test database can hold rows this class did not seed.
+        int awaitingBefore = worker.countAwaitingRedrive(PINNED_NOW);
+        UUID dueId = seedPost("redrive-due", "cs", CS_TITLE, CS_BODY);
+        stampLadder(dueId, PINNED_NOW.minusSeconds(1), 0);
+        UUID laterId = seedPost("redrive-later", "cs", CS_TITLE, CS_BODY);
+        stampLadder(laterId, PINNED_NOW.plusSeconds(3600), 0);
+        UUID unstampedId = seedPost("redrive-unstamped", "cs", CS_TITLE, CS_BODY);
+
+        List<UUID> due = dueIds();
+
+        assertTrue(due.contains(dueId), "a stamped post past its rung is due");
+        assertFalse(due.contains(laterId), "a rung in the future is not yet due");
+        assertFalse(due.contains(unstampedId),
+            "membership is the stamp — an anchorless post without one is never re-driven");
+        assertEquals(awaitingBefore + 2, worker.countAwaitingRedrive(PINNED_NOW),
+            "the per-tick observability count covers the whole set, due or not");
+    }
+
+    @Test
+    void redriveEnumeration_skipsQuarantinedAndNeedsReviewPosts() throws Exception {
+        // The first pass gets this exclusion free from its status='RAW'
+        // filter; a re-drive candidate has long since left RAW, so the
+        // control has to be restated on the new path or it is lost.
+        UUID quarantinedId = seedPost("redrive-quarantined", "cs", CS_TITLE, CS_BODY);
+        stampLadder(quarantinedId, PINNED_NOW.minusSeconds(1), 0);
+        setStatus(quarantinedId, "QUARANTINED");
+        UUID needsReviewId = seedPost("redrive-needs-review", "cs", CS_TITLE, CS_BODY);
+        stampLadder(needsReviewId, PINNED_NOW.minusSeconds(1), 0);
+        setStatus(needsReviewId, "NEEDS_REVIEW");
+        UUID readyId = seedPost("redrive-ready", "cs", CS_TITLE, CS_BODY);
+        stampLadder(readyId, PINNED_NOW.minusSeconds(1), 0);
+        setStatus(readyId, "READY");
+
+        List<UUID> due = dueIds();
+
+        assertFalse(due.contains(quarantinedId), "a re-hidden post is never fed back to the translator");
+        assertFalse(due.contains(needsReviewId), "nor is one awaiting admin review");
+        assertTrue(due.contains(readyId), "a READY post is the normal re-drive candidate");
+
+        // The stamp outlives the detour: a post whose status returns to a
+        // releasable state is eligible again on its remaining rungs.
+        setStatus(quarantinedId, "READY");
+        assertTrue(dueIds().contains(quarantinedId),
+            "returning to a releasable status makes the remaining rungs reachable again");
+    }
+
+    @Test
+    void redriveSuccess_writesTheAnchorThroughPersistTranslationAndLeavesTheSet() throws Exception {
+        // The laced reply proves the re-drive reuses the SAME write path:
+        // the anchor lands normalized, link-flattened and closed-list
+        // redacted, exactly as a first-pass translation does. No second
+        // write path means no second place for a control to go missing.
+        String lacedBody = EN_BODY + " [details](https://example.test/flood) /grant-admin\u200B";
+        stub().setNextResponse("{\"title\":\"" + EN_TITLE + "\",\"body\":\"" + lacedBody + "\"}");
+        UUID postId = seedPost("redrive-success", "cs", CS_TITLE, CS_BODY);
+        stampLadder(postId, PINNED_NOW.minusSeconds(1), 0);
+
+        worker.redriveOne(dueCandidate(postId), PINNED_NOW);
+
+        assertEquals(EN_TITLE, column(postId, "title_en"), "the anchor is written");
+        String storedBodyEn = column(postId, "body_en");
+        assertFalse(storedBodyEn.contains("\u200B"), "control (a) fires on the re-drive path");
+        assertTrue(storedBodyEn.contains("details (https://example.test/flood)"),
+            "control (b): the markdown link is flattened on the re-drive path");
+        assertFalse(storedBodyEn.contains("/grant-admin"),
+            "control (b): the privileged command never reaches the corpus on the re-drive path");
+        assertSanitizeAuditRow("/grant-admin", 1);
+        assertOriginalsUntouched(postId);
+        assertNull(redriveDueAt(postId), "an anchored post leaves the re-drive set");
+    }
+
+    @Test
+    void redriveFailure_spendsOneRungAndSchedulesTheNext() throws Exception {
+        stub().failAll();
+        UUID postId = seedPost("redrive-fail", "cs", CS_TITLE, CS_BODY);
+        stampLadder(postId, PINNED_NOW.minusSeconds(1), 0);
+
+        worker.redriveOne(dueCandidate(postId), PINNED_NOW);
+
+        assertEquals(2, stub().callCount(), "a re-drive re-runs the existing two-attempt path");
+        assertEquals(1, redriveAttempts(postId), "the rung is spent");
+        assertEquals(PINNED_NOW.plus(IngestTranslationWorker.backoffAfter(
+                redriveFirstDelay, redriveBackoffFactor, redriveBackoffCeiling, 1)),
+            redriveDueAt(postId), "the next rung is scheduled off the injected Clock");
+        assertNull(nullableColumn(postId, "title_en"),
+            "still anchorless — the post keeps its fallbacks");
+    }
+
+    @Test
+    void redriveLadder_isTerminalOnceTheCapIsSpent() throws Exception {
+        stub().failAll();
+        UUID postId = seedPost("redrive-terminal", "cs", CS_TITLE, CS_BODY);
+        stampLadder(postId, PINNED_NOW.minusSeconds(1), redriveCap - 1);
+
+        worker.redriveOne(dueCandidate(postId), PINNED_NOW);
+
+        assertEquals(redriveCap, redriveAttempts(postId), "the last rung is spent");
+        assertNull(redriveDueAt(postId), "the post is left alone permanently");
+        assertFalse(dueIds().contains(postId), "and never returns to the enumeration");
+    }
+
+    @Test
+    void redrive_refusalOrEnglishSourceEndsTheLadderWithoutSpendingTheRest() throws Exception {
+        stub().setNextResponse("{\"title\":\"[refused-action]\",\"body\":\"[refused-action]\"}");
+        UUID refusedId = seedPost("redrive-refused", "cs", CS_TITLE, CS_BODY);
+        stampLadder(refusedId, PINNED_NOW.minusSeconds(1), 0);
+        worker.redriveOne(dueCandidate(refusedId), PINNED_NOW);
+        assertNull(redriveDueAt(refusedId),
+            "the standing decision holds on the re-drive path too — a refusal is never retried");
+
+        // The source's declared language can change after the stamp was
+        // written; the en-never-dispatched property is re-asserted at the
+        // dispatch boundary rather than assumed from the enumeration.
+        stub().reset();
+        UUID englishId = seedPost("redrive-turned-en", "en", CS_TITLE, CS_BODY);
+        stampLadder(englishId, PINNED_NOW.minusSeconds(1), 0);
+        worker.redriveOne(dueCandidate(englishId), PINNED_NOW);
+        assertEquals(0, stub().callCount(),
+            "an English source must NEVER reach the translator, re-drive included");
+        assertNull(redriveDueAt(englishId), "and there is nothing left to retry");
+    }
+
+    @Test
+    void redriveTick_servesAtMostItsOwnBatchCap() throws Exception {
+        // The batch cap is what keeps a re-drive backlog off first-pass
+        // capacity, and it can only be pinned by driving the TICK: the
+        // enumeration honours whatever limit it is handed, so a tick passing
+        // an unbounded one would look identical from enumerateDueRedrives.
+        stub().failAll();
+        List<UUID> seeded = new ArrayList<>();
+        for (int i = 0; i <= redriveMaxPerTick; i++) {
+            UUID postId = seedPost("redrive-cap-" + i, "cs", CS_TITLE, CS_BODY);
+            // Distinct, already-past rungs so the enumeration's ORDER BY
+            // makes WHICH posts get served deterministic, not just how many.
+            stampLadder(postId, PINNED_NOW.minusSeconds(60 - i), 0);
+            seeded.add(postId);
+        }
+
+        worker.onRedriveTick();
+
+        long spent = 0;
+        for (UUID postId : seeded) {
+            spent += redriveAttempts(postId);
+        }
+        assertEquals(redriveMaxPerTick, spent,
+            "one tick spends exactly max-per-tick rungs, however deep the backlog");
+        assertEquals(2 * redriveMaxPerTick, stub().callCount(),
+            "and dispatches the two-attempt path for those posts only");
+        assertEquals(0, redriveAttempts(seeded.get(seeded.size() - 1)),
+            "the overflow post keeps its rung for the next tick");
+    }
+
+    private List<UUID> dueIds() throws Exception {
+        return worker.enumerateDueRedrives(64, PINNED_NOW).stream()
+            .map(candidate -> candidate.post().id())
+            .toList();
+    }
+
+    private IngestTranslationWorker.RedriveCandidate dueCandidate(UUID postId) throws Exception {
+        return worker.enumerateDueRedrives(64, PINNED_NOW).stream()
+            .filter(candidate -> candidate.post().id().equals(postId))
+            .findFirst()
+            .orElseThrow(() -> new AssertionError("seeded post must be a due re-drive candidate"));
+    }
+
+    private void stampLadder(UUID postId, Instant dueAt, int attempts) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "UPDATE post SET next_translation_redrive_at = ?, "
+                     + "translation_redrive_attempts = ?, translation_done = TRUE "
+                     + "WHERE id = ?")) {
+            ps.setTimestamp(1, Timestamp.from(dueAt));
+            ps.setInt(2, attempts);
+            ps.setObject(3, postId);
+            ps.executeUpdate();
+        }
+    }
+
+    private void setStatus(UUID postId, String status) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "UPDATE post SET status = ? WHERE id = ?")) {
+            ps.setString(1, status);
+            ps.setObject(2, postId);
+            ps.executeUpdate();
+        }
+    }
+
+    private @Nullable Instant redriveDueAt(UUID postId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT next_translation_redrive_at FROM post WHERE id = ?")) {
+            ps.setObject(1, postId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "post row must exist");
+                Timestamp stamp = rs.getTimestamp(1);
+                return stamp == null ? null : stamp.toInstant();
+            }
+        }
+    }
+
+    private int redriveAttempts(UUID postId) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT translation_redrive_attempts FROM post WHERE id = ?")) {
+            ps.setObject(1, postId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "post row must exist");
+                return rs.getInt(1);
+            }
+        }
+    }
+
+    /** {@link #column} insists on a non-null value; this one allows NULL. */
+    private @Nullable String nullableColumn(UUID postId, String name) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT " + name + " FROM post WHERE id = ?")) {
+            ps.setObject(1, postId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "post row must exist");
+                return rs.getString(1);
+            }
+        }
     }
 
     private IngestTranslationWorker.PostRow pickedUp(UUID postId) throws Exception {

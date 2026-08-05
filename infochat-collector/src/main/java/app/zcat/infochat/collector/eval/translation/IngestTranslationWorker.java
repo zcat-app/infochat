@@ -39,6 +39,7 @@ import java.sql.Timestamp;
 import java.sql.Types;
 import java.text.Normalizer;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -92,6 +93,42 @@ import java.util.UUID;
  * stays retrievable through the {@code coalesce} fallback rather than
  * wedging out of READY forever (ReadyPromoter requires
  * {@code embedding_done}, which a permanent FALSE here would block).
+ *
+ * <h2>Re-drive ladder (M1-760)</h2>
+ *
+ * <p>That release is correct but permanent, and a transient failure — the
+ * route down, a rate limit, one garbage reply — would otherwise become a
+ * permanent per-post defect: the post competes on original-language text
+ * inside an English-anchored index forever. {@link #onRedriveTick} tries
+ * again on a bounded, slow ladder, then leaves the post alone for good.
+ *
+ * <p>Membership is a DURABLE STAMP ({@code post.next_translation_redrive_at},
+ * V77) written by {@link #releaseNull} and by nothing else. It cannot be a
+ * predicate over the post's columns: {@code releaseNull} and
+ * {@link #releaseRefused} write byte-identical rows, so any derived
+ * predicate would re-feed action-request content to the model on a
+ * schedule, against the standing decision in {@link #processOne} that a
+ * structured refusal is never retried. The English short-circuit and the
+ * TRANSLATED arm likewise never stamp.
+ *
+ * <p>The re-drive runs on its OWN {@code @Scheduled} method with its own
+ * poll interval and its own batch cap, so a re-drive backlog can never
+ * consume first-pass batch capacity (the {@code ReprobeScheduler}
+ * separate-scheduling-path shape, M1-754). Two controls are carried onto
+ * the new path rather than inherited: the first pass excludes quarantined
+ * posts through its {@code status='RAW'} filter, which a re-drive — running
+ * on posts that have long since left RAW — must restate explicitly
+ * ({@code status IN ('RAW','READY')}, so a post re-hidden to QUARANTINED or
+ * NEEDS_REVIEW by {@code ReEvaluationJob} is skipped); and the
+ * en-never-dispatched property is re-asserted at the dispatch boundary in
+ * {@link #redriveOne}, since a source's declared language can change after
+ * the stamp was written.
+ *
+ * <p>The whole ladder must finish inside the partition scan window
+ * ({@link PartitionScan#scanWindowFloor}) — 16 days on {@code %pi}, the
+ * tightest profile — because a rung scheduled past that floor is silently
+ * unreachable. {@link #ladderSpan} computes the span from the configured
+ * values and the unit test pins it under every profile's window.
  *
  * <h2>Persistence cursor</h2>
  *
@@ -208,6 +245,21 @@ public class IngestTranslationWorker {
     @ConfigProperty(name = "infochat.llm.translator.max-concurrency")
     int maxConcurrency;
 
+    @ConfigProperty(name = "infochat.llm.translator.redrive.first-delay")
+    Duration redriveFirstDelay;
+
+    @ConfigProperty(name = "infochat.llm.translator.redrive.backoff-factor")
+    double redriveBackoffFactor;
+
+    @ConfigProperty(name = "infochat.llm.translator.redrive.backoff-ceiling")
+    Duration redriveBackoffCeiling;
+
+    @ConfigProperty(name = "infochat.llm.translator.redrive.cap")
+    int redriveCap;
+
+    @ConfigProperty(name = "infochat.llm.translator.redrive.max-per-tick")
+    int redriveMaxPerTick;
+
     @SuppressWarnings("NullAway.Init")
     private String promptTemplate;
     @SuppressWarnings("NullAway.Init")
@@ -247,6 +299,109 @@ public class IngestTranslationWorker {
             } catch (RuntimeException e) {
                 SafeLog.warn(LOG, "IngestTranslationWorker: processing failed for post_id="
                     + row.id() + "; will retry next tick", e);
+            }
+        }
+    }
+
+    /**
+     * Re-drive tick, a scheduling path SEPARATE from {@link #onTick} with
+     * its own poll interval and its own batch cap: a re-drive backlog can
+     * never delay a first-pass translation. Package-private so tests can
+     * drive a sweep deterministically without waiting on the scheduler.
+     */
+    @Scheduled(every = "{infochat.llm.translator.redrive.poll-interval}",
+        concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
+    void onRedriveTick() {
+        // One clock sample feeds the scan-window floor, the dueness
+        // comparison and every rung this tick schedules, so a single tick's
+        // decisions cannot straddle two instants (engineering-rules §9; the
+        // ReprobeScheduler discipline). This component writes the stamp and
+        // reads it back, so both sides are the same injected Clock.
+        Instant now = clock.instant();
+        int awaiting;
+        List<RedriveCandidate> due;
+        try {
+            awaiting = countAwaitingRedrive(now);
+            due = enumerateDueRedrives(redriveMaxPerTick, now);
+        } catch (SQLException e) {
+            SafeLog.warn(LOG, "IngestTranslationWorker: failed to enumerate re-drive candidates; "
+                + "skipping tick", e);
+            return;
+        }
+        if (awaiting > 0) {
+            // A recurring non-empty set is the operator's signal that the
+            // translator route itself is misconfigured, rather than
+            // something to be inferred from missing translations.
+            LOG.info("IngestTranslationWorker: {} post(s) awaiting an English anchor after "
+                + "exhausted translation; {} due for re-drive this tick", awaiting, due.size());
+        }
+        for (RedriveCandidate candidate : due) {
+            try {
+                redriveOne(candidate, now);
+            } catch (RuntimeException e) {
+                SafeLog.warn(LOG, "IngestTranslationWorker: re-drive failed for post_id="
+                    + candidate.post().id() + "; the ladder rung is spent", e);
+            }
+        }
+    }
+
+    /**
+     * One re-drive: spend a rung, then re-run the EXISTING translation path
+     * on the post. A success writes the anchor through the same
+     * {@link #persistTranslation} statement a first-pass translation uses,
+     * so it lands sanitized and atomic with no second write path. A failure
+     * simply leaves the post for the next rung; the model answering with
+     * the refusal marker ends the ladder immediately, because the standing
+     * decision (see {@link #processOne}) is that a structured refusal is
+     * never retried. Package-private for the IT.
+     */
+    void redriveOne(RedriveCandidate candidate, Instant now) {
+        PostRow row = candidate.post();
+        if ("en".equals(row.language())) {
+            // The source's declared language changed to English after the
+            // stamp was written. Nothing to translate, so end the ladder —
+            // the en-never-dispatched property is enforced HERE, at the
+            // dispatch boundary, exactly as it is on the first pass.
+            clearRedriveLadder(row);
+            return;
+        }
+
+        // Spend the rung BEFORE the call: the cap counts attempts, so a
+        // crash mid-attempt must not hand the post a free retry (the
+        // ReprobeScheduler record-attempt-first discipline).
+        int attemptNumber = advanceRedriveLadder(candidate, now);
+
+        LlmProvider provider = llmRouter.forTask(ModelTask.TRANSLATOR, row.language());
+        AttemptResult first = tryOnce(provider, row, 1);
+        AttemptResult chosen = first;
+        if (first.kind() != AttemptKind.PARSED) {
+            if (first.kind() == AttemptKind.UNREACHABLE) {
+                retryBackoff.sleepBeforeRetry();
+            }
+            chosen = tryOnce(provider, row, 2);
+        }
+
+        ParseOutcome outcome = chosen.outcome();
+        if (outcome == null) {
+            LOG.warn("IngestTranslationWorker: re-drive attempt {} of {} produced no anchor for "
+                + "post_id={} (error_class={} first={} second={})",
+                attemptNumber, redriveCap, row.id(), ERROR_CLASS_TRANSLATION_FAILURE,
+                first.kind(), chosen.kind());
+            return;
+        }
+        switch (outcome.kind()) {
+            case TRANSLATED -> {
+                persistTranslation(row,
+                    outcome.title() == null ? null : cleanTitle(row, outcome.title()),
+                    outcome.body() == null ? null : cleanBody(row, outcome.body()));
+                LOG.info("IngestTranslationWorker: re-drive attempt {} of {} anchored post_id={}",
+                    attemptNumber, redriveCap, row.id());
+            }
+            case REFUSAL -> {
+                LOG.warn("IngestTranslationWorker: model returned " + REFUSAL_MARKER
+                    + " on re-drive attempt {} for post_id={}; ending the ladder "
+                    + "(error_class={})", attemptNumber, row.id(), ERROR_CLASS_TRANSLATION_REFUSAL);
+                clearRedriveLadder(row);
             }
         }
     }
@@ -534,6 +689,16 @@ public class IngestTranslationWorker {
      * notification. The post degrades to embedding-from-original and stays
      * retrievable through the {@code coalesce} fallback rather than
      * wedging out of READY forever.
+     *
+     * <p>This is also the ONLY path that stamps the re-drive ladder
+     * (M1-760): exhausted-attempts is the one anchorless state worth
+     * retrying, and it is indistinguishable on disk from the refusal and
+     * never-attempted states, so the discriminator has to be written here
+     * by the path that knows. The stamp is a second statement rather than a
+     * column on the {@link #persistTranslation} write, so the three callers
+     * that must NOT stamp keep sharing that statement untouched; a crash
+     * between the two leaves the post released but unstamped, which is
+     * exactly today's behaviour.
      */
     private void releaseNull(PostRow row, AttemptKind first, AttemptKind second) {
         LOG.warn(
@@ -541,6 +706,7 @@ public class IngestTranslationWorker {
                 + "after two failed attempts (error_class={} first={} second={})",
             row.id(), ERROR_CLASS_TRANSLATION_FAILURE, first, second);
         persistTranslation(row, null, null);
+        stampRedriveLadder(row, clock.instant().plus(redriveFirstDelay));
         throttledAdminNotifier.notifyOnce(
             ERROR_CLASS_TRANSLATION_FAILURE,
             ERROR_CLASS_TRANSLATION_FAILURE,
@@ -558,11 +724,20 @@ public class IngestTranslationWorker {
      * byte-identical (D29). A {@code null} field writes SQL NULL (the
      * English-source, no-body, refusal, and release paths share this
      * statement).
+     *
+     * <p>The write also clears {@code next_translation_redrive_at}, which
+     * is what takes a successfully re-driven post out of the ladder set
+     * (M1-760). Clearing it here rather than in a follow-up statement is
+     * what lets a re-drive reuse this path verbatim — the anchor lands
+     * sanitized and atomic, and leaving the set is part of the same
+     * commit. On the four first-pass callers the column is already NULL, so
+     * the assignment is inert.
      */
     private void persistTranslation(PostRow row, @Nullable String titleEn, @Nullable String bodyEn) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                 "UPDATE post SET title_en = ?, body_en = ?, translation_done = TRUE "
+                 "UPDATE post SET title_en = ?, body_en = ?, translation_done = TRUE, "
+                     + "next_translation_redrive_at = NULL "
                      + "WHERE id = ? AND fetched_at = ?")) {
             if (titleEn == null) {
                 ps.setNull(1, Types.VARCHAR);
@@ -581,6 +756,180 @@ public class IngestTranslationWorker {
             throw new IllegalStateException(
                 "IngestTranslationWorker: cursor UPDATE failed for post_id=" + row.id(), e);
         }
+    }
+
+    /**
+     * Write the durable re-drive stamp: the post enters the ladder set,
+     * due at {@code dueAt}. Keyed on the partitioned-PK shape like every
+     * other write here. {@code translation_redrive_attempts} is left at its
+     * V77 default of 0 — a post can be stamped only once, because
+     * {@code translation_done} never returns to FALSE.
+     */
+    private void stampRedriveLadder(PostRow row, Instant dueAt) {
+        updatePostRedriveState(row, dueAt, null,
+            "stamp re-drive ladder for post_id=" + row.id());
+    }
+
+    /**
+     * End the ladder permanently: the post leaves the re-drive set with its
+     * spent-attempt count intact. Used for the two outcomes that make
+     * further re-drives pointless rather than merely unsuccessful — the
+     * source turning out to be English, and a structured refusal.
+     */
+    private void clearRedriveLadder(PostRow row) {
+        updatePostRedriveState(row, null, null,
+            "clear re-drive ladder for post_id=" + row.id());
+    }
+
+    /**
+     * Spend one rung: increment the attempt count and schedule the next
+     * one, or drop the post out of the set for good once the cap is
+     * reached. Returns the number of the attempt just spent, for the log
+     * lines that report progress against the cap.
+     */
+    private int advanceRedriveLadder(RedriveCandidate candidate, Instant now) {
+        int attemptNumber = candidate.attempts() + 1;
+        Instant nextDueAt = attemptNumber >= redriveCap
+            ? null
+            : now.plus(backoffAfter(attemptNumber));
+        updatePostRedriveState(candidate.post(), nextDueAt, attemptNumber,
+            "advance re-drive ladder for post_id=" + candidate.post().id());
+        return attemptNumber;
+    }
+
+    // The one statement behind the three ladder writes above, keyed on the
+    // partitioned-PK shape like every other write here. A null dueAt writes
+    // SQL NULL, which IS the "not in the set" state; a null attempts leaves
+    // the spent-rung count as it was.
+    private void updatePostRedriveState(PostRow row, @Nullable Instant dueAt,
+                                        @Nullable Integer attempts, String what) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "UPDATE post SET next_translation_redrive_at = ?, "
+                     + "translation_redrive_attempts = coalesce(?, translation_redrive_attempts) "
+                     + "WHERE id = ? AND fetched_at = ?")) {
+            if (dueAt == null) {
+                ps.setNull(1, Types.TIMESTAMP);
+            } else {
+                ps.setTimestamp(1, Timestamp.from(dueAt));
+            }
+            if (attempts == null) {
+                ps.setNull(2, Types.INTEGER);
+            } else {
+                ps.setInt(2, attempts);
+            }
+            ps.setObject(3, row.id());
+            ps.setTimestamp(4, Timestamp.from(row.fetchedAt()));
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("IngestTranslationWorker: failed to " + what, e);
+        }
+    }
+
+    /**
+     * How many posts are sitting in the re-drive set inside the scan
+     * window, due or not — the per-tick observability number. A set that
+     * stays non-empty across ticks is the signal that the translator route
+     * itself is broken, which is otherwise only visible as translations
+     * quietly failing to appear.
+     */
+    int countAwaitingRedrive(Instant now) throws SQLException {
+        final String sql =
+            "SELECT count(*) FROM post "
+                + " WHERE next_translation_redrive_at IS NOT NULL "
+                + "   AND fetched_at >= ?";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setTimestamp(1, Timestamp.from(partitionScan.scanWindowFloor(now)));
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getInt(1);
+            }
+        }
+    }
+
+    /**
+     * Enumerate the re-drive candidates due at {@code now}. Membership is
+     * the durable stamp, never a predicate over the post's other columns —
+     * see the class javadoc for why no such predicate exists.
+     *
+     * <p>The {@code status IN ('RAW','READY')} conjunct is the control the
+     * first pass gets for free from its {@code status='RAW'} filter,
+     * restated here because a re-drive candidate has long since left RAW: a
+     * post re-hidden to QUARANTINED or advanced to NEEDS_REVIEW by
+     * {@code ReEvaluationJob} must not be fed back to the translator. A post
+     * whose status later returns to a releasable state becomes eligible
+     * again on its remaining rungs, since the stamp outlives the detour.
+     * The {@code fetched_at} floor is the same partition-pruning bound the
+     * first-pass pickup uses, and the ladder is configured to finish inside
+     * it (see {@link #ladderSpan}).
+     */
+    List<RedriveCandidate> enumerateDueRedrives(int limit, Instant now) throws SQLException {
+        final String sql =
+            "SELECT p.id, p.fetched_at, p.title, p.body, s.language, "
+                + "       p.translation_redrive_attempts "
+                + "  FROM post p "
+                + "  JOIN source s ON s.id = p.source_id "
+                + " WHERE p.next_translation_redrive_at IS NOT NULL "
+                + "   AND p.next_translation_redrive_at <= ? "
+                + "   AND p.status IN ('RAW', 'READY') "
+                + "   AND p.fetched_at >= ? "
+                + " ORDER BY p.next_translation_redrive_at, p.id "
+                + " LIMIT ?";
+        List<RedriveCandidate> rows = new ArrayList<>();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setTimestamp(1, Timestamp.from(now));
+            ps.setTimestamp(2, Timestamp.from(partitionScan.scanWindowFloor(now)));
+            ps.setInt(3, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    UUID id = (UUID) rs.getObject(1);
+                    Instant fetchedAt = rs.getTimestamp(2).toInstant();
+                    String title = rs.getString(3);
+                    String body = rs.getString(4);
+                    String language = rs.getString(5);
+                    int attempts = rs.getInt(6);
+                    rows.add(new RedriveCandidate(
+                        new PostRow(id, fetchedAt, title, body, language), attempts));
+                }
+            }
+        }
+        return rows;
+    }
+
+    // The k-th attempt schedules rung k+1 at first-delay * factor^k, capped
+    // at the ceiling — ReprobeScheduler's ladder, same formula. Double math
+    // cannot overflow before the min() the way long multiplication would.
+    private Duration backoffAfter(int attemptsMade) {
+        return backoffAfter(redriveFirstDelay, redriveBackoffFactor, redriveBackoffCeiling,
+            attemptsMade);
+    }
+
+    static Duration backoffAfter(Duration firstDelay, double factor, Duration ceiling,
+                                 int attemptsMade) {
+        double scaledMillis = firstDelay.toMillis() * Math.pow(factor, attemptsMade);
+        return Duration.ofMillis((long) Math.min(scaledMillis, (double) ceiling.toMillis()));
+    }
+
+    /**
+     * Wall-clock span from the stamp to the LAST rung of a full ladder: the
+     * first delay plus every backoff between the {@code cap} attempts. The
+     * whole span has to fit inside the partition scan window
+     * ({@code infochat.partitions.retention-days.post} widened by
+     * {@link PartitionScan#PARTITION_SCAN_SLACK}) on EVERY profile — 16 days
+     * on {@code %pi}, the tightest — because a rung scheduled past that
+     * floor is silently unreachable: the post drops out of the enumeration
+     * with its stamp still set and no signal anywhere. Static and
+     * package-private so the unit test can assert the shipped configuration
+     * against each profile's window without a running container.
+     */
+    static Duration ladderSpan(Duration firstDelay, double factor, Duration ceiling, int cap) {
+        Duration span = firstDelay;
+        for (int attemptsMade = 1; attemptsMade < cap; attemptsMade++) {
+            span = span.plus(backoffAfter(firstDelay, factor, ceiling, attemptsMade));
+        }
+        return span;
     }
 
     /**
@@ -660,6 +1009,15 @@ public class IngestTranslationWorker {
     public record PostRow(UUID id, Instant fetchedAt,
                           @Nullable String title, @Nullable String body,
                           String language) {
+    }
+
+    /**
+     * One due re-drive candidate: the post plus the rungs already spent on
+     * it. The count rides alongside {@link PostRow} rather than inside it
+     * because it belongs to the ladder, not to the post's translation
+     * inputs — the first-pass path has no use for it.
+     */
+    public record RedriveCandidate(PostRow post, int attempts) {
     }
 
     /**
