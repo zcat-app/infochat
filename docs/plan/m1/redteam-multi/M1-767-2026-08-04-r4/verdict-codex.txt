@@ -1,0 +1,37 @@
+RED-TEAM VERDICT: FINDINGS
+
+FINDINGS:
+  - CATEGORY: DOS
+    SEVERITY: medium
+    PROMISE: The round-five retry contract says the pre-charge decision must
+             use the retry leg computed with the same reads as retryDigest,
+             that the zero-LLM REPLAY leg is never gated, and that the
+             system budget backs only digest cost. security.md §Rate
+             limiting likewise says the aggregate system LLM budget is the
+             backstop for scheduled digest cost, while periodic digests are
+             outside the user-initiated buckets.
+    GAP: RetryCommandHandler.java:552-568 makes the refusal from a separate
+         DigestRetryService.retryLeg(groupDbId) read before it calls
+         retryDigest. DigestRetryService.java:309-333 performs an unlocked
+         latest-cache lookup and persisted-section lookup, then returns
+         FALLBACK; the eventual retryDigest repeats those reads later. A
+         scheduled render can persist sections in that interval, changing
+         the actual retry from FALLBACK to the zero-LLM REPLAY leg. When the
+         system window is exhausted, the handler returns the budget refusal
+         before retryDigest can observe that new replay state. The retryLeg
+         comment expressly accepts this FALLBACK-to-REPLAY flip as a retry
+         the user can re-issue, but that still gates an operation which, at
+         execution time, consumes no LLM call, contradicting the stated
+         never-gate replay invariant. The probe is therefore not an atomic
+         authorization of the subsequent leg.
+    REPRO: 1) The deployment-wide system window is at its ceiling. 2) A
+           group has a live latest digest-cache row whose sections are not
+           yet visible, so retryLeg returns FALLBACK. 3) A group admin sends
+           /retry --digest while the scheduled render for that row completes
+           and persists its sections after the probe but before the
+           hypothetical retryDigest read. 4) The handler refuses on the
+           stale FALLBACK result, although retryDigest would now take REPLAY
+           and only redeliver persisted bytes. The group loses the
+           zero-LLM delivery-recovery attempt because other groups exhausted
+           the LLM budget.
+    SUGGESTED-FIX-CLASS: trust-boundary-tightening

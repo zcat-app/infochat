@@ -1,0 +1,107 @@
+RED-TEAM VERDICT: FINDINGS
+
+FINDINGS:
+  - CATEGORY: DOS
+    SEVERITY: medium
+    PROMISE: security.md §Rate limiting — "**Per-group LLM rate (D47)** — a separate
+              sub-bucket per approved group bounding LLM-triggering operations (chat
+              replies + on-demand `/summary` + `/retry` re-rolls) across all group
+              members. ... Periodic digests do NOT count against user-initiated
+              per-group LLM budget (they are system-initiated; the aggregate system
+              LLM budget is the backstop for digest **cost**)." The whole §Rate
+              limiting section is built on per-consumer bounds — "**Per-user
+              interruptible concurrency** ... so group membership cannot let a single
+              sender occupy every dispatch worker at one instant" — and the aggregate
+              budget is scoped by the spec to *digest cost*, i.e. LLM spend. Paired
+              with §Failure handling — "A complete LLM outage degrades quality, not
+              safety."
+    GAP: The new pre-charge gate is placed ABOVE the branch that decides whether the
+          retry costs any LLM call at all, so it refuses a zero-LLM-cost operation on
+          the strength of a counter that only other tenants filled.
+          `RetryCommandHandler.java:559-563` runs
+          `if (!systemLlmBudget.canStartRender()) { return reply(... ERROR_RETRY_DIGEST_SYSTEM_BUDGET); }`
+          BEFORE `digestRetryService.retryDigest(groupDbId)` at
+          `RetryCommandHandler.java:582`. But `retryDigest` has two legs
+          (`DigestRetryService.java:129-141`): a **replay** leg
+          (`replayMissing`, `DigestRetryService.java:156-209`) that re-delivers the
+          already-persisted, already-sanitized section bytes for the categories with
+          no delivery record — `digestDelivery.deliver(...)` at
+          `DigestRetryService.java:205`, **zero provider calls, zero render, no
+          `DigestWorker` involvement at all** — and the **fallbackRerun** leg
+          (`DigestRetryService.java:220-234`) that really does re-render. Only the
+          second leg is "genuinely digest cost", which is the justification the
+          round-2 disposition recorded for binding the pool
+          (`SystemLlmBudget.java` class javadoc: "the retry route is a deliberate
+          exception that BINDS this budget"; M1-769's own acceptance concedes "a
+          `/retry --digest` replay path (no re-render) draws nothing"). The shipped
+          gate cannot tell them apart because it fires one call earlier, so the
+          delivery-recovery path — the only way a group recovers categories that
+          failed to send — is denied for as long as the deployment-wide PT24H window
+          stays at its ceiling. There is no per-group share reserving any of that
+          ceiling (`SystemLlmBudget.java`: "One system-wide deque of call timestamps
+          — no per-user or per-group key"), and by the ticket's own §Measurement the
+          default ceiling (3000) equals the documented daily capacity (~50 full-mode
+          groups x 2 slots), so exhaustion is reachable under nominal load, not only
+          under attack. The denial can also outlive the fix: the replay row expires
+          (`coords.expiresAt`, `DigestRetryService.java:129`) on the same order as
+          the budget window, after which the retry falls through to `fallbackRerun`
+          — which the same gate also refuses — and the undelivered categories are
+          simply lost.
+    REPRO: 1) Group B's scheduled digest fires; some category messages fail to
+            deliver (adapter transient failure), leaving `digest_category_delivery`
+            rows missing for those slugs while the rendered sections are persisted.
+            2) Meanwhile the deployment-wide window is driven to the ceiling by
+            OTHER groups: either nominal load at the documented capacity, or an
+            attacker who is a registered non-probation group admin of group A
+            inflating A's post volume (`/add-source <feed-they-control> --tags ai` +
+            subscribe, which any non-banned user may do per `commands.md` §Source
+            management) so A's FULL-mode render — whose per-section cluster cap is
+            deliberately lifted (`DigestRenderer.java:111`) — draws hundreds of calls
+            in one admitted render. 3) B's group admin issues `/retry --digest`.
+            4) `RetryCommandHandler.java:559` refuses with
+            `error.retry.digest_system_budget` ("The deployment's digest LLM budget
+            is exhausted..."), even though the retry would have taken the replay leg
+            and issued ZERO LLM calls — it would only have re-sent bytes already
+            rendered, already sanitized and already stored. 5) B cannot recover the
+            missing categories for the rest of the 24-hour window; the operator's
+            only levers are a process restart (the window is in-memory) or a config
+            change. Nothing in the threat model lets one tenant's LLM consumption
+            deny another tenant an operation that consumes no LLM.
+    SUGGESTED-FIX-CLASS: rate-limit
+
+OUT-OF-MODEL:
+  - Examined and deliberately NOT filed: the refusal path at
+    `RetryCommandHandler.java:549-563` writes the audit row and then calls
+    `SystemLlmBudget.canStartRender()`, whose refusal branch calls
+    `ThrottledAdminNotifier.notifyOnce` — which opens a JDBC connection and UPSERTs
+    `admin_notification_state` on EVERY call (the coalescing suppresses the emission,
+    not the round-trip; `ThrottledAdminNotifier.java:234-244`). Because the gate sits
+    ABOVE the per-user LLM token and the D47 per-group LLM draw, a group admin
+    hammering `/retry --digest` during exhaustion now produces 2-3 DB round-trips per
+    attempt while drawing NO LLM bucket at all — an operation that previously always
+    spent a token. It is nonetheless bounded: `InboundRouter.java:1114` draws the D47
+    per-group command sub-bucket (`infochat.ratelimit.group-commands-per-15min`,
+    default 20 / vps 40) before dispatch, and step 1.5's transport cap bounds the
+    sender, so the residual is a few cheap statements per group per 15 minutes. The
+    inline comment's "hammering stays audit-visible" is a visibility argument, not a
+    bounding one — flagged for the spec/ticket owner rather than filed, since the
+    existing cap does the bounding.
+  - The distinct refusal string is a cross-tenant load oracle: a group admin who
+    polls `/retry --digest` learns whether the DEPLOYMENT-wide digest budget — filled
+    entirely by other groups' system-initiated renders — is at its ceiling, and by
+    polling can trace global digest consumption over time. §Rate limiting accepts an
+    analogous disclosure for the per-user concurrency reply but justifies it as
+    "metadata-only, self-triggered — no third party can probe another user's count",
+    which is exactly the property this reply does not have. Metadata-only and
+    admin-tier, so noted for the spec owner rather than filed.
+  - Re-verified closed from round 2, not re-reported: (a) the M1-763 slot-window
+    cancellation leg is now named in `SystemLlmBudget`'s class javadoc, in the ticket
+    acceptance and in `application.properties`' operator note (which also names the
+    up-but-slow trigger); (b) the "only scheduled-route-only entry point" claim is
+    corrected in all four places and the retry-route policy is decided and
+    implemented; (c) round 1's monitor-holding breach signal stays structurally fixed
+    — `canStartRender()` is not synchronized and `underCeiling()` is the only
+    synchronized read. Also verified: `renderSections` and `appendClusterProse` have
+    no caller outside `DigestWorker` (`DigestWorker.java:243`), so no user-initiated
+    surface other than the decided `/retry --digest` route draws this budget, and the
+    new bundle key is present in all five bundles.

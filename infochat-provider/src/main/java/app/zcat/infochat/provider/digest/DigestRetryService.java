@@ -39,6 +39,18 @@ import java.util.List;
  * to today's full re-run path. The fallback's render budget is bounded by
  * the configured digest window width, never by the 24-hour replay-retention
  * horizon, so a retry never acquires a many-hours LLM timeout.
+ *
+ * <p><b>System budget (M1-767).</b> The fallback re-run is the retry's ONLY
+ * LLM-spending leg, so it binds the deployment-wide {@link SystemLlmBudget}
+ * — but the refusal decision lives UPSTREAM in {@code
+ * RetryCommandHandler}: {@link #retryLeg} tells the handler which leg the
+ * retry would take, and the handler refuses pre-charge (nothing drawn, no
+ * cooldown) when the leg is {@link RetryLeg#FALLBACK} and the window is
+ * at/over its ceiling. The zero-LLM replay leg is never gated in steady
+ * state — a stale probe refuses it free, see {@link #retryLeg}. The worker's
+ * own admission gate remains the authoritative check on both routes; a
+ * window that fills after the pre-charge check degrades the re-run (the
+ * conservative non-render convention).
  */
 @ApplicationScoped
 public class DigestRetryService {
@@ -219,6 +231,17 @@ public class DigestRetryService {
      */
     private RetryResult fallbackRerun(UUID groupId, SlotCoordinates coords,
                                       GroupReplayMeta meta, Instant now) {
+        // M1-767 redteam rounds 2-4: the fallback re-run is the retry's ONLY
+        // LLM-spending leg, so it binds the deployment-wide pool. There is
+        // deliberately NO gate here — the admission decision belongs to ONE
+        // place: RetryCommandHandler's pre-charge refusal (leg probe +
+        // SystemLlmBudget, so a refused re-run draws nothing) and
+        // DigestWorker.executeSlot's admission gate (the authoritative
+        // check; a window that fills in between degrades the re-run rather
+        // than refusing after the charges — the conservative non-render
+        // convention). A gate at this boundary would refuse AFTER the
+        // per-user and D47 draws were spent, draining the group's shared
+        // budget for a system-level denial (M1-767 redteam rounds 3+4).
         Duration windowWidth = Duration.ofMinutes(windowWidthMinutes);
         Instant clampedWindowEnd = min(coords.expiresAt, now.plus(windowWidth));
         DigestSlot slot = new DigestSlot(
@@ -287,6 +310,46 @@ public class DigestRetryService {
         }
     }
 
+    /**
+     * Which leg {@link #retryDigest} would take for this group right now,
+     * computed with the same reads {@code retryDigest} performs (latest
+     * cache row + persisted-section presence). M1-767 redteam rounds 3-5:
+     * this is the pre-charge gate's input — {@code RetryCommandHandler}
+     * refuses with the system-budget reply when the window is at/over its
+     * ceiling AND the leg is {@link RetryLeg#FALLBACK}, so a refused
+     * re-run draws no per-user token, no D47 draw and no cooldown. The
+     * probe is an ESTIMATE, read outside any lock: between the probe's
+     * reads and the refusal a concurrent scheduled render can persist
+     * sections, flipping the would-be leg FALLBACK → REPLAY, so a refusal
+     * can land on a retry that would by then have made no LLM call. What
+     * bounds that residual is not the width of the interval but the
+     * refusal's cost — it drew and stamped NOTHING, so the re-issued
+     * retry probes REPLAY and proceeds; the REPLAY leg is never gated in
+     * steady state (round-5 finding, documented here and in the handler,
+     * which also explains why the probe runs BEFORE the budget read).
+     * The authoritative leg
+     * decision for a PROCEEDING retry remains {@code retryDigest}'s own
+     * reads; a probe-vs-run flip to {@code FALLBACK} is caught by the
+     * worker's admission gate (degrade, conservative convention).
+     */
+    public RetryLeg retryLeg(UUID groupId) {
+        SlotCoordinates coords = findLatestCacheEntry(groupId);
+        if (coords == null || lookupGroupForReplay(groupId) == null) {
+            return RetryLeg.NO_PRIOR;
+        }
+        if (coords.expiresAt.isAfter(clock.instant())) {
+            try {
+                if (!sectionRepository.findOrderedSections(groupId, coords.slotFiredAt).isEmpty()) {
+                    return RetryLeg.REPLAY;
+                }
+            } catch (SQLException e) {
+                throw new IllegalStateException(
+                        "DigestRetryService.retryLeg: section lookup failed", e);
+            }
+        }
+        return RetryLeg.FALLBACK;
+    }
+
     public enum RetryResult {
         SUCCESS,
         REPLAYED_MISSING,
@@ -294,6 +357,16 @@ public class DigestRetryService {
         ALREADY_IN_PROGRESS,
         NO_PRIOR_DIGEST,
         RATE_LIMITED
+    }
+
+    /** The leg {@link #retryDigest} would take for a group (see {@link #retryLeg}). */
+    public enum RetryLeg {
+        /** A live cache row with persisted sections — zero LLM calls. */
+        REPLAY,
+        /** The section-less/expired fallback re-run — the retry's only LLM-spending leg. */
+        FALLBACK,
+        /** No prior digest to retry. */
+        NO_PRIOR
     }
 
     record SlotCoordinates(

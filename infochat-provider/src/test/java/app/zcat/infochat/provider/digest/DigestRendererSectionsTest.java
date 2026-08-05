@@ -10,6 +10,7 @@ import app.zcat.infochat.provider.summary.EmptyEdgeSource;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator.ClusterProse;
 import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
+import app.zcat.infochat.provider.translation.TranslationCache;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -68,6 +69,11 @@ class DigestRendererSectionsTest {
         renderer.categoryRollupGenerator = rollupGenerator;
         renderer.llmOutputSanitizer = SanitizerTestDoubles.noAuditSanitizer();
         renderer.translationPipeline = newEnShortCircuitPipeline(bundleLoader);
+        // M1-767: the renderer's system-budget draw probes this cache at
+        // appendClusterProse (to skip cache-hit translations), so the
+        // field is now read on non-en scopes — wired here as
+        // DigestRendererTest does.
+        renderer.translationCache = new TranslationCache();
         renderer.digestCategorizer = newCategorizer(3);
         renderer.bundleLoader = bundleLoader;
         renderer.categoryItemCap = 12;

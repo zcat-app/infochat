@@ -16,7 +16,10 @@ import app.zcat.infochat.provider.translation.TranslationPipeline;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -389,6 +392,89 @@ class DigestRendererTest {
                 "full: no roll-up calls");
         assertEquals(40, proseGenerator.callCount(),
                 "full: one prose call per rendered cluster (the cap is lifted)");
+    }
+
+    @Test
+    void renderSections_drawsSystemLlmBudgetAtLiveCallSites() throws Exception {
+        // M1-767 acceptance item 5: the meter is drawn on the scheduled
+        // digest render. The provider stubs cannot be counted (they are
+        // test doubles), so the assertion is on the budget's own counter:
+        // one draw per summarizer cluster (SummaryProseGenerator's
+        // documented per-cluster contract), one per non-en, cache-missing
+        // cluster-prose translation, and one per roll-up call site.
+        //
+        // The summarizer stub returns DISTINCT prose per cluster — the
+        // translation cache is keyed on prose text, so uniform text would
+        // collapse clusters 2 and 3 into cache hits and undercount the
+        // draws (production prose is per-cluster distinct by construction).
+        SystemLlmBudget budget = new SystemLlmBudget();
+        budget.window = Duration.ofHours(24);
+        budget.ceiling = 1000;
+        budget.clock = Clock.fixed(Instant.parse("2026-08-04T08:00:00Z"), ZoneOffset.UTC);
+        renderer.systemLlmBudget = budget;
+        renderer.leadMinimum = Integer.MAX_VALUE;
+        DistinctProseGenerator distinctProse = new DistinctProseGenerator();
+        renderer.summaryProseGenerator = distinctProse;
+        List<Post> posts = taggedPosts(3, "en", "ai");
+        AtomicInteger translatorCalls = new AtomicInteger();
+        wireTranslator(translatorCalls, "Přeložená próza");
+
+        renderer.renderSections(posts, "cs", DigestMode.FULL, GROUP_ID);
+
+        assertEquals(6, budget.callsInWindow(),
+                "full render of 3 clusters: 3 summarizer calls + 3 cluster-prose translations");
+        assertEquals(3, translatorCalls.get(),
+                "control: the non-en translation leg really did call the provider");
+
+        renderer.renderSections(posts, "cs", DigestMode.BRIEF, GROUP_ID);
+
+        assertEquals(7, budget.callsInWindow(),
+                "brief render: one roll-up draw per surviving section");
+        assertEquals(1, distinctProse.generateCalls(),
+                "brief makes no summarizer invocations, so no summarizer draws");
+    }
+
+    @Test
+    void renderSections_enScope_drawsNoTranslationCalls() throws Exception {
+        // M1-767: en-scope prose translation is a guaranteed no-op (the
+        // pipeline's documented short-circuit), so it must not draw the
+        // budget — the M1-756 "cache hits render free" principle and the
+        // translatesUnderThisScope restatement precedent.
+        SystemLlmBudget budget = new SystemLlmBudget();
+        budget.window = Duration.ofHours(24);
+        budget.ceiling = 1000;
+        budget.clock = Clock.fixed(Instant.parse("2026-08-04T08:00:00Z"), ZoneOffset.UTC);
+        renderer.systemLlmBudget = budget;
+        renderer.leadMinimum = Integer.MAX_VALUE;
+        List<Post> posts = taggedPosts(3, "en", "ai");
+
+        renderer.renderSections(posts, "en", DigestMode.FULL, GROUP_ID);
+
+        assertEquals(3, budget.callsInWindow(),
+                "en-scope full render: 3 summarizer calls, ZERO translation draws");
+    }
+
+    /**
+     * Summarizer stub returning DISTINCT prose per cluster, so the
+     * translation cache — keyed on prose text — misses for every cluster
+     * and the system-budget draw test counts real per-cluster draws.
+     * The shared {@link RecordingSummaryProseGenerator} returns one text
+     * for all clusters, which would collapse the cache keys.
+     */
+    private static final class DistinctProseGenerator extends SummaryProseGenerator {
+        private int generateCalls;
+
+        int generateCalls() { return generateCalls; }
+
+        @Override
+        public List<ClusterProse> generate(List<Cluster> clusters, String scopeLanguage) {
+            generateCalls++;
+            List<ClusterProse> out = new ArrayList<>(clusters.size());
+            for (Cluster c : clusters) {
+                out.add(new ClusterProse(c, "prose for " + c.topicId(), false));
+            }
+            return out;
+        }
     }
 
     // ----- M1-756 display-hit translation -----------------------------------

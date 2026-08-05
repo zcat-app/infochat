@@ -1,0 +1,89 @@
+RED-TEAM VERDICT: FINDINGS
+
+FINDINGS:
+  - CATEGORY: DOS
+    SEVERITY: medium
+    PROMISE: docs/spec/security.md §Rate limiting ("Per-group LLM rate
+      (D47)"): "Periodic digests do NOT count against user-initiated
+      per-group LLM budget (they are system-initiated; the aggregate
+      system LLM budget is the backstop for digest cost)." The threat
+      model also establishes that feed publishers are untrusted
+      ("The Collector is exposed to arbitrary feed content. Every RSS
+      publisher ... is untrusted"), and the DOS category covers
+      "unbounded LLM calls".
+    GAP: The "backstop" is gate-then-draw with no intra-render bound.
+      DigestWorker.executeSlot consults SystemLlmBudget.canStartRender()
+      once, before the render starts (DigestWorker.java, the
+      `!systemLlmBudget.canStartRender()` clause added at the former
+      line-219 slot-window check). The render's calls are then drawn
+      AFTER they complete: recordCalls(shownClusters.size()) after
+      summaryProseGenerator.generate returns (DigestRenderer.java ~363),
+      recordCalls(leadProse.size()) after the lead generate (~376),
+      recordCalls(1) after generateRollup (~432), and a post-hoc
+      per-cluster draw in appendClusterProse (~862). Nothing caps the
+      calls a single ADMITTED render makes: FULL mode lifts the
+      per-section cluster cap (DigestRenderer.java:145 comment,
+      "Max clusters rendered per category section in FULL mode is
+      unbounded"), so per-render summarizer + translator call count is
+      driven by inter-slot post volume — which is attacker-controlled
+      feed content. SystemLlmBudget.java's own class comment concedes
+      "A render admitted under the ceiling draws its actual calls as it
+      runs and may push the window over"; the overshoot multiple is
+      unbounded, not a small slack.
+    REPRO: Adversary controls (or injects into) a feed a digest group
+      subscribes to. Between two digest slots they publish tens of
+      thousands of items. The next scheduled render passes
+      canStartRender() (window near zero), clusters the flood, and makes
+      one summarizer provider call plus one non-en translator call per
+      cluster — e.g. 50,000 calls against a 3000-call ceiling — all
+      spent before the first recordCalls lands. Against a remote,
+      per-call-billed ModelTask backend this is a direct cost-amplification
+      attack the spec's "aggregate system LLM budget is the backstop for
+      digest cost" commitment claims to bound; the bound only engages on
+      the NEXT render.
+    SUGGESTED-FIX-CLASS: rate-limit
+  - CATEGORY: DOS
+    SEVERITY: low
+    PROMISE: Same §Rate limiting commitment — the budget is meaningful
+      only if its accounting tracks actual provider calls; a meter that
+      undercounts is a weaker backstop than the one the spec names.
+    GAP: Four undercount paths in the draw sites: (a) recordCalls is
+      placed after summaryProseGenerator.generate returns, so an
+      exception mid-generate (schema-violating reply after retry,
+      transport failure) drops the count of the calls already made —
+      no finally-block draw (DigestRenderer.java ~363, ~376);
+      (b) §Failure handling mandates "retry once" on schema-violating
+      LLM output, so the summarizer/roll-up can spend 2 provider calls
+      per drawn unit while the budget draws 1; (c) the appendClusterProse
+      translation draw is decided by a PRE-call probe,
+      translationCache.get(sanitized, langCode) (~858) — the diff's own
+      comment acknowledges the probe-vs-pipeline race, but only the
+      safe-direction half: the cache is capacity-bounded, so an eviction
+      between probe and translationPipeline.run yields a provider call
+      that was never drawn; (d) the lead draw uses leadProse.size()
+      (the RETURNED list), so generator failure containment that drops
+      a cluster after spending its call undercounts.
+    REPRO: A hostile or flaky endpoint (in scope per §Trust boundaries
+      item 9) returns schema-violating replies: every summarizer cluster
+      costs 2 provider calls (initial + mandated retry) and draws 1,
+      silently halving the effective ceiling; sustained failure modes
+      that throw mid-generate draw 0 for partial spend. The backstop
+      trips later than its accounting claims, compounding finding 1.
+    SUGGESTED-FIX-CLASS: rate-limit
+
+OUT-OF-MODEL:
+  - Operator misconfiguration of infochat.digest.system-llm-call-window /
+    -ceiling (absurdly high ceiling, huge window) neuters the control,
+    but operator-set config is trusted per §Threat model. A zero/negative
+    ceiling fails closed (permanent degradation), which is the safe
+    direction.
+  - The budget is in-memory and resets on restart, so a restart during
+    an attack window re-arms the full ceiling; consistent with the
+    circuit-breaker precedent ("State is in-memory only — a restart
+    resets to CLOSED") and restarts are operator-controlled, not
+    adversary-reachable.
+  - The field-initialized `new SystemLlmBudget()` left for plain-JUnit
+    construction carries a null adminNotifier, so a refusal in that
+    construction NPEs instead of signalling; test-only shape (CDI
+    overwrites the field at runtime), a code-quality note rather than a
+    threat-model finding.

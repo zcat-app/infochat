@@ -1,0 +1,177 @@
+RED-TEAM VERDICT: FINDINGS
+
+FINDINGS:
+  - CATEGORY: DOS
+    SEVERITY: medium
+    PROMISE: security.md §Rate limiting — "**Per-group LLM rate (D47)** — a separate
+              sub-bucket per approved group bounding LLM-triggering operations (chat
+              replies + on-demand `/summary` + `/retry` re-rolls) across all group
+              members. The per-user LLM cap fires first; the per-group cap is the
+              backstop for groups with many active members. ... Periodic digests do NOT
+              count against user-initiated per-group LLM budget (they are
+              system-initiated; the aggregate system LLM budget is the backstop for
+              digest cost)." Paired with §Authorization model — "**Group admin** — one
+              group only." The whole §Rate limiting section is built on per-consumer
+              bounds so one sender/one group cannot consume the shared capacity of
+              others (cf. "**Per-user interruptible concurrency** ... so group
+              membership cannot let a single sender occupy every dispatch worker at one
+              instant").
+    GAP: The new control is a single deployment-wide counter with no per-group share,
+          no per-render bound, and an admission-only gate.
+          `SystemLlmBudget.callTimestamps` (SystemLlmBudget.java:~54, "One system-wide
+          deque of call timestamps — no per-user or per-group key") is consulted exactly
+          once per render, in `DigestWorker.executeSlot` at DigestWorker.java:227-228
+          (`|| !systemLlmBudget.canStartRender()`). Once admitted, the render's spend is
+          bounded only by wall clock: `DigestRenderer.renderSections` at
+          DigestRenderer.java:357-363 draws `shownClusters.size()` — one summarizer call
+          per cluster over ALL clusters of ALL surviving sections, and FULL mode
+          deliberately lifts the per-section item cap (DigestRenderer.java:111,
+          "Max clusters rendered per category section in FULL mode is unbounded"). The
+          cluster count is driven by post volume in the group's D59 world, which any
+          non-banned user can inflate (`/add-source` + subscription). Nothing reserves
+          budget for later groups, and `DigestScheduler.staggerOffset`
+          (DigestScheduler.java:338-341) is a deterministic `groupId hash %
+          windowWidthMinutes`, so the SAME late-firing groups lose every day. The gate
+          is also check-then-act across concurrent slot dispatches (DigestScheduler
+          fires slots on virtual threads bounded by `infochat.summary.workers`), so N
+          renders can pass `canStartRender()` under the ceiling and then all spend.
+          Finally the user-initiated `/retry --digest` route reaches the very same
+          render and the same global pool (`DigestRetryService.fallbackRerun` →
+          `digestWorker.execute`, DigestRetryService.java:220-231), so a GROUP-admin-tier
+          actor ("Only group admins or bot admins can retry a digest") draws down a
+          deployment-wide resource. The shipped default has zero headroom by its own
+          arithmetic: ceiling 3000 ÷ 30 calls/render = exactly 50 groups × 2 slots
+          (application.properties, M1-767 block; ticket §Measurement).
+    REPRO: 1) Attacker is a registered, non-probation user and group admin of one
+            approved group (auto-promoted as the first eligible @mentioner, or promoted
+            after activating the group). 2) `/add-source <feed-they-control> --tags ai`
+            and subscribe the group to it. 3) Publish a few hundred posts into that feed
+            between digest slots; they cluster into hundreds of clusters. 4) At the
+            group's slot the FULL-mode render is admitted by a single `canStartRender()`
+            and then issues one summarizer call per cluster plus one translator call per
+            cluster (non-`en` scope) until the 30-minute slot window cancels it —
+            hundreds to thousands of recorded calls in one render. 5) The 3000-call,
+            PT24H window is now at/over the ceiling. Every OTHER group whose slot fires
+            later that day is refused at DigestWorker.java:227-228 and receives the
+            headlines-only degraded digest for the remainder of the 24-hour window,
+            including groups the attacker has no membership in. The same effect is
+            reachable without any hostile feed simply by one large tenant, and the
+            deterministic stagger makes the set of starved groups stable rather than
+            random. Nothing in the spec grants a group-admin-tier actor, or one group's
+            content volume, a deployment-wide lever over other groups' digests.
+    SUGGESTED-FIX-CLASS: rate-limit
+
+  - CATEGORY: DOS
+    SEVERITY: medium
+    PROMISE: security.md §Rate limiting — "Periodic digests do NOT count against
+              user-initiated per-group LLM budget (they are system-initiated; the
+              aggregate system LLM budget is the backstop for digest cost)." A backstop
+              on *cost* has to count the calls that are actually made; a ceiling that
+              meters a strict subset of the render's generative calls is not the bound
+              the spec names.
+    GAP: The meter systematically under-counts the render's real provider calls on the
+          DEFAULT digest mode. `DigestRenderer.renderSections` records exactly one call
+          per roll-up call site (DigestRenderer.java:430-433, `recordCalls(1)`, comment:
+          "the generator makes one provider call per invocation"), but
+          `CategoryRollupGenerator.generateRollup` makes TWO provider-reaching
+          generative calls on a non-`en` scope: `provider.generate(ModelTask.SUMMARIZER,
+          …)` (CategoryRollupGenerator.java:196-197) and then
+          `translationPipeline.run(sanitized, langCode)` (CategoryRollupGenerator.java:213),
+          the latter a `ModelTask.TRANSLATOR` call on a cold cache. That second leg is
+          uncounted here and has no budget of its own — DigestRenderer.java:132-136
+          states it explicitly: "`appendClusterProse` and `CategoryRollupGenerator` reach
+          the same `ModelTask.TRANSLATOR` on the same render with no per-render budget of
+          their own". The diff meters `appendClusterProse`'s translator call
+          (DigestRenderer.java:861-866) but not the roll-up's. `brief`/`normal` are the
+          modes that render roll-ups (`normal` is the SQL-deserialization fallback per
+          DigestWorker.digestModeOrNormal), and `max-categories=8`, so a single default-mode
+          render in a non-English group can spend up to ~2× what it records. The
+          headline display-hit leg is excluded too (documented, and separately bounded by
+          `translation-max-per-render`), which compounds the gap in the same direction.
+    REPRO: A deployment of non-English (`/lang cs`) groups on the default `normal`
+            digest mode. Each slot render makes 8 SUMMARIZER roll-up calls + up to 8
+            TRANSLATOR roll-up calls + up to 5 headline translations, and records 8.
+            Real generative spend runs ~2.6× the recorded figure, so the operator-set
+            ceiling of 3000 calls/24h is crossed in reality at ~1150 recorded calls and
+            `canStartRender()` keeps admitting renders long past the point the operator
+            believes spending stops. On a metered remote provider (`ModelTask.TRANSLATOR`
+            "may be remote" per §Rate limiting) the overspend is billed, and the control
+            the ticket exists to add reports "under budget" throughout.
+    SUGGESTED-FIX-CLASS: rate-limit
+
+  - CATEGORY: DOS
+    SEVERITY: medium
+    PROMISE: security.md §Failure handling — "Fail-fast changes WHEN a doomed call
+              fails, never WHERE it goes or how the task degrades: the short-circuit
+              surfaces as the same failure the consumer already handles" and "A complete
+              LLM outage degrades quality, not safety." §Trust boundaries item 9 puts the
+              hostile/unreachable endpoint in scope: "a hostile or compromised endpoint
+              is in scope here for the same reason a hostile feed is on the ingest side."
+    GAP: The draws record calls that were never made on exactly the failure paths where
+          zero HTTP requests are issued, so an outage burns the 24-hour budget.
+          `DigestRenderer.java:362-363` calls `summaryProseGenerator.generate(...)` and
+          then unconditionally `recordCalls(shownClusters.size())`. Inside
+          `SummaryProseGenerator.generate` an unresolvable provider returns every cluster
+          degraded with ZERO calls (SummaryProseGenerator.java:110-118), and with the
+          circuit breaker OPEN each `provider.generate` short-circuits "without an HTTP
+          attempt" (§Failure handling) into the per-cluster catch — again zero real
+          calls. The roll-up draw (DigestRenderer.java:433) has the same shape: it fires
+          after `generateRollup`, which returns `Optional.empty()` from its
+          `catch (RuntimeException)` with no call made. The budget therefore fills at
+          full nominal rate during an outage, and once `callTimestamps.size() >= ceiling`
+          (SystemLlmBudget.java:~108) every subsequent slot is refused for the rest of the
+          PT24H window. The breaker's short-circuit thus acquires a lasting side effect on
+          how a LATER, healthy task degrades — the property the spec says fail-fast never
+          changes.
+    REPRO: 1) The configured LLM endpoint becomes unreachable (a hostile or compromised
+            endpoint refusing connections is in-model per trust boundary 9; a 20-minute
+            network partition does it equally well). 2) The breaker trips OPEN after 3
+            consecutive transport failures. 3) The scheduled digest slots for 50 groups
+            fire; each render makes zero provider calls yet records ~30, so ~1500 phantom
+            calls land in the window per slot round; two rounds exhaust the 3000 ceiling.
+            4) The endpoint recovers minutes later and the breaker closes. 5) Every group's
+            digest nevertheless stays headlines-only degraded until the 24-hour window
+            drains, and the admin receives "scheduled digest degraded: system LLM call
+            budget exhausted" for spend that never happened. A transient outage is
+            converted into a day-long, deployment-wide degradation, and the operator's
+            only recovery lever is a restart (which resets the in-memory window) or a
+            config change.
+    SUGGESTED-FIX-CLASS: other
+
+  - CATEGORY: DOS
+    SEVERITY: low
+    PROMISE: security.md §Failure handling — "**Admin notifications** are coalesced per
+              `(channel, error_class)` for a short window so an outage produces one
+              summary message, not 200 individual alerts." The coalescing exists so a
+              breach condition does not turn into per-event work.
+    GAP: `SystemLlmBudget.canStartRender()` (SystemLlmBudget.java:~106-113) is
+          `synchronized` and calls `adminNotifier.notifyOnce(BREACH_KEY, …)` INSIDE the
+          monitor, on EVERY refusal. `ThrottledAdminNotifier.notifyOnce` opens a JDBC
+          connection and runs an UPSERT against `admin_notification_state`
+          (ThrottledAdminNotifier.java:234-244) — the coalescing suppresses the *emission*,
+          not the round-trip. The class javadoc's claim ("whose own per-(key,
+          throttle-window) coalescing makes it at most one emission per window, never one
+          per suppressed render") is true of the message and false of the work. Because
+          `recordCalls` and `callsInWindow` share the same monitor
+          (SystemLlmBudget.java:~121, ~135), every concurrent render's draw blocks behind
+          that DB round-trip. The provider's JDBC pool is small (application.properties
+          §pool sizing: 12–16), so the contention appears precisely under the overload the
+          control is meant to handle, and precisely when the pool is already contended.
+    REPRO: Drive the budget to the ceiling (see finding 1). From then on, every scheduled
+            slot dispatch and every `/retry --digest` calls `canStartRender()`, each doing
+            a blocking DB write while holding the single global budget monitor; the
+            concurrent renders admitted just before exhaustion stall on `recordCalls` for
+            the duration of each of those writes. The breach path adds per-refusal DB and
+            lock work rather than shedding it.
+    SUGGESTED-FIX-CLASS: other
+
+OUT-OF-MODEL:
+  - The budget window is in-memory only (`SystemLlmBudget.callTimestamps`), so a
+    restart, redeploy, or crash-loop resets a 24-hour control to zero. The spec accepts
+    in-memory state for the circuit breaker ("State is in-memory only — a restart resets
+    to CLOSED"), and process restarts are not an external-adversary lever in this threat
+    model, so this is flagged for the operator/spec owner rather than filed as a finding.
+  - The budget is per-JVM. v1 is single-instance by advisory lock, so this is currently
+    equivalent to deployment-wide; a future multi-instance Provider would silently
+    multiply the ceiling by the instance count. Out of model today, worth an explicit
+    spec line before any multi-instance work.

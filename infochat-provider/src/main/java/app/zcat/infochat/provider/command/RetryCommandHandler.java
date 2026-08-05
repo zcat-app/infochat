@@ -16,6 +16,8 @@ import app.zcat.infochat.provider.chat.SummaryAnchorRepository.AnchorRow;
 import app.zcat.infochat.provider.digest.DigestRenderer;
 import app.zcat.infochat.provider.digest.DigestRenderer.RenderedSection;
 import app.zcat.infochat.provider.digest.DigestRetryService;
+import app.zcat.infochat.provider.digest.DigestRetryService.RetryLeg;
+import app.zcat.infochat.provider.digest.SystemLlmBudget;
 import app.zcat.infochat.provider.group.GroupMembershipRepository;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.messaging.CommandHandler;
@@ -135,6 +137,19 @@ public class RetryCommandHandler implements CommandHandler {
 
     @Inject
     DigestRetryService digestRetryService;
+
+    // M1-767 redteam rounds 2-5 (Option B): the /retry --digest route binds
+    // the deployment-wide pool on its FALLBACK re-run leg (the retry's only
+    // LLM spend; the replay leg makes zero calls and is never gated in
+    // steady state — a stale probe refuses it free, see
+    // DigestRetryService.retryLeg). The
+    // refusal is decided HERE, pre-charge, from retryLeg() + this budget, so
+    // a refused re-run draws no per-user token, no D47 draw and no cooldown.
+    // Field-initialized so a plain-JUnit construction carries an empty
+    // (never-refusing) budget; CDI overwrites at runtime — the
+    // {@link DigestWorker} pattern.
+    @Inject
+    SystemLlmBudget systemLlmBudget = new SystemLlmBudget();
 
     @Inject
     RateCapBucket rateCapBucket;
@@ -538,6 +553,34 @@ public class RetryCommandHandler implements CommandHandler {
         }
 
         writeDigestRetryAudit(actor, adapter, contactId, groupDbId);
+
+        // M1-767 redteam rounds 2-5 (Option B): the retry binds the
+        // deployment-wide pool ONLY on its fallback re-run leg. This
+        // PRE-CHARGE refusal draws no per-user token, no D47 draw, stamps
+        // no cooldown and never touches retryDigest, so the zero-LLM
+        // replay leg is never gated in steady state (round-3 finding,
+        // fixed). The LEG PROBE RUNS FIRST, and canStartRender() only on
+        // the FALLBACK leg: canStartRender() is NOT a pure predicate — it
+        // emits the breach signal (a JDBC UPSERT on every refusal) — so
+        // ordering it ahead of the probe would alarm "digest degraded" on
+        // the replay leg, which degrades nothing. The probe is an
+        // estimate: a concurrent render persisting sections
+        // can flip the would-be leg FALLBACK -> REPLAY after the read, so
+        // a refusal can land on a retry that would by then have been free.
+        // It refuses FREE — nothing drawn or stamped — so the re-issue
+        // probes REPLAY and proceeds (round-5 finding, documented). The
+        // authoritative admission remains DigestWorker.executeSlot's gate,
+        // which DEGRADES (never refuses after a charge) if the window
+        // fills in between — the conservative non-render convention
+        // (round-4 finding, fixed). Audited above, so a hammering admin
+        // stays audit-visible; a refusal emits the budget's
+        // once-per-window breach signal.
+        if (digestRetryService.retryLeg(groupDbId) == RetryLeg.FALLBACK
+                && !systemLlmBudget.canStartRender()) {
+            return reply(scope, bundleLoader.get(
+                    BundleKeys.ERROR_RETRY_DIGEST_SYSTEM_BUDGET,
+                    inboundContext.effectiveLanguage()));
+        }
 
         // security.md §Rate limiting: /retry re-rolls draw from the same
         // per-user LLM bucket as chat replies and /summary; the per-group

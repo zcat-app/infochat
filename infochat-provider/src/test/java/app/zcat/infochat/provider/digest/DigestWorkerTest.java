@@ -5,6 +5,7 @@ import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
+import app.zcat.infochat.core.notifier.NotifyOutcome;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
@@ -170,6 +171,41 @@ class DigestWorkerTest {
         assertEquals(1, cacheRepository.upsertCount());
         assertEquals("Headlines only", cacheRepository.lastContent());
         assertTrue(cacheRepository.lastIsDegraded());
+    }
+
+    @Test
+    void execute_systemBudgetExhausted_degradesScheduledSlot() {
+        // M1-767 acceptance item 5: the meter is drawn on the SCHEDULED
+        // route specifically — this is the leg with no other meter. The
+        // provider is stubbed, so the assertion is on the budget's own
+        // counter, not on the provider: a window at the ceiling must refuse
+        // the render, degrade the digest through the existing
+        // non-generative path, still deliver it, and record nothing on the
+        // refusal (rejection never consumes budget).
+        postCollector.seed(testPosts(), 1, 1);
+        degradedRenderer.setResponse("Headlines only");
+        SystemLlmBudget budget = new SystemLlmBudget();
+        budget.window = Duration.ofHours(24);
+        budget.ceiling = 2;
+        budget.adminNotifier = new RecordingAdminNotifier();
+        budget.recordCalls(2);
+        worker.systemLlmBudget = budget;
+
+        DigestSlot slot = futureSlot();
+        worker.execute(slot);
+
+        assertEquals(0, digestRenderer.callCount(),
+                "LLM renderer not invoked when the system budget is exhausted");
+        assertEquals(1, degradedRenderer.callCount(),
+                "the digest degrades to its non-generative path instead of failing");
+        assertEquals(1, cacheRepository.upsertCount(),
+                "the degraded digest is still cached");
+        assertTrue(cacheRepository.lastIsDegraded());
+        assertEquals("Headlines only", cacheRepository.lastContent());
+        assertEquals(1, recordingAdapter.sendCount(),
+                "the degraded digest still goes out — a breach never drops it silently");
+        assertEquals(2, budget.callsInWindow(),
+                "a refused render records nothing — assert on the budget's own counter");
     }
 
     @Test
@@ -692,6 +728,18 @@ class DigestWorkerTest {
                 Thread.currentThread().interrupt();
                 throw new IllegalStateException("interrupted during send");
             }
+        }
+    }
+
+    /**
+     * Hand-rolled notifier stub for the budget-gate test — the recording
+     * subclass idiom from SystemLlmBudgetTest (notifyOnce is public and
+     * non-final).
+     */
+    private static final class RecordingAdminNotifier extends ThrottledAdminNotifier {
+        @Override
+        public NotifyOutcome notifyOnce(String key, String errorClass, String message) {
+            return NotifyOutcome.EMITTED;
         }
     }
 

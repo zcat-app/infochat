@@ -1629,6 +1629,15 @@ public final class BundleKeys {
     /** {@code /retry --digest} rate-limited — too soon after the last retry for this group. */
     public static final String ERROR_RETRY_DIGEST_RATE_LIMITED = "error.retry.digest_rate_limited";
 
+    /**
+     * {@code /retry --digest} refused before any charge: the deployment-wide
+     * system LLM budget window is at/over its ceiling, so the scheduled
+     * digest pipeline is degraded (M1-767 redteam round 2 — the pre-charge
+     * gate keeps a doomed retry from burning the per-user token, the D47
+     * per-group draw or the retry cooldown).
+     */
+    public static final String ERROR_RETRY_DIGEST_SYSTEM_BUDGET = "error.retry.digest_system_budget";
+
     /** {@code /retry --digest} success — digest re-generation initiated. */
     public static final String REPLY_RETRY_DIGEST_SUCCESS = "reply.retry.digest_success";
 

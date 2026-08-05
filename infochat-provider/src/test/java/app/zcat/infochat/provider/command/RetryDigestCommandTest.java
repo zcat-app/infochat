@@ -7,7 +7,9 @@ import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.chat.LlmRateCap;
 import app.zcat.infochat.provider.digest.DigestRetryService;
+import app.zcat.infochat.provider.digest.DigestRetryService.RetryLeg;
 import app.zcat.infochat.provider.digest.DigestRetryService.RetryResult;
+import app.zcat.infochat.provider.digest.SystemLlmBudget;
 import app.zcat.infochat.provider.group.GroupMembershipRepository;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.messaging.RateCapBucket;
@@ -204,11 +206,95 @@ class RetryDigestCommandTest {
                 "the per-user cap fires first — a per-user rejection must not touch the group bucket");
     }
 
+    // ----- M1-767 redteam rounds 2-5: pre-charge system-budget gate -------
+    //
+    // Option B: /retry --digest binds the deployment-wide pool on its
+    // FALLBACK re-run only (the replay leg makes zero LLM calls and is
+    // never gated in steady state). The refusal is decided HERE,
+    // pre-charge, from DigestRetryService.retryLeg + the budget — a
+    // refused re-run draws no per-user token, no D47 draw, stamps no
+    // cooldown and never touches retryDigest (rounds 3+4: the D47 refund
+    // gap and the post-charge refusal are closed by refusing before any
+    // charge; round 5: the leg probe is ordered ahead of the budget read).
+
+    @Test
+    void retryDigest_refusedPreChargeWhenFallbackAndSystemBudgetExhausted() {
+        digestRetryService.nextLeg = RetryLeg.FALLBACK;
+        handler.systemLlmBudget = new SystemLlmBudget() {
+            @Override
+            public boolean canStartRender() {
+                return false;
+            }
+        };
+        CountingLlmBucket groupBucket = new CountingLlmBucket(10);
+        handler.rateCapBucket = groupBucket;
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Group("group-1"), "/retry --digest");
+
+        assertEquals(handler.bundleLoader.get(BundleKeys.ERROR_RETRY_DIGEST_SYSTEM_BUDGET),
+                reply.text(),
+                "an exhausted system budget must refuse a FALLBACK-leg retry pre-charge");
+        assertEquals(0, digestRetryService.callCount,
+                "retryDigest must NOT be called on a pre-charge refusal");
+        assertTrue(handler.llmRateCap.tryAcquire(USER_ID),
+                "the pre-charge refusal must not consume the per-user LLM token");
+        assertEquals(10, groupBucket.tokensLeft,
+                "the pre-charge refusal must not touch the D47 per-group bucket");
+    }
+
+    @Test
+    void retryDigest_replayLegProceedsWithoutConsultingTheSystemBudget() {
+        // Round-3 redteam finding (claude): the zero-LLM replay leg must
+        // never be refused on the strength of the deployment-wide counter.
+        // Round 5: it must not even CONSULT the budget — canStartRender()
+        // is not a pure predicate, it emits the breach signal on refusal,
+        // so reaching it here would alarm "scheduled digest degraded" for
+        // a retry that degrades nothing. The call count
+        // is what pins the probe-before-budget ordering in the handler.
+        digestRetryService.nextLeg = RetryLeg.REPLAY;
+        CountingSystemLlmBudget budget = new CountingSystemLlmBudget();
+        handler.systemLlmBudget = budget;
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Group("group-1"), "/retry --digest");
+
+        assertEquals(1, digestRetryService.callCount,
+                "a REPLAY-leg retry must proceed despite an exhausted system budget");
+        assertEquals(0, budget.canStartRenderCalls,
+                "the replay leg must not consult canStartRender() at all — the call "
+                        + "emits the breach signal, and nothing was degraded");
+        assertTrue(reply.text().contains("Digest retry complete"),
+                "the replay must surface its normal result. Got: " + reply.text());
+    }
+
     // ----- stubs -------------------------------------------------------------
+
+    /**
+     * Refuses admission and counts the consultations. The count is the
+     * assertion surface: {@code canStartRender()} is not a pure predicate —
+     * it emits the breach signal — so the un-gated replay leg must never
+     * reach it (M1-767 redteam round 5).
+     */
+    static class CountingSystemLlmBudget extends SystemLlmBudget {
+        int canStartRenderCalls = 0;
+
+        @Override
+        public boolean canStartRender() {
+            canStartRenderCalls++;
+            return false;
+        }
+    }
 
     static class StubDigestRetryService extends DigestRetryService {
         RetryResult nextResult = RetryResult.SUCCESS;
+        RetryLeg nextLeg = RetryLeg.REPLAY;
         int callCount = 0;
+
+        @Override
+        public RetryLeg retryLeg(UUID groupId) {
+            return nextLeg;
+        }
 
         @Override
         public RetryResult retryDigest(UUID groupId) {

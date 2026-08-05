@@ -169,6 +169,42 @@ class DigestRetryServiceTest {
                 "DigestDelivery is not invoked on the fallback path — the worker delivers");
     }
 
+    // ----- M1-767 redteam rounds 2-4: the retryLeg pre-charge probe -------
+
+    @Test
+    void retryLeg_reportsFallbackForSectionLessSlot() {
+        // The section-less/expired case is the retry's ONLY LLM-spending
+        // leg — the one RetryCommandHandler gates against the system budget
+        // BEFORE any charge.
+        assertTrue(sectionRepository.findOrderedSections(GROUP_ID, SLOT_FIRED_AT).isEmpty(),
+                "fixture: no persisted sections");
+
+        assertEquals(DigestRetryService.RetryLeg.FALLBACK, service.retryLeg(GROUP_ID),
+                "a section-less slot must probe as FALLBACK");
+    }
+
+    @Test
+    void retryLeg_reportsReplayForLivePersistedSections() {
+        // Round-3 redteam finding (claude): the zero-LLM replay leg must
+        // NEVER be refused on the strength of the system counter — the
+        // probe reports REPLAY so the handler skips the budget gate
+        // entirely for it.
+        pinClockToLiveRow();
+        sectionRepository.seedSections(List.of(
+                new RenderedSection("security", "section A bytes")));
+
+        assertEquals(DigestRetryService.RetryLeg.REPLAY, service.retryLeg(GROUP_ID),
+                "a live row with persisted sections must probe as REPLAY");
+    }
+
+    @Test
+    void retryLeg_reportsNoPriorForMissingRow() {
+        service.dataSource = noPriorDataSource();
+
+        assertEquals(DigestRetryService.RetryLeg.NO_PRIOR, service.retryLeg(GROUP_ID),
+                "no cache row must probe as NO_PRIOR");
+    }
+
     // ----- replay path (persisted sections present, row non-expired) --------
 
     @Test
@@ -390,6 +426,42 @@ class DigestRetryServiceTest {
      */
     private static DataSource stubDataSource(boolean isDegraded) {
         return stubDataSource(isDegraded, "normal");
+    }
+
+    /** DataSource whose every query returns no rows — the NO_PRIOR probe shape. */
+    private static DataSource noPriorDataSource() {
+        return new DataSource() {
+            @Override
+            public Connection getConnection() {
+                return (Connection) Proxy.newProxyInstance(
+                        Connection.class.getClassLoader(),
+                        new Class<?>[] { Connection.class },
+                        (proxy, method, args) -> switch (method.getName()) {
+                            case "prepareStatement" -> (PreparedStatement) Proxy.newProxyInstance(
+                                    PreparedStatement.class.getClassLoader(),
+                                    new Class<?>[] { PreparedStatement.class },
+                                    (ps, psMethod, psArgs) -> switch (psMethod.getName()) {
+                                        case "setString", "setObject", "setTimestamp" -> null;
+                                        case "executeQuery" -> emptyResultSet();
+                                        case "close" -> null;
+                                        default -> throw new UnsupportedOperationException(
+                                                "PS." + psMethod.getName());
+                                    });
+                            case "close" -> null;
+                            default -> throw new UnsupportedOperationException(
+                                    "Conn." + method.getName());
+                        });
+            }
+
+            @Override public Connection getConnection(String u, String p) { return getConnection(); }
+            @Override public PrintWriter getLogWriter() { throw new UnsupportedOperationException(); }
+            @Override public void setLogWriter(PrintWriter out) { throw new UnsupportedOperationException(); }
+            @Override public void setLoginTimeout(int seconds) { throw new UnsupportedOperationException(); }
+            @Override public int getLoginTimeout() { throw new UnsupportedOperationException(); }
+            @Override public Logger getParentLogger() throws SQLFeatureNotSupportedException { throw new SQLFeatureNotSupportedException(); }
+            @Override public <T> T unwrap(Class<T> iface) { throw new UnsupportedOperationException(); }
+            @Override public boolean isWrapperFor(Class<?> iface) { return false; }
+        };
     }
 
     private static DataSource stubDataSource(boolean isDegraded, String digestMode) {

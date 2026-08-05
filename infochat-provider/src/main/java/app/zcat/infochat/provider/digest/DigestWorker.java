@@ -86,6 +86,24 @@ public class DigestWorker {
     @Inject
     OutboundDelivery outboundDelivery;
 
+    // M1-767: the system-wide LLM call budget — the scheduled digest
+    // route's only rate-limiting control (no user in the loop, so no
+    // per-user or per-group bucket is drawn), shared with the
+    // /retry --digest route, whose FALLBACK re-run binds the same pool
+    // behind the pre-charge refusal in RetryCommandHandler
+    // (DigestRetryService.retryLeg + this budget); its replay leg makes
+    // zero LLM calls and is never gated in steady state — a stale probe
+    // refuses it free, see DigestRetryService.retryLeg (M1-767 redteam
+    // rounds 2-5).
+    // The render draws an estimate
+    // of its calls at its live generative call sites; this gate refuses admission
+    // when the window is at/over the ceiling, degrading the digest exactly
+    // like the slot-window check below. Field-initialized so a plain-JUnit
+    // construction carries an empty (never-refusing) budget; CDI overwrites
+    // at runtime — the {@link #clock} pattern.
+    @Inject
+    SystemLlmBudget systemLlmBudget = new SystemLlmBudget();
+
     @Inject
     DataSource dataSource;
 
@@ -208,7 +226,13 @@ public class DigestWorker {
             content = bundleLoader.get(BundleKeys.REPLY_SUMMARY_NO_POSTS_YET, meta.language());
         } else {
             Duration remaining = Duration.between(clock.instant(), slot.windowEnd());
-            if (remaining.isNegative() || remaining.isZero()) {
+            // M1-767: the volume bound sits alongside the temporal one —
+            // an exhausted system budget degrades the scheduled digest the
+            // same way an expired slot window does (the digest still goes
+            // out; a breach never throws into the scheduler and never
+            // drops it silently).
+            if (remaining.isNegative() || remaining.isZero()
+                    || !systemLlmBudget.canStartRender()) {
                 content = degradedRenderer.render(collection.posts());
                 isDegraded = true;
             } else {
