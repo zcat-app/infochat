@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 777 |
+| done | 778 |
 | deferred | 0 |
 | abandoned | 23 |
 | **total** | **804** |
@@ -26,12 +26,8 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-760 — Re-drive posts whose ingest translation exhausted its attempts (complexity: medium, risk: medium)
-<<<<<<< HEAD
 - M1-765 — Anchor snapshot for saved posts (complexity: medium, risk: medium)
 - M1-766 — Anchor-first degraded renderers (complexity: low, risk: low)
-- M1-769 — Render-scoped exact LLM call accounting and per-call bound for the digest budget (complexity: high, risk: high)
-=======
->>>>>>> m1/M1-769-render-scoped-exact-llm-call-accounting
 
 ---
 
@@ -77,7 +73,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-761 | Extend the translator target-script check to the display-hit leg | 2026-08-04 | round 1 APPROVE |
 | M1-758 | Correct every operator-facing LLM exposure disclosure | 2026-08-04 | round 1 APPROVE |
 | M1-756 | Display-time hit translation for digest headlines and the degraded renderers | 2026-08-04 | round 1 APPROVE |
-| M1-755 | Display-time translation of /saved list headlines | 2026-08-04 | round 2 APPROVE |
 
 ---
 
