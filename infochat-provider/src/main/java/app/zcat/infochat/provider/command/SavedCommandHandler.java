@@ -124,8 +124,21 @@ public class SavedCommandHandler implements CommandHandler {
     // value always carries at least BODY_SCAN_LIMIT Java chars whenever the
     // full body would have, and the helper's own cut consumes no more than
     // that. (Redteam 2026-07-30, medium/DOS.)
+    //
+    // The two anchor columns (V78, M1-765) are bounded the same way, and
+    // title_en is bounded even though `title` beside it is not: `title` is
+    // capped at the ingest write boundary by
+    // IngestTextNormalizer.TITLE_MAX_LENGTH, whereas BOTH anchor columns are
+    // LLM-authored and capped at no write path
+    // (IngestTranslationWorker.persistTranslation writes the translator's
+    // reply as it stands). So they carry the unbounded-operand property that
+    // earned `body` its left(), and the 20-rows-per-page argument above
+    // applies to them unchanged. Still a pure snapshot read: the anchor was
+    // frozen at /save time and never re-resolves against `post`.
     private static final String SELECT_ROWS_BASE_SQL =
             "SELECT post_uid, title, left(body, " + DisplayHeadline.BODY_SCAN_LIMIT + ") AS body, "
+                    + "left(title_en, " + DisplayHeadline.BODY_SCAN_LIMIT + ") AS title_en, "
+                    + "left(body_en, " + DisplayHeadline.BODY_SCAN_LIMIT + ") AS body_en, "
                     + "url, snapshot_tags, personal_tags, saved_at, source_language "
                     + "FROM saved_post WHERE user_id = ?" + VISIBILITY_INTERLOCK_SQL;
 
@@ -338,6 +351,8 @@ public class SavedCommandHandler implements CommandHandler {
                 rs.getString("post_uid"),
                 rs.getString("title"),
                 rs.getString("body"),
+                rs.getString("title_en"),
+                rs.getString("body_en"),
                 rs.getString("url"),
                 snapshotArr == null ? List.of() : Arrays.asList((String[]) snapshotArr.getArray()),
                 personalArr == null ? List.of() : Arrays.asList((String[]) personalArr.getArray()),
@@ -405,20 +420,30 @@ public class SavedCommandHandler implements CommandHandler {
             // (M1-697: a flag-bearing closed-list entry deletes the span from
             // command word to flag token, so a widened input would let a
             // command word in the title and a flag in the body erase
-            // everything between them). The tags are a SECOND author field and
+            // everything between them). The anchor does not widen that unit:
+            // it is a separately stored value and takes its OWN sanitize call
+            // inside the helper, at the same point in the same order the
+            // original takes its own, so an anchored row makes two
+            // single-field calls rather than one call over a wider input.
+            // The tags are a SECOND author field and
             // keep their own separate call here. sanitize() is a no-op on a
             // value with no closed-list token (byte-identical passthrough of a
             // legit-slash title like TCP/IP), and opens no DB connection
             // unless it actually redacts. The bot-authored uid and relative
             // age are not sanitized.
-            // The anchor is ALWAYS absent here: this is a pure snapshot read
-            // and saved_post carries no title_en/body_en, so /saved can only
-            // render the anchor-absent form — the original in the primary
-            // slot, bracketed when it is not in the reader's language.
-            // Snapshotting the anchor needs a migration (M1-765).
+            // The anchor is read from the SNAPSHOT (V78, M1-765), so this
+            // stays a pure snapshot read — the same derivation the digest
+            // surfaces run, over columns frozen at /save time rather than
+            // re-resolved against `post`. A row saved before V78, or one
+            // whose post the ingest translator never anchored, hands NULL
+            // here and takes the anchor-absent branch: the original in the
+            // primary slot, bracketed when it is not in the reader's
+            // language.
             DisplayHeadline.AnchoredHeadline headline = DisplayHeadline.anchorFirst(
-                    row.title, row.body, null, null, llmOutputSanitizer);
-            String primary = headline.originalLine();
+                    row.title, row.body, row.titleEn, row.bodyEn, llmOutputSanitizer);
+            boolean usesAnchor = DisplayHeadline.usesAnchor(
+                    headline, row.sourceLanguage, scopeLanguage);
+            String primary = usesAnchor ? headline.readerLine() : headline.originalLine();
             TranslationPipeline.DisplayHit hit = TranslationPipeline.skipped(primary);
             if (!headline.isEmpty()
                     && !"en".equalsIgnoreCase(scopeLanguage)
@@ -460,11 +485,11 @@ public class SavedCommandHandler implements CommandHandler {
                 // spends the last slot still calls.
                 if (cacheHit) {
                     hit = translationPipeline.runForDisplayHit(
-                            primary, row.sourceLanguage, false, "saved", userId, scopeLanguage);
+                            primary, row.sourceLanguage, usesAnchor, "saved", userId, scopeLanguage);
                 } else if (translationBudget > 0) {
                     translationBudget--;
                     hit = translationPipeline.runForDisplayHit(
-                            primary, row.sourceLanguage, false, "saved", userId, scopeLanguage);
+                            primary, row.sourceLanguage, usesAnchor, "saved", userId, scopeLanguage);
                 }
             }
             // An empty headline means the snapshot carries no renderable text
@@ -480,7 +505,7 @@ public class SavedCommandHandler implements CommandHandler {
             // subordinate line (M1-759).
             String primaryToken = DisplayHeadline.primaryFor(hit.headline(),
                     TranslationPipeline.primaryInReaderLanguage(
-                            hit, false, row.sourceLanguage, scopeLanguage));
+                            hit, usesAnchor, row.sourceLanguage, scopeLanguage));
             if (hit.note() != null) {
                 primaryToken = primaryToken + "\n" + hit.note();
             }
@@ -611,6 +636,12 @@ public class SavedCommandHandler implements CommandHandler {
             // `saved_post.body` is nullable in the DDL (V15) — a save taken
             // from a body-less source snapshots NULL here.
             @Nullable String body,
+            // `saved_post.title_en` / `body_en` are nullable with no default
+            // (V78) — a row saved before that migration, or one whose post
+            // the ingest translator never anchored, carries NULL and takes
+            // DisplayHeadline's anchor-absent branch.
+            @Nullable String titleEn,
+            @Nullable String bodyEn,
             String url,
             List<String> snapshotTags,
             List<String> personalTags,

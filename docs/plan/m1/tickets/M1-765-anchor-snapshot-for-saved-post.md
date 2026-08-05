@@ -1,9 +1,9 @@
 ---
 id: M1-765
 title: "Anchor snapshot for saved posts"
-status: pending
+status: done
 created: 2026-08-04
-last_updated: 2026-08-04
+last_updated: 2026-08-05
 blocked_by:
   - M1-759
 files_budget: 7
@@ -107,12 +107,120 @@ decision_refs:
   - D13
   - D29
   - D33
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 10
+      added: 759
+      removed: 24
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+redteam_audits:
+  - date: 2026-08-05
+    verdict: CLEAN
+    base: 02baa3a153973f668ce59f7288aa70b48ea3cd3a
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-765-2026-08-05.md
+    out_of_model_count: 4
+    note: |
+      Ran at the /m1-tick run gate, ahead of review, against the working
+      tree vs the fork point. CLEAN at every severity: the adversary
+      confirmed the sanitize unit stays one author's field per call
+      (DisplayHeadline.derive gives the anchor its own call rather than
+      widening the original's input), the read path stays a pure snapshot
+      read, and both new columns carry the BODY_SCAN_LIMIT bound in SQL
+      and again in Java.
+      Four out-of-model items, all advisory and none a delivery gap:
+      (1) a privileged command split across the anchor line and the
+      original line is neither redacted nor audited — an exposure
+      security.md §"Flag position mirrors the parser's own scan" already
+      accepts for "two posts' fields", which the anchor now makes
+      reachable from ONE hostile publisher; (2) that same section's
+      sanitize-call census does not list the anchor, stale since M1-759
+      for the digest surfaces and now for /saved; (3) nothing verifies
+      the anchor column is actually English, so D29 (c)'s unbracketed-
+      means-readable invariant rests on an unchecked column (pre-exists
+      on the digest surfaces; this diff extends it to /saved); (4) audit
+      writes per row moved from two sanitize calls to three, the third
+      firing even when usesAnchor is false.
+      Dispositions (user, 2026-08-05, each after a falsification pass).
+      NOTE: the 1+2 disposition below was SUPERSEDED the same day — see
+      the round-2 entry; the spec amendment was reverted back out and
+      the gap is closed in code by M1-772 instead.
+      1+2 folded into this ticket (refine 990c7f5f) — item 1 survived,
+      and the first falsification of it was WRONG: the two lines DO
+      combine, because the parser tokenizes the whole multi-line body
+      and bracketed() wraps only the line's ends, so `--all` stays a
+      clean token. 3 deferred to M1-771, whose out_of_scope fences the
+      audit's proposed target-script fix as unworkable
+      (missingTargetScript no-ops on LATIN targets; the anchor targets
+      English). 4 dropped as falsified — emitAuditRows does no DB work
+      without a match. Detail in the verdict file.
+  - date: 2026-08-05
+    verdict: FINDINGS
+    base: 02baa3a153973f668ce59f7288aa70b48ea3cd3a
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-765-2026-08-05-r2.md
+    findings_count: 1
+    out_of_model_count: 4
+    note: |
+      Round 2, re-audit of the spec amendment items 1+2 had folded in.
+      One low/AUDIT-EVASION finding, and it was against the AMENDMENT,
+      not the code: the new text carried the old residual's two-legged
+      accept-rationale onto the within-row case, but only the
+      `is_admin=true` leg transfers. The multi-author leg ("one sanitize
+      call over assembled multi-author prose is strictly worse") cannot
+      apply when both values come from ONE post — a joint pass there
+      would delete only that publisher's own bytes, self-suppression
+      rather than the third-party content-suppression vector the spec
+      cites. So the text recorded a CLOSABLE gap as a permanent
+      residual. Three of the four out-of-model items were also against
+      the amendment: it misattributed the mechanism to M1-765 when the
+      original+anchor adjacency shipped with M1-759 (reaching the
+      digest and /summary, not just /saved); it stated the precondition
+      as "a single hostile publisher" when §Trust boundaries item 9 puts
+      a hostile LLM endpoint in scope, which needs no publisher control
+      at all; and the census remains short by two pre-existing one-field
+      calls (the /saved <tag> filter echo, the display-hit sanitizer-2
+      leg). None was falsifiable — all four were verified against the
+      code and the threat model and all survived.
+      RESOLUTION (user, 2026-08-05): the amendment was REVERTED out of
+      this ticket entirely rather than corrected a third time. Two facts
+      drove it — the sentence was already inaccurate when M1-759 merged,
+      so it is not "paired with the code change that justifies it"
+      (workflow.md §Non-ticket commits rule 2) but a pre-existing
+      inaccuracy this diff surfaced; and with nothing deployed beyond
+      v1.0 there is no reason to ACCEPT a closable gap at all. M1-772
+      closes it in code (detection-only joint scan emitting the audit
+      row, output sanitize still per-field) and shrinks the spec to say
+      the pair is covered, which removes the residual paragraph rather
+      than perfecting it. The finding is therefore resolved by
+      reversion: the text it was against no longer exists in this
+      branch, and the code it audited is byte-identical to the round-1
+      CLEAN verdict.
+clarity_check:
+  date: 2026-08-05
+  verdict: PASS
+  warnings:
+    - >-
+      Self-check note: `post.title_en` is LLM-authored and capped at no
+      write path (`IngestTranslationWorker.persistTranslation`), unlike
+      `post.title` which `IngestTextNormalizer.TITLE_MAX_LENGTH` bounds
+      at ingest. The read path therefore bounds BOTH new columns with
+      `left(..., DisplayHeadline.BODY_SCAN_LIMIT)`, not just `body_en`
+      — the same M1-730 paginated-read guard the sibling `body` column
+      already carries, applied to the operands that share its property.
+  blockers: []
 escalation_reason:
 ---
 

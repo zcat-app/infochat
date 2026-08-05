@@ -112,8 +112,8 @@ public class SaveCommandHandler implements CommandHandler {
     // existence-vs-no-access distinction is never exposed (the getPost
     // contract, security.md §Prompt-injection defenses).
     private static final String SELECT_POST_SQL =
-            "SELECT p.id, p.title, p.body, p.url, p.author, p.published_at, "
-                    + "p.source_id, s.bootstrap_tags, s.language "
+            "SELECT p.id, p.title, p.body, p.title_en, p.body_en, p.url, p.author, "
+                    + "p.published_at, p.source_id, s.bootstrap_tags, s.language "
                     + "FROM post p JOIN source s ON s.id = p.source_id "
                     + "WHERE p.uid = ? AND p.status = 'READY' "
                     + "AND (((s.source_origin = 'bootstrap' AND s.deleted_at IS NULL "
@@ -142,8 +142,9 @@ public class SaveCommandHandler implements CommandHandler {
     private static final String INSERT_SAVED_POST_SQL =
             "INSERT INTO saved_post ("
                     + "user_id, post_uid, source_id, title, body, url, author, "
-                    + "published_at, snapshot_tags, personal_tags, source_language"
-                    + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                    + "published_at, snapshot_tags, personal_tags, source_language, "
+                    + "title_en, body_en"
+                    + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     @Inject
     BundleLoader bundleLoader;
@@ -342,6 +343,8 @@ public class SaveCommandHandler implements CommandHandler {
                 return Optional.of(new PostSnapshot(
                         rs.getString("title"),
                         rs.getString("body"),
+                        rs.getString("title_en"),
+                        rs.getString("body_en"),
                         rs.getString("url"),
                         rs.getString("author"),
                         publishedAtTs == null ? null : publishedAtTs.toInstant(),
@@ -380,6 +383,14 @@ public class SaveCommandHandler implements CommandHandler {
             ps.setArray(9, conn.createArrayOf("TEXT", post.bootstrapTags.toArray(new String[0])));
             ps.setArray(10, conn.createArrayOf("TEXT", personalTags.toArray(new String[0])));
             ps.setString(11, post.sourceLanguage);
+            // A NULL anchor is snapshotted AS NULL, never coalesced to the
+            // original: NULL is what M1-759's anchor-absent branch reads to
+            // decide the bookmark has no anchor, and substituting the
+            // original here would make DisplayHeadline report anchored=true
+            // for text that is still the publisher's own words — an
+            // unbracketed foreign line to a reader who cannot read it.
+            ps.setString(12, post.titleEn);
+            ps.setString(13, post.bodyEn);
             ps.executeUpdate();
         }
     }
@@ -461,6 +472,12 @@ public class SaveCommandHandler implements CommandHandler {
     private record PostSnapshot(
             String title,
             String body,
+            // `post.title_en` / `post.body_en` are NULL until the collector's
+            // IngestTranslationWorker has run, and stay NULL forever for an
+            // en-language source or after the translator exhausts its
+            // attempts (V74). The snapshot preserves that state verbatim.
+            @Nullable String titleEn,
+            @Nullable String bodyEn,
             String url,
             String author,
             @Nullable Instant publishedAt,

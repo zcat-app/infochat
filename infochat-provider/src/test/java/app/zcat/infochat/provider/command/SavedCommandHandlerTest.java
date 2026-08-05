@@ -395,6 +395,108 @@ class SavedCommandHandlerTest {
     }
 
     @Test
+    void enScopeRendersTheSnapshottedAnchorWithBracketedOriginalAndZeroTranslatorCalls()
+            throws Exception {
+        // M1-765, the whole point of snapshotting the anchor: an English
+        // reader's Turkish bookmark now renders the same anchor-first block a
+        // digest renders for the same post — English primary, publisher's own
+        // words bracketed beneath — and it costs NO provider call, because
+        // the anchor is a column read. The spy assertion is what makes that
+        // claim testable rather than asserted: a render that reached for the
+        // translator instead would still produce English text.
+        String contactId = PREFIX + "anchor-actor";
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "anchor-source");
+        seedAnchoredSavedPost(userId, sourceId, PREFIX + "anchor-uid-1",
+                "Türkçe başlık", "Turkish headline", "tr",
+                Instant.now().minus(1, ChronoUnit.HOURS));
+        mockLlm.reset();
+        mockLlm.setTranslatorResponseText("would-be translation");
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(contactId), "/saved");
+
+        assertTrue(reply.text().contains("Turkish headline"),
+                "the snapshotted English anchor must occupy the primary slot; got: "
+                        + reply.text());
+        assertFalse(reply.text().contains("[Turkish headline]"),
+                "the anchor IS in an en reader's language, so it must render unbracketed "
+                        + "(D29 (c)); got: " + reply.text());
+        assertTrue(reply.text().contains("\n[Türkçe başlık]"),
+                "the publisher's own words must stay reachable on the bracketed subordinate "
+                        + "line; got: " + reply.text());
+        assertEquals(0, mockLlm.callCount(),
+                "reading a snapshotted anchor is a column read — it must add ZERO "
+                        + "translator calls");
+        mockLlm.reset();
+    }
+
+    @Test
+    void preAnchorSaveWithNullAnchorStillRendersTheBracketedOriginal() throws Exception {
+        // Old saves still render, and render HONESTLY. A row written before
+        // V78 carries NULL in both anchor columns, which is the accurate
+        // value — no anchor was ever computed for it — and takes M1-759's
+        // anchor-absent branch: the original in the primary slot, bracketed
+        // because it is NOT in the reader's language. Not a blank headline
+        // (the row has text), and not a bare line (that would tell an en
+        // reader the Turkish words are English). The seed deliberately omits
+        // the anchor columns entirely, so it writes the pre-migration shape.
+        String contactId = PREFIX + "nullanchor-actor";
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "nullanchor-source");
+        seedAnchoredSavedPost(userId, sourceId, PREFIX + "nullanchor-uid-1",
+                "Türkçe başlık", null, "tr",
+                Instant.now().minus(1, ChronoUnit.HOURS));
+        mockLlm.reset();
+        mockLlm.setTranslatorResponseText("would-be translation");
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(contactId), "/saved");
+
+        assertTrue(reply.text().contains("[Türkçe başlık]"),
+                "a NULL anchor must render the original BRACKETED, since it is not in the "
+                        + "reader's language; got: " + reply.text());
+        assertEquals(1, countOccurrences(reply.text(), "Türkçe başlık"),
+                "the anchor-absent branch renders the original once — primary and "
+                        + "subordinate are the same string, so the subordinate is suppressed; "
+                        + "got: " + reply.text());
+        assertEquals(0, mockLlm.callCount(),
+                "an en scope makes no translator call regardless of the anchor's presence");
+        mockLlm.reset();
+    }
+
+    @Test
+    void savedBoundsTheAnchorInSqlWithoutChangingTheRenderedHeadline() throws Exception {
+        // Both anchor columns are LLM-authored and capped at NO write path
+        // (IngestTranslationWorker stores the translator's reply as it
+        // stands), so they carry the same unbounded-operand property that
+        // earned `body` its left() — and /saved materialises 20 of them per
+        // page. The bound must be invisible for the same reason it is on
+        // `body`: left() counts CODE POINTS while Java counts UTF-16 units,
+        // so the truncated value always carries at least as many Java chars
+        // as DisplayHeadline's own cut consumes. The emoji is what makes the
+        // two counts disagree, so it is load-bearing here, not decoration.
+        String hugeAnchor = "Shielded pool 😀 crosses a million ZEC "
+                + "w".repeat(DisplayHeadline.BODY_SCAN_LIMIT * 3);
+        String contactId = PREFIX + "anchorcap-actor";
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "anchorcap-source");
+        seedAnchoredSavedPost(userId, sourceId, PREFIX + "anchorcap-uid-1",
+                "Türkçe başlık", hugeAnchor, "tr",
+                Instant.now().minus(1, ChronoUnit.HOURS));
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(contactId), "/saved");
+
+        // The oracle is the derivation over the FULL anchor — what the
+        // handler would have rendered with no SQL bound at all.
+        String uncappedAnchorLine = DisplayHeadline.anchorFirst(
+                        "Türkçe başlık", null, hugeAnchor, null,
+                        SanitizerTestDoubles.noAuditSanitizer())
+                .readerLine();
+        assertTrue(reply.text().contains(uncappedAnchorLine),
+                "the SQL bound must not change the rendered anchor; expected: "
+                        + uncappedAnchorLine + "; got: " + reply.text());
+    }
+
+    @Test
     void csScopeTranslatesHeadlineOfDifferingSourceLanguageRowWithBracketedOriginal() throws Exception {
         // M1-755 renderer-wiring pin (the M1-747 precedent): without this
         // case, deleting the runForDisplayHit call in buildReply would keep
@@ -774,6 +876,37 @@ class SavedCommandHandlerTest {
             ps.setArray(6, conn.createArrayOf("TEXT", snapshotTags));
             ps.setArray(7, conn.createArrayOf("TEXT", personalTags));
             ps.setObject(8, OffsetDateTime.ofInstant(savedAt, java.time.ZoneOffset.UTC));
+            ps.executeUpdate();
+        }
+    }
+
+    /**
+     * Seeds a save carrying the V78 English title anchor and a declared
+     * source language. A null {@code titleEn} writes the PRE-MIGRATION shape
+     * — the column is omitted from the INSERT entirely rather than bound to
+     * NULL, so the row is byte-for-byte what a save taken before V78 left
+     * behind, which is the state the anchor-absent case has to render.
+     */
+    private void seedAnchoredSavedPost(UUID userId, UUID sourceId, String postUid, String title,
+                                       @Nullable String titleEn, String sourceLanguage,
+                                       Instant savedAt) throws Exception {
+        String columns = "user_id, post_uid, source_id, title, snapshot_tags, personal_tags, "
+                + "saved_at, source_language" + (titleEn == null ? "" : ", title_en");
+        String placeholders = "?, ?, ?, ?, ?, ?, ?, ?" + (titleEn == null ? "" : ", ?");
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO saved_post (" + columns + ") VALUES (" + placeholders + ")")) {
+            ps.setObject(1, userId);
+            ps.setString(2, postUid);
+            ps.setObject(3, sourceId);
+            ps.setString(4, title);
+            ps.setArray(5, conn.createArrayOf("TEXT", new String[] {}));
+            ps.setArray(6, conn.createArrayOf("TEXT", new String[] {}));
+            ps.setObject(7, OffsetDateTime.ofInstant(savedAt, java.time.ZoneOffset.UTC));
+            ps.setString(8, sourceLanguage);
+            if (titleEn != null) {
+                ps.setString(9, titleEn);
+            }
             ps.executeUpdate();
         }
     }

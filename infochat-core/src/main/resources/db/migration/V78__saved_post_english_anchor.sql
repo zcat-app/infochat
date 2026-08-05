@@ -1,0 +1,39 @@
+-- V78: saved_post.title_en / saved_post.body_en — snapshot the English
+-- corpus anchor at /save time (M1-765, D29/D13/D33).
+--
+-- M1-759 made every render surface anchor-first: the reader sees the
+-- English anchor with the publisher's own words bracketed beneath. /saved
+-- could not participate, because SavedCommandHandler.SELECT_ROWS_BASE_SQL
+-- is a pure snapshot read (the only post interaction is the M1-730
+-- existence/status visibility interlock) and saved_post carried no anchor
+-- — so it rendered the anchor-ABSENT form and an English reader's Turkish
+-- bookmark stayed Turkish while the same post in a digest showed English.
+--
+-- The fix is the pattern V76 established one ticket earlier: snapshot the
+-- field at a site that already holds the join. SaveCommandHandler's
+-- SELECT_POST_SQL already joins post -> source (it reads s.language for
+-- V76's column), so this costs two projected columns at a statement that
+-- already pays for the row.
+--
+-- NULLABLE, NO DEFAULT — and that is the point, differing deliberately
+-- from V76's `source_language TEXT NOT NULL DEFAULT 'en'`. For the
+-- language column 'en' was TRUTH of every pre-column row (the whole
+-- corpus was English until M1-750). No such truth exists here: a row
+-- saved before this migration was never accompanied by an anchor at all.
+-- NULL is the accurate value, and it is exactly the state M1-759's
+-- anchor-absent branch already renders correctly (DisplayHeadline.derive
+-- degrades a null anchor to the original, bracketed). A DEFAULT '' would
+-- fabricate an anchor the ingest translator never produced.
+--
+-- NO BACKFILL, for the same reason the render path carries no join:
+-- filling these from `post` would be a re-resolution of frozen content
+-- against live rows, which V15's Invariant 6 ("copied at /save time,
+-- never re-resolved against post") forbids — and the post may have been
+-- partitioned away entirely. The bookmark is a point-in-time artifact; an
+-- anchor computed later is not part of it.
+--
+-- Both columns take the PG fast default path (attmissingval): adding a
+-- nullable column with no default rewrites nothing.
+
+ALTER TABLE saved_post ADD COLUMN title_en TEXT;
+ALTER TABLE saved_post ADD COLUMN body_en  TEXT;

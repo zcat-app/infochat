@@ -129,6 +129,39 @@ class SavedLibraryIT {
                 "users.save_count must be 0 after /unsave (trigger decrement)");
     }
 
+    @Test
+    void saveThenListRendersTheEnglishAnchorSnapshottedAtSaveTime() throws Exception {
+        // M1-765 joins two legs that the handler unit tests each cover in
+        // isolation: SaveCommandHandlerTest proves the anchor reaches
+        // saved_post, SavedCommandHandlerTest proves a seeded anchor renders.
+        // Neither proves they agree on the columns, so only a /save → /saved
+        // roundtrip catches a projection that writes one pair and reads
+        // another. Driven through the adapter, so the render asserted here is
+        // the one a reader actually receives.
+        String anchoredUid = PREFIX + "anchored-uid";
+        try (Connection conn = dataSource.getConnection()) {
+            UUID sourceId = seedTurkishSource(conn, PREFIX + "anchored-source");
+            exec(conn,
+                    "INSERT INTO source_subscription (scope_kind, scope_id, source_id) "
+                            + "SELECT 'dm', id, ? FROM users WHERE contact_id = ?",
+                    sourceId, ACTOR);
+            seedAnchoredReadyPost(conn, sourceId, anchoredUid);
+        }
+
+        adapter.deliverDm(ACTOR, "/save " + anchoredUid);
+        adapter.deliverDm(ACTOR, "/saved");
+
+        List<OutboundMessage> sent = adapter.sentMessages();
+        assertEquals(2, sent.size(), "one reply per command expected");
+        String savedBody = sent.get(1).text();
+        assertTrue(savedBody.contains("Turkish headline"),
+                "the anchor snapshotted at /save must render in the primary slot; got: "
+                        + savedBody);
+        assertTrue(savedBody.contains("[Türkçe başlık]"),
+                "the publisher's own words must render bracketed beneath the anchor (D29 (c)); "
+                        + "got: " + savedBody);
+    }
+
     private UUID seedSource(Connection conn, String identifier) throws Exception {
         try (PreparedStatement ps = conn.prepareStatement(
                 "INSERT INTO source (kind, identifier, display_name, category, "
@@ -148,6 +181,36 @@ class SavedLibraryIT {
                 "INSERT INTO post (source_id, uid, title, body, fetched_at, status, "
                         + "upstream_identifier) "
                         + "VALUES (?, ?, 'Roundtrip Title', 'Roundtrip Body', ?, 'READY', ?)")) {
+            ps.setObject(1, sourceId);
+            ps.setString(2, uid);
+            ps.setObject(3, OffsetDateTime.parse("2026-05-15T00:00:00Z"));
+            ps.setString(4, uid);
+            ps.executeUpdate();
+        }
+    }
+
+    /** A source declaring a non-en language, so the save carries one (V74/V76). */
+    private UUID seedTurkishSource(Connection conn, String identifier) throws Exception {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "INSERT INTO source (kind, identifier, display_name, category, "
+                        + "bootstrap_tags, language) VALUES ('rss', ?, ?, 'news', '{}', 'tr') "
+                        + "RETURNING id")) {
+            ps.setString(1, identifier);
+            ps.setString(2, "Test Source " + identifier);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return (UUID) rs.getObject("id");
+            }
+        }
+    }
+
+    /** A READY post the ingest translator has already anchored (V74). */
+    private void seedAnchoredReadyPost(Connection conn, UUID sourceId, String uid) throws Exception {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "INSERT INTO post (source_id, uid, title, body, title_en, body_en, "
+                        + "fetched_at, status, upstream_identifier) "
+                        + "VALUES (?, ?, 'Türkçe başlık', 'Türkçe gövde', "
+                        + "'Turkish headline', 'Turkish body', ?, 'READY', ?)")) {
             ps.setObject(1, sourceId);
             ps.setString(2, uid);
             ps.setObject(3, OffsetDateTime.parse("2026-05-15T00:00:00Z"));

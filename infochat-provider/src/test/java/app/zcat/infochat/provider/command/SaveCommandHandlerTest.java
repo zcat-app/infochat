@@ -9,6 +9,7 @@ import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -509,6 +511,79 @@ class SaveCommandHandlerTest {
     }
 
     @Test
+    void saveSnapshotsTheEnglishAnchorFromThePost() throws Exception {
+        // M1-765: the save-time SELECT projects post.title_en / post.body_en
+        // and the INSERT writes them, freezing the anchor with the rest of
+        // the row. The probe reads the INSERT arguments back from storage, so
+        // dropping either column from the save path fails here — and without
+        // the write there is nothing for /saved to render, since its read is
+        // a pure snapshot read that never re-resolves against `post`.
+        String contactId = PREFIX + "anchor-actor";
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "anchor-source", new String[] { "news" }, "tr");
+        seedDmSubscription(userId, sourceId);
+        String uid = PREFIX + "anchor-uid";
+        seedAnchoredPost(sourceId, uid, "Türkçe başlık", "Türkçe gövde",
+                "Turkish headline", "Turkish body");
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(contactId), "/save " + uid);
+
+        assertEquals(MessageFormat.format(bundleLoader.get(BundleKeys.REPLY_SAVE_SUCCESS), uid),
+                reply.text(),
+                "/save must succeed for an anchored non-en post");
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT title, body, title_en, body_en FROM saved_post WHERE post_uid = ?")) {
+            ps.setString(1, uid);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "saved_post row must exist");
+                assertEquals("Turkish headline", rs.getString("title_en"),
+                        "the post's English title anchor must be snapshotted with the row");
+                assertEquals("Turkish body", rs.getString("body_en"),
+                        "the post's English body anchor must be snapshotted with the row");
+                assertEquals("Türkçe başlık", rs.getString("title"),
+                        "the publisher's own title stays byte-identical beside the anchor (D29)");
+                assertEquals("Türkçe gövde", rs.getString("body"),
+                        "the publisher's own body stays byte-identical beside the anchor (D29)");
+            }
+        }
+    }
+
+    @Test
+    void saveSnapshotsNullAnchorAsNullRatherThanFallingBackToTheOriginal() throws Exception {
+        // The anchor columns are NULL until the collector's ingest translator
+        // has run, and stay NULL for an en source or after the translator
+        // exhausts its attempts (V74). That NULL must survive the snapshot
+        // verbatim: it is what M1-759's anchor-absent branch reads to decide
+        // the bookmark has no anchor. Coalescing to the original here would
+        // make DisplayHeadline report anchored=true for the publisher's own
+        // words, rendering an unbracketed foreign line to a reader who cannot
+        // read it — the exact indistinguishability D29 (c)'s bracket removes.
+        String contactId = PREFIX + "noanchor-actor";
+        UUID userId = seedUser(contactId);
+        UUID sourceId = seedSource(PREFIX + "noanchor-source", new String[] { "news" }, "tr");
+        seedDmSubscription(userId, sourceId);
+        String uid = PREFIX + "noanchor-uid";
+        seedAnchoredPost(sourceId, uid, "Türkçe başlık", "Türkçe gövde", null, null);
+
+        handler.handle(new ScopeRef.Dm(contactId), "/save " + uid);
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT title_en, body_en FROM saved_post WHERE post_uid = ?")) {
+            ps.setString(1, uid);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "saved_post row must exist");
+                assertNull(rs.getString("title_en"),
+                        "an untranslated post must snapshot a NULL title anchor, not its original");
+                assertNull(rs.getString("body_en"),
+                        "an untranslated post must snapshot a NULL body anchor, not its original");
+            }
+        }
+    }
+
+    @Test
     void save_succeedsInGroupScope() throws Exception {
         String contactId = PREFIX + "group-actor";
         inboundContext.setSenderContactId(contactId);
@@ -832,6 +907,26 @@ class SaveCommandHandlerTest {
             ps.setObject(8, OffsetDateTime.parse("2026-05-15T00:00:00Z"));
             ps.setString(9, status);
             ps.setString(10, uid);
+            ps.executeUpdate();
+        }
+    }
+
+    /**
+     * Seeds a READY post carrying the V74 English anchor columns. Separate
+     * from {@link #seedPost} because every other case here predates the
+     * anchor and must keep seeding it as NULL — the state that proves the
+     * snapshot does not fabricate one.
+     */
+    private void seedAnchoredPost(UUID sourceId, String uid, String title, String body,
+                                  @Nullable String titleEn, @Nullable String bodyEn)
+            throws Exception {
+        seedPost(sourceId, uid, "READY", title, body, null, null, null);
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "UPDATE post SET title_en = ?, body_en = ? WHERE uid = ?")) {
+            ps.setString(1, titleEn);
+            ps.setString(2, bodyEn);
+            ps.setString(3, uid);
             ps.executeUpdate();
         }
     }
