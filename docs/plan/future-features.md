@@ -113,36 +113,32 @@ gfx1151 box:
 
 **Prerequisites / tensions:**
 
-- Needs the outbound half of the media SPI (see the §B header).
+- Needs the outbound half of the media SPI (see the §B header). That remains the
+  bulk of the work — the backend is the easy part.
 - **The privacy/cost tension recorded 2026-07-13 is resolved.** That entry
   assumed local generation was too heavy for the deployment profile and that
   remote generation would leak prompts. At 4.38 s and never leaving the host,
   local generation now *supports* the privacy-first posture instead of cutting
   against it. The tension returns only on a CPU-only VPS profile.
-- **No MCP, and not an LLM tool.** ComfyUI exposes plain HTTP (`POST /prompt`,
-  poll `/history`, `GET /view`) — deterministic Java calls it directly. Exposing
-  generation as an LLM-callable tool would collide with the
-  deterministic-retrieval principle and widen the injection surface for nothing.
-- **Build the workflow graph server-side.** ComfyUI's API accepts an entire
-  graph, and its nodes execute Python and touch the filesystem. User text must
-  reach exactly one field (`CLIPTextEncode.text`) as a JSON string value;
-  anything looser is remote code execution.
-- **Bind ComfyUI to `127.0.0.1`** — it ships no authentication of any kind.
-- Provider→ComfyUI is new egress: route it through `infochat-ssrf` or record an
-  explicit configured-internal exemption.
-- **GPU contention:** one GPU, ~4.4 s held per image. Requests must queue behind
-  a per-user rate cap, or image traffic starves any local LLM task and the
-  digest pipeline.
-- **Content liability is the open question, and it is specific to B2.** A
-  user-supplied prompt steers an image model whose output the bot then delivers
-  under its own identity — a different risk class from text output, addressed by
-  neither the threat model nor the probation system today. Needs a `/redteam`
-  pass at design time plus a gating decision (probation-only? admin-only?
-  classifier pre-filter? fixed-template prompts?).
+- **Content liability is no longer the open question.** The 2026-08-05 design
+  conversation settled it: `/image` is available in DM and groups, with no
+  prompt pre-filter, resting on attribution (D44 invite-gated DMs, D47
+  admin-approved groups) and operator model choice rather than on model
+  guardrails. A `/redteam` pass at design time still stands.
+- **The design layer now lives in
+  [`docs/design/future/image-generation.md`](../design/future/image-generation.md)** —
+  the 18-step flow, the adapter-SPI delta, the credit/cooldown/queue-depth
+  model, the six-link no-content chain (the prompt is treated as message
+  content: never logged, never audited, stripped from the PNG), the tmpfs
+  spool + sweeper lifecycle, and the failure contract. The architecture and
+  security constraints from this spike — no MCP, server-side graph, `127.0.0.1`
+  bind, SSRF-routed egress, GPU queueing — are carried there verbatim rather
+  than duplicated here.
 
-**Verdict: `v2-milestone`** — the backend is proven; the plumbing and the content
-policy are the actual work. **User priority (2026-08-05): B2 ahead of B1/B3**,
-against the §B header's voice-in → image → read sequencing.
+**Verdict: `v2-milestone`** — the backend is proven and the content policy is
+settled; the outbound-media plumbing is what remains. **User priority
+(2026-08-05): B2 ahead of B1/B3**, against the §B header's voice-in → image →
+read sequencing.
 
 ### B3. `/read` — return the last answer as audio (TTS)
 **What:** `/read` sends the previous answer back as a playable audio file.
