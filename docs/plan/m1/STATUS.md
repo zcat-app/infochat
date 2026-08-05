@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 781 |
+| done | 782 |
 | deferred | 0 |
 | abandoned | 23 |
 | **total** | **807** |
@@ -25,11 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-<<<<<<< HEAD
-- M1-770 — Doc-only commits must run the parity gates (complexity: low, risk: low)
-=======
-- M1-766 — Anchor-first degraded renderers (complexity: low, risk: low)
->>>>>>> m1/M1-770-doc-only-commits-must-run-parity-gates
 - M1-771 — Echo check on the ingest anchor write (complexity: low, risk: medium)
 - M1-772 — Audit the anchor/original pair as a span (complexity: medium, risk: medium)
 
@@ -77,7 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-768 | Redteam run-gate must always diff working tree vs fork point | 2026-08-04 | round 1 APPROVE |
 | M1-764 | Pin the LLM transport's interrupt contract with a test | 2026-08-04 | round 1 APPROVE |
 | M1-763 | Timed-out digest render is never cancelled and keeps spending LLM calls | 2026-08-04 | round 1 APPROVE |
-| M1-762 | Localization cleanup after Turkish enablement | 2026-08-04 | round 1 APPROVE |
 
 ---
 
