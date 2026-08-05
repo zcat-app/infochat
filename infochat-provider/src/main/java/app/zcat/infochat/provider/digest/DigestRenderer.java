@@ -14,6 +14,7 @@ import java.util.UUID;
 
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 
+import app.zcat.infochat.llm.LlmCallBudget;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.digest.DigestCategorizer.CategorySection;
@@ -100,19 +101,13 @@ public class DigestRenderer {
     // whose FALLBACK re-run binds the same pool behind the pre-charge
     // refusal in RetryCommandHandler; the replay leg is never gated in
     // steady state — a stale probe refuses it free, see
-    // DigestRetryService.retryLeg). The render draws an ESTIMATE of
-    // its generative calls here at the ticket's two live call-site groups
-    // (summaryProseGenerator.generate + appendClusterProse, and the
-    // CategoryRollupGenerator call site); DigestWorker gates admission
-    // against the same budget before the render starts. The display-hit
-    // headline leg is NOT drawn (it rides the M1-756 per-render budget).
-    // The draws sit at THIS altitude, not at the provider calls they
-    // stand for, because renderSections is reached by BOTH the scheduled
-    // route and /retry --digest, and every generative helper below it is
-    // shared with /summary, /retry, chat and saves — not because the
-    // entry point is single-route (M1-767 redteam round 2 corrected that
-    // claim). SystemLlmBudget's class javadoc
-    // names the over- and under-count legs that buys.
+    // DigestRetryService.retryLeg). DigestWorker gates ADMISSION against
+    // it before the render starts; renderSections binds it as the
+    // render-scoped sink so each call the render issues draws itself and
+    // is refused once the window is exhausted (M1-769). No draw is
+    // written from this class any more — a call site can only ever
+    // estimate what it is about to spend, which is what M1-767's
+    // over- and under-count legs were.
     // Field-initialized so plain-JUnit constructions draw into an inert
     // budget; CDI overwrites at runtime — the {@link
     // #categoryRollupGenerator} pattern.
@@ -281,11 +276,45 @@ public class DigestRenderer {
      * its own; the caller's {@code slot.groupId()} is the only source. The
      * scope KIND is the literal {@code "group"} — the periodic digest
      * broadcasts to groups and nothing else.
+     *
+     * <p>This method is also the sole binder of the {@link
+     * SystemLlmBudget} render sink (M1-769): every LLM call issued
+     * beneath it draws, and every call issued anywhere else in the
+     * deployment does not. See {@link #renderSectionsUnderBudget}.
      */
     public List<RenderedSection> renderSections(List<EligiblePostQuery.Post> posts,
                                                 String langCode,
                                                 DigestMode mode,
                                                 UUID groupId) {
+        return LlmCallBudget.callWith(systemLlmBudget.forRender(groupId),
+                () -> renderSectionsUnderBudget(posts, langCode, mode, groupId));
+    }
+
+    /**
+     * The render itself, running under the bound {@link SystemLlmBudget}
+     * sink (M1-769). The binding sits HERE, inside the method, and not
+     * around {@code DigestWorker}'s {@code renderExecutor.submit(...)}:
+     * a {@code ScopedValue} binding is not inherited across a plain
+     * executor submit, so a binder placed at the submit site would be
+     * absent on the render thread and every draw would silently vanish —
+     * a deployment that looks metered and is not.
+     *
+     * <p>Binding at this altitude is also what makes the scoping
+     * structural rather than a matter of discipline. Both routes that
+     * genuinely spend digest budget reach this method — the scheduled
+     * one ({@code DigestScheduler} → {@code DigestWorker.executeSlot})
+     * and {@code /retry --digest}'s fallback re-run ({@code
+     * DigestRetryService.fallbackRerun} → {@code DigestWorker.execute} →
+     * {@code executeSlot}) — while {@link #renderSummarySections} and
+     * {@link #renderShortBody}, the user-initiated forms metered by
+     * {@code LlmRateCap} and the D47 per-group sub-bucket instead, do
+     * not. The generative helpers below are shared with those routes;
+     * the binding, not the helper, decides what draws.
+     */
+    private List<RenderedSection> renderSectionsUnderBudget(List<EligiblePostQuery.Post> posts,
+                                                            String langCode,
+                                                            DigestMode mode,
+                                                            UUID groupId) {
         List<Cluster> clusters = clusterTraversal.cluster(posts);
         List<CategorySection> allSections = digestCategorizer.categorize(clusters);
         // M1-724 prominence ranking: score every cluster (urgent gate →
@@ -365,21 +394,7 @@ public class DigestRenderer {
         // surviving section (the cap is lifted — there is no capped-out
         // cluster to spare), so per-call behavior (e.g. degraded fallback)
         // stays uniform across sections. brief/normal render no per-cluster
-        // prose at all, so the generator is never invoked. The draw is one
-        // per cluster — SummaryProseGenerator's documented per-cluster
-        // provider contract (M1-767, acceptance-4 measurement basis) — but
-        // it is an ESTIMATE, not a call count: generate() returns every
-        // cluster degraded WITHOUT calling the provider when the SUMMARIZER
-        // router is unresolvable, and short-circuits per cluster with no
-        // HTTP attempt while the breaker is OPEN. Both make this draw
-        // charge for spend that never happened, so an LLM outage fills the
-        // window at full nominal rate (redteam 2026-08-04, medium/DOS —
-        // exact accounting is M1-769). The draw stays at this altitude
-        // because renderSections is reached by BOTH the scheduled route
-        // and /retry --digest, and every generative helper below it is
-        // shared with chat, saves and /summary — not because the entry
-        // point is single-route (M1-767 redteam round 2 corrected that
-        // claim); see SystemLlmBudget's class javadoc.
+        // prose at all, so the generator is never invoked.
         List<ClusterProse> proseList;
         if (mode == DigestMode.FULL) {
             List<Cluster> shownClusters = new ArrayList<>();
@@ -387,7 +402,6 @@ public class DigestRenderer {
                 shownClusters.addAll(section.clusters());
             }
             proseList = summaryProseGenerator.generate(shownClusters, langCode);
-            systemLlmBudget.recordCalls(shownClusters.size());
         } else {
             proseList = List.of();
         }
@@ -400,11 +414,6 @@ public class DigestRenderer {
         List<ClusterProse> leadProse = leadClusters.isEmpty()
                 ? List.of()
                 : summaryProseGenerator.generate(leadClusters, langCode);
-        if (!leadProse.isEmpty()) {
-            // M1-767: the lead's per-cluster summarizer calls, drawn on the
-            // same per-cluster basis as the FULL body above.
-            systemLlmBudget.recordCalls(leadProse.size());
-        }
 
         List<RenderedSection> rendered = new ArrayList<>(sections.size() + 1);
         if (!leadClusters.isEmpty()) {
@@ -450,22 +459,10 @@ public class DigestRenderer {
                 // sanitizes its own output. A roll-up failure ships the
                 // section with header (+ headlines) + footer but no
                 // synthesis line (CategoryRollupGenerator's existing failure
-                // containment, same as renderShortBody). M1-767: one draw
-                // per roll-up call site. This is the meter's largest known
-                // UNDER-count — generateRollup reaches the provider TWICE on
-                // a non-`en` scope (provider.generate, then
-                // translationPipeline.run on a cold cache), and draws one.
-                // Metering the second leg needs the draw inside
-                // CategoryRollupGenerator, which renderShortBody also calls
-                // on the user-initiated /summary --short and /retry routes —
-                // it would meter them into this system-initiated budget.
-                // That trade is why exact accounting is M1-769, not here.
-                // The empty-prompt skip over-counts by one in the other
-                // direction (redteam 2026-08-04, medium/DOS).
+                // containment, same as renderShortBody).
                 Optional<String> rollup =
                         categoryRollupGenerator.generateRollup(
                                 section.clusters(), section.tag(), langCode);
-                systemLlmBudget.recordCalls(1);
                 if (rollup.isPresent()) {
                     sb.append("\n\n").append(rollup.get());
                 }
@@ -882,28 +879,12 @@ public class DigestRenderer {
             sb.append(SummaryProseGenerator.degradedProseFor(cp.cluster(), llmOutputSanitizer));
         } else {
             String sanitized = llmOutputSanitizer.sanitize(cp.prose());
-            // M1-767: one draw per translator call this leg is expected to
-            // make. The en-scope short-circuit and a cache HIT are
-            // guaranteed no-ops that make no provider call, so they never
-            // draw — the M1-756 principle ("a cache hit makes no provider
-            // call, so charging it against a generative budget would shrink
-            // the translated portion") and the translatesUnderThisScope
-            // restatement precedent. The probe captures the PRE-CALL cache
-            // state (the call below writes the cache on success); the
-            // probe-vs-pipeline-read race is the same accepted one
-            // M1-755/756 document for the per-render budget. Note the race
-            // runs BOTH ways, not just the safe one: the cache is
-            // capacity-bounded, so an eviction between this probe and the
-            // pipeline's own read yields a provider call that is never
-            // drawn (redteam 2026-08-04, low/DOS — a draw that cannot race
-            // has to sit inside the shared TranslationPipeline, which
-            // /summary, /retry, chat and saves also call; that is M1-769).
-            boolean cacheMiss = !langCode.equalsIgnoreCase("en")
-                    && translationCache.get(sanitized, langCode).isEmpty();
+            // No draw here (M1-769): the en-scope short-circuit and a cache
+            // hit both return before the translation provider, and a real
+            // call draws itself at the provider decorator — so the probe
+            // this used to need, and the eviction race that made it charge
+            // one call short, are both gone rather than fixed.
             sb.append(translationPipeline.run(sanitized, langCode));
-            if (cacheMiss) {
-                systemLlmBudget.recordCalls(1);
-            }
         }
     }
 

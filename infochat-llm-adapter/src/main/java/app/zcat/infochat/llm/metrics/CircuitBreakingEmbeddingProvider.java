@@ -53,14 +53,37 @@ public class CircuitBreakingEmbeddingProvider implements EmbeddingProvider {
         try {
             results = delegate.embed(texts);
         } catch (EmbeddingProviderUnreachableException e) {
-            breakerRegistry.recordUnreachableForEmbeddings();
+            if (!releasedAsCancelled()) {
+                breakerRegistry.recordUnreachableForEmbeddings();
+            }
             throw e;
         } catch (EmbeddingCallFailedException e) {
-            breakerRegistry.recordReachableForEmbeddings();
+            if (!releasedAsCancelled()) {
+                breakerRegistry.recordReachableForEmbeddings();
+            }
             throw e;
         }
         breakerRegistry.recordReachableForEmbeddings();
         return results;
+    }
+
+    /**
+     * Embedding-side twin of {@code
+     * CircuitBreakingLlmProvider.releasedAsCancelled} — see that method
+     * for the full reasoning (M1-769). Reachable here through a different
+     * door than the digest's: a chat turn cancelled by {@code /stop}
+     * interrupts a thread that embeds ({@code SemanticSearchTool},
+     * {@code HelpLookupTool}), and the embedding providers share {@code
+     * LlmHttpSupport.sendForBody}, so the interrupt arrives as a plain
+     * {@link EmbeddingCallFailedException} — the arm that closes the
+     * breaker.
+     */
+    private boolean releasedAsCancelled() {
+        if (!Thread.currentThread().isInterrupted()) {
+            return false;
+        }
+        breakerRegistry.releaseProbeForEmbeddings();
+        return true;
     }
 
     /**

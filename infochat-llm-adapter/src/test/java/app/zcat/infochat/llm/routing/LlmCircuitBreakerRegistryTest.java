@@ -20,6 +20,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -287,7 +288,174 @@ class LlmCircuitBreakerRegistryTest {
         assertTrue(registry.tryAcquireForEmbeddings());
     }
 
+    @Test
+    void llmAndEmbeddingsOnOneEndpointDoNotShareABreaker() {
+        // The SHIPPED default points BOTH SPIs at the same local Ollama on
+        // every profile, so this is the normal deployment, not a corner
+        // case. They apply different patience to that one URL
+        // (infochat.embeddings.timeout-ms 30s vs infochat.llm.chat.timeout-ms
+        // 120s) and a read timeout classifies as transport-unreachable, so a
+        // live-but-slow backend fails embeddings while chat still answers.
+        // On a shared key those embedding failures would deny chat with no
+        // HTTP attempt against an endpoint that is demonstrably answering —
+        // and docs/spec/security.md §Failure handling promises the two are
+        // tracked separately. (M1-769)
+        String sharedEndpoint = "http://one-ollama.test:11434/v1";
+        registry = new LlmCircuitBreakerRegistry(THRESHOLD, COOLDOWN_MS, clock,
+                LlmRouter.ConfigReader.fromMap(Map.of(
+                        LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL, sharedEndpoint,
+                        LlmCircuitBreakerRegistry.CONFIG_KEY_EMBEDDINGS_BASE_URL,
+                        sharedEndpoint)));
+        llmBreaker = new CircuitBreakingLlmProvider(llmStub, registry);
+        embedBreaker = new CircuitBreakingEmbeddingProvider(embedStub, registry);
+
+        embedStub.mode = StubMode.THROW_TRANSPORT;
+        for (int i = 0; i < THRESHOLD; i++) {
+            assertThrows(EmbeddingProviderUnreachableException.class,
+                    () -> embedBreaker.embed(List.of("text")));
+        }
+        assertFalse(registry.tryAcquireForEmbeddings(),
+                "precondition: the embedding breaker tripped on the shared URL");
+
+        assertFalse(registry.wouldShortCircuit(ModelTask.CHAT_AGENT),
+                "embedding transport failures must not deny the generative SPI "
+                        + "sharing the same base-url");
+        assertTrue(registry.tryAcquireForTask(ModelTask.CHAT_AGENT));
+        llmBreaker.generate(ModelTask.CHAT_AGENT, "", "hi");
+        assertEquals(1, llmStub.calls, "the generative call still reaches the endpoint");
+    }
+
+    // --- caller-side cancellation is not endpoint evidence (M1-769) ---
+
+    @Test
+    void interruptedCallDoesNotResetTheConsecutiveCount() {
+        // An interrupted caller sends no request (M1-764, pinned by
+        // HttpProviderSharedPipelineTest) — but the interrupt surfaces as a
+        // PLAIN LlmCallFailedException, the very type an answered-with-500
+        // endpoint produces and which applicationErrorDoesNotTripTheBreaker
+        // above correctly credits as reachability. Telling those two apart is
+        // the point: crediting a call that sent nothing closes the breaker and
+        // zeroes this counter, and M1-763's cancelled render issues a whole
+        // LOOP of such calls, so the breaker could never re-trip while an
+        // orphaned render drains.
+        //
+        // The consecutive-failure count is the observable that discriminates.
+        // wouldShortCircuit() reads the same either way once the probe is
+        // released, but a reset count cannot trip and an intact one can.
+        failTransport(THRESHOLD - 1);
+        assertFalse(registry.wouldShortCircuit(ModelTask.CHAT_AGENT),
+                "precondition: below the threshold the breaker is still closed");
+
+        llmStub.mode = StubMode.THROW_APPLICATION;
+        onInterruptedThread(() -> assertThrows(LlmCallFailedException.class,
+                () -> llmBreaker.generate(ModelTask.CHAT_AGENT, "", "hi")));
+
+        // The run is intact, so ONE more transport failure reaches the
+        // threshold. Credit the interrupted call and the count sits at 1
+        // instead and the breaker stays closed.
+        failTransport(1);
+        assertTrue(registry.wouldShortCircuit(ModelTask.CHAT_AGENT),
+                "an interrupted call must not break the run of consecutive transport "
+                        + "failures — it observed nothing about the endpoint");
+    }
+
+    @Test
+    void interruptedEmbeddingCallDoesNotResetTheConsecutiveCount() {
+        // Same defect, different door: /stop cancels a chat turn whose
+        // SemanticSearchTool / HelpLookupTool call embeds, and the embedding
+        // providers share LlmHttpSupport.sendForBody with the generative ones.
+        embedStub.mode = StubMode.THROW_TRANSPORT;
+        for (int i = 0; i < THRESHOLD - 1; i++) {
+            assertThrows(EmbeddingProviderUnreachableException.class,
+                    () -> embedBreaker.embed(List.of("text")));
+        }
+        assertTrue(registry.tryAcquireForEmbeddings(),
+                "precondition: below the threshold the embedding breaker is still closed");
+
+        embedStub.mode = StubMode.THROW_APPLICATION;
+        onInterruptedThread(() -> assertThrows(EmbeddingCallFailedException.class,
+                () -> embedBreaker.embed(List.of("text"))));
+
+        embedStub.mode = StubMode.THROW_TRANSPORT;
+        assertThrows(EmbeddingProviderUnreachableException.class,
+                () -> embedBreaker.embed(List.of("text")));
+        assertFalse(registry.tryAcquireForEmbeddings(),
+                "an interrupted embedding call must not break the run either");
+    }
+
+    @Test
+    void releasingCallerCannotReturnAProbeItNeverHeld() {
+        // The scenario the release path made reachable: a call admitted
+        // while the breaker was still CLOSED outlives a trip AND a whole
+        // cooldown (a chat call's 120s budget against a 30s cooldown), and
+        // only then reports no evidence. By that time a DIFFERENT caller
+        // holds the HALF-OPEN probe. A state-only release would hand back
+        // the newer caller's slot, so a second probe would be admitted
+        // while the first is still in flight — two concurrent probes
+        // against an endpoint the breaker exists to touch once. (M1-769)
+        assertTrue(registry.tryAcquireForTask(ModelTask.CHAT_AGENT),
+                "precondition: this thread's call is admitted while CLOSED");
+        failTransport(THRESHOLD);
+        clock.advance(Duration.ofMillis(COOLDOWN_MS));
+
+        // A different caller takes the single recovery probe and keeps it.
+        onFreshThread(() -> assertTrue(registry.tryAcquireForTask(ModelTask.CHAT_AGENT),
+                "precondition: the cooldown elapsed, so this caller becomes the probe"));
+
+        // The long-running call finally reports no evidence and releases.
+        registry.releaseProbeForTask(ModelTask.CHAT_AGENT);
+
+        assertFalse(registry.tryAcquireForTask(ModelTask.CHAT_AGENT),
+                "a caller that never held the probe must not free it — the "
+                        + "outstanding probe stays the only one in flight");
+    }
+
     // --- helpers ---
+
+    /**
+     * Run {@code body} on a fresh thread with the interrupt flag already
+     * armed, surfacing any assertion failure back here.
+     *
+     * <p>A fresh thread rather than JUnit's, for the two reasons
+     * {@code HttpProviderSharedPipelineTest} documents: the armed flag dies
+     * with the leg instead of leaking into later tests in this JVM, and an
+     * assertion raised on another thread is invisible to JUnit unless it is
+     * carried back — without the hand-off a failing leg passes silently.
+     */
+    private static void onInterruptedThread(Runnable body) {
+        onFreshThread(() -> {
+            Thread.currentThread().interrupt();
+            body.run();
+        });
+    }
+
+    /**
+     * Run {@code body} on a fresh thread, carrying any assertion failure
+     * back to the caller. Also the seam that lets a test act as a SECOND
+     * caller — thread identity is what tells the breaker who holds the
+     * recovery probe.
+     */
+    private static void onFreshThread(Runnable body) {
+        AtomicReference<Throwable> legFailure = new AtomicReference<>();
+        Thread leg = Thread.ofPlatform().unstarted(() -> {
+            try {
+                body.run();
+            } catch (Throwable t) {
+                legFailure.set(t);
+            }
+        });
+        leg.start();
+        try {
+            leg.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("interrupted while awaiting the leg thread", e);
+        }
+        Throwable failed = legFailure.get();
+        if (failed != null) {
+            throw new AssertionError("assertion failed on the leg thread", failed);
+        }
+    }
 
     private void failTransport(int times) {
         StubMode before = llmStub.mode;

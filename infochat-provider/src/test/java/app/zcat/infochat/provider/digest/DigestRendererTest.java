@@ -396,18 +396,27 @@ class DigestRendererTest {
     }
 
     @Test
-    void renderSections_drawsSystemLlmBudgetAtLiveCallSites() throws Exception {
-        // M1-767 acceptance item 5: the meter is drawn on the scheduled
-        // digest render. The provider stubs cannot be counted (they are
-        // test doubles), so the assertion is on the budget's own counter:
-        // one draw per summarizer cluster (SummaryProseGenerator's
-        // documented per-cluster contract), one per non-en, cache-missing
-        // cluster-prose translation, and one per roll-up call site.
+    void renderSections_nonCallingCollaborators_drawNothing() throws Exception {
+        // M1-769 retargets what M1-767's
+        // renderSections_drawsSystemLlmBudgetAtLiveCallSites asserted here.
+        // Its counts (6, then 7) came from four draws in the render LOOP
+        // firing against collaborators that issue no provider call at all:
+        // DistinctProseGenerator overrides generate, the renderer's roll-up
+        // generator overrides generateRollup, and wireTranslator injects a
+        // TranslationProvider straight into the pipeline, bypassing
+        // LlmTranslationProvider. Loop cardinality was the meter, so a
+        // fixture that spends NOTHING charged 7 calls.
         //
-        // The summarizer stub returns DISTINCT prose per cluster — the
+        // The meter now follows calls that actually reach a provider, so
+        // the same fixture must charge ZERO — the opposite number at the
+        // same seam, and the assertion that pins the proxy meter gone. The
+        // exact counts move to DigestRenderCallAccountingTest, which drives
+        // a real provider chain.
+        //
+        // The summarizer stub still returns DISTINCT prose per cluster: the
         // translation cache is keyed on prose text, so uniform text would
-        // collapse clusters 2 and 3 into cache hits and undercount the
-        // draws (production prose is per-cluster distinct by construction).
+        // collapse clusters 2 and 3 into cache hits and the translator
+        // control below would under-count.
         SystemLlmBudget budget = new SystemLlmBudget();
         budget.window = Duration.ofHours(24);
         budget.ceiling = 1000;
@@ -422,25 +431,29 @@ class DigestRendererTest {
 
         renderer.renderSections(posts, "cs", DigestMode.FULL, GROUP_ID);
 
-        assertEquals(6, budget.callsInWindow(),
-                "full render of 3 clusters: 3 summarizer calls + 3 cluster-prose translations");
+        assertEquals(0, budget.callsInWindow(),
+                "full render whose summarizer and translator are non-calling doubles: "
+                        + "the meter follows issued provider calls, not loop iterations");
         assertEquals(3, translatorCalls.get(),
-                "control: the non-en translation leg really did call the provider");
+                "control: the translation leg really did run — the zero above is the "
+                        + "absence of a PROVIDER call, not the absence of the leg");
 
         renderer.renderSections(posts, "cs", DigestMode.BRIEF, GROUP_ID);
 
-        assertEquals(7, budget.callsInWindow(),
-                "brief render: one roll-up draw per surviving section");
+        assertEquals(0, budget.callsInWindow(),
+                "brief render: the roll-up double issues no provider call either");
         assertEquals(1, distinctProse.generateCalls(),
-                "brief makes no summarizer invocations, so no summarizer draws");
+                "control: brief makes no summarizer invocations at all");
     }
 
     @Test
     void renderSections_enScope_drawsNoTranslationCalls() throws Exception {
-        // M1-767: en-scope prose translation is a guaranteed no-op (the
-        // pipeline's documented short-circuit), so it must not draw the
-        // budget — the M1-756 "cache hits render free" principle and the
-        // translatesUnderThisScope restatement precedent.
+        // Same intent as M1-767's: en-scope prose translation is a
+        // guaranteed no-op (the pipeline's documented short-circuit), so it
+        // must never draw the budget. M1-769 makes that structural — the
+        // short-circuit returns before the translation provider, so there
+        // is no call to charge — and the expected total drops from 3 to 0
+        // because this fixture's summarizer is a non-calling double too.
         SystemLlmBudget budget = new SystemLlmBudget();
         budget.window = Duration.ofHours(24);
         budget.ceiling = 1000;
@@ -451,8 +464,11 @@ class DigestRendererTest {
 
         renderer.renderSections(posts, "en", DigestMode.FULL, GROUP_ID);
 
-        assertEquals(3, budget.callsInWindow(),
-                "en-scope full render: 3 summarizer calls, ZERO translation draws");
+        assertEquals(0, budget.callsInWindow(),
+                "en-scope full render: ZERO translation draws by construction, and the "
+                        + "summarizer double issues no provider call to charge");
+        assertEquals(3, proseGenerator.callCount(),
+                "control: the summarizer leg really did run for all 3 clusters");
     }
 
     /**

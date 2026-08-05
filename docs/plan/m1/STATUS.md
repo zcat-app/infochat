@@ -26,9 +26,12 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-760 — Re-drive posts whose ingest translation exhausted its attempts (complexity: medium, risk: medium)
+<<<<<<< HEAD
 - M1-765 — Anchor snapshot for saved posts (complexity: medium, risk: medium)
 - M1-766 — Anchor-first degraded renderers (complexity: low, risk: low)
 - M1-769 — Render-scoped exact LLM call accounting and per-call bound for the digest budget (complexity: high, risk: high)
+=======
+>>>>>>> m1/M1-769-render-scoped-exact-llm-call-accounting
 
 ---
 
@@ -64,6 +67,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-769 | Render-scoped exact LLM call accounting and per-call bound for the digest budget | 2026-08-05 | round 1 APPROVE |
 | M1-767 | Aggregate system LLM budget for the unmetered scheduled digest | 2026-08-05 | round 2 APPROVE |
 | M1-759 | Anchor-first headline display: reader-language line, bracketed original beneath | 2026-08-05 | round 1 APPROVE |
 | M1-768 | Redteam run-gate must always diff working tree vs fork point | 2026-08-04 | round 1 APPROVE |
@@ -1018,6 +1022,6 @@ M1-762 (done)
 M1-763 (done)
 M1-764 (done)
 M1-767 (done)
-  └── M1-769 (pending) ← runnable
+  └── M1-769 (done)
 M1-768 (done)
 ```

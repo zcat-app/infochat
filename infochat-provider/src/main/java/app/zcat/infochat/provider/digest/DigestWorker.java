@@ -95,10 +95,13 @@ public class DigestWorker {
     // zero LLM calls and is never gated in steady state — a stale probe
     // refuses it free, see DigestRetryService.retryLeg (M1-767 redteam
     // rounds 2-5).
-    // The render draws an estimate
-    // of its calls at its live generative call sites; this gate refuses admission
-    // when the window is at/over the ceiling, degrading the digest exactly
-    // like the slot-window check below. Field-initialized so a plain-JUnit
+    // The render charges each call it actually issues, at the provider
+    // decorator under the sink renderSections binds (M1-769); this gate
+    // refuses admission when the window is at/over the ceiling, degrading
+    // the digest exactly like the slot-window check below. Both altitudes
+    // are needed: admission keeps a doomed render from starting, the
+    // per-call bound keeps an admitted one from overshooting without
+    // limit. Field-initialized so a plain-JUnit
     // construction carries an empty (never-refusing) budget; CDI overwrites
     // at runtime — the {@link #clock} pattern.
     @Inject
@@ -230,9 +233,13 @@ public class DigestWorker {
             // an exhausted system budget degrades the scheduled digest the
             // same way an expired slot window does (the digest still goes
             // out; a breach never throws into the scheduler and never
-            // drops it silently).
+            // drops it silently). M1-769: the gate is GROUP-AWARE, and
+            // asks the same question the per-call draw does — a group the
+            // budget will refuse must be refused here, where the digest
+            // degrades cleanly and the breach signal fires, rather than
+            // inside a render that then issues nothing.
             if (remaining.isNegative() || remaining.isZero()
-                    || !systemLlmBudget.canStartRender()) {
+                    || !systemLlmBudget.canStartRender(slot.groupId())) {
                 content = degradedRenderer.render(collection.posts());
                 isDegraded = true;
             } else {

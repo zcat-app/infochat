@@ -5,6 +5,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.Config;
 import org.jboss.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -21,23 +22,41 @@ import java.util.concurrent.ConcurrentHashMap;
  * path, it is never re-routed).
  *
  * <h2>Keying</h2>
- * <p>State is keyed by resolved provider ENDPOINT (base-url), not by
- * {@link ModelTask}: one deployment runs one LLM service in practice
- * (D56), so all tasks routed to one endpoint share its breaker — the
- * first worker that discovers an outage spares every other consumer the
- * doomed connect wait. Task → endpoint resolution mirrors, read-only,
- * the providers' own {@code configFor} precedence (per-task
+ * <p>State is keyed by (transport KIND, resolved provider ENDPOINT), not
+ * by {@link ModelTask}: one deployment runs one LLM service in practice
+ * (D56), so all generative tasks routed to one endpoint share its
+ * breaker — the first worker that discovers an outage spares every other
+ * consumer the doomed connect wait. Task → endpoint resolution mirrors,
+ * read-only, the providers' own {@code configFor} precedence (per-task
  * {@code infochat.llm.<task>.base-url} wins, else the shared
  * {@link LlmRouter#CONFIG_KEY_DEFAULT_BASE_URL}); the precedence is
  * intentionally duplicated here rather than extracted from the two
  * providers — a shared-helper refactor is out of this ticket's scope.
- * The embedding SPI is a single per-deployment endpoint
- * ({@code infochat.embeddings.base-url}), resolved separately. A task
- * (or deployment) whose endpoint does not resolve — the test-stub case:
- * no HTTP transport at all — bypasses the breaker entirely, so
- * stub-backed environments keep today's behaviour byte-identical.
  *
- * <h2>State machine (per endpoint)</h2>
+ * <p>The embedding SPI is a single per-deployment endpoint
+ * ({@code infochat.embeddings.base-url}) and gets its OWN breaker even
+ * when that URL equals the generative one — which under the shipped
+ * defaults it does on every profile. The KIND is part of the key because
+ * the endpoint alone is not the failure domain: the two SPIs apply
+ * different patience to the same URL ({@code
+ * infochat.embeddings.timeout-ms} defaults to 30s and is unprofiled,
+ * against {@code infochat.llm.chat.timeout-ms}'s 120s) and a read
+ * timeout classifies as transport-unreachable, so a live-but-slow
+ * backend times out embeddings while chat still answers well inside its
+ * own budget. Sharing one key would let those embedding timeouts trip
+ * the breaker chat depends on and deny chat WITHOUT an HTTP attempt
+ * against an endpoint that is demonstrably answering.
+ * {@code docs/spec/security.md} §Failure handling states the separation
+ * ("the embedding endpoint is tracked separately"); D54/D56 keep
+ * embeddings off the LLM routing defaults for the same independence
+ * reason. (M1-769)
+ *
+ * <p>A task (or deployment) whose endpoint does not resolve — the
+ * test-stub case: no HTTP transport at all — bypasses the breaker
+ * entirely, so stub-backed environments keep today's behaviour
+ * byte-identical.
+ *
+ * <h2>State machine (per key)</h2>
  * <p>CLOSED by default; {@code failureThreshold} CONSECUTIVE
  * transport-unreachable failures trip it to OPEN; while OPEN every call
  * is denied ({@link #tryAcquireForTask} false → the decorator throws the
@@ -101,7 +120,7 @@ public class LlmCircuitBreakerRegistry {
     private final Duration cooldown;
     private final Clock clock;
     private final LlmRouter.ConfigReader config;
-    private final ConcurrentHashMap<String, EndpointBreaker> breakersByEndpoint =
+    private final ConcurrentHashMap<BreakerKey, EndpointBreaker> breakersByKey =
         new ConcurrentHashMap<>();
 
     /**
@@ -146,11 +165,11 @@ public class LlmCircuitBreakerRegistry {
      * grounding. Read-only — never transitions state.
      */
     public boolean wouldShortCircuit(ModelTask task) {
-        Optional<String> endpoint = endpointForTask(task);
-        if (endpoint.isEmpty()) {
+        Optional<BreakerKey> key = llmKey(task);
+        if (key.isEmpty()) {
             return false;
         }
-        EndpointBreaker breaker = breakersByEndpoint.get(endpoint.get());
+        EndpointBreaker breaker = breakersByKey.get(key.get());
         return breaker != null && breaker.wouldDeny(clock.instant());
     }
 
@@ -161,55 +180,97 @@ public class LlmCircuitBreakerRegistry {
      * endpoint bypasses (always true).
      */
     public boolean tryAcquireForTask(ModelTask task) {
-        return endpointForTask(task)
-            .map(endpoint -> breakerFor(endpoint).tryAcquire(clock.instant()))
+        return llmKey(task)
+            .map(key -> breakerFor(key).tryAcquire(clock.instant()))
             .orElse(true);
     }
 
     /** Reachability evidence for {@code task}'s endpoint: closes its breaker. */
     public void recordReachableForTask(ModelTask task) {
-        endpointForTask(task).ifPresent(this::recordReachable);
+        llmKey(task).ifPresent(this::recordReachable);
     }
 
     /** Classified transport failure for {@code task}'s endpoint. */
     public void recordUnreachableForTask(ModelTask task) {
-        endpointForTask(task).ifPresent(this::recordUnreachable);
+        llmKey(task).ifPresent(this::recordUnreachable);
+    }
+
+    /**
+     * Return the HALF-OPEN probe {@link #tryAcquireForTask} handed out,
+     * for a call that produced NO evidence about the endpoint (M1-769).
+     *
+     * <p>Acquiring the probe is a state change — it spends the single
+     * slot and pushes the deadline a full cooldown forward — so a call
+     * that reports neither reachable nor unreachable leaves the breaker
+     * denying an endpoint nobody has observed since it tripped. The
+     * digest's per-call spend cap makes that reachable: a budget refusal
+     * is deliberately outside the {@code LlmCallFailedException} family
+     * (it is evidence about our own spend, not about the provider), so
+     * it passes both recording catches in the decorator and would
+     * otherwise burn one recovery probe per cooldown for the whole
+     * length of a refused render, extending every LLM surface's outage
+     * against a provider that has already recovered.
+     *
+     * <p>Restores the pre-acquire state rather than closing or
+     * re-opening the breaker: the endpoint is still unobserved, so the
+     * NEXT caller should become the probe. A no-op unless the caller
+     * actually HOLDS the probe (see
+     * {@link EndpointBreaker#releaseProbe}), so releasing after an
+     * ordinary CLOSED-breaker call costs nothing.
+     */
+    public void releaseProbeForTask(ModelTask task) {
+        llmKey(task).ifPresent(this::releaseProbe);
     }
 
     /** Embedding-side twin of {@link #tryAcquireForTask}. */
     public boolean tryAcquireForEmbeddings() {
-        return embeddingsEndpoint()
-            .map(endpoint -> breakerFor(endpoint).tryAcquire(clock.instant()))
+        return embeddingsKey()
+            .map(key -> breakerFor(key).tryAcquire(clock.instant()))
             .orElse(true);
     }
 
     /** Embedding-side twin of {@link #recordReachableForTask}. */
     public void recordReachableForEmbeddings() {
-        embeddingsEndpoint().ifPresent(this::recordReachable);
+        embeddingsKey().ifPresent(this::recordReachable);
     }
 
     /** Embedding-side twin of {@link #recordUnreachableForTask}. */
     public void recordUnreachableForEmbeddings() {
-        embeddingsEndpoint().ifPresent(this::recordUnreachable);
+        embeddingsKey().ifPresent(this::recordUnreachable);
     }
 
-    private void recordReachable(String endpoint) {
+    /** Embedding-side twin of {@link #releaseProbeForTask}. */
+    public void releaseProbeForEmbeddings() {
+        embeddingsKey().ifPresent(this::releaseProbe);
+    }
+
+    private void recordReachable(BreakerKey key) {
         // No breakerFor() here: reachability evidence on an endpoint with
         // no breaker entry has nothing to close — don't allocate state
         // for the healthy steady-state path.
-        EndpointBreaker breaker = breakersByEndpoint.get(endpoint);
+        EndpointBreaker breaker = breakersByKey.get(key);
         if (breaker != null) {
             breaker.recordReachable();
         }
     }
 
-    private void recordUnreachable(String endpoint) {
-        breakerFor(endpoint).recordUnreachable(clock.instant());
+    private void recordUnreachable(BreakerKey key) {
+        breakerFor(key).recordUnreachable(clock.instant());
     }
 
-    private EndpointBreaker breakerFor(String endpoint) {
-        return breakersByEndpoint.computeIfAbsent(endpoint,
-            key -> new EndpointBreaker(key, failureThreshold, cooldown));
+    private void releaseProbe(BreakerKey key) {
+        // get() rather than breakerFor(): a key with no breaker entry has
+        // no probe to return — the same reason recordReachable does not
+        // allocate on the healthy path.
+        EndpointBreaker breaker = breakersByKey.get(key);
+        if (breaker != null) {
+            breaker.releaseProbe(clock.instant());
+        }
+    }
+
+    private EndpointBreaker breakerFor(BreakerKey key) {
+        return breakersByKey.computeIfAbsent(key,
+            absent -> new EndpointBreaker(absent, failureThreshold, cooldown));
     }
 
     /**
@@ -231,22 +292,55 @@ public class LlmCircuitBreakerRegistry {
             .filter(url -> !url.isEmpty());
     }
 
+    private Optional<BreakerKey> llmKey(ModelTask task) {
+        return endpointForTask(task).map(endpoint -> new BreakerKey(TransportKind.LLM, endpoint));
+    }
+
+    private Optional<BreakerKey> embeddingsKey() {
+        return embeddingsEndpoint()
+            .map(endpoint -> new BreakerKey(TransportKind.EMBEDDINGS, endpoint));
+    }
+
     /**
-     * One endpoint's breaker state. All transitions are synchronized on
-     * the instance — the critical sections are a handful of field reads
-     * and writes, contention-irrelevant next to the HTTP calls they
-     * gate.
+     * Which SPI's transport a breaker guards. Part of the map key, not a
+     * label: see the class javadoc §Keying for why one URL serving both
+     * SPIs still needs two breakers.
+     */
+    private enum TransportKind { LLM, EMBEDDINGS }
+
+    /**
+     * One breaker's identity. {@code endpoint} is the resolved base-url;
+     * {@code kind} keeps the two SPIs' state apart on a shared URL.
+     */
+    private record BreakerKey(TransportKind kind, String endpoint) {
+
+        /** Log-line identity — both components, since either can differ. */
+        String label() {
+            return endpoint + " (" + kind + ")";
+        }
+    }
+
+    /**
+     * One {@link BreakerKey}'s breaker state. All transitions are
+     * synchronized on the instance — the critical sections are a handful
+     * of field reads and writes, contention-irrelevant next to the HTTP
+     * calls they gate.
      */
     private static final class EndpointBreaker {
 
         private enum State { CLOSED, OPEN, HALF_OPEN }
 
-        private final String endpoint;
+        private final String label;
         private final int failureThreshold;
         private final Duration cooldown;
 
         private State state = State.CLOSED;
         private int consecutiveUnreachableFailures = 0;
+        // The thread admitted as the current HALF-OPEN probe, or null
+        // when no probe is outstanding. Identifies the probe HOLDER so a
+        // release can only return the slot its own caller took — see
+        // releaseProbe.
+        private @Nullable Thread probeOwner = null;
         // When OPEN: the instant the single HALF-OPEN probe becomes
         // admissible. When HALF_OPEN: the instant the in-flight probe's
         // slot expires — a probe whose thread never reports (killed
@@ -255,8 +349,8 @@ public class LlmCircuitBreakerRegistry {
         // the next call probes again.
         private Instant deadline = Instant.EPOCH;
 
-        EndpointBreaker(String endpoint, int failureThreshold, Duration cooldown) {
-            this.endpoint = endpoint;
+        EndpointBreaker(BreakerKey key, int failureThreshold, Duration cooldown) {
+            this.label = key.label();
             this.failureThreshold = failureThreshold;
             this.cooldown = cooldown;
         }
@@ -272,9 +366,42 @@ public class LlmCircuitBreakerRegistry {
                     // this caller becomes the single HALF-OPEN probe.
                     state = State.HALF_OPEN;
                     deadline = now.plus(cooldown);
+                    probeOwner = Thread.currentThread();
                     yield true;
                 }
             };
+        }
+
+        /**
+         * Undo an acquisition that observed nothing: back to OPEN with the
+         * probe admissible again from {@code now}. The caller is handing
+         * back a slot it never used, so the endpoint is exactly as overdue
+         * for a probe as it was an instant ago — hence no fresh cooldown.
+         *
+         * <p>Gated on OWNERSHIP, not merely on the state being HALF_OPEN:
+         * a call admitted while the breaker was still CLOSED can outlive a
+         * trip plus a whole cooldown (an LLM call's budget runs to 120s
+         * against a 30s cooldown), and if it then reports no evidence — a
+         * {@code /stop} interrupt, a budget refusal — a state-only check
+         * would let it hand back a probe a DIFFERENT, newer call is
+         * holding. The newer probe would keep running while the freed slot
+         * admitted a second one, so two concurrent probes would hit an
+         * endpoint the breaker is meant to be touching once. (M1-769)
+         *
+         * <p>Thread identity is a sound token here because acquire and
+         * release are the same synchronous decorator invocation on one
+         * thread ({@code CircuitBreakingLlmProvider.generate} /
+         * {@code CircuitBreakingEmbeddingProvider.embed} wrap a blocking
+         * call). Should that ever stop holding, the mismatch degrades to a
+         * no-op release — the pre-M1-769 behaviour of burning the probe,
+         * which is the safe direction.
+         */
+        synchronized void releaseProbe(Instant now) {
+            if (state == State.HALF_OPEN && probeOwner == Thread.currentThread()) {
+                state = State.OPEN;
+                deadline = now;
+                probeOwner = null;
+            }
         }
 
         synchronized boolean wouldDeny(Instant now) {
@@ -291,10 +418,13 @@ public class LlmCircuitBreakerRegistry {
             // after the trip closes it too, correctly).
             if (state != State.CLOSED) {
                 LOG.infof("LLM circuit breaker CLOSED for %s (endpoint reachable again)",
-                    endpoint);
+                    label);
             }
             state = State.CLOSED;
             consecutiveUnreachableFailures = 0;
+            // The probe (if this call was one) has settled — drop the
+            // owner so the reference does not outlive its thread.
+            probeOwner = null;
         }
 
         synchronized void recordUnreachable(Instant now) {
@@ -306,16 +436,17 @@ public class LlmCircuitBreakerRegistry {
                         deadline = now.plus(cooldown);
                         LOG.warnf("LLM circuit breaker OPEN for %s after %d consecutive "
                                 + "transport failures; short-circuiting calls for %d ms",
-                            endpoint, consecutiveUnreachableFailures, cooldown.toMillis());
+                            label, consecutiveUnreachableFailures, cooldown.toMillis());
                     }
                 }
                 case HALF_OPEN -> {
                     // The probe failed: re-open with a fresh cooldown.
                     state = State.OPEN;
                     deadline = now.plus(cooldown);
+                    probeOwner = null;
                     LOG.warnf("LLM circuit breaker re-OPENED for %s (probe failed); "
                             + "short-circuiting calls for %d ms",
-                        endpoint, cooldown.toMillis());
+                        label, cooldown.toMillis());
                 }
                 case OPEN -> {
                     // An in-flight straggler failing after the trip: the
