@@ -64,6 +64,7 @@ infochat.embeddings.provider | docs/design/05-llm-and-embeddings.md §5.2 states
 infochat.fetch.max-body-bytes | docs/design/04-security.md §SSRF item 5 states the 5 MiB cap is a compile-time constant, deliberately not operator-tunable, and that this key never existed.
 infochat.fetch.connect-timeout | docs/design/04-security.md §SSRF item 6 states the timeouts are compile-time constants and that this key never existed.
 infochat.fetch.read-timeout | docs/design/04-security.md §SSRF item 6 states the timeouts are compile-time constants and that this key never existed.
+infochat.image.base-url | docs/design/future/image-generation.md §Non-negotiables row 12 states the /image feature is "optional by configuration — no infochat.image.base-url, no command"; the feature is unbuilt, so the key it WOULD introduce is named only to assert its absence.
 infochat.ratelimit.llm-ops-per-minute | docs/design/04-security.md §Rate limiting records this name as one the table previously used and that never existed; the shipped key is infochat.chat.llm-rate-cap-per-minute.
 infochat.ratelimit.tool-calls-per-turn | docs/design/04-security.md §Rate limiting records this name as never having existed; the tool-call budget has no config key at all.
 
