@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 784 |
 | deferred | 0 |
 | abandoned | 23 |
-| **total** | **808** |
+| **total** | **809** |
 
 ---
 
@@ -26,6 +26,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-771 — Echo check on the ingest anchor write (complexity: low, risk: medium)
+- M1-774 — Intake rejections skip the confirm drain and the anchor clear (complexity: medium, risk: low)
 
 ---
 
@@ -1021,4 +1022,5 @@ M1-770 (done)
 M1-771 (pending) ← runnable
 M1-772 (done)
 M1-773 (done)
+M1-774 (pending) ← runnable
 ```
