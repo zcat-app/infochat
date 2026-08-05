@@ -25,7 +25,11 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
+<<<<<<< HEAD
 - M1-770 — Doc-only commits must run the parity gates (complexity: low, risk: low)
+=======
+- M1-766 — Anchor-first degraded renderers (complexity: low, risk: low)
+>>>>>>> m1/M1-770-doc-only-commits-must-run-parity-gates
 - M1-771 — Echo check on the ingest anchor write (complexity: low, risk: medium)
 - M1-772 — Audit the anchor/original pair as a span (complexity: medium, risk: medium)
 
@@ -63,6 +67,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-770 | Doc-only commits must run the parity gates | 2026-08-05 | round 2 APPROVE |
 | M1-769 | Render-scoped exact LLM call accounting and per-call bound for the digest budget | 2026-08-05 | round 1 APPROVE |
 | M1-767 | Aggregate system LLM budget for the unmetered scheduled digest | 2026-08-05 | round 2 APPROVE |
 | M1-766 | Anchor-first degraded renderers | 2026-08-05 | round 2 APPROVE |
@@ -1019,7 +1024,7 @@ M1-764 (done)
 M1-767 (done)
   └── M1-769 (done)
 M1-768 (done)
-M1-770 (pending) ← runnable
+M1-770 (done)
 M1-771 (pending) ← runnable
 M1-772 (pending) ← runnable
 ```

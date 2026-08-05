@@ -1,7 +1,7 @@
 ---
 id: M1-770
 title: "Doc-only commits must run the parity gates"
-status: pending
+status: done
 created: 2026-08-05
 last_updated: 2026-08-05
 blocked_by: []
@@ -35,28 +35,48 @@ out_of_scope:
     which never reach that gate at all.
 acceptance:
   - >-
-    THE BYPASS IS NARROWED, NOT REMOVED. `CLAUDE.md` §"Commit prefixes"
-    and `docs/process/workflow.md` §Non-ticket commits both state that a
-    `spec:` commit touching `docs/spec/**` or `docs/design/**` must run
-    the two parity gates before landing, because those trees are TEST
-    INPUT. Doc edits that touch neither tree (`docs/process/**`,
-    `docs/plan/**`, `.claude/**`) keep the existing zero-verify bypass —
-    the point is to price the gates where they can actually fire, not to
-    make every typo fix cost a full suite.
+    THE TRIGGER IS CONTENT-KEYED, NOT PATH-KEYED. `CLAUDE.md`
+    §"Commit prefixes" and `docs/process/workflow.md` §Non-ticket commits
+    both state that a non-ticket commit runs the parity gates before
+    landing only when its diff can actually trip one — measured per test,
+    not assumed per directory:
+    (a) it ADDS a line containing an `infochat.`-prefixed token under
+    `docs/spec/**`, `docs/design/**` or a root-level `*.md`
+    (`DocumentedConfigKeyParityTest`); (b) it touches
+    `docs/spec/commands.md` (`CommandCatalogueParityTest`); or (c) it
+    touches `docs/spec/security.md` (`ChatToolAllowlistSpecParityTest`).
+    EVERY other doc edit keeps the existing zero-verify bypass —
+    including prose anywhere in `docs/spec/**`, `docs/design/**` or a
+    root guide that adds no such token. A path-keyed rule would charge
+    the gates to the large majority of doc edits that provably cannot
+    fail them, which is the cost that made the bypass attractive in the
+    first place.
   - >-
-    THE CHEAP COMMAND IS NAMED. Both documents state the module-scoped
-    invocation that exercises the two gates rather than "run `mvn
-    verify`", so the rule is followable at doc-edit cost. A full
-    repo-root verify for a one-line prose change is what made the bypass
-    attractive in the first place; a rule too expensive to follow is the
-    failure mode being replaced.
+    THE DECIDING GREP IS NAMED, AND SO IS THE COMMAND. Both documents
+    give the one-liner that answers "does THIS commit need the gates?"
+    and, separately, the module-scoped invocation that runs them — so
+    applying the rule costs seconds, and the ~2 minutes is paid only when
+    the rule actually fires. A rule too expensive to follow is the
+    failure mode being replaced, not a fix for it.
   - >-
-    THE WHY IS RECORDED WITH THE RULE. Both edits name the mechanism —
-    `DocumentedConfigKeyParityTest` scrapes `infochat.*` tokens out of
-    `docs/spec/**` and `docs/design/**`; `CommandCatalogueParityTest`
-    does the same for the command catalogue — so a future reader can
-    tell WHICH doc trees are load-bearing and does not re-derive the
-    bypass from "docs cannot break a build".
+    THE WHY IS RECORDED WITH THE RULE, FOR ALL FOUR READERS. Both edits
+    name the mechanism — `DocumentedConfigKeyParityTest` scrapes
+    `infochat.*` tokens out of `docs/spec/**`, `docs/design/**` and the
+    root-level `*.md` guides; `CommandCatalogueParityTest` and
+    `LlmOutputSanitizerTest` both read `docs/spec/commands.md` (the
+    catalogue and the sanitizer's closed list respectively);
+    `ChatToolAllowlistSpecParityTest` reads the chat-tool allowlist in
+    `docs/spec/security.md` — so a future reader can tell WHICH doc
+    content is load-bearing and does not re-derive the bypass from "docs
+    cannot break a build". The fourth reader does NOT widen the trigger
+    (it reads a file leg (b) already covers), so the deciding one-liner
+    is unchanged by its inclusion. Both also
+    record WHY deletions are exempt (the vacuity floors are 50 real / 50
+    documented keys, far below the repo's counts) and WHY no cheaper
+    `-Dtest`-filtered invocation is offered (the parent POM sets
+    surefire's `failIfNoTests` in `<configuration>`, which outranks the
+    `-D` override, so a filtered cross-module run fails on every module
+    with no matching class).
   - >-
     `mvn verify` is green from the repo root.
 test_plan:
@@ -70,12 +90,58 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-05
+    verdict: REWORK
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PARTIAL
+    diff_stats:
+      files: 4
+      added: 98
+      removed: 29
+  - round: 2
+    date: 2026-08-05
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 157
+      removed: 41
 overrides: []
 aborted_attempts: []
 reopens: []
 redteam_findings: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-05
+  verdict: PASS
+  warnings:
+    - >-
+      lint: PASS (0 blockers, 0 warnings).
+    - >-
+      Self-check, census truth: the §Census grep returns exactly the three
+      tests in the table, all under `infochat-provider/src/test/java`.
+    - >-
+      Self-check, ticket-vs-code truth: `DocumentedConfigKeyParityTest`
+      `docFiles()` walks `docs/spec/**` and `docs/design/**` recursively AND
+      every root-level `*.md` (10 guides today). Acceptance items 1 and 3 had
+      omitted the root-guide leg and gated only `spec:` commits, while
+      `workflow.md`'s prefix table assigns `CLAUDE.md` / `AGENTS.md` /
+      `CONTRIBUTING.md` to `process:` — so the rule as drafted would have left
+      the same test's root-guide input ungated. Raised as a blocking question;
+      the user chose to cover root guides. Acceptance items 1–3 amended
+      accordingly (path-keyed, not prefix-keyed) before the status flip, and
+      the stale "two parity gates" count corrected to three per the body's own
+      "must name all three" directive.
 escalation_reason:
 ---
 
@@ -126,12 +192,13 @@ which is luck, not design.
 
 The class is **tests that resolve a repo-root-relative path and read a
 `docs/` file as test input**. Surefire runs with the module directory as
-the working directory, so every such test reaches the repo root via
-`Path.of("..")` — which makes that construction the enumeration handle.
-Re-runnable:
+the working directory, so every such test reaches the repo root by a
+relative path — but there is more than one way to spell that, so the
+handle must cover all of them. Re-runnable:
 
 ```
-grep -rlE 'Path\.of\("\.\.' --include=*.java infochat-*/src/test/java
+grep -rlE 'Path\.of\("\.\.|Paths\.get\("\.\.|new File\("\.\.|"\.\./' \
+  --include=*.java infochat-*/src/test/java
 ```
 
 | Test | Reads | Fails when | Disposition |
@@ -139,12 +206,25 @@ grep -rlE 'Path\.of\("\.\.' --include=*.java infochat-*/src/test/java
 | `DocumentedConfigKeyParityTest` | `docs/spec/**`, `docs/design/**`, root guides (walks from `Path.of("..")`) | a doc names an `infochat.*` key that is neither real nor exempt | COVERED — the gate that caught `835ab637` |
 | `CommandCatalogueParityTest` | `docs/spec/commands.md` | the documented command set, its permission tiers, or its closed-list formatting drifts from the dispatched one | COVERED — same bypass, same exposure |
 | `ChatToolAllowlistSpecParityTest` | `docs/spec/security.md` | the chat-tool allowlist in the spec drifts from the registry | COVERED — same bypass, same exposure |
+| `LlmOutputSanitizerTest` (`matchSetEqualsSpecClosedList`, via `locateSpec()`) | `docs/spec/commands.md` | the sanitizer's closed list drifts from the spec's | COVERED — reached by the same trigger leg as `CommandCatalogueParityTest` |
+| `LiveSimpleXScenarioSuiteIT`, `LiveSimpleXRoundTripIT` | `../prod/runtime/simplex-clients` | — | NOT IN CLASS — relative path, but not a `docs/` fixture |
 
-The third was missed on this ticket's first draft, which asserted "two
-tests" from memory; the linter's `CENSUS-PRESENT-IF-CLASS-SCOPED` WARN
-is what forced the grep that found it. The rule the ticket writes must
-name all three, or a `spec:` edit to `docs/spec/security.md` keeps the
-exact bypass this ticket exists to close.
+The census has now been wrong twice, in the same direction, and both
+misses are handle defects rather than judgment calls:
+
+- The **first draft** asserted "two tests" from memory; the linter's
+  `CENSUS-PRESENT-IF-CLASS-SCOPED` WARN forced the grep that found
+  `ChatToolAllowlistSpecParityTest`.
+- The **`Path\.of\("\.\.` handle** then missed `LlmOutputSanitizerTest`,
+  which reaches the same file via `Paths.get("..", ...)`. Round-1 review
+  caught it. Enumerating by one spelling of an idiom is the recurring
+  failure — the handle above alternates over all of them.
+
+The rule the ticket writes must name all four, or its "which doc content
+is load-bearing" claim understates the surface a reader is asked to
+trust. Note that the fourth does NOT widen the trigger: it reads
+`docs/spec/commands.md`, which trigger leg (b) already covers, so the
+deciding one-liner is unchanged.
 
 ## Why not just exempt `docs/design/future/**`
 
@@ -178,3 +258,18 @@ directory-wide exclusion states nothing and expires never.
   taxes every doc commit with JVM startup, and the repo currently has no
   hook infrastructure. Whoever implements this should weigh both and
   record the choice.
+
+## Round 1 rework
+
+1. Fix the deciding one-liner so it matches an added line that BEGINS with an
+   `infochat.` token, in BOTH copies: `CLAUDE.md` and
+   `docs/process/workflow.md`. Replace the second alternation
+   `^\+[^+].*infochat\.` with an ERE that still excludes the `+++` header but
+   admits a token at column 0 — e.g. `^\+([^+].*)?infochat\.` (the optional
+   group keeps `+++ b/…` out of that arm while letting `+infochat.foo=bar`
+   match). Update the explanatory clause in `docs/process/workflow.md` —
+   "with `[^+]` excluding the `+++` header from that arm" — to describe
+   whatever form is chosen, so the prose and the command stay in agreement.
+   Re-verify against the ticket's own precedent claim ("flags that commit on
+   three added lines") that the revised pattern still flags `835ab637` and
+   still finds nothing in the prose-only `75ef6d29`.

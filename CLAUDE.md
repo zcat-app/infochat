@@ -199,7 +199,7 @@ Tickets live in `docs/plan/m1/tickets/M1-NNN-<slug>.md`; status board at `docs/p
 
 ### Commit prefixes (not every change is a ticket)
 
-The ticket flow exists for code, tests, migrations, and spec changes coordinated with code. Pure-doc edits (spec, design, process, skills, agents) bypass the ticket-readiness pre-flight, reviewer, `mvn verify`, and STATUS regen — commit them directly on `main` with a non-ticket prefix:
+The ticket flow exists for code, tests, migrations, and spec changes coordinated with code. Pure-doc edits (spec, design, process, skills, agents) bypass the ticket-readiness pre-flight, reviewer, `mvn verify`, and STATUS regen — subject to the parity-gate check below — commit them directly on `main` with a non-ticket prefix:
 
 | Prefix | When | Example |
 |---|---|---|
@@ -208,5 +208,14 @@ The ticket flow exists for code, tests, migrations, and spec changes coordinated
 | `process:` | `.claude/`, `docs/process/`, `docs/plan/`, or `CLAUDE.md` edit, no code change | `process: Replace status-regenerator subagent with script` |
 | `text:` | Zero-behavior text **inside a source file**: comments, javadoc, and message-only string literals (assertion/log/exception messages). Every `+`/`-` line must sit inside a comment or a string literal — no executable line changes, and never a literal a test asserts on or a user sees | `text: Drop the phantom config key from the body-cap assertion message` |
 | `fix:` | **Minimal repair of a red `main` that no ticket owns** — almost always damage from an earlier non-ticket commit. Must be the smallest change that restores green, and `mvn verify` must be green from the repo root BEFORE it lands (a `fix:` is the one non-ticket prefix that can touch code or test resources, so it does not inherit the doc-edit verify bypass). Anything beyond the repair — the underlying process gap, a better design — is a follow-up ticket named in the commit body, never folded in | `fix: Exempt the /image design note's unbuilt config key` |
+
+**Parity-gated doc content — some docs ARE test input.** Four tests read doc files as fixtures, so "a pure-doc edit cannot break the build" is false for some doc *content*: `DocumentedConfigKeyParityTest` scrapes every `infochat.*` token out of `docs/spec/**`, `docs/design/**` **and every root-level `*.md`** (each must be a real key or carry an exemption entry); `CommandCatalogueParityTest` and `LlmOutputSanitizerTest.matchSetEqualsSpecClosedList()` both read `docs/spec/commands.md` (the catalogue and the sanitizer's closed list); `ChatToolAllowlistSpecParityTest` pins the chat-tool allowlist in `docs/spec/security.md`. **The trigger is what the diff CONTAINS, not which directory it sits in** — prefix is irrelevant (`CLAUDE.md` / `AGENTS.md` / `CONTRIBUTING.md` are `process:` territory *and* root guides), and a prose-only `docs/spec/` amendment pays nothing. Stage the change, then let one command decide:
+
+```
+git diff --cached -U0 -- docs/spec docs/design ':(top,glob)*.md' \
+  | grep -E '^\+\+\+ b/docs/spec/(commands|security)\.md|^\+([^+].*)?infochat\.'
+```
+
+Any output → run `./mvnw -B -pl infochat-provider -am test` green before landing (~2 min; surefire only, no `*IT` suite). No output → the zero-verify bypass stands. Only ADDED tokens can fail the scrape (documented ⊆ real ∪ exempt; the vacuity floors are 50/50, far below the repo's counts). A failure is fixed by correcting the doc or adding a ledger entry — never by narrowing the scan. Full rule + rationale: `docs/process/workflow.md` §Non-ticket commits rule 10.
 
 If a change touches both code and docs, it's a ticket. `git log --grep "^M1-"` keeps cleanly enumerating ticketed work because no non-ticket prefix starts with `M`. Full rules in `docs/process/workflow.md` §Non-ticket commits.

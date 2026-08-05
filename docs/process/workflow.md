@@ -301,8 +301,8 @@ The ticket flow exists for code, tests, migrations, and spec changes coordinated
 | Prefix | Scope | Skipped vs ticket flow |
 |---|---|---|
 | `M<N>-NNN:` | Implementation ticket: code, tests, migrations, or spec changes coordinated with code | (full flow) |
-| `spec:` | Pure spec/design edit under `docs/spec/` or `docs/design/`, no code change | ticket-readiness pre-flight, reviewer, `mvn verify`, STATUS regen |
-| `process:` | Edit under `.claude/`, `docs/process/`, `docs/plan/`, `CLAUDE.md`, or the agent-tooling surface (`AGENTS.md`, `.agents/`, `.opencode/`, `.codex/`, `CONTRIBUTING.md`), no code change | ticket-readiness pre-flight, reviewer, `mvn verify`, STATUS regen |
+| `spec:` | Pure spec/design edit under `docs/spec/` or `docs/design/`, no code change | ticket-readiness pre-flight, reviewer, STATUS regen, `mvn verify` — but run the rule 10 one-liner first; some doc content is test input |
+| `process:` | Edit under `.claude/`, `docs/process/`, `docs/plan/`, `CLAUDE.md`, or the agent-tooling surface (`AGENTS.md`, `.agents/`, `.opencode/`, `.codex/`, `CONTRIBUTING.md`), no code change | ticket-readiness pre-flight, reviewer, STATUS regen, `mvn verify` — but run the rule 10 one-liner first if the edit touches a root-level `*.md` |
 | `text:` | **Zero-behavior text inside a source file** — comments, javadoc, and message-only string literals (assertion messages, log messages). Every `+`/`-` line must lie inside a comment or a string literal; no executable line changes. See rule 8 | ticket-readiness pre-flight, reviewer, `mvn verify`, STATUS regen |
 | `fix:` | **Minimal repair of a red `main` that no ticket owns.** See rule 9 | ticket-readiness pre-flight, reviewer, STATUS regen — **NOT** `mvn verify` |
 
@@ -327,6 +327,33 @@ The ticket flow exists for code, tests, migrations, and spec changes coordinated
    - **`mvn verify` IS required**, green from the repo root, BEFORE the commit lands — this is the one non-ticket prefix that can touch code or a test resource, so it does not inherit the pure-doc verify bypass. The commit body records the result.
    - **The root cause is a follow-up ticket, never folded in.** A `fix:` repairs the symptom so work can continue; the process gap or design defect that produced it gets a ticket named in the commit body. Fixing both in one commit is the scope expansion §"Better alternatives surface as proposals" forbids.
    - **If a ticket DOES own the breakage, it is not a `fix:`** — it is that ticket's rework, or a new ticket. `fix:` is for orphaned breakage only.
+10. **Parity-gated doc content — some docs ARE test input.** The `mvn verify` bypass in the table above rests on "a pure-doc edit cannot break the build". For some doc *content* that premise is simply false, because four tests read doc files as fixtures:
+   - `DocumentedConfigKeyParityTest` scrapes every `infochat.*` token out of `docs/spec/**`, `docs/design/**` **and every root-level `*.md`**, and asserts each one is a real config key or carries an entry in `documented-config-key-exemptions.txt`.
+   - `CommandCatalogueParityTest` pins the command catalogue in `docs/spec/commands.md` — its command set, permission tiers and closed-list formatting — against the dispatched one.
+   - `LlmOutputSanitizerTest.matchSetEqualsSpecClosedList()` pins the sanitizer's closed list against the same file, reaching it via `locateSpec()`.
+   - `ChatToolAllowlistSpecParityTest` pins the chat-tool allowlist in `docs/spec/security.md` against the registry.
+
+   **The trigger is what the diff CONTAINS, not which directory it sits in.** Gating on the directory would charge the gates to nearly every `docs/spec/**`, `docs/design/**` and root-guide edit, and the overwhelming majority of those cannot fail one — which would re-create, at a smaller scale, the too-expensive-to-follow rule this is replacing. Stage the change, then let one command decide:
+
+   ```
+   git diff --cached -U0 -- docs/spec docs/design ':(top,glob)*.md' \
+     | grep -E '^\+\+\+ b/docs/spec/(commands|security)\.md|^\+([^+].*)?infochat\.'
+   ```
+
+   **Any output → run the gates. No output → the bypass stands, commit as normal.** How it maps onto the four tests: the `:(top,glob)` pathspec admits root-level `*.md` only (under `:(glob)` a `*` does not cross `/`), so `docs/process/**`, `docs/plan/**`, `.claude/**` and `.agents/**` never enter the diff at all; the first alternation catches a touch of either single-file fixture; the second catches an ADDED line naming a config key. In that second arm the group is **optional** so a token at column 0 still matches — `+infochat.foo=bar`, the properties-block style a design note documenting a new key most naturally uses — while `[^+]` inside it keeps the `+++ b/…` file header out (the header's second character is `+`, so the group cannot match, and no bare `infochat.` follows the first `+`).
+
+   **The gates:**
+
+   ```
+   ./mvnw -B -pl infochat-provider -am test
+   ```
+
+   ~2 minutes: all four are `*Test` (surefire) in one module, and the `test` phase skips the failsafe `*IT` suite. A full repo-root `mvn verify` costs tens of minutes, and that price gap is the whole point — a rule too expensive to follow is the failure mode being replaced, not a fix for it.
+   - **Why unfiltered, and why `-am`.** A `-Dtest=<the four classes>` filter looks cheaper and does not work: the parent POM sets surefire's `failIfNoTests` in `<configuration>` (rule 8's M1-446 non-empty-unit-suite tripwire), which outranks a `-D` override, so every reactor module with no matching class fails the build. Dropping `-am` to dodge that resolves the sibling modules from `~/.m2` instead of the working tree, compiling against whatever was last installed. Neither is worth defeating a tripwire for; run the module's unit suite unfiltered.
+   - **Why only ADDED tokens.** The scrape asserts documented ⊆ real ∪ exempt, so only a token the diff introduces can create drift. Deleting or rewording prose cannot: the vacuity floors (`MIN_REAL_KEYS` and `MIN_DOCUMENTED_KEYS`, both 50) sit far below the repo's real counts, so no prose edit approaches them.
+   - **Prefix is irrelevant; content decides.** `CLAUDE.md`, `AGENTS.md` and `CONTRIBUTING.md` are `process:` territory *and* root guides, so a `spec:`-only reading would leave one whole leg of `DocumentedConfigKeyParityTest` ungated. Equally, a `spec:` commit is not automatically gated — a prose-only amendment under `docs/spec/` pays nothing.
+   - **A failure is not licence to narrow the gate.** Excluding a doc tree from the scan, or relaxing an assertion, is the §8 test-integrity violation whatever the prefix. The remedies the tests themselves prescribe are: fix a mis-named key, or add a ledger entry stating why the key legitimately has no literal.
+   - Precedent, both directions: `835ab637` (`spec:`, one new note under `docs/design/future/`, no code) named `infochat.image.base-url` in a sentence asserting the key's *absence* — the scraper reads tokens, not intent, and `main` went red and stayed red until the next ticket's full suite tripped over it. The one-liner above flags that commit on three added lines. It finds nothing in a prose-only amendment such as `75ef6d29`, which would pay nothing.
 
 ### When in doubt
 
