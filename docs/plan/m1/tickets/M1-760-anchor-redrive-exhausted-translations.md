@@ -3,7 +3,7 @@ id: M1-760
 title: "Re-drive posts whose ingest translation exhausted its attempts"
 status: pending
 created: 2026-08-04
-last_updated: 2026-08-04
+last_updated: 2026-08-05
 blocked_by: []
 files_budget: 6
 files_scope:
@@ -11,6 +11,8 @@ files_scope:
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/translation/IngestTranslationWorker.java
   - infochat-collector/src/main/resources/application.properties
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/translation/IngestTranslationWorkerTest.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/translation/IngestTranslationWorkerIT.java
+  - infochat-collector/src/test/resources/application.properties
 complexity: medium
 risk: medium
 round_cap: 2
@@ -112,7 +114,18 @@ acceptance:
     `mvn verify` is green from the repo root.
 test_plan:
   adds:
-    - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/translation/IngestTranslationWorkerTest.java
+    - >-
+      infochat-collector/src/test/java/app/zcat/infochat/collector/eval/translation/IngestTranslationWorkerIT.java
+      — every re-drive proof that needs the schema: only `releaseNull`
+      stamps the ladder (the other three `persistTranslation` callers
+      leave it unset), the QUARANTINED/NEEDS_REVIEW exclusion, dueness
+      and the terminal cap under a pinned Clock, and the anchor landing
+      through the same `persistTranslation` write.
+    - >-
+      infochat-collector/src/test/java/app/zcat/infochat/collector/eval/translation/IngestTranslationWorkerTest.java
+      — the pure half only: the backoff ladder's arithmetic and its
+      whole-ladder fit inside the `%pi` scan window. This class is a
+      no-DB, no-CDI unit test by construction.
   preserves:
     - >-
       Every first-pass translation test, including the English-source
@@ -230,6 +243,17 @@ attempt/timestamp columns four times already (V21, V52, V66 ×2).
   English and V74 is recent, so that set is expected to be empty; if the
   live check finds otherwise, raise it rather than adding a backfill
   UPDATE under this ticket.
+- The re-drive proofs live in the `*IT`, not the `*Test`. Every
+  acceptance item here is DB-backed, and
+  `IntegrationTestNamingGuardTest` fails the build on a
+  DataSource-injecting `*Test` class — the same constraint that already
+  pushed M1-749's `processOne` contract tests into
+  `IngestTranslationWorkerIT`. The `*Test` class keeps only what is pure.
+  `infochat-collector/src/test/resources/application.properties` is in
+  scope for one line: turning the new tick off under `@QuarkusTest` if
+  its poll interval is short enough to fire mid-suite (the
+  `infochat.fetch.reprobe.poll-interval=off` precedent). If a long
+  interval makes that unnecessary, the file stays untouched.
 - `migration_touch: true` (set by this refine) serializes the start:
   `docs/process/workflow.md:337` bars a parallel start while any other
   ticket is in flight. M1-758 and M1-759 were live when this was written.
