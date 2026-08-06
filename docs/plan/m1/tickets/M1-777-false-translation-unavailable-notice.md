@@ -1,9 +1,14 @@
 ---
 id: M1-777
 title: "Bot claims 'showing in English' on a reply that is not English"
-status: pending
+status: done
 created: 2026-08-06
 last_updated: 2026-08-06
+clarity_check:
+  date: 2026-08-06
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 4
 files_scope:
@@ -69,7 +74,20 @@ spec_refs:
   - docs/spec/commands.md §Content
 decision_refs:
   - D43
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-06
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 151
+      removed: 23
 overrides: []
 ---
 

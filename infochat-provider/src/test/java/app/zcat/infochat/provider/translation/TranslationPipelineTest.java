@@ -179,6 +179,64 @@ class TranslationPipelineTest {
     }
 
     @Test
+    void runReturnsTextAloneWhenTheInputIsAlreadyInTheScopeLanguage() {
+        // The v1.1.0 live-test failure (M1-777): the generator handed the
+        // pipeline Czech under a cs scope, the translator correctly
+        // returned it unchanged, and M1-437's blanket reading of
+        // condition (b) stapled "showing English" onto Czech prose.
+        String czech = "Ještě upřesněte, co vás u Zcash zajímá víc.";
+        translatorStub.setResponseText(czech);
+
+        String result = pipeline.run(czech, "cs", "cs");
+
+        assertEquals(czech, result,
+                "text already in the scope language must be returned alone — "
+                        + "identity IS the correct translation here");
+        assertFalse(result.contains(bundleLoaderStub.noteFor("cs")),
+                "a correct identity translation must NOT append the fallback note");
+        assertEquals(0, sanitizer.sanitizeCallCount(),
+                "the translator contributed nothing, so sanitizer-2 must not run");
+        assertTrue(cache.get(czech, "cs").isEmpty(),
+                "a non-translating path must NOT populate the cache");
+    }
+
+    @Test
+    void runAppendsNoNoteWhenTheEchoedInputWasNotDeclaredEnglish() {
+        // The note asserts the delivered text is English, so it may only
+        // fire over text declared English. A third language echoed back is
+        // a genuine failure the note cannot describe without lying, and no
+        // bundle key exists that could: it degrades to silence.
+        String german = "Zcash hat ein Upgrade angekündigt.";
+        translatorStub.setResponseText(german);
+
+        String result = pipeline.run(german, "de", "cs");
+
+        assertEquals(german, result,
+                "an echoed non-English input must not be labelled English");
+        assertFalse(result.contains(bundleLoaderStub.noteFor("cs")),
+                "the pipeline must never assert a language it was not told");
+    }
+
+    @Test
+    void runWithDeclaredEnglishSourceStillFallsBackOnAnEchoedTranslation() {
+        // Condition (b) at the three-argument API: the M1-437 case, which
+        // narrowing (b) to declared-English inputs must leave intact.
+        String input = "English text the translator echoes back unchanged.";
+        translatorStub.setResponseText(input);
+
+        String result = pipeline.run(input, "en", "cs");
+
+        assertEquals(input + "\n" + bundleLoaderStub.noteFor("cs"), result,
+                "an echoed English input must still return English plus the fallback note");
+        assertEquals(BundleKeys.REPLY_TRANSLATION_UNAVAILABLE, bundleLoaderStub.lastKey(),
+                "the note must be resolved from the translation-unavailable bundle key");
+        assertEquals(0, sanitizer.sanitizeCallCount(),
+                "identical-output fallback must NOT invoke sanitizer-2");
+        assertTrue(cache.get(input, "cs").isEmpty(),
+                "identical-output fallback must NOT populate the cache");
+    }
+
+    @Test
     void fallsBackToEnglishWhenOutputCarriesNoTargetScript() {
         String input = "English prose the translator refuses to translate.";
         // Condition (d): a translator that answers a ru-scope request in

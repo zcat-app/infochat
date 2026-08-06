@@ -103,6 +103,12 @@ public class TranslationPipeline {
      * Translate post-sanitizer-1 English text into the scope's
      * language, running sanitizer-2 on the translator's output.
      *
+     * <p>This form DECLARES its input to be English on the caller's
+     * behalf — the contract every caller was written against. A caller
+     * that cannot honour it, because the language of its text is the
+     * model's choice rather than the code's, passes what it actually
+     * has to {@link #run(String, String, String)} instead.
+     *
      * @param postSanitizer1English  LLM-authored prose after
      *     sanitizer-1; never null.
      * @param scopeLanguage  ISO 639-1 code from
@@ -115,17 +121,49 @@ public class TranslationPipeline {
      */
     public String run(String postSanitizer1English,
                                String scopeLanguage) {
+        return run(postSanitizer1English, "en", scopeLanguage);
+    }
+
+    /**
+     * Translate post-sanitizer-1 prose into the scope's language,
+     * running sanitizer-2 on the translator's output.
+     *
+     * @param postSanitizer1Text  LLM-authored prose after sanitizer-1;
+     *     never null.
+     * @param sourceLanguage  the language {@code postSanitizer1Text} is
+     *     DECLARED to be in — ISO 639-1, never null. Declared and never
+     *     inferred, for two independent reasons (M1-777). D29 (amended
+     *     2026-08-05) "refuses to infer a language from text", and no
+     *     check available here could anyway: {@link
+     *     #missingTargetScript} is blind the moment the target is Latin,
+     *     which is exactly the {@code cs} case that motivated this
+     *     parameter — English, Czech, Spanish and Turkish share one
+     *     script, so separating them needs a language identifier the
+     *     project does not have and would not add to decide a notice.
+     * @param scopeLanguage  ISO 639-1 code from
+     *     {@code scope_preferences.language}; never null.
+     * @return the translated, sanitized text; the input unchanged when
+     *     the translator returns it and it was not declared English (it
+     *     is then already in a language the note cannot describe); or,
+     *     on any reachable fallback condition (provider error, blank
+     *     output, English echoed back, or — for a non-Latin target —
+     *     output carrying no character of the target script), the input
+     *     text plus a one-line localized note. Never null.
+     */
+    public String run(String postSanitizer1Text,
+                               String sourceLanguage,
+                               String scopeLanguage) {
         // Step 1: en-short-circuit — the TranslationProvider is never
         // invoked, the cache is never consulted, the sanitizer-2 pass
         // is skipped (spec §Translation flow line 199).
         if (scopeLanguage.equalsIgnoreCase("en")) {
-            return postSanitizer1English;
+            return postSanitizer1Text;
         }
 
         // Step 2: cache lookup — a hit returns the cached post-sanitizer-2
         // value immediately, short-circuiting both the translator call
         // AND the sanitizer-2 pass (spec §Pipeline order lines 263-264).
-        var cached = translationCache.get(postSanitizer1English, scopeLanguage);
+        var cached = translationCache.get(postSanitizer1Text, scopeLanguage);
         if (cached.isPresent()) {
             return cached.get();
         }
@@ -137,25 +175,54 @@ public class TranslationPipeline {
         String translated;
         try {
             translated = translationProvider.translate(
-                    postSanitizer1English,
+                    postSanitizer1Text,
+                    // Still en → reader, whatever the caller declared:
+                    // sourceLanguage interprets the RESULT, it does not
+                    // steer the request. D29's collapse fixes this leg's
+                    // direction at one per reader language, and a literal
+                    // Locale.ENGLISH keeps a declared code clear of the
+                    // Locale.of parse ISO_639_SHAPE guards.
                     Locale.ENGLISH,
                     Locale.of(scopeLanguage));
         } catch (RuntimeException e) {
             SafeLog.warn(LOG, "TranslationPipeline: translator failed for target_language=" + scopeLanguage
                     + "; falling back to post-sanitizer-1 English text with a note", e);
-            return fallbackWithNote(postSanitizer1English, scopeLanguage);
+            return fallbackWithNote(postSanitizer1Text, scopeLanguage);
         }
 
         // Step 3.5: sanity-check the translator output before sanitizer-2
-        // (spec §Failure handling conditions b and c). (c) blank output and
-        // (b) output byte-identical to the English input both mean the
-        // translator produced nothing usable; fall back to English + note
-        // rather than deliver an empty or untranslated message.
-        if (translated.isBlank() || translated.equals(postSanitizer1English)) {
-            LOG.warn("TranslationPipeline: translator returned unusable output for "
-                    + "target_language={} (blank or identical to input); falling back "
-                    + "to English with a note", scopeLanguage);
-            return fallbackWithNote(postSanitizer1English, scopeLanguage);
+        // (spec §Failure handling conditions b and c). (c) blank output
+        // means the translator produced nothing usable; fall back to
+        // English + note rather than deliver an empty message.
+        if (translated.isBlank()) {
+            LOG.warn("TranslationPipeline: translator returned blank output for "
+                    + "target_language={}; falling back to English with a note", scopeLanguage);
+            return fallbackWithNote(postSanitizer1Text, scopeLanguage);
+        }
+
+        // Condition (b): output byte-identical to the input. Identity is
+        // only a FAILURE when the input is English, and the spec's own
+        // wording is what scopes it — "the system falls back to English
+        // with a one-line note" presupposes English in hand. Handed text
+        // already in the reader's language, returning it unchanged is the
+        // CORRECT translation, and M1-437's blanket reading of (b) is
+        // what stapled "(překlad není k dispozici — zobrazuji anglicky)"
+        // onto a Czech reply in the v1.1.0 live test (M1-777).
+        //
+        // The same test is what keeps the note honest, which is why it is
+        // one condition and not two: the note asserts the text is
+        // English, so it may fire only over text the caller DECLARED to
+        // be English. A third language reaching here — declared neither
+        // English nor the scope's — is a genuine echo failure the note
+        // cannot describe without lying, so it degrades to silence
+        // rather than to a false claim.
+        if (translated.equals(postSanitizer1Text)) {
+            if (!sourceLanguage.equalsIgnoreCase("en")) {
+                return postSanitizer1Text;
+            }
+            LOG.warn("TranslationPipeline: translator echoed the English input back for "
+                    + "target_language={}; falling back to English with a note", scopeLanguage);
+            return fallbackWithNote(postSanitizer1Text, scopeLanguage);
         }
 
         // Condition (d): for a non-Latin target, output carrying zero
@@ -169,7 +236,7 @@ public class TranslationPipeline {
             LOG.warn("TranslationPipeline: translator returned no {} characters for "
                     + "target_language={}; falling back to English with a note",
                     missingScript, scopeLanguage);
-            return fallbackWithNote(postSanitizer1English, scopeLanguage);
+            return fallbackWithNote(postSanitizer1Text, scopeLanguage);
         }
 
         // Step 4: sanitizer-2 — the translator is itself an LLM and may
@@ -181,7 +248,7 @@ public class TranslationPipeline {
         // form so hits skip step 4 (spec §Pipeline order step 5).
         // NOT populated on the failure path (the cache stores translated
         // forms only).
-        translationCache.put(postSanitizer1English, scopeLanguage, sanitized);
+        translationCache.put(postSanitizer1Text, scopeLanguage, sanitized);
 
         return sanitized;
     }
