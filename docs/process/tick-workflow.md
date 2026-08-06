@@ -287,12 +287,17 @@ ticket for `--parallel`. `migration_touch: true` still serializes.
 - Round cap: 2 (3 for `complexity: high` or `risk: high`). Round-N growth
   beyond the named REWORK items is a WARN — advisory, never a FAIL. The
   round cap is the bound on non-convergent rework.
-- On REWORK, re-review reads the **fix hunks only** — round N to round N+1 —
-  and checks each against the `EVALUATED-AS` probe its round-N finding
-  named. APPROVE is the expected verdict and is explicitly permitted.
-  Observations outside the fix hunks go to the user as a new-ticket
-  recommendation, never as this round's REWORK items. No separate security
-  re-audit loop: the gate IS the security review.
+- On REWORK, re-review works from **round N's REWORK items** — every one
+  gets a disposition of SATISFIED / NOT-ADDRESSED / DECLINED against the
+  `EVALUATED-AS` probe its finding named, with the fix hunks (round N to
+  N+1) as the evidence. Enumerating items rather than hunks is what stops a
+  silently dropped item: where its probe is a test the rework was to add,
+  dropping the item leaves the suite green and produces no hunk to inspect.
+  Any NOT-ADDRESSED is a FAIL; any DECLINED is MANUAL. APPROVE is the
+  expected verdict and is explicitly permitted once every item is
+  SATISFIED. Observations outside the fix hunks go to the user as a
+  new-ticket recommendation, never as this round's REWORK items. No
+  separate security re-audit loop: the gate IS the security review.
 
 ### 5. Commit & merge — `/tick commit <id>`, `/tick merge <id>`
 

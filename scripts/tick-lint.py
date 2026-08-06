@@ -109,7 +109,13 @@ def parse_frontmatter(text):
                 fields[key] = value
         elif line.startswith(" ") and fields:
             last_key = list(fields)[-1]
-            fields[last_key] = (fields[last_key] + " " + line.strip()).strip()
+            # Newline, not space: joining a YAML list's items with a space
+            # destroys the item boundary, and two checks depend on it —
+            # ACCEPTANCE-VERIFIABLE splits items on `^- `, and the spec_refs
+            # `§section` capture runs to end-of-line. Space-joining made the
+            # former vacuous (one blob passes if ANY item names a probe) and
+            # the latter report a bogus "file not found" naming two paths.
+            fields[last_key] = (fields[last_key] + "\n" + line.strip()).strip()
     return fields
 
 

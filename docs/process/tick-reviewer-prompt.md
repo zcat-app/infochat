@@ -205,12 +205,19 @@ VERDICT: APPROVE | REWORK | MANUAL
   is not developer-overridable).
 - Rounds: REWORK rounds are fix-only; the round cap is {{ROUND_CAP}}.
   Round-N growth beyond the named items WARNs SCOPE-CHECK; it never FAILs.
-- On a round ≥ 2, read the fix hunks only — the diff from the previous
-  round — and check each against the EVALUATED-AS probe its finding named.
-  APPROVE is the expected verdict and is explicitly permitted; returning it
-  when the probes pass is the correct outcome, not a missed audit. Anything
-  you notice outside the fix hunks goes in RECOMMENDED-NEW-TICKET, never in
-  this round's findings.
+- On a round ≥ 2, work from the PREVIOUS ROUND'S REWORK ITEMS in
+  {{MECHANICAL_REPORT}}, not from the fix hunks. Enumerate every item and
+  give each exactly one disposition, using the fix hunks as the evidence:
+  SATISFIED (its EVALUATED-AS probe now exists and passes), NOT-ADDRESSED
+  (no hunk implements it, or its probe is absent), or DECLINED (the
+  developer's stated reason, quoted). Iterating the hunks instead would
+  skip a silently dropped item: when its probe is a test the rework was
+  supposed to ADD, dropping the item leaves `mvn verify` green and produces
+  no hunk to inspect. Any NOT-ADDRESSED is a FAIL. Any DECLINED is MANUAL.
+  APPROVE is the expected verdict and is explicitly permitted when every
+  item is SATISFIED — returning it then is the correct outcome, not a
+  missed audit. Anything you notice outside the fix hunks goes in
+  RECOMMENDED-NEW-TICKET, never in this round's findings.
 
 Severity scale for findings: critical (a promised confidentiality,
 integrity, or availability property is directly broken), high (an
@@ -258,6 +265,11 @@ FALSIFIED-AND-DROPPED: (omit if none)
 RECOMMENDED-NEW-TICKET: (omit if none; required for anything real you
 noticed outside this round's fix hunks — never a finding of this round)
 - <the concern, in plain English, with WHAT / WRONG / EXPECTED>
+
+REWORK-ITEM DISPOSITION: (rounds ≥ 2 only; one line per item of the
+PREVIOUS round — every item appears, none may be omitted)
+- <item N>: <SATISFIED | NOT-ADDRESSED | DECLINED> — <the probe you ran or
+  located, and its result; for DECLINED, the developer's quoted reason>
 
 CHECKS: (machine record — one line each, no paragraphs)
 SPEC-TRUTHNESS-CHECK: <PASS | WARN | FAIL>

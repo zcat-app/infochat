@@ -32,6 +32,10 @@ re-audit loop and no code-reviewer.
      the stash stack (which is shared across worktrees). It prints nothing
      when the tree is clean — the `HEAD` fallback keeps an empty file from
      silently turning the round-N diff into a `HEAD`-relative one
+   - on rounds ≥ 2, the previous round's REWORK ITEMS block copied verbatim
+     from `.scratch/tick-review-<ID>-r<round-1>.txt` — the reviewer
+     dispositions every one of them, so a dropped item cannot pass by
+     leaving no fix hunk behind
    - round-N stats: on rounds ≥ 2, the previous round's diff stats for the
      must-shrink check (growth beyond the named REWORK items is a WARN)
    - on rounds ≥ 2, the fix hunks — `git diff $(cat
