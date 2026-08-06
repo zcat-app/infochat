@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 786 |
+| done | 787 |
 | deferred | 0 |
 | abandoned | 23 |
 | **total** | **810** |
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-775 — Confirm redemption ignores retyped arguments, and pending state is never swept (complexity: high, risk: medium)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -61,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-775 | Confirm redemption ignores retyped arguments, and pending state is never swept | 2026-08-06 | round 1 APPROVE |
 | M1-774 | Intake rejections skip the confirm drain and the anchor clear | 2026-08-06 | round 1 APPROVE |
 | M1-772 | Slash-command arguments end at the first line | 2026-08-06 | round 1 APPROVE |
 | M1-771 | Echo check on the ingest anchor write | 2026-08-06 | round 1 APPROVE |
@@ -70,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-767 | Aggregate system LLM budget for the unmetered scheduled digest | 2026-08-05 | round 2 APPROVE |
 | M1-766 | Anchor-first degraded renderers | 2026-08-05 | round 2 APPROVE |
 | M1-765 | Anchor snapshot for saved posts | 2026-08-05 | round 1 APPROVE |
-| M1-760 | Re-drive posts whose ingest translation exhausted its attempts | 2026-08-05 | round 2 APPROVE |
 
 ---
 
@@ -1022,5 +1022,5 @@ M1-771 (done)
 M1-772 (done)
 M1-773 (done)
 M1-774 (done)
-  └── M1-775 (pending) ← runnable
+  └── M1-775 (done)
 ```

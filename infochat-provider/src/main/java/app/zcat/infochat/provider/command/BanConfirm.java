@@ -32,4 +32,15 @@ public record BanConfirm(String targetContactId, @Nullable String reason,
     public String sweepPrefix() {
         return "ban";
     }
+
+    @Override
+    public boolean matchesRetypedArguments(String retypedArguments) {
+        // Case-SENSITIVE, unlike the UUID-valued payloads: a contact id
+        // is an opaque adapter-minted identity (a SimpleX queue address,
+        // a Signal ACI), so folding case here would be a widening of
+        // which identity a ban confirm accepts. A retyped `--reason` is
+        // not accepted — the stored reason is authoritative and the
+        // prompt instructs the bare `/ban confirm`.
+        return retypedArguments.equals(targetContactId);
+    }
 }

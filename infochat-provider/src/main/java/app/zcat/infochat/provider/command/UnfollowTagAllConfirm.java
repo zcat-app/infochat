@@ -30,11 +30,10 @@ public record UnfollowTagAllConfirm() implements ConfirmStateService.PendingConf
     public String sweepPrefix() {
         // The canonical user-visible confirm form is
         // `/unfollow-tag --all confirm`; sweepPrefix is the slash-stripped
-        // prefix InboundRouter.isConfirmShape matches against. With the
-        // M1-051 contract `normalized.equals("/" + sweepPrefix + " confirm")`
-        // (canonical) or `normalized.startsWith("/" + sweepPrefix + " ")
-        //   && normalized.endsWith(" confirm")` (args-retyped relaxation),
-        // the prefix MUST embed the literal `--all` token so that the
+        // prefix InboundRouter.isConfirmShape matches against. Since the
+        // canonical branch of that predicate is
+        // `normalized.equals("/" + sweepPrefix + " confirm")`, the prefix
+        // MUST embed the literal `--all` token so that the
         // canonical body the user types is recognized as confirm-shape
         // (otherwise the step 4.5 sweep cancels the pending and the
         // confirm-leg dispatch never runs). The commandName key

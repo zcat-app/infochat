@@ -100,8 +100,18 @@ public class ConfirmStateService {
     public void remember(UUID actorUserId,
                          ScopeRef scope,
                          PendingConfirm pendingConfirm) {
-        Instant deadline = clock.instant().plus(timeout);
-        pending.put(new ConfirmKey(actorUserId, scope), new Stored(pendingConfirm, deadline));
+        Instant now = clock.instant();
+        // Expiry is otherwise lazy (peek / takeAny / takeMatching), so an
+        // entry whose owner arms a confirm and then never messages again
+        // holds its payload — a target contact id, a source id — for the
+        // process lifetime. Sweeping on write bounds the map by the
+        // (user, scope) pairs that are ACTIVELY arming confirms rather
+        // than by every pair that ever did. Removal is strictly
+        // deadline-driven and must stay that way: this loop walks OTHER
+        // actors' entries, so any predicate other than "past its own
+        // deadline" would be a cross-user cancel (M1-775).
+        pending.values().removeIf(stored -> !now.isBefore(stored.deadline()));
+        pending.put(new ConfirmKey(actorUserId, scope), new Stored(pendingConfirm, now.plus(timeout)));
     }
 
     /**
@@ -205,10 +215,11 @@ public class ConfirmStateService {
      *   <li>{@link #sweepPrefix()} MUST equal the slash-stripped user-
      *       visible prefix the router's step 4.5 sweep matches against
      *       to recognize the confirm-shape body. The canonical confirm
-     *       form is {@code "/" + sweepPrefix() + " confirm"}; the
-     *       "args retyped" relaxation is any body starting with
-     *       {@code "/" + sweepPrefix() + " "} that ends in
-     *       {@code " confirm"}.</li>
+     *       form is {@code "/" + sweepPrefix() + " confirm"}; a body of
+     *       the form {@code "/" + sweepPrefix() + " <args> confirm"}
+     *       retypes the command's identifying argument and is
+     *       recognized only when {@link #matchesRetypedArguments}
+     *       accepts {@code <args>}.</li>
      * </ul>
      */
     public interface PendingConfirm {
@@ -221,5 +232,33 @@ public class ConfirmStateService {
          * sweep matches against to recognize the confirm-shape body.
          */
         String sweepPrefix();
+
+        /**
+         * Does {@code retypedArguments} — the trimmed, NON-EMPTY text
+         * between {@code "/" + sweepPrefix() + " "} and the trailing
+         * {@code " confirm"} token — identify the very action THIS
+         * payload holds?
+         *
+         * <p>The canonical bare leg never reaches here: the router
+         * treats an empty segment as the canonical form and matches it
+         * for every payload, so an implementation only ever answers for
+         * a body that named something. The contract is identity, not
+         * containment — answering true for a segment that merely
+         * mentions the stored identifier would let
+         * {@code /ban bob alice confirm} redeem a pending
+         * {@code BanConfirm("alice")}.</p>
+         *
+         * <p>The default <b>fails closed</b>: a payload that does not
+         * override this accepts the bare leg only, so a retyped
+         * argument cancels rather than executes. That is deliberate for
+         * argument-less commands ({@code /clear}, {@code /forget}) and
+         * is also the safe landing spot for any future payload whose
+         * author forgets this method — the failure direction is a
+         * cancellation the user can retry, never an execution against a
+         * target they did not name (M1-775).</p>
+         */
+        default boolean matchesRetypedArguments(String retypedArguments) {
+            return false;
+        }
     }
 }

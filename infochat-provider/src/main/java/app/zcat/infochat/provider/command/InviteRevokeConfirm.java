@@ -24,4 +24,12 @@ public record InviteRevokeConfirm(UUID code)
     public String sweepPrefix() {
         return "invite revoke";
     }
+
+    @Override
+    public boolean matchesRetypedArguments(String retypedArguments) {
+        // `/invite revoke <code> confirm` — the retyped code must be the
+        // one the prompt leg armed. equalsIgnoreCase: UUID.toString()
+        // renders lower case and case is not identity for a UUID.
+        return retypedArguments.equalsIgnoreCase(code.toString());
+    }
 }

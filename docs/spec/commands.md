@@ -53,6 +53,18 @@ live in `docs/design/03-commands.md`.
   `/source-enable` confirms only the soft-deleted revival, and
   `/quarantine reject` confirms only the forensic `BENIGN_CLOSED`
   path, never the routine `PENDING` reject).
+  **The canonical follow-up is the bare `<command> confirm`.** A
+  confirm leg MAY also retype the command's identifying argument —
+  `/remove-source <id> confirm`, `/reject-group <id> confirm`,
+  `/quarantine reject <id> confirm` — and is a confirmation **only
+  when that argument names the very action awaiting confirmation**
+  (ids compare case-insensitively; contact ids compare exactly).
+  The comparison is on the retyped argument as a whole, not
+  containment. Anything else between the command and the `confirm`
+  token — a different target, a retyped flag, an unrecognized token —
+  is **not** a confirmation: it is "any other input", so it cancels
+  the pending action with the standard acknowledgement and executes
+  nothing, neither the pending action nor the one the body named.
   The timeout is the same for every confirmable command in a given
   deployment (no per-command bespoke values); the exact duration is
   a profile-driven value (design notes). A late `confirm` past the

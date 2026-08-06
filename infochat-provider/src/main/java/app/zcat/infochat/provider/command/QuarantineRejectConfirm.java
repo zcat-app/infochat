@@ -28,4 +28,14 @@ public record QuarantineRejectConfirm(UUID quarantineId)
     public String sweepPrefix() {
         return "quarantine reject";
     }
+
+    @Override
+    public boolean matchesRetypedArguments(String retypedArguments) {
+        // `/quarantine reject <id> confirm` is a legitimate
+        // argument-carrying leg, so the id is compared rather than
+        // forbidden. equalsIgnoreCase because UUID.toString() renders
+        // lower case and a hand-retyped upper-case id names the same
+        // row — case is not identity for a UUID.
+        return retypedArguments.equalsIgnoreCase(quarantineId.toString());
+    }
 }

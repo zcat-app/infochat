@@ -23,4 +23,12 @@ public record SourceEnableConfirm(UUID sourceId)
     public String sweepPrefix() {
         return "source-enable";
     }
+
+    @Override
+    public boolean matchesRetypedArguments(String retypedArguments) {
+        // `/source-enable <id> confirm` — the retyped id must be the
+        // soft-deleted source the prompt leg armed. equalsIgnoreCase:
+        // case is not identity for a UUID.
+        return retypedArguments.equalsIgnoreCase(sourceId.toString());
+    }
 }

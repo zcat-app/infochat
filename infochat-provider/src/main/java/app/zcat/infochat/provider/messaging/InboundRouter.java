@@ -267,6 +267,9 @@ public class InboundRouter {
     /** The pre-banned registration state: a group message from such a contact is silently dropped at step 3. */
     private static final String REGISTRATION_STATE_PREBAN = "preban";
 
+    /** Trailing token of every confirm leg, with its separating space. */
+    private static final String CONFIRM_TOKEN = " confirm";
+
     /**
      * M1-705 cheap-command classification — exactly the eight
      * parser-only / DB-read {@link CommandHandler}-bean command names
@@ -1676,20 +1679,57 @@ public class InboundRouter {
     /**
      * Does {@code normalized} look like the confirm-shape body for
      * {@code pending}? Per spec §Surface conventions: the canonical
-     * confirm form is {@code "/" + sweepPrefix + " confirm"} and the
-     * "args retyped" relaxation accepts any body that starts with
-     * {@code "/" + sweepPrefix + " "} AND ends with {@code " confirm"}.
-     * Used by step 4.5 to decide cancel-vs-leave-alone — the handler
-     * still performs the authoritative {@code takeMatching} call on
-     * its own commandName key when dispatch reaches it.
+     * confirm form is {@code "/" + sweepPrefix + " confirm"}, and a body
+     * that retypes the command's identifying argument
+     * ({@code "/" + sweepPrefix + " <args> confirm"}) is confirm-shape
+     * only when {@code <args>} identifies the very action the pending
+     * payload holds. Used by step 4.5 to decide cancel-vs-leave-alone —
+     * the handler still performs the authoritative {@code takeMatching}
+     * call on its own commandName key when dispatch reaches it.
+     *
+     * <p><b>Why the arguments are compared, not ignored (M1-775).</b>
+     * Matching on prefix + suffix alone let {@code /ban bob confirm}
+     * satisfy a pending {@code BanConfirm("alice")}: the sweep left the
+     * entry armed and the handler popped the STORED payload, so a
+     * destructive admin primitive ran against a target that appeared
+     * nowhere in the message that triggered it. A mismatched segment is
+     * now "any other input" — the sweep drains it and the user is told,
+     * exactly as §Surface conventions says every non-confirming body is
+     * treated.</p>
+     *
+     * <p>The comparison is on the segment <i>as a whole</i>, never
+     * containment: {@code /ban bob alice confirm} must not redeem
+     * {@code BanConfirm("alice")}. The segment is trimmed because
+     * {@link #normalize} preserves interior whitespace runs, so
+     * {@code /ban  alice  confirm} is the same intent as the single-
+     * spaced form.</p>
      */
     private static boolean isConfirmShape(String normalized,
                                           ConfirmStateService.PendingConfirm pending) {
         String prefix = "/" + pending.sweepPrefix();
+        // The canonical bare leg, tested FIRST: for this body the segment
+        // below would be empty, and the slice's start index would run
+        // past its end for any prefix whose own tail overlaps the
+        // trailing token.
         if (normalized.equals(prefix + " confirm")) {
             return true;
         }
-        return normalized.startsWith(prefix + " ") && normalized.endsWith(" confirm");
+        if (!normalized.startsWith(prefix + " ")) {
+            return false;
+        }
+        // Slice AFTER the prefix rather than off the whole body: the
+        // trailing " confirm" must follow the retyped segment, not
+        // straddle the prefix boundary.
+        String afterPrefix = normalized.substring(prefix.length() + 1);
+        if (!afterPrefix.endsWith(CONFIRM_TOKEN)) {
+            return false;
+        }
+        String retypedArguments =
+                afterPrefix.substring(0, afterPrefix.length() - CONFIRM_TOKEN.length()).trim();
+        // An empty segment is the canonical form again (a doubled space
+        // before the token) — the wire-form rule lives here, so payloads
+        // only ever answer for a body that named something.
+        return retypedArguments.isEmpty() || pending.matchesRetypedArguments(retypedArguments);
     }
 
     /**

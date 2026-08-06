@@ -387,5 +387,16 @@ public class RejectGroupCommandHandler implements CommandHandler {
         public String sweepPrefix() {
             return "reject-group";
         }
+
+        @Override
+        public boolean matchesRetypedArguments(String retypedArguments) {
+            // The prompt this handler sends instructs
+            // `/reject-group <id> confirm` (reply.confirm.prompt.reject_group),
+            // so the group id is compared rather than forbidden — an
+            // override that rejected it would contradict the text the
+            // admin is shown. equalsIgnoreCase: case is not identity for
+            // a UUID.
+            return retypedArguments.equalsIgnoreCase(groupId.toString());
+        }
     }
 }

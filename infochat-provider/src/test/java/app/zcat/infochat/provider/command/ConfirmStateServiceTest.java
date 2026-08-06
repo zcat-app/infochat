@@ -7,6 +7,8 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -23,7 +25,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * controllable {@link Clock} + explicit timeout, so the deadline-boundary
  * scenarios are deterministic without a Quarkus boot.
  *
- * <p>Six scenarios mirror acceptance items 3..8 of M1-051.</p>
+ * <p>Six scenarios mirror acceptance items 3..8 of M1-051; the rest
+ * pin M1-775's write-time expiry sweep and the payload-vs-retyped-
+ * arguments match on the {@code PendingConfirm} SPI.</p>
  */
 class ConfirmStateServiceTest {
 
@@ -190,5 +194,113 @@ class ConfirmStateServiceTest {
         assertTrue(takenB.isPresent(), "actor B must have its own pending");
         assertSame(payloadB, takenB.get(),
                 "actor B's take must return actor B's stored value, not actor A's");
+    }
+
+    @Test
+    void rememberSweepsExpiredEntriesOfOtherActors() {
+        // M1-775: expiry used to be lazy only, so an entry armed by an
+        // actor who never messages again outlived its deadline for the
+        // process lifetime. Any remember now clears every past-deadline
+        // entry in the map, not just the writer's own.
+        ConfirmStateService service = new ConfirmStateService(fixedAt(T0), TIMEOUT);
+        UUID silentActor = UUID.randomUUID();
+        UUID writingActor = UUID.randomUUID();
+        ScopeRef scope = new ScopeRef.Dm("shared-scope-contact");
+
+        service.remember(silentActor, scope,
+                new BanConfirm("target-contact", null, "intent-req"));
+
+        service.setClock(fixedAt(T0.plus(TIMEOUT).plusSeconds(1)));
+        service.remember(writingActor, scope, new ClearConfirm());
+
+        assertEquals(1, service.size(),
+                "the expired entry must be gone, leaving only the entry just written");
+        assertFalse(service.peek(silentActor, scope).isPresent(),
+                "the silent actor's expired pending must have been swept by the other actor's remember");
+    }
+
+    @Test
+    void rememberLeavesUnexpiredEntriesOfOtherActorsAlone() {
+        // The complement, and the security-relevant half: the sweep walks
+        // OTHER actors' entries, so it must remove strictly on deadline.
+        // A live entry belonging to another actor is not the writer's to
+        // cancel.
+        ConfirmStateService service = new ConfirmStateService(fixedAt(T0), TIMEOUT);
+        UUID quietActor = UUID.randomUUID();
+        UUID writingActor = UUID.randomUUID();
+        ScopeRef scope = new ScopeRef.Dm("shared-scope-contact");
+        BanConfirm quietPayload = new BanConfirm("target-contact", null, "intent-req");
+
+        service.remember(quietActor, scope, quietPayload);
+
+        service.setClock(fixedAt(T0.plusSeconds(30)));
+        service.remember(writingActor, scope, new ClearConfirm());
+
+        assertEquals(2, service.size(),
+                "a still-live entry of another actor must survive the write-time sweep");
+        assertSame(quietPayload, service.peek(quietActor, scope).orElseThrow(),
+                "the other actor's live pending must be untouched, not cancelled");
+    }
+
+    @Test
+    void banConfirmMatchesOnlyItsOwnTargetContactId() {
+        // M1-775's repro at the SPI tier: `/ban bob confirm` must not
+        // satisfy a pending ban on alice.
+        BanConfirm pending = new BanConfirm("alice-contact", "spam", "intent-req");
+
+        assertTrue(pending.matchesRetypedArguments("alice-contact"),
+                "retyping the pending target must be recognized as a confirmation");
+        assertFalse(pending.matchesRetypedArguments("bob-contact"),
+                "a confirm leg naming a DIFFERENT target must not redeem the pending ban");
+        assertFalse(pending.matchesRetypedArguments("bob-contact alice-contact"),
+                "the match is on the whole segment, not containment");
+        assertFalse(pending.matchesRetypedArguments("ALICE-CONTACT"),
+                "contact ids are opaque adapter identities and compare case-sensitively");
+        assertFalse(pending.matchesRetypedArguments("alice-contact --reason spam"),
+                "a retyped --reason is not part of the identity the confirm leg may restate");
+    }
+
+    @Test
+    void argumentCarryingPayloadsMatchOnlyTheirOwnIdentifier() {
+        // The legitimate argument-carrying legs: each prompt instructs a
+        // body that restates the id, so the id must be accepted — but
+        // only its own.
+        UUID own = UUID.fromString("11111111-2222-3333-4444-555555555555");
+        UUID other = UUID.fromString("99999999-8888-7777-6666-555555555555");
+
+        for (ConfirmStateService.PendingConfirm payload : List.of(
+                new QuarantineRejectConfirm(own),
+                new InviteRevokeConfirm(own),
+                new RemoveSourceConfirm(own),
+                new SourceEnableConfirm(own),
+                new RejectGroupCommandHandler.RejectGroupConfirm(own))) {
+            String label = payload.commandName();
+            assertTrue(payload.matchesRetypedArguments(own.toString()),
+                    label + ": retyping its own id must redeem the pending action");
+            assertTrue(payload.matchesRetypedArguments(own.toString().toUpperCase(Locale.ROOT)),
+                    label + ": case is not identity for a UUID");
+            assertFalse(payload.matchesRetypedArguments(other.toString()),
+                    label + ": a confirm leg naming a DIFFERENT id must not redeem it");
+            assertFalse(payload.matchesRetypedArguments(own + " " + other),
+                    label + ": the match is on the whole segment, not containment");
+        }
+    }
+
+    @Test
+    void argumentlessPayloadsRejectEveryRetypedArgument() {
+        // The census rows left on the interface default: these commands
+        // carry no identifying argument, so nothing a body could name
+        // identifies them and the default fails closed.
+        for (ConfirmStateService.PendingConfirm payload : List.of(
+                new ClearConfirm(),
+                new ForgetConfirm(),
+                new UnfollowTagAllConfirm(),
+                new InviteCreateOpenConfirm("inmemory"))) {
+            String label = payload.commandName();
+            assertFalse(payload.matchesRetypedArguments("anything"),
+                    label + ": an argument-less command accepts the bare confirm leg only");
+            assertFalse(payload.matchesRetypedArguments("--adapter inmemory"),
+                    label + ": a retyped flag is not a confirmation either");
+        }
     }
 }

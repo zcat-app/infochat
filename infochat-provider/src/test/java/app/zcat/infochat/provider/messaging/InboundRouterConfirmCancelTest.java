@@ -12,6 +12,8 @@ import app.zcat.infochat.provider.command.BanConfirm;
 import app.zcat.infochat.provider.command.CommandPermissions;
 import app.zcat.infochat.provider.command.ConfirmStateService;
 import app.zcat.infochat.provider.command.ForgetConfirm;
+import app.zcat.infochat.provider.command.QuarantineRejectConfirm;
+import app.zcat.infochat.provider.command.RejectGroupCommandHandler;
 import app.zcat.infochat.provider.command.asset.AssetRegistry;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -26,6 +28,8 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -44,6 +48,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li>(c) empty pending: peek → empty, no-op path; no takeAny, no
  *       cancellation, dispatch proceeds.</li>
  * </ul>
+ *
+ * <p>M1-775 adds the argument half of that decision tree: a confirm leg
+ * that retypes the command's identifying argument redeems the pending
+ * action only when the argument names it, and a leg naming something
+ * else is treated as any other input.</p>
  *
  * <p>Two further scenarios pin the M1-772 single-line rule's own drain,
  * which fires ahead of the sweep because the rejection returns before
@@ -322,6 +331,105 @@ class InboundRouterConfirmCancelTest {
                 "second outbound must be the /help dispatch, not a duplicate cancellation");
     }
 
+    @Test
+    void confirmLegNamingAnotherTargetCancelsAndRedeemsNothing() {
+        // M1-775's repro: `/ban bob confirm` against a pending
+        // BanConfirm("alice") used to satisfy the sweep's prefix+suffix
+        // match, so the entry survived and the handler popped the STORED
+        // payload — alice was banned by a message that named bob. The
+        // mismatched leg is now "any other input": drained, acknowledged,
+        // and nothing redeemed. The handler still dispatches (the drain
+        // does not swallow the body), but its takeMatching comes back
+        // empty, so it executes neither target.
+        FakeConfirmStateService confirmState = new FakeConfirmStateService(
+                Optional.of(new BanConfirm("alice-contact", null, "intent-req")));
+        CapturingAdapter capture = new CapturingAdapter();
+        ConfirmPoppingCommandHandler banHandler =
+                new ConfirmPoppingCommandHandler("ban", "ban", confirmState);
+        InboundRouter router = newRouter(confirmState, capture);
+        router.commandHandlers = new SingletonInstance<>(banHandler);
+
+        router.onMessage(dmInbound(DM_CONTACT, "/ban bob-contact confirm"), ADAPTER);
+
+        assertTrue(confirmState.calls.contains("takeAny"),
+                "a confirm leg naming another target must be drained by the sweep");
+        assertEquals("Pending `ban` cancelled.", capture.captured.get(0).text(),
+                "first outbound must be the cancellation acknowledgement");
+        assertNull(banHandler.popped,
+                "the handler must find NO pending payload — neither the stored target "
+                        + "nor the retyped one may execute");
+    }
+
+    @Test
+    void argumentCarryingQuarantineRejectLegStillRedeems() {
+        // The legitimate argument-carrying leg (M1-458): the retyped id
+        // is the one the prompt armed, so the sweep must leave the entry
+        // alone and the handler must pop it.
+        UUID quarantineId = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        FakeConfirmStateService confirmState = new FakeConfirmStateService(
+                Optional.of(new QuarantineRejectConfirm(quarantineId)));
+        CapturingAdapter capture = new CapturingAdapter();
+        ConfirmPoppingCommandHandler quarantineHandler =
+                new ConfirmPoppingCommandHandler("quarantine", "quarantine-reject", confirmState);
+        InboundRouter router = newRouter(confirmState, capture);
+        router.commandHandlers = new SingletonInstance<>(quarantineHandler);
+
+        router.onMessage(dmInbound(DM_CONTACT, "/quarantine reject " + quarantineId + " confirm"), ADAPTER);
+
+        assertFalse(confirmState.calls.contains("takeAny"),
+                "a confirm leg retyping the pending id must NOT be drained by the sweep");
+        assertEquals(1, capture.captured.size(),
+                "expected exactly one outbound (dispatch only); got: " + capture.captured);
+        assertNotNull(quarantineHandler.popped,
+                "the handler's takeMatching must still redeem the pending payload");
+    }
+
+    @Test
+    void argumentCarryingRejectGroupLegStillRedeems() {
+        // The second argument-carrying leg — the prompt the admin is
+        // shown instructs `/reject-group <id> confirm` verbatim.
+        UUID groupId = UUID.fromString("bbbbbbbb-cccc-dddd-eeee-ffffffffffff");
+        FakeConfirmStateService confirmState = new FakeConfirmStateService(
+                Optional.of(new RejectGroupCommandHandler.RejectGroupConfirm(groupId)));
+        CapturingAdapter capture = new CapturingAdapter();
+        ConfirmPoppingCommandHandler rejectGroupHandler =
+                new ConfirmPoppingCommandHandler("reject-group", "reject-group", confirmState);
+        InboundRouter router = newRouter(confirmState, capture);
+        router.commandHandlers = new SingletonInstance<>(rejectGroupHandler);
+
+        router.onMessage(dmInbound(DM_CONTACT, "/reject-group " + groupId + " confirm"), ADAPTER);
+
+        assertFalse(confirmState.calls.contains("takeAny"),
+                "a confirm leg retyping the pending group id must NOT be drained by the sweep");
+        assertNotNull(rejectGroupHandler.popped,
+                "the handler's takeMatching must still redeem the pending payload");
+    }
+
+    @Test
+    void quarantineRejectLegNamingAnotherIdCancels() {
+        // The wrong-target case for a two-word sweepPrefix: the prefix
+        // and the trailing token both match, so only the id comparison
+        // separates this from the redeeming leg above.
+        UUID armed = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        UUID other = UUID.fromString("11111111-2222-3333-4444-555555555555");
+        FakeConfirmStateService confirmState = new FakeConfirmStateService(
+                Optional.of(new QuarantineRejectConfirm(armed)));
+        CapturingAdapter capture = new CapturingAdapter();
+        ConfirmPoppingCommandHandler quarantineHandler =
+                new ConfirmPoppingCommandHandler("quarantine", "quarantine-reject", confirmState);
+        InboundRouter router = newRouter(confirmState, capture);
+        router.commandHandlers = new SingletonInstance<>(quarantineHandler);
+
+        router.onMessage(dmInbound(DM_CONTACT, "/quarantine reject " + other + " confirm"), ADAPTER);
+
+        assertTrue(confirmState.calls.contains("takeAny"),
+                "a confirm leg naming another quarantine id must be drained by the sweep");
+        assertEquals("Pending `quarantine-reject` cancelled.", capture.captured.get(0).text(),
+                "first outbound must be the cancellation acknowledgement");
+        assertNull(quarantineHandler.popped,
+                "the handler must find NO pending payload — the forensic reject must not run");
+    }
+
     // ----- router wiring + fakes -------------------------------------------
 
     /**
@@ -435,6 +543,16 @@ class InboundRouterConfirmCancelTest {
         @Override
         public Optional<ConfirmStateService.PendingConfirm> takeMatching(UUID actor, ScopeRef scope, String commandName) {
             calls.add("takeMatching:" + commandName);
+            // Production pop semantics (M1-775): return AND clear iff the
+            // stored payload answers to this commandName. Without them a
+            // test cannot tell "the handler redeemed the pending" from
+            // "the sweep had already drained it", which is the whole
+            // distinction the argument match introduces.
+            if (stored.isPresent() && stored.get().commandName().equals(commandName)) {
+                Optional<ConfirmStateService.PendingConfirm> result = stored;
+                stored = Optional.empty();
+                return result;
+            }
             return Optional.empty();
         }
 
@@ -504,6 +622,37 @@ class InboundRouterConfirmCancelTest {
         public OutboundMessage handle(ScopeRef scope, String rawText) {
             dispatchCount++;
             return new OutboundMessage(scope, stubBody, Instant.now(), "h-" + dispatchCount);
+        }
+    }
+
+    /**
+     * {@link CommandHandler} stand-in that performs the handler-side
+     * confirm fork the real handlers perform — {@code takeMatching} on
+     * its own key — and records what came back. That recorded value is
+     * what makes "the mismatched leg executes nothing" an assertion
+     * rather than an inference: the sweep's drain and the handler's pop
+     * are two different removals, and only the handler's decides whether
+     * the destructive action runs.
+     */
+    private static final class ConfirmPoppingCommandHandler implements CommandHandler {
+        private final String name;
+        private final String confirmKey;
+        private final ConfirmStateService confirmState;
+        ConfirmStateService.@Nullable PendingConfirm popped;
+
+        ConfirmPoppingCommandHandler(String name, String confirmKey, ConfirmStateService confirmState) {
+            this.name = name;
+            this.confirmKey = confirmKey;
+            this.confirmState = confirmState;
+        }
+
+        @Override public String name() { return name; }
+
+        @Override
+        public OutboundMessage handle(ScopeRef scope, String rawText) {
+            popped = confirmState.takeMatching(ACTOR_ID, scope, confirmKey).orElse(null);
+            return new OutboundMessage(scope,
+                    popped == null ? "no-pending" : "executed", Instant.now(), "h-1");
         }
     }
 }

@@ -1,7 +1,7 @@
 ---
 id: M1-775
 title: "Confirm redemption ignores retyped arguments, and pending state is never swept"
-status: pending
+status: done
 created: 2026-08-06
 last_updated: 2026-08-06
 blocked_by: [M1-774]
@@ -125,13 +125,104 @@ spec_refs:
   - docs/spec/commands.md §Surface conventions
   - docs/spec/security.md §Authorization model
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-06
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 15
+      added: 635
+      removed: 28
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-redteam_audits: []
+redteam_findings:
+  - date: 2026-08-06
+    category: AUTH-BYPASS
+    severity: low
+    promise: |
+      docs/spec/security.md §Trust boundaries item 3 ("Authorization →
+      execution. Permission checks run in deterministic Java.") and
+      §What's intentionally NOT in v1 ("Two-factor confirmation for ban
+      — single-step confirm-within-window is enough for v1"): the
+      confirm-within-window IS the v1 control binding a destructive
+      admin primitive to the target the admin named. This diff's own
+      commands.md amendment states a confirm leg is a confirmation
+      "only when that argument names the very action awaiting
+      confirmation".
+    gap: |
+      The identity binding is enforced in exactly one place — the
+      router's step-4.5 sweep (InboundRouter.isConfirmShape, called
+      from InboundRouter:970). The handler-side pop the same javadoc
+      calls "the authoritative takeMatching call" was not changed and
+      remains target-blind: each confirmable handler forks on a bare
+      ` confirm` suffix test and then executes the STORED payload
+      (BanCommandHandler:190-199, RejectGroupCommandHandler:136-143,
+      QuarantineCommandHandler:333-341, InviteCommandHandler:422-433
+      and :762-770, UnfollowTagCommandHandler:199-205). The auditor
+      verified no dispatch path reaches a handler while skipping step
+      4.5 today (runDispatchStage has one call site; the interruptible
+      fork carries no confirm-arming command) — which is why this is
+      low — but the defence is one refactor deep.
+    repro: |
+      1. Admin DMs `/ban alice-contact` → BanConfirm("alice-contact")
+         armed.
+      2. Admin sends `/ban bob-contact confirm`.
+      3. Step 4.5 drains the entry and replies "Pending `ban`
+         cancelled"; only because of that drain does the handler's
+         takeMatching come back empty.
+      4. Remove step 3 — any future path dispatching a slash body
+         without the sweep — and BanCommandHandler pops
+         BanConfirm("alice-contact") and bans alice from a message
+         naming only bob. The primitive itself cannot tell the two
+         bodies apart.
+    suggested_fix_class: trust-boundary-tightening
+    disposition: |
+      STATED RESIDUAL (user decision, 2026-08-06). No code change, no
+      follow-up ticket. No dispatch path reaches a confirmable handler
+      while skipping step 4.5 today (verified by the auditor), and the
+      handler-side fix is design (b) from acceptance item 2, which was
+      weighed and rejected: six of the nine confirm legs deliberately
+      never parse the retyped body, and the cancellation reply belongs
+      to the router sweep. The identity binding is a router-tier
+      invariant by design.
+redteam_audits:
+  - date: 2026-08-06
+    verdict: FINDINGS
+    base: 1c1f69f776d57e74eb6cb753ca44fc35ba7532d8
+    head: working-tree
+    verdict_file: docs/plan/m1/redteam/M1-775-2026-08-06.md
+    findings_count: 1
+    out_of_model_count: 2
+    note: |
+      One low AUTH-BYPASS finding: the retyped-argument identity check
+      lives on the router sweep only, so the confirmable handlers stay
+      target-blind and the property is a router invariant rather than a
+      property of the primitive. No bypass path exists today (verified
+      by the auditor). Two out-of-model items: (1) the write-triggered
+      expiry sweep leaves the last expired entries resident for the
+      process lifetime — a data-minimisation residual security.md
+      discloses for the analogous translation cache but not for this
+      map; (2) a verified NON-finding recording that
+      ConcurrentHashMap.values().removeIf is value-conditional, so the
+      sweep cannot cancel a concurrently re-armed entry.
+      Disposition (user, 2026-08-06): finding 1 is a stated residual (no
+      code change, no follow-up ticket); out-of-model 1 becomes a
+      separate `spec:` commit AFTER this ticket merges, naming the
+      pending-confirm map in security.md §Secrets handling; out-of-model
+      2 needs no action.
+outline_file: target/m1-tick-outline-M1-775.md
 clarity_check:
+  date: 2026-08-06
+  verdict: PASS
+  warnings: []
+  blockers: []
 escalation_reason:
 ---
 

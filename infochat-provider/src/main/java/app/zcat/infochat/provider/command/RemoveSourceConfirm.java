@@ -30,4 +30,13 @@ public record RemoveSourceConfirm(UUID sourceId)
     public String sweepPrefix() {
         return "remove-source";
     }
+
+    @Override
+    public boolean matchesRetypedArguments(String retypedArguments) {
+        // The shipped prompt transcript instructs
+        // `/remove-source <id> confirm` (docs/design/03-commands.md
+        // §/remove-source), so the id is compared rather than forbidden.
+        // equalsIgnoreCase: case is not identity for a UUID.
+        return retypedArguments.equalsIgnoreCase(sourceId.toString());
+    }
 }
