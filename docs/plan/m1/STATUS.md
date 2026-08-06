@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 787 |
 | deferred | 0 |
 | abandoned | 23 |
-| **total** | **810** |
+| **total** | **817** |
 
 ---
 
@@ -25,7 +25,10 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-776 — Ingest corrupts post body: escaped punctuation and unstripped HTML (complexity: high, risk: medium)
+- M1-777 — Bot claims 'showing in English' on a reply that is not English (complexity: medium, risk: low)
+- M1-779 — LLM replies leak prompt scaffolding and markdown to the reader (complexity: medium, risk: medium)
+- M1-780 — Relative timestamps stay English inside translated replies (complexity: medium, risk: low)
 
 ---
 
@@ -42,7 +45,9 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-778 — blocked_by: M1-777 (pending)
+- M1-781 — blocked_by: M1-780 (pending)
+- M1-782 — blocked_by: M1-781 (pending)
 
 ---
 
@@ -1023,4 +1028,11 @@ M1-772 (done)
 M1-773 (done)
 M1-774 (done)
   └── M1-775 (done)
+M1-776 (pending) ← runnable
+M1-777 (pending) ← runnable
+  └── M1-778 (pending)
+M1-779 (pending) ← runnable
+M1-780 (pending) ← runnable
+  └── M1-781 (pending)
+        └── M1-782 (pending)
 ```
