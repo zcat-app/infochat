@@ -2075,6 +2075,22 @@ sources). Application code uses the soft-delete column.
   because the store is process-local, never persisted, and bounded; a
   `/forget` that also drains the caller's translation entries is the
   follow-up if the retention window is judged too long.
+- **Pending-confirm state is a second in-memory residual of the same
+  shape (M1-775).** The confirm store holds one payload per (user,
+  scope) for the confirm timeout, and those payloads carry identifying
+  arguments — a pending `/ban` holds the target contact id **and the
+  admin-authored reason string**, unredacted, because the confirm leg
+  has to execute against them. It is process-local, never persisted,
+  cleared on Provider restart, and bounded: entries live at most one
+  timeout past their arming, and the set of live entries is bounded by
+  the (user, scope) pairs that armed a confirm within that window,
+  itself bounded by §Rate limiting. Expiry is lazy (on read) plus a
+  sweep on every arm, so in a Provider where no further confirm is ever
+  armed the last expired entries stay resident until the process ends —
+  a data-minimization residual, not a growth vector. `/forget` does not
+  drain it, exactly as it does not drain the translation cache above.
+  Accepted for v1 on the same terms; reading Provider process memory is
+  outside the documented adversary model.
 - Audit-log writes pass through a redaction hook that masks values
   matching a **closed catalogue of API-key shapes**. The catalogue's
   v1 baseline (spec-level commitment) is:
