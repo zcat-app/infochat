@@ -5,18 +5,26 @@ status: pending                # pending | in-progress | in-review | escalated |
 created: <YYYY-MM-DD>          # set on first save; never edited afterwards
 last_updated: <YYYY-MM-DD>     # auto-updated by the /tick skill on every status transition
 flow: tick                     # distinguishes tick-flow tickets from m1-flow tickets for measurement
-analysis_ref: self
-                               # MANDATORY (tick-lint BLOCKER). `self` for a single-ticket
-                               # decomposition (the ticket body IS the analysis); for a
-                               # 2+ ticket decomposition, the path of the shared analysis
-                               # document: docs/plan/<milestone>/tick-analysis/<slug>.md.
-                               # Created by /tick analyze; never hand-written.
+reproduction:
+                               # MANDATORY (tick-lint BLOCKER). The executable statement of
+                               # the wrong behavior, written and RUN RED before the ticket
+                               # is filed (workflow §0). Either the fully-qualified name of
+                               # the failing test:
+                               #   ChatAgentReplyLanguageTest.replyToACzechScopeIsCzech
+                               # or, for a diff mvn verify cannot cover, the exact probe
+                               # command plus its observed wrong output.
+analysis_ref: none
+                               # MANDATORY (tick-lint BLOCKER), one of: `none` (workflow §0b
+                               # does not require analysis — state the reason inline), `self`
+                               # (the ticket body IS the analysis), or the path of a shared
+                               # analysis document for a 2+ ticket decomposition:
+                               # docs/plan/<milestone>/tick-analysis/<slug>.md.
 blocked_by: []
-files_scope:                   # OPTIONAL. Parallelism-proof ONLY — the path/glob list used
-                               # to prove disjointness for /tick start <id> --parallel. It
-                               # carries NO review consequence (no membership FAIL, no
-                               # negative-space check). Omit it unless you intend to run
-                               # this ticket in parallel with another.
+files_scope:                   # OPTIONAL, and never load-bearing. Supporting evidence only.
+                               # It carries NO review consequence (no membership FAIL, no
+                               # negative-space check) and does NOT qualify a ticket for
+                               # --parallel: that requires a different Maven module from
+                               # every in-flight ticket (workflow §1).
 complexity: low                # low | medium | high; high → round_cap 3 allowed, commit-time verify re-run
 risk: low                      # low | medium | high; high → commit-time verify re-run
 round_cap: 2                   # default 2; 3 only for complexity: high or risk: high
@@ -33,10 +41,11 @@ acceptance:
   # Runnable or testable items. EACH item MUST name its verification:
   # a named test method/class the diff must add and pass, a runnable
   # command, or a probe. Unverifiable prose is a tick-lint BLOCKER.
-  # Every item MUST cite at least one spec_refs entry (tick-lint BLOCKER).
-  # At least one item MUST be a failure-mode test — a test that feeds the
-  # diff's own production code a hostile/edge input and asserts the
-  # behavior that would otherwise break (tick-lint BLOCKER).
+  # The FIRST item is the `reproduction:` test, now passing.
+  # On a spec-bearing ticket, an item SHOULD cite a spec_refs entry (WARN).
+  # At least one item SHOULD be a failure-mode test beyond the reproduction —
+  # one that feeds the diff's own production code a hostile/edge input and
+  # asserts the behavior that would otherwise break (WARN).
   #   - ChatAgentReplyLanguageTest.drivesWrongLanguageGeneratorAndGetsScopeLanguage
   #     (P3) passes — feeds a stub generator returning English into a cs
   #     scope and asserts the reply is Czech
@@ -49,8 +58,10 @@ test_plan:
   preserves:
     - all tests currently green on main
 spec_refs:
-  # The spec sections this ticket implements. MANDATORY, non-empty, and
-  # every entry must resolve (tick-lint BLOCKER). The Approach section is
+  # The spec sections this ticket implements. MANDATORY and non-empty on a
+  # spec-bearing ticket — one that changes what the system promises; legally
+  # EMPTY on a defect ticket, whose contract is its `reproduction:`. Every
+  # entry that IS present must resolve (tick-lint BLOCKER). The Approach is
   # derived from these; a spec conflict is a spec-amend, never a bend.
   # - docs/spec/<file>.md §<section>
 decision_refs:

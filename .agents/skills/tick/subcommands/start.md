@@ -37,12 +37,13 @@ plan and was approved at draft time).
 ## Step 2 — branch
 
 Set `status: in-progress` (frontmatter) and `last_updated`. Create branch
-`m<N>/M<N>-NNN-<slug>` off `main`. For `--parallel`: preconditions are
-provably-disjoint `files_scope` vs every in-flight ticket (no in-flight
-`migration_touch: true`), and the work happens in a git worktree; degrade to
-sequential if the tool cannot operate in another working directory. A ticket
-without `files_scope` cannot run `--parallel` (nothing to prove disjoint
-with).
+`m<N>/M<N>-NNN-<slug>` off `main`. For `--parallel`: the ticket's changes
+must land in a different Maven module from every in-flight ticket's (no
+in-flight `migration_touch: true`), and the work happens in a git worktree;
+degrade to sequential if the tool cannot operate in another working
+directory. A ticket that shares a module with an in-flight ticket runs
+sequentially — a declared `files_scope` is supporting evidence, not a
+substitute for the module boundary.
 
 ## Step 3 — implement (execution, not discovery)
 

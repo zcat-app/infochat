@@ -14,7 +14,10 @@ re-audit loop and no code-reviewer.
    the ticket first). WARNs → include in the mechanical report as notes.
 
 2. **Collect the mechanical report.** Write to
-   `target/tick-mech-<ID>-r<round>.txt`:
+   `.scratch/tick-mech-<ID>-r<round>.txt`. Every per-round artifact lives in
+   `.scratch/`, never `target/` — a REWORK round runs `mvn verify` between
+   reviews and the parent module's clean wipes `<repo-root>/target/`, so a
+   round-N artifact written there is gone before round N+1 reads it.
    - `git add -N` on any untracked files, then `git diff $(git merge-base
      main HEAD) --stat` (files touched, added, removed)
    - the ticket's files-to-touch list (from the Approach section) vs the
@@ -22,8 +25,20 @@ re-audit loop and no code-reviewer.
      touched files
    - any path matching an `out_of_scope` entry (grep the diff's paths)
    - the test-log path + mtime, and whether any staged-file mtime is newer
+   - snapshot this round's working tree FIRST: `s=$(git stash create); echo
+     "${s:-$(git rev-parse HEAD)}" > .scratch/tick-review-<ID>-r<round>.tree`.
+     Rounds are not committed, so there is no prior HEAD to diff against;
+     `stash create` records the tree as a dangling commit and does NOT touch
+     the stash stack (which is shared across worktrees). It prints nothing
+     when the tree is clean — the `HEAD` fallback keeps an empty file from
+     silently turning the round-N diff into a `HEAD`-relative one
    - round-N stats: on rounds ≥ 2, the previous round's diff stats for the
-     must-shrink check (growth beyond the named REWORK items is a FAIL)
+     must-shrink check (growth beyond the named REWORK items is a WARN)
+   - on rounds ≥ 2, the fix hunks — `git diff $(cat
+     .scratch/tick-review-<ID>-r<round-1>.tree) $(cat
+     .scratch/tick-review-<ID>-r<round>.tree)` written to
+     `.scratch/tick-review-<ID>-r<round>-fix.diff`; that file, not the full
+     diff, is what the reviewer evaluates this round
    - the lint WARNs
    Read it back into the session (the report is small; it substitutes into
    `{{MECHANICAL_REPORT}}`).
@@ -31,12 +46,14 @@ re-audit loop and no code-reviewer.
 3. **Render and spawn.** Render `docs/process/tick-reviewer-prompt.md` via
    `scripts/m1-render-prompt.py` with `TICKET_ID`, `CURRENT_ROUND`,
    `ROUND_CAP` (from frontmatter), `TICKET_FILE_PATH`,
-   `DIFF_FILE_PATH` (the diff written to `target/tick-review-<ID>-r<round>.diff`),
+   `DIFF_FILE_PATH` (round 1: the full diff written to
+   `.scratch/tick-review-<ID>-r<round>.diff`; rounds ≥ 2: the fix-hunks file
+   from step 2),
    `TEST_LOG_PATH`, `ANALYSIS_FILE_PATH` (from `analysis_ref:` — for a
    `self` ticket, substitute the ticket's own path: the analysis IS the
    ticket; for a 2+ decomposition, the tick-analysis/ path),
    `MECHANICAL_REPORT` (via `@file`), `VERDICT_FILE_PATH`
-   (`target/tick-review-<ID>-r<round>.txt`). ALL paths absolute
+   (`.scratch/tick-review-<ID>-r<round>.txt`). ALL paths absolute
    (harness-mapping §6.1(d)). Spawn `tick-reviewer` fresh-context with the
    stub: `Read <rendered-prompt-path> and follow it exactly. It names every
    input file and the output path. Write the required artifact and reply

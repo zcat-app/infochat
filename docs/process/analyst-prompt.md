@@ -166,8 +166,11 @@ frontmatter exactly as the template defines it (including `flow: tick`,
 `analysis_ref:` — the analysis document path for a 2+ ticket
 decomposition, or the literal `self` for a single-ticket one —
 `out_of_scope` populated, `acceptance` items that each name their
-verification and cite a spec_refs entry, at least one failure-mode
-acceptance item) and the body sections Context / Root cause / Pitfalls /
+verification, at least one failure-mode acceptance item, and
+**`reproduction:` naming the failing test that states the wrong behavior**,
+which the tick-lint BLOCKER refuses a ticket without: name the test each
+ticket must add, phrased against the behavior, never against your Approach)
+and the body sections Context / Root cause / Pitfalls /
 Approach / Definition of done / Verification / Out-of-scope (+ Census
 when class-scoped). Each ticket embeds its slice of the analysis — the
 implementor reads the ticket, not the analysis document.

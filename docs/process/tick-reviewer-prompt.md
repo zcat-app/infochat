@@ -117,11 +117,14 @@ downgrade to WARN or PASS.
 ### SCOPE-CHECK
 Mechanical parts come from {{MECHANICAL_REPORT}} (files touched vs the
 ticket's files-to-touch plan, untraceable-line candidates, out_of_scope
-violations). You adjudicate: is a departure from the plan justified (the
-analysis under-planned) or is it drift? A changed line tracing to no
-acceptance item, user request, or orphan the diff itself created is a FAIL.
-Round-N must-shrink is LOAD-BEARING: on rounds ≥ 2, growth beyond the
-named REWORK items is a FAIL.
+violations). A departure from the files-to-touch plan is NOT drift by
+itself — the plan is a route proposed before the code was read, and taking
+a better one inside the same behavior is execution. Judge against the
+contract: a changed line tracing to no acceptance item, user request, or
+orphan the diff itself created is a FAIL; an `out_of_scope` violation is a
+FAIL. An unplanned file whose lines all trace to acceptance is a PASS.
+Round-N must-shrink is ADVISORY: on rounds ≥ 2, growth beyond the named
+REWORK items is a WARN, never a FAIL.
 
 ---
 
@@ -201,7 +204,13 @@ VERDICT: APPROVE | REWORK | MANUAL
   developer rationale "this is fine because..." is MANUAL (test integrity
   is not developer-overridable).
 - Rounds: REWORK rounds are fix-only; the round cap is {{ROUND_CAP}}.
-  Round-N growth beyond the named items FAILs SCOPE-CHECK.
+  Round-N growth beyond the named items WARNs SCOPE-CHECK; it never FAILs.
+- On a round ≥ 2, read the fix hunks only — the diff from the previous
+  round — and check each against the EVALUATED-AS probe its finding named.
+  APPROVE is the expected verdict and is explicitly permitted; returning it
+  when the probes pass is the correct outcome, not a missed audit. Anything
+  you notice outside the fix hunks goes in RECOMMENDED-NEW-TICKET, never in
+  this round's findings.
 
 Severity scale for findings: critical (a promised confidentiality,
 integrity, or availability property is directly broken), high (an
@@ -246,12 +255,16 @@ FALSIFIED-AND-DROPPED: (omit if none)
 - <the candidate concern, in plain English> — <the citation that
   defeated it: guard/check/invariant at file:line>
 
+RECOMMENDED-NEW-TICKET: (omit if none; required for anything real you
+noticed outside this round's fix hunks — never a finding of this round)
+- <the concern, in plain English, with WHAT / WRONG / EXPECTED>
+
 CHECKS: (machine record — one line each, no paragraphs)
 SPEC-TRUTHNESS-CHECK: <PASS | WARN | FAIL>
 SECURITY-CHECK: <PASS | WARN | FAIL>
 TEST-ADEQUACY-CHECK: <PASS | WARN | FAIL | NOT-APPLICABLE>
 MAINTAINABILITY-CHECK: <PASS | WARN | FAIL>
-SCOPE-CHECK: <PASS | FAIL>
+SCOPE-CHECK: <PASS | WARN | FAIL>
 
 REWORK ITEMS: (required on REWORK; the fix contract — each item names
 its probe)

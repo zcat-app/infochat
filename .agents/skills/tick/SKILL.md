@@ -19,11 +19,11 @@ The user invokes the skill as `/tick <subcommand> [args]`. Each subcommand's ful
 
 | User invocation | Procedure file |
 |---|---|
-| `/tick analyze <brief>` | [subcommands/analyze.md](subcommands/analyze.md) — mandatory analysis: analyst gate turns a problem brief into an analysis doc + small tickets |
+| `/tick analyze <brief>` | [subcommands/analyze.md](subcommands/analyze.md) — conditional analysis (workflow §0b): analyst gate turns a problem brief into an analysis doc + small tickets |
 | `/tick next` | [subcommands/next.md](subcommands/next.md) — list runnable tick tickets |
-| `/tick start <id>` | [subcommands/start.md](subcommands/start.md) — begin work; lint pre-flight; no plan-writer (the analysis IS the plan) |
-| `/tick start <id> --parallel` | [subcommands/start.md](subcommands/start.md) — worktree; needs disjoint `files_scope` (optional, parallelism-only) |
-| `/tick hurdle <id>` | [subcommands/hurdle.md](subcommands/hurdle.md) — the implementor's stop-and-report: divergence from the plan |
+| `/tick start <id>` | [subcommands/start.md](subcommands/start.md) — begin work; lint pre-flight; no plan-writer (the §0 reproduction is the contract) |
+| `/tick start <id> --parallel` | [subcommands/start.md](subcommands/start.md) — worktree; needs a different Maven module from every in-flight ticket |
+| `/tick hurdle <id>` | [subcommands/hurdle.md](subcommands/hurdle.md) — the implementor's stop-and-report: one of the four hurdle triggers |
 | `/tick review <id>` | [subcommands/review.md](subcommands/review.md) — spawn the merged tick-reviewer gate |
 | `/tick commit <id>` | [subcommands/commit.md](subcommands/commit.md) — finalize the per-ticket commit |
 | `/tick merge <id>` | [subcommands/merge.md](subcommands/merge.md) — squash-merge into main |

@@ -8,21 +8,24 @@ the flow rules (docs/process/tick-workflow.md §1). BLOCKERs refuse
 `/tick start`; WARNs are notify-and-continue.
 
 Checks:
-  REQUIRED-SECTIONS               BLOCKER  body missing Root cause / Pitfalls /
-                                           Approach / Definition of done / Verification
-  SPEC-REFS-RESOLVABLE            BLOCKER  spec_refs empty, or an entry whose
-                                           file or §section anchor does not resolve
-  SPEC-REFS-CITED-BY-DOD          BLOCKER  no acceptance item cites any spec_refs entry
-  PITFALL-VERIFICATION            BLOCKER  a pitfall (Pn) with no Verification entry,
-                                           or a Verification entry referencing no pitfall
+  REPRODUCTION-PRESENT            BLOCKER  reproduction empty, or naming neither a
+                                           test method nor a probe with output
   ACCEPTANCE-VERIFIABLE           BLOCKER  acceptance item naming no test method,
                                            no runnable command, and no probe
-  NEGATIVE-TESTS                  BLOCKER  Verification has no failure-mode entry
-  ANALYSIS-REF-RESOLVABLE         BLOCKER  analysis_ref missing, an unresolvable
-                                           path, or not 'self' for a single-ticket
-                                           decomposition
-  OUT-OF-SCOPE-PRESENT            BLOCKER  empty or circular out_of_scope
   FORWARD-REFERENCE-RESOLVABLE    BLOCKER  load-bearing ticket-ID reference with no file
+  SPEC-REFS-RESOLVABLE            BLOCKER  a present spec_refs entry whose file or
+                                           §section anchor does not resolve
+  ANALYSIS-REF-RESOLVABLE         BLOCKER  analysis_ref missing, or a path that does
+                                           not resolve ('self' / 'none' are legal)
+  STATUS-VALUE                    BLOCKER  status outside the allowed set
+  REQUIRED-SECTIONS               WARN    body missing Root cause / Pitfalls /
+                                           Approach / Definition of done / Verification
+  SPEC-REFS-CITED-BY-DOD          WARN    no acceptance item cites any spec_refs entry
+  PITFALL-VERIFICATION            WARN    a pitfall (Pn) with no Verification entry,
+                                           or a Verification entry referencing no pitfall
+  NEGATIVE-TESTS                  WARN    Verification has no failure-mode entry
+                                           beyond the reproduction
+  OUT-OF-SCOPE-PRESENT            WARN    empty or circular out_of_scope
   CENSUS-PRESENT-IF-CLASS-SCOPED  WARN    class-scoped ticket with no §Census
   PROSE-VERB-IN-VERIFY            WARN    acceptance items using unrunnable prose verbs
 
@@ -62,6 +65,11 @@ SECTION_TITLES = {
 ACCEPTANCE_VERIFY_RE = re.compile(
     r"(\.\w+\(\)|\bmvn\b|\bgit\b|\bgrep\b|\bcurl\b|\bpython3\b|"
     r"\bprobe\b|renders?|asserts?|pinned by|passes|fails)",
+    re.IGNORECASE,
+)
+REPRODUCTION_RE = re.compile(
+    r"(\w+(Test|IT)\w*[.#]\w+|\.\w+\(\)|\bmvn\b|\bcurl\b|\bpython3\b|\bgrep\b"
+    r"|\bdocker\b|\bprobe\b|\bobserved\b)",
     re.IGNORECASE,
 )
 NEGATIVE_TEST_HINT = re.compile(
@@ -164,8 +172,22 @@ def lint_file(path):
     for name, title in REQUIRED_SECTIONS:
         if title not in body:
             findings.append(Finding(
-                "REQUIRED-SECTIONS", BLOCKER, ticket_id,
+                "REQUIRED-SECTIONS", WARN, ticket_id,
                 f"missing section '{title}'"))
+
+    # ---- REPRODUCTION-PRESENT ----------------------------------------------
+    reproduction = fm.get("reproduction", "").strip()
+    if not reproduction or reproduction in {"[]", "{}", "''", '""'}:
+        findings.append(Finding(
+            "REPRODUCTION-PRESENT", BLOCKER, ticket_id,
+            "reproduction is empty — a ticket states the wrong behavior "
+            "executably: a failing test method, or a probe command with its "
+            "observed output"))
+    elif not REPRODUCTION_RE.search(reproduction):
+        findings.append(Finding(
+            "REPRODUCTION-PRESENT", BLOCKER, ticket_id,
+            "reproduction names neither a test method nor a runnable probe: "
+            f"{reproduction[:80]}…"))
 
     # ---- SPEC-REFS-RESOLVABLE ----------------------------------------------
     spec_refs = fm.get("spec_refs", "")
@@ -174,8 +196,9 @@ def lint_file(path):
         entries.append(token.strip())
     if not entries:
         findings.append(Finding(
-            "SPEC-REFS-RESOLVABLE", BLOCKER, ticket_id,
-            "spec_refs is empty — every ticket must be grounded in the spec"))
+            "SPEC-REFS-RESOLVABLE", WARN, ticket_id,
+            "spec_refs is empty — legal only for a defect whose contract is "
+            "its reproduction; a change to what the system promises must cite"))
     else:
         for entry in entries:
             ok, note = resolve_section_anchor(entry)
@@ -188,19 +211,20 @@ def lint_file(path):
     if not analysis_ref:
         findings.append(Finding(
             "ANALYSIS-REF-RESOLVABLE", BLOCKER, ticket_id,
-            "analysis_ref missing — every ticket is produced by /tick analyze"))
-    elif analysis_ref.strip().lower() != "self" and not Path(analysis_ref).exists():
+            "analysis_ref missing — set 'none' (with the reason), 'self', or "
+            "a tick-analysis/ path"))
+    elif analysis_ref.strip().lower() not in {"self", "none"} and not Path(analysis_ref).exists():
         findings.append(Finding(
             "ANALYSIS-REF-RESOLVABLE", BLOCKER, ticket_id,
             f"analysis_ref does not resolve: {analysis_ref} "
-            "(use 'self' for a single-ticket decomposition, or a real "
-            "tick-analysis/ path for a 2+ ticket one)"))
+            "(use 'none' when §0b does not require analysis, 'self' for a "
+            "single-ticket decomposition, or a real tick-analysis/ path)"))
 
     # ---- OUT-OF-SCOPE-PRESENT ----------------------------------------------
     oos = fm.get("out_of_scope", "")
     if not oos or not oos.strip() or oos.strip() in {"[]", "{}"}:
         findings.append(Finding(
-            "OUT-OF-SCOPE-PRESENT", BLOCKER, ticket_id,
+            "OUT-OF-SCOPE-PRESENT", WARN, ticket_id,
             "out_of_scope is empty"))
     elif re.search(r"unrelated|anything (else|not)|everything (else|not)", oos, re.I):
         findings.append(Finding(
@@ -224,7 +248,7 @@ def lint_file(path):
         )
         if not acc_has_cite:
             findings.append(Finding(
-                "SPEC-REFS-CITED-BY-DOD", BLOCKER, ticket_id,
+                "SPEC-REFS-CITED-BY-DOD", WARN, ticket_id,
                 "no acceptance item cites any spec_refs entry"))
 
     # ---- ACCEPTANCE-VERIFIABLE ----------------------------------------------
@@ -253,18 +277,18 @@ def lint_file(path):
     for p in sorted(pitfall_ids, key=int):
         if p not in verif_refs:
             findings.append(Finding(
-                "PITFALL-VERIFICATION", BLOCKER, ticket_id,
+                "PITFALL-VERIFICATION", WARN, ticket_id,
                 f"pitfall P{p} has no matching entry in Verification"))
     for p in sorted(verif_refs, key=int):
         if p not in pitfall_ids:
             findings.append(Finding(
-                "PITFALL-VERIFICATION", BLOCKER, ticket_id,
+                "PITFALL-VERIFICATION", WARN, ticket_id,
                 f"Verification references P{p} which is not declared in Pitfalls"))
 
     # ---- NEGATIVE-TESTS ------------------------------------------------------
     if verif_sec and not NEGATIVE_TEST_HINT.search(verif_sec):
         findings.append(Finding(
-            "NEGATIVE-TESTS", BLOCKER, ticket_id,
+            "NEGATIVE-TESTS", WARN, ticket_id,
             "Verification contains no failure-mode test — happy-path-only "
             "coverage is not acceptable"))
 

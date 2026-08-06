@@ -17,21 +17,29 @@ lens, and findings must survive falsification before they are reported.**
 
 ## Principles
 
-1. **Spec is the contract.** Every design decision in a ticket traces to a
-   `spec_refs` entry. A conflict between spec and implementation is a
-   spec-amend, never a bend of the spec to the implementation. Tickets that
-   cannot be grounded in the spec are analysis failures, not implementation
-   discoveries.
-2. **Analysis before ticket.** Every ticket is produced by a mandatory
-   analysis (the `analyze` subcommand + the analyst gate agent). A ticket
-   that omits root cause, pitfalls, or verification does not exist.
+1. **Spec is the contract for spec-bearing tickets.** A ticket that changes
+   what the system promises traces every design decision to a `spec_refs`
+   entry; a conflict between spec and implementation is a spec-amend, never
+   a bend of the spec to the implementation. A defect ticket — one making
+   the code do what the spec already says — is grounded by its reproduction
+   instead, and `spec_refs` may be empty.
+2. **Reproduction before analysis.** Every ticket carries an executable
+   statement of the wrong behavior (§0). Analysis is required only where a
+   reproduction cannot settle the question (§0b). A ticket without a
+   reproduction does not exist.
 3. **Small tickets.** A problem decomposes into tickets whose implementation
    is execution, not discovery. A ticket whose analysis names 25 files is a
    decomposition failure, not a big ticket.
-4. **Implementor is an executor, not a designer.** Divergence from the
-   ticket's Approach is a **hurdle** — stop and report, never drift. The
-   hurdle report carries root cause (evidence, `file:line`), suggested
-   solutions, and options; the user decides.
+4. **Implementor executes the contract, not the route.** The contract is the
+   ticket's reproduction and acceptance; the Approach is a route proposed
+   before the code was read. A better route inside the same behavior —
+   calling an existing helper the Approach missed, replacing instead of
+   patching — is execution, not drift. A **hurdle** is one of four: the
+   reproduction proves the ticket's premise wrong; the fix needs another
+   Maven module or a file another in-flight ticket holds; the fix needs a
+   spec change; the change would drop a control the replaced path carried
+   (engineering-rules §10). On a hurdle: STOP, report root cause with
+   `file:line` evidence, suggested solutions and options; the user decides.
 5. **One merged review gate.** Bookkeeping is a script; judgment is one
    fresh-context gate agent applying a promise-vs-delivery lens over the
    threat model, the spec sections, the ticket acceptance, and the
@@ -44,10 +52,12 @@ lens, and findings must survive falsification before they are reported.**
    evidence; bookkeeping gates that produced refines without findings
    (`files_budget`, `files_scope` membership, negative-space) are not
    re-invented here.
-8. **Comments carry meaning.** Within classes a diff touches, the
-   implementor removes stale or meaningless comments and proposes better
-   names. Comments survive only when they carry business logic, a decision,
-   or a trap that is not visible in the code.
+8. **Comments carry meaning, and are budgeted.** Within classes a diff
+   touches, the implementor removes stale or meaningless comments and
+   proposes better names. Comments survive only when they carry business
+   logic, a decision, or a trap that is not visible in the code. New
+   rationale is capped at 3 lines per call site; overflow moves to the
+   ticket or the decisions log and is cited by its stable anchor.
 
 ## Surfaces
 
@@ -78,7 +88,7 @@ sequence (next free ID, scanning both `tickets/` and `tick-tickets/`).
       │                         escalated ──> refine | override | decompose |
       │                                        defer | spec-amend | abandon
       ▼
-   (draft-time analysis failure → ticket never filed)
+   (no reproduction, or draft-time analysis failure → ticket never filed)
 ```
 
 Statuses and their meanings are identical to `docs/process/workflow.md`
@@ -88,9 +98,35 @@ lineage fields (`deferred_on`, `deferred_reason`, `abandoned_reason`).
 
 ## The flow
 
-### 0. Analyze — `/tick analyze <brief>`
+### 0. Reproduce — the entry gate
 
-Mandatory for **every** ticket. The driver takes a problem brief (a
+Before a ticket is filed, the wrong behavior is made executable. The driver
+writes the failing test that names it — asserting the behavior the system
+should have — and runs it. It must fail, and the failure must name the
+actual wrong output, not a missing symbol. The test's fully-qualified name
+goes in the ticket's `reproduction:` field and its assertion becomes the
+first acceptance item.
+
+For a diff `mvn verify` cannot cover (docs, shell, compose), the
+reproduction is a runnable probe: the exact command plus its observed wrong
+output, pasted. Same field, same role.
+
+- A reproduction that cannot be written is not a ticket yet — it is a brief,
+  and routes to §0b.
+- A reproduction that passes on `main` falsifies the ticket's premise. Stop
+  and report; do not file.
+- The test is written against the behavior, never against the planned
+  implementation. A test that only compiles once the fix exists is a design
+  sketch, not a reproduction.
+
+### 0b. Analyze — `/tick analyze <brief>` (conditional)
+
+Required when any of these holds: the problem needs 2+ tickets; the root
+cause is unknown or unverified; the change is spec-bearing; or §0's
+reproduction cannot be written. Otherwise skipped, and the ticket records
+`analysis_ref: none` with the reason.
+
+The driver takes a problem brief (a
 live-test finding, a user report, a redteam finding, a hurdle that needs
 decomposition) and spawns the **analyst** gate agent (fresh context) with
 `docs/process/analyst-prompt.md` rendered.
@@ -131,24 +167,36 @@ refuses), and at `review` (mechanical input for the reviewer). Checks:
 
 | Check | Severity | What it catches |
 |---|---|---|
-| REQUIRED-SECTIONS | BLOCKER | Body missing Root cause / Pitfalls / Approach / Definition of done / Verification |
-| SPEC-REFS-RESOLVABLE | BLOCKER | `spec_refs` empty, or an entry whose file or `§section` anchor does not resolve |
-| SPEC-REFS-CITED-BY-DOD | BLOCKER | No acceptance item cites any `spec_refs` entry (the "why" is decoupled from the "what") |
-| PITFALL-VERIFICATION | BLOCKER | A pitfall (Pn) with no matching Verification entry, or a Verification entry referencing a non-existent pitfall |
+| REPRODUCTION-PRESENT | BLOCKER | `reproduction:` empty, or naming neither a test method nor a probe with observed output (§0) |
 | ACCEPTANCE-VERIFIABLE | BLOCKER | An acceptance item that names no test method, no runnable command, and no probe (unverifiable prose) |
-| NEGATIVE-TESTS | BLOCKER | Verification contains no failure-mode test (every test asserts the intended path; nothing tries to break it) |
-| ANALYSIS-REF-RESOLVABLE | BLOCKER | `analysis_ref` missing, an unresolvable path, or not `self` for a single-ticket decomposition |
-| OUT-OF-SCOPE-PRESENT | BLOCKER | Empty or circular `out_of_scope` |
 | FORWARD-REFERENCE-RESOLVABLE | BLOCKER | Load-bearing ticket-ID reference with no file under `tickets/` or `tick-tickets/` |
+| SPEC-REFS-RESOLVABLE | BLOCKER | A **present** `spec_refs` entry whose file or `§section` anchor does not resolve |
+| ANALYSIS-REF-RESOLVABLE | BLOCKER | `analysis_ref` missing, or a path that does not resolve (`self` / `none` are legal) |
+| STATUS-VALUE | BLOCKER | `status` outside the allowed set |
+| REQUIRED-SECTIONS | WARN | Body missing Root cause / Pitfalls / Approach / Definition of done / Verification |
+| SPEC-REFS-CITED-BY-DOD | WARN | No acceptance item cites any `spec_refs` entry |
+| PITFALL-VERIFICATION | WARN | A pitfall (Pn) with no matching Verification entry, or a Verification entry referencing a non-existent pitfall |
+| NEGATIVE-TESTS | WARN | Verification contains no failure-mode test beyond the reproduction |
+| OUT-OF-SCOPE-PRESENT | WARN | Empty or circular `out_of_scope` |
 | CENSUS-PRESENT-IF-CLASS-SCOPED | WARN | Class-scoped ticket (parity/reconcile/plural-site framing) with no §Census |
 | PROSE-VERB-IN-VERIFY | WARN | Acceptance items using "by reading", "by inspection", "should be present" |
+
+A BLOCKER means the flow would rather file nothing than file this: no
+executable statement of the wrong behavior, an acceptance criterion nobody
+can check, or a dangling reference. Everything else is a WARN — visible in
+the mechanical report, never a refusal.
 
 There is **no `files_budget` and no `files_scope` membership gate** in this
 flow. Ticket size is bounded by the analysis decomposition and by
 line-level traceability (every changed line traces to an acceptance item —
-a reviewer FAIL, see §4). `files_scope` MAY be declared, but only as the
-mechanical disjointness proof for `--parallel`; it carries no review
-consequence. `out_of_scope` remains semantic and load-bearing.
+a reviewer FAIL, see §4). `out_of_scope` remains semantic and load-bearing.
+
+**Parallel start requires different Maven modules.** Two tickets may run
+concurrently only when their changes land in disjoint modules — a boundary
+the build enforces, unlike a declared path list, which is a promise made
+before the code was read. `files_scope` MAY be declared as supporting
+evidence; it carries no review consequence and does not by itself qualify a
+ticket for `--parallel`. `migration_touch: true` still serializes.
 
 ### 2. Start — `/tick start <id>`
 
@@ -160,17 +208,21 @@ consequence. `out_of_scope` remains semantic and load-bearing.
   raises one blocking question. Result recorded under `clarity_check:`.
 - Set `status: in-progress`, create branch `m<N>/M<N>-NNN-<slug>` off
   `main`, regenerate `STATUS-TICK.md`.
-- No plan-writer at start: the analysis IS the plan, and it was approved at
-  draft time.
+- No plan-writer at start: where §0b required an analysis, that analysis IS
+  the plan and was approved at draft time; otherwise the §0 reproduction is
+  the contract and the Approach is a route, not a gate.
 
 ### 3. Implement — execution, not discovery
 
-- Follow the ticket's Approach. Touched files should match the
-  files-to-touch plan; the plan is guidance, not an allowlist, but any
-  departure from it (new file, skipped file, changed order with a reason)
-  is a **hurdle** unless it is purely mechanical.
-- **Hurdle rule.** The implementor diverges from the plan only in response
-  to an extra hurdle found in the code. On a hurdle: STOP, write a hurdle
+- **Make the §0 reproduction green** — that is the contract. Follow the
+  Approach where it holds; take a better route inside the same behavior
+  where it does not (§Principles 4). Departures from the files-to-touch plan
+  are reported at review as a diff-shape line, not gated at implement time.
+- **Hurdle rule — the four triggers** (§Principles 4): premise wrong;
+  another Maven module or another in-flight ticket's file; a spec change; a
+  control of the replaced path would be dropped. Anything else is
+  execution — proceed, and let the merged gate judge the result against the
+  contract. On a hurdle: STOP, write a hurdle
   report (see `hurdle.md`): what was planned, what was found, root cause
   with `file:line` evidence, suggested solutions (≥1, each carrying the
   falsification note — the alternative tried and why it lost),
@@ -233,11 +285,14 @@ consequence. `out_of_scope` remains semantic and load-bearing.
     in-band (only the named items), `mvn verify`, re-review once.
   - medium or low without a fix the diff can absorb → **MANUAL**.
 - Round cap: 2 (3 for `complexity: high` or `risk: high`). Round-N growth
-  beyond the named REWORK items is a FAIL (must-shrink is load-bearing
-  again, not advisory).
-- On REWORK, re-review re-runs the whole gate once — one verdict per
-  round, all findings in it. No separate security re-audit loop: the gate
-  IS the security review.
+  beyond the named REWORK items is a WARN — advisory, never a FAIL. The
+  round cap is the bound on non-convergent rework.
+- On REWORK, re-review reads the **fix hunks only** — round N to round N+1 —
+  and checks each against the `EVALUATED-AS` probe its round-N finding
+  named. APPROVE is the expected verdict and is explicitly permitted.
+  Observations outside the fix hunks go to the user as a new-ticket
+  recommendation, never as this round's REWORK items. No separate security
+  re-audit loop: the gate IS the security review.
 
 ### 5. Commit & merge — `/tick commit <id>`, `/tick merge <id>`
 
@@ -270,8 +325,13 @@ with these deltas:
   lines are a FAIL; no adjacent "improvements").
 - §2–§7, §7a, §8 (test integrity + assertion adequacy), §9 (injectable
   time), §10 (preserve controls of a replaced path): apply verbatim.
-  §10's "enumerate controls in acceptance at authoring time" becomes
-  mandatory inside the Approach section (the analyst enumerates them).
+  §10's "enumerate controls in acceptance at authoring time" is mandatory
+  inside the Approach section whenever the change reroutes or replaces an
+  existing path. The analyst enumerates them where §0b required an
+  analysis; where it did not, the ticket's author does, at §0. A dropped
+  control is also a hurdle trigger (§Principles 4) and a SECURITY-CHECK
+  item at review — the duty never depends on which door the ticket came
+  through.
 - The M1 flow's `files_budget`/`files_scope`/negative-space gates do NOT
   apply (§1 of this document). `text:` and `fix:` commit prefixes from
   `docs/process/workflow.md` §Non-ticket commits apply unchanged.

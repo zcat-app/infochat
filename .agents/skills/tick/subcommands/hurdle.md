@@ -1,11 +1,21 @@
 # /tick hurdle
 
-The implementor's stop-and-report. A hurdle is ANY divergence from the
-ticket's plan: a plan claim that does not hold in the code, a new
-constraint, a spec conflict, a discovery that invalidates part of the
-approach, a premise-fail in `mvn verify`, or a decision the ticket did not
-make. Hurdles are the ONLY licence to diverge — the flow treats silent
-drift as the primary failure mode.
+The implementor's stop-and-report, for a divergence the ticket's contract
+cannot absorb. A hurdle is one of exactly four (workflow §Principles 4):
+
+1. the reproduction proves the ticket's premise wrong (including a
+   premise-fail surfacing in `mvn verify`);
+2. the fix needs another Maven module, or a file another in-flight ticket
+   holds;
+3. the fix needs a spec change;
+4. the change would drop a control the replaced path carried
+   (engineering-rules §10) and the ticket does not authorize that.
+
+Anything else is execution, not a hurdle: an Approach step that does not
+hold in the code, a better helper than the one named, a rewrite instead of
+a patch, an extra test file. Proceed, and let the merged review gate judge
+the result against the contract. Silent drift is still a failure mode — the
+gate is where it is caught, not a stop at every surprise.
 
 Invocation: `/tick hurdle <id>` from the in-progress ticket's branch.
 
