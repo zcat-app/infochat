@@ -20,6 +20,7 @@ and this store is the shared one both worlds read.
 
 ## Process and workflow
 
+- [The /tick flow (analysis-first) runs alongside /m1-tick](tick-flow-exists.md) — parallel A/B track: mandatory analyst gate at draft time, hurdle-report discipline, one merged review gate with falsification duty, files_budget abolished; measure with `scripts/tick-measure.py`, never mix flows on one ticket.
 - [Relocated controls don't travel](relocated-controls-dont-travel.md) — a diff that reroutes a path drops that path's INCIDENTAL controls (sanitize, audit row, the unit they operate on, tests that pinned a security property); invisible to the suite and to review, so enumerate them in `acceptance:` at authoring time. Engineering-rules §10.
 - [Enumerate a census by invocation, not output token](census-enumerate-by-invocation.md) — a label-based grep misses bare-content fields, so each plan pass finds a different subset; two passes finding different file sets means decompose, not refine again.
 - [A pre-registration with a free variable isn't pinned](pre-registration-free-variable.md) — write the threshold as a formula and mark which inputs are known TODAY; a percentage of a survivor set moves its own trigger point once the data lands. Fix by shrinking the population until the rule is invariant, or by stating an absolute count.

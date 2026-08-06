@@ -26,7 +26,8 @@ the repo root. Setup: [DEVELOPER.md](DEVELOPER.md).
 | Engineering rules (binding on every change) | [docs/process/engineering-rules-verbatim.md](docs/process/engineering-rules-verbatim.md) — read in full before changing code |
 | Project conventions + coding style | [CLAUDE.md](CLAUDE.md) §Key conventions and §Coding style — apply both; IGNORE its Claude-harness sections (§Context budget heuristics, §M1 workflow pointers into `.claude/`) |
 | Ticket workflow (lifecycle, escalation, review) | [docs/process/workflow.md](docs/process/workflow.md) |
-| Runnable workflow procedures | `.agents/skills/{m1-tick,redteam,deep-code-review}/SKILL.md` — thin wrappers over the single-sourced procedures in `.claude/skills/` |
+| Analysis-first ticket flow (NEW, runs alongside m1-tick for A/B measurement) | [docs/process/tick-workflow.md](docs/process/tick-workflow.md) — driven by the opencode-native [`/tick` skill](.agents/skills/tick/SKILL.md); tickets in `docs/plan/m1/tick-tickets/`, analyses in `tick-analysis/`, board `STATUS-TICK.md`, comparison via `scripts/tick-measure.py`. Do NOT drive tick-flow tickets with `/m1-tick` or vice versa |
+| Runnable workflow procedures | `.agents/skills/{m1-tick,redteam,deep-code-review}/SKILL.md` — thin wrappers over the single-sourced procedures in `.claude/skills/`; `/tick` is fully self-contained under `.agents/skills/tick/` (no `.claude` surface) |
 | Harness bindings (how YOUR tool runs the gates) | [docs/process/harness-mapping.md](docs/process/harness-mapping.md) |
 | Ticket format | [docs/process/ticket-template.md](docs/process/ticket-template.md) |
 | Contribution walk-through | [CONTRIBUTING.md](CONTRIBUTING.md) |
