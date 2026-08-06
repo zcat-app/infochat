@@ -115,6 +115,17 @@ output, pasted. Same field, same role.
   implementation. A test that only compiles once the fix exists is a design
   sketch, not a reproduction.
 
+For a multi-ticket decomposition, §0's mandatory RED run is the FAMILY's
+reproduction — it exists before `analyze`. A child ticket then either
+names a test that resolves in-tree, or carries an explicit marker:
+`to-be-written` (plus the intended `Class#method`) for a test only that
+child can make writable, or `parked: <path>` for a test written and run
+RED but deliberately held out of the source tree. `start` converts the
+marker before any fix code: write (or restore) the test, run it RED,
+replace the marker with the real name. tick-lint resolves named tests
+in-tree and accepts only these two markers as alternatives — an invented
+test name is a BLOCKER, not a promise.
+
 ### 0b. Analyze — `/tick analyze <brief>`
 
 Mandatory for **every** ticket, and it runs on §0's evidence: the analyst is
@@ -163,7 +174,7 @@ refuses), and at `review` (mechanical input for the reviewer). Checks:
 
 | Check | Severity | What it catches |
 |---|---|---|
-| REPRODUCTION-PRESENT | BLOCKER | `reproduction:` empty, or naming neither a test method nor a probe with observed output (§0) |
+| REPRODUCTION-PRESENT | BLOCKER | `reproduction:` empty; naming neither a test method nor a probe with observed output; or naming a test that does not resolve in-tree and carries no `to-be-written` / `parked:` marker (§0) |
 | ACCEPTANCE-VERIFIABLE | BLOCKER | An acceptance item that names no test method, no runnable command, and no probe (unverifiable prose) |
 | FORWARD-REFERENCE-RESOLVABLE | BLOCKER | Load-bearing ticket-ID reference with no file under `tickets/` or `tick-tickets/` |
 | SPEC-REFS-RESOLVABLE | BLOCKER | A **present** `spec_refs` entry whose file or `§section` anchor does not resolve |
@@ -174,7 +185,7 @@ refuses), and at `review` (mechanical input for the reviewer). Checks:
 | PITFALL-VERIFICATION | WARN | A pitfall (Pn) with no matching Verification entry, or a Verification entry referencing a non-existent pitfall |
 | NEGATIVE-TESTS | WARN | Verification contains no failure-mode test beyond the reproduction |
 | OUT-OF-SCOPE-PRESENT | WARN | Empty or circular `out_of_scope` |
-| CENSUS-PRESENT-IF-CLASS-SCOPED | WARN | Class-scoped ticket (parity/reconcile/plural-site framing) with no §Census |
+| CENSUS-PRESENT-IF-CLASS-SCOPED | WARN | Class-scoped ticket (parity/reconcile/plural-site framing in the title or acceptance items — body prose does not trigger) with no §Census |
 | PROSE-VERB-IN-VERIFY | WARN | Acceptance items using "by reading", "by inspection", "should be present" |
 
 A BLOCKER means the flow would rather file nothing than file this: no
@@ -277,6 +288,14 @@ ticket for `--parallel`. `migration_touch: true` still serializes.
 - **Severity disposition.** Findings are graded critical/high/medium/low.
   - critical or high → verdict **MANUAL**: the ticket escalates and the
     user is notified with the finding summary. Fix is decided by the user.
+  - all findings LOW, every fix comment/javadoc-only (zero executable
+    lines; no docs/spec, docs/design or root-md files — parity-test
+    fixtures), every finding carrying a mechanical EVALUATED-AS probe →
+    verdict **APPROVE-WITH-FIXES**: the driver applies exactly the named
+    fixes, verifies each probe plus a `test-compile` of the touched
+    modules, and proceeds to commit. The round's green log remains the log
+    of record; no further round runs. A fix that cannot stay comment-only
+    demotes the verdict to REWORK.
   - medium or low with a named fix class → verdict **REWORK**: fixed
     in-band (only the named items), `mvn verify`, re-review once.
   - medium or low without a fix the diff can absorb → **MANUAL**.
@@ -291,8 +310,12 @@ ticket for `--parallel`. `migration_touch: true` still serializes.
   dropping the item leaves the suite green and produces no hunk to inspect.
   Any NOT-ADDRESSED is a FAIL; any DECLINED is MANUAL. APPROVE is the
   expected verdict and is explicitly permitted once every item is
-  SATISFIED. Observations outside the fix hunks go to the user as a
-  new-ticket recommendation, never as this round's REWORK items. No
+  SATISFIED. Observations outside the fix hunks go to
+  RECOMMENDED-NEW-TICKET, never into this round's REWORK items; the
+  driver dispositions them — pre-existing and untouched by the diff →
+  recorded in the ticket and commit body with no user decision requested;
+  carrying a DECIDE-BEFORE ordering constraint → relayed to the user now.
+  Filing any ticket stays the user's call. No
   separate security re-audit loop: the gate IS the security review.
 
 ### 5. Commit & merge — `/tick commit <id>`, `/tick merge <id>`
@@ -300,8 +323,11 @@ ticket for `--parallel`. `migration_touch: true` still serializes.
 - One commit per branch; subject `M<N>-NNN: <imperative summary>`; body =
   Context + `Alternatives considered:` + `Renames:` trailers +
   `Reviewed-by:` (reviewer verdict line, round, agent run id).
-- `commit` re-runs `mvn verify` for `complexity: high` / `risk: high`,
-  and checks test-log freshness (mtime vs staged files) otherwise.
+- `commit` first checks tree identity against the last verified snapshot
+  (docs/plan excluded — it holds only board/frontmatter bookkeeping):
+  identical → the green log stands and no re-run happens; else it re-runs
+  `mvn verify` for `complexity: high` / `risk: high`, and checks test-log
+  freshness (mtime vs staged files) otherwise.
 - `merge` squash-merges into `main` with the canonical-subject idempotency
   precheck and the conflict set rule (STATUS board regen = pseudo-conflict,
   auto-resolved; anything else = refuse).
@@ -331,6 +357,14 @@ with these deltas:
   control is also a hurdle trigger (§Principles 4) and a SECURITY-CHECK
   item at review — the duty never depends on which door the ticket came
   through.
+- §"Run the full test suite before declaring done": amended for two
+  byte-identity cases — an APPROVE-WITH-FIXES apply whose diff is
+  comment-only keeps the round's green log as the log of record
+  (test-compile of the touched modules is the required proof — a comment
+  edit can still break the compile), and `/tick commit` skips the safety
+  re-run when the tree is identical (docs/plan excluded) to the tree the
+  last green log verified. Both cases record what was reused and why in
+  the commit body. Everything else in that rule applies verbatim.
 - The M1 flow's `files_budget`/`files_scope`/negative-space gates do NOT
   apply (§1 of this document). `text:` and `fix:` commit prefixes from
   `docs/process/workflow.md` §Non-ticket commits apply unchanged.

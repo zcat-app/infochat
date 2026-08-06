@@ -183,10 +183,21 @@ you are explaining the diff to a colleague who has not seen the ticket:
 
 ## Verdict semantics
 
-VERDICT: APPROVE | REWORK | MANUAL
+VERDICT: APPROVE | APPROVE-WITH-FIXES | REWORK | MANUAL
 
 - **APPROVE** — every check PASS (MAINTAINABILITY WARN permitted,
   informational). The SUMMARY says so in plain English.
+- **APPROVE-WITH-FIXES** — the only findings are severity LOW, every
+  SOLUTION is comment/javadoc-only (zero executable lines changed; no
+  edits to docs/spec/, docs/design/ or root-level *.md — those are
+  parity-test fixtures), and every finding carries a mechanical
+  EVALUATED-AS probe (a command or grep, not prose). List them under FIX
+  ITEMS (same shape as REWORK ITEMS). The driver applies exactly these
+  fixes, verifies each probe plus a test-compile, and commits — no
+  further review round runs. Returning REWORK when every finding meets
+  these conditions is the wrong verdict (it costs a full verify + round
+  for zero executable change); returning APPROVE-WITH-FIXES when any
+  finding does not meet them is worse — then return REWORK.
 - **REWORK** — findings of severity medium or low, each with a fix the
   existing diff can absorb. REWORK ITEMS must be specific and addressable
   in the diff and must carry their probe: "restore the `sanitize` call at
@@ -230,7 +241,7 @@ low (a small but real fix; nothing exploitable today).
 ## On-disk verdict format (Write to {{VERDICT_FILE_PATH}})
 
 ```text
-VERDICT: <APPROVE | REWORK | MANUAL>
+VERDICT: <APPROVE | APPROVE-WITH-FIXES | REWORK | MANUAL>
 
 SUMMARY:
 <2-4 plain sentences. What the change does, whether it ships as-is,
@@ -264,7 +275,12 @@ FALSIFIED-AND-DROPPED: (omit if none)
 
 RECOMMENDED-NEW-TICKET: (omit if none; required for anything real you
 noticed outside this round's fix hunks — never a finding of this round)
-- <the concern, in plain English, with WHAT / WRONG / EXPECTED>
+- <the concern, in plain English, with WHAT / WRONG / EXPECTED, ending
+  with the label lines the driver's disposition depends on:
+  TOUCHED-BY-THIS-DIFF: <yes | no> — did this diff create or alter the
+  behavior? — and, only when ordering matters, DECIDE-BEFORE:
+  <ticket id / event>. Pre-existing observations without a DECIDE-BEFORE
+  are recorded by the driver, not raised as decisions>
 
 REWORK-ITEM DISPOSITION: (rounds ≥ 2 only; one line per item of the
 PREVIOUS round — every item appears, none may be omitted)
@@ -278,8 +294,8 @@ TEST-ADEQUACY-CHECK: <PASS | WARN | FAIL | NOT-APPLICABLE>
 MAINTAINABILITY-CHECK: <PASS | WARN | FAIL>
 SCOPE-CHECK: <PASS | WARN | FAIL>
 
-REWORK ITEMS: (required on REWORK; the fix contract — each item names
-its probe)
+REWORK ITEMS: (required on REWORK; on APPROVE-WITH-FIXES title the block
+FIX ITEMS — same shape; the fix contract — each item names its probe)
 1. <finding N: SOLUTION, evaluated via EVALUATED-AS>
 ...
 
@@ -292,9 +308,9 @@ UNCERTAINTY: (required on MANUAL)
 
 ## Short chat reply (the only thing you return inline)
 
-VERDICT: <APPROVE | REWORK | MANUAL>
+VERDICT: <APPROVE | APPROVE-WITH-FIXES | REWORK | MANUAL>
 Verdict file: {{VERDICT_FILE_PATH}}
-Rework items: <integer count, 0 on APPROVE/MANUAL>
+Rework/fix items: <integer count, 0 on APPROVE/MANUAL>
 Critical/high: <integer count>
 ```
 
@@ -312,9 +328,11 @@ Critical/high: <integer count>
 2. Renders via `scripts/m1-render-prompt.py`, spawns `tick-reviewer`,
    reads the verdict file back, records it under `reviews:` (latest only;
    git log is the audit trail).
-3. Dispatches per the verdict semantics: APPROVE → commit path; REWORK →
-   in-progress, fix only named items, re-run `mvn verify`, re-review;
-   MANUAL → `escalated`, and the user is shown the critical/high findings
-   summary with a notification.
+3. Dispatches per the verdict semantics: APPROVE → commit path;
+   APPROVE-WITH-FIXES → driver applies the FIX ITEMS (comment-only,
+   probe-verified, test-compile) and proceeds to commit, no further round;
+   REWORK → in-progress, fix only named items, re-run `mvn verify`,
+   re-review; MANUAL → `escalated`, and the user is shown the
+   critical/high findings summary with a notification.
 4. The post-gate contamination check (`git status --porcelain`) and the
    absolute-path rule apply per `docs/process/harness-mapping.md` §6.

@@ -6,7 +6,9 @@ created: 2026-08-06
 last_updated: 2026-08-06
 flow: tick
 reproduction: Stage1BodyRemediationIT.storedBodyWithMarkupAndEntitiesBecomesPlainText
-              — new test this ticket adds, seeding a post row and a saved_post
+              — to-be-written: the seed rows need M1-784's fixed pipeline, so
+              this test cannot exist until that lands; `start` writes it and
+              runs it RED first. It seeds a post row and a saved_post
               row whose body is the pre-fix stored form
               (<p>Hello <a href="https://x.test">link</a></p> and
               We&#39;re working on it!!) and asserting both read back as

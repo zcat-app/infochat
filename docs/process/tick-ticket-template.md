@@ -13,6 +13,13 @@ reproduction:
                                #   ChatAgentReplyLanguageTest.replyToACzechScopeIsCzech
                                # or, for a diff mvn verify cannot cover, the exact probe
                                # command plus its observed wrong output.
+                               # tick-lint resolves named tests in-tree. A child of a 2+
+                               # decomposition whose test cannot exist yet carries the
+                               # literal marker `to-be-written` next to the intended
+                               # Class#method; a test written and run RED but held out of
+                               # the tree carries `parked: <path>` (path must exist).
+                               # `start` converts the marker — write/restore the test, run
+                               # it RED — before any fix code (workflow §0).
 analysis_ref: self
                                # MANDATORY (tick-lint BLOCKER). Every ticket comes out of
                                # /tick analyze, which runs on the `reproduction:` above.

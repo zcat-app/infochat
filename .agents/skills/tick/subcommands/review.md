@@ -44,6 +44,11 @@ re-audit loop and no code-reviewer.
      .scratch/tick-review-<ID>-r<round>.tree)` written to
      `.scratch/tick-review-<ID>-r<round>-fix.diff`; that file, not the full
      diff, is what the reviewer evaluates this round
+   - the round's diff file: round 1 → `git diff $(git merge-base main HEAD)
+     > .scratch/tick-review-<ID>-r1.diff`; rounds ≥ 2 → the fix-hunks file
+     above. Then the comment-cap report over it: `python3
+     scripts/tick-comment-cap.py <that file>` — its WARN lines go in the
+     report (they feed the reviewer's MAINTAINABILITY check)
    - the lint WARNs
    Read it back into the session (the report is small; it substitutes into
    `{{MECHANICAL_REPORT}}`).
@@ -51,9 +56,8 @@ re-audit loop and no code-reviewer.
 3. **Render and spawn.** Render `docs/process/tick-reviewer-prompt.md` via
    `scripts/m1-render-prompt.py` with `TICKET_ID`, `CURRENT_ROUND`,
    `ROUND_CAP` (from frontmatter), `TICKET_FILE_PATH`,
-   `DIFF_FILE_PATH` (round 1: the full diff written to
-   `.scratch/tick-review-<ID>-r<round>.diff`; rounds ≥ 2: the fix-hunks file
-   from step 2),
+   `DIFF_FILE_PATH` (round 1: the full-diff file from step 2; rounds ≥ 2:
+   the fix-hunks file from step 2),
    `TEST_LOG_PATH`, `ANALYSIS_FILE_PATH` (from `analysis_ref:` — for a
    `self` ticket, substitute the ticket's own path: the analysis IS the
    ticket; for a 2+ decomposition, the tick-analysis/ path),
@@ -74,6 +78,18 @@ re-audit loop and no code-reviewer.
    tick-reviewer-prompt.md):
    - **APPROVE** → record under `reviews:` (round, date, verdict, checks,
      diff_stats); status stays `in-review`; prompt `/tick commit <id>`.
+   - **APPROVE-WITH-FIXES** → record under `reviews:`; apply EXACTLY the
+     verdict's FIX ITEMS. At apply time verify every changed line is a
+     comment/javadoc line and no docs/spec, docs/design or root-level *.md
+     file is touched (parity-test fixtures); if any fix cannot stay
+     comment-only, treat the verdict as REWORK instead. Then run each
+     item's EVALUATED-AS probe plus `./mvnw -B -pl <touched modules> -am
+     test-compile` (a comment edit can still break the compile — Error
+     Prone parses comments); the round's green log remains the log of
+     record. Snapshot the fixed tree for commit's identity check:
+     `git add -A; s=$(git stash create); echo "${s:-$(git rev-parse HEAD)}"
+     > .scratch/tick-fixes-<ID>.tree`. Record the probe outputs in the
+     `reviews:` entry, then prompt `/tick commit <id>`. No further round.
    - **REWORK** → record; status → `in-progress`; append the REWORK ITEMS
      verbatim to the ticket body under "Round N rework"; the developer
      fixes ONLY those items, re-runs `mvn verify`, re-invokes this
@@ -85,6 +101,15 @@ re-audit loop and no code-reviewer.
      `/tick escalate <id>`.
    - Round cap reached on REWORK → `escalated`, escalate menu, no round
      beyond the cap.
+   - **RECOMMENDED-NEW-TICKET entries** get a driver disposition, not an
+     automatic relay: an entry the verdict labels `TOUCHED-BY-THIS-DIFF:
+     no` with no `DECIDE-BEFORE:` line is recorded — append it under a
+     "Review observations" heading in the ticket body and carry a one-line
+     version into the commit body — and no decision is requested; the user
+     reads it there. Entries carrying `DECIDE-BEFORE: <ticket/event>` (an
+     ordering interaction with planned or in-flight work) are relayed to
+     the user now, one decision each. Filing a ticket is the user's call
+     in every case — never file one unilaterally.
 
 6. **Renames handoff.** Copy the reviewer's MAINTAINABILITY naming
    suggestions into the eventual commit's `Renames:` trailer material —

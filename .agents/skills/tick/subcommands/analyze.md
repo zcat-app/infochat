@@ -18,6 +18,25 @@ For a long brief, take a pointer (`/tick analyze ".scratch/V1.1.0-TEST-REPORT-CL
    `§section`), Read that section. State the problem in one or two lines to
    the user and wait for confirmation that this is the problem to analyze
    (a misread brief produces a useless analysis — confirm cheaply, once).
+   The same confirmation message carries step 1b's `Prior art:` line.
+
+1b. **Enumerate prior art (required, before spawning).** Run the named
+   probes — never answer from memory:
+   - `git log --all --grep '<topic token>'`, `git branch -a`,
+     `git worktree list` — prior or parallel implementations;
+   - `ls docs/plan/m1/redteam/` grepped for the surface — redteam findings;
+   - `grep -l '<token>' docs/plan/m1/tickets/*.md
+     docs/plan/m1/tick-tickets/*.md` — prior tickets on the surface;
+   - recent review verdicts and reports under `.scratch/`.
+   Everything found — diffs, review verdicts, redteam reports, superseded
+   branches/worktrees — goes into the rendered `PRIOR_ART` block: each item
+   as its location plus one line on what it is. Prior art is INPUT labeled
+   "falsify, do not adopt", never the answer; feeding it to the analyst is
+   not optional, and withholding a known item is not the driver's call.
+   The step-1 confirmation MUST carry a `Prior art:` line — either the
+   item list or `none found (searched: git log, branches, worktrees,
+   redteam dir, ticket corpus, .scratch)` — so the user can veto a false
+   "none" before any agent spawns.
 
 2. **Allocate the ID set.** Compute `NEXT_ID` = 1 + max over every
    `M\d+-\d+` seen in filenames under BOTH `docs/plan/m1/tickets/` and
@@ -33,8 +52,10 @@ For a long brief, take a pointer (`/tick analyze ".scratch/V1.1.0-TEST-REPORT-CL
      ticket the analyst will draft; the analyst may draft fewer than the
      count you allocate — it writes what it writes)
    Render `docs/process/analyst-prompt.md` via
-   `scripts/m1-render-prompt.py` with `PROBLEM_BRIEF`, `ANALYSIS_FILE_PATH`,
-   `TICKET_FILE_PATHS` (newline-joined), `NEXT_ID`, then spawn the
+   `scripts/m1-render-prompt.py` with `PROBLEM_BRIEF`, `PRIOR_ART` (the
+   step-1b block, or the literal `none found (searched: ...)` line),
+   `ANALYSIS_FILE_PATH`, `TICKET_FILE_PATHS` (newline-joined), `NEXT_ID`,
+   then spawn the
    `analyst` gate agent (definition and spawn form per your harness,
    `docs/process/harness-mapping.md` §2; fresh context; stub
    `Read <rendered-prompt-path> and follow it exactly. It names every input

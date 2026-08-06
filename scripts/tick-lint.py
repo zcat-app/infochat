@@ -8,8 +8,11 @@ the flow rules (docs/process/tick-workflow.md §1). BLOCKERs refuse
 `/tick start`; WARNs are notify-and-continue.
 
 Checks:
-  REPRODUCTION-PRESENT            BLOCKER  reproduction empty, or naming neither a
-                                           test method nor a probe with output
+  REPRODUCTION-PRESENT            BLOCKER  reproduction empty; naming neither a
+                                           test method nor a probe with output;
+                                           or naming a test that does not resolve
+                                           in-tree and carries no `to-be-written`
+                                           / `parked: <path>` marker
   ACCEPTANCE-VERIFIABLE           BLOCKER  acceptance item naming no test method,
                                            no runnable command, and no probe
   FORWARD-REFERENCE-RESOLVABLE    BLOCKER  load-bearing ticket-ID reference with no file
@@ -27,6 +30,8 @@ Checks:
                                            beyond the reproduction
   OUT-OF-SCOPE-PRESENT            WARN    empty or circular out_of_scope
   CENSUS-PRESENT-IF-CLASS-SCOPED  WARN    class-scoped ticket with no §Census
+                                           (trigger keywords are matched in the
+                                           title and acceptance items only)
   PROSE-VERB-IN-VERIFY            WARN    acceptance items using unrunnable prose verbs
 
 Exit codes: 0 clean, 1 BLOCKER(s), 2 usage error. Prints one line per
@@ -72,6 +77,11 @@ REPRODUCTION_RE = re.compile(
     r"|\bdocker\b|\bprobe\b|\bobserved\b)",
     re.IGNORECASE,
 )
+# In-tree resolution (case-sensitive on purpose: Java test classes are
+# UpperCamel, and the M1-785 session showed the shape regex alone accepts
+# invented names — "run RED before filing" was unenforced).
+TEST_REF_RE = re.compile(r"\b([A-Z]\w*(?:Test|IT))[.#](\w+)")
+REPRODUCTION_MARKER_RE = re.compile(r"\bto-be-written\b|\bparked:\s*(\S+)")
 NEGATIVE_TEST_HINT = re.compile(
     r"(fail(ure|ing)?[- ]?mode|hostile|adversarial|malicious|wrong[- ]?(language|input)|"
     r"rejects|refuses|does not (reach|survive|appear)|must not|never|"
@@ -194,6 +204,31 @@ def lint_file(path):
             "REPRODUCTION-PRESENT", BLOCKER, ticket_id,
             "reproduction names neither a test method nor a runnable probe: "
             f"{reproduction[:80]}…"))
+    else:
+        marker = REPRODUCTION_MARKER_RE.search(reproduction)
+        parked_path = marker.group(1) if marker and marker.group(1) else None
+        if parked_path and not Path(parked_path.strip("`,()")).exists():
+            findings.append(Finding(
+                "REPRODUCTION-PRESENT", BLOCKER, ticket_id,
+                f"parked: path does not exist: {parked_path}"))
+        elif not marker:
+            # Named tests must exist in a src/test tree. A probe-style
+            # reproduction (command + output) has no test ref and skips this.
+            for cls, method in sorted(set(TEST_REF_RE.findall(reproduction))):
+                hits = sorted(Path(".").glob(f"*/src/test/java/**/{cls}.java"))
+                if not hits:
+                    findings.append(Finding(
+                        "REPRODUCTION-PRESENT", BLOCKER, ticket_id,
+                        f"reproduction names {cls}#{method} but {cls}.java is "
+                        "in no src/test tree — write and run it RED first, or "
+                        "mark `to-be-written` / `parked: <path>` (workflow §0)"))
+                elif not any(method in p.read_text(errors="replace")
+                             for p in hits):
+                    findings.append(Finding(
+                        "REPRODUCTION-PRESENT", BLOCKER, ticket_id,
+                        f"reproduction names {cls}#{method} but no such method "
+                        f"exists in {hits[0]} — the named test must exist, or "
+                        "mark `to-be-written`"))
 
     # ---- SPEC-REFS-RESOLVABLE ----------------------------------------------
     spec_refs = fm.get("spec_refs", "")
@@ -305,9 +340,13 @@ def lint_file(path):
                 f"acceptance item not mechanically checkable: {item[:80]}…"))
 
     # ---- CENSUS-PRESENT-IF-CLASS-SCOPED --------------------------------------
+    # Matched against title + acceptance only: over the whole ticket text,
+    # merely MENTIONING "parity"/"every call site" in body prose fabricated
+    # a §Census requirement (M1-785 session finding).
+    census_surface = fm.get("title", "") + "\n" + acceptance
     class_scoped = re.search(
         r"\b(class[- ]scoped|parity|reconcile|every (site|instance|call site)|plural|"
-        r"all (sites|call sites))\b", text, re.I)
+        r"all (sites|call sites))\b", census_surface, re.I)
     if class_scoped and "## Census" not in body:
         findings.append(Finding(
             "CENSUS-PRESENT-IF-CLASS-SCOPED", WARN, ticket_id,

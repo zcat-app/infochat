@@ -13,6 +13,9 @@ reproduction: Stage1BodyTextIT.htmlMarkupDoesNotReachTheBodyColumn
               .normalizationSynthesizedEntityIsRedactedNotStoredLiteral,
               .lineBreakSynthesizedByBlockCloseCannotHideAnImpersonationPrefix,
               .textRunsJoinedByInlineTagRemovalCannotHideADelimiterToken).
+              parked: .scratch/parked-for-M1-784/Stage1BodyTextIT.java —
+              restore into infochat-collector/src/test/java/app/zcat/infochat/collector/eval/stage1/
+              at start and run RED before any fix code.
               Run 2026-08-06 against main @258670d2:
               ./mvnw -B -pl infochat-collector -am verify
               -Dit.test=Stage1BodyTextIT -Dfailsafe.failIfNoSpecifiedTests=false

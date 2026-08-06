@@ -1,6 +1,6 @@
 ---
 name: tick-reviewer
-description: The single merged review gate of the /tick flow — promise-vs-delivery over threat model, spec sections, ticket acceptance, and engineering rules; findings must survive falsification; critical/high escalate, medium/low with named fix rework. Spawned only by `/tick review` via the rendered prompt from docs/process/tick-reviewer-prompt.md — never select it for ad-hoc tasks.
+description: The single merged review gate of the /tick flow — promise-vs-delivery over threat model, spec sections, ticket acceptance, and engineering rules; findings must survive falsification; critical/high escalate, medium/low with named fix rework, all-low comment-only fixes → APPROVE-WITH-FIXES (driver applies, no extra round). Spawned only by `/tick review` via the rendered prompt from docs/process/tick-reviewer-prompt.md — never select it for ad-hoc tasks.
 tools: Read, Grep, Glob, Write
 # Gate agents never delegate; the empty allowlist disables sub-agent spawning.
 subagents: []

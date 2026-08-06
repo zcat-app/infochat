@@ -27,6 +27,9 @@ artifacts are: one analysis document and one or more ticket files.
 The problem brief:
 {{PROBLEM_BRIEF}}
 
+Prior art on this problem — falsify, do not adopt (may be "none found"):
+{{PRIOR_ART}}
+
 Your artifacts:
   Analysis document (Write): {{ANALYSIS_FILE_PATH}}
   Ticket files (Write):      {{TICKET_FILE_PATHS}}
@@ -67,6 +70,21 @@ check, never as fact.
 
 ---
 
+## Prior-art rule (binding)
+
+The prior-art block lists existing implementations, review verdicts and
+redteam findings for THIS problem. Read every listed artifact BEFORE
+designing. Each is a hypothesis about the mechanism and a checklist of
+already-found pitfalls: a prior reviewer or redteam finding you neither
+carry forward as a pitfall nor explicitly retire with a code citation is a
+defect in your analysis. Never adopt a prior diff as the answer — derive
+the solution from the spec, then state in the analysis document where it
+agrees or disagrees with the prior attempt and why. If your own reading
+surfaces prior work the block omits, use it under the same rule and note
+the omission.
+
+---
+
 ## Spec-first rule (binding)
 
 The solution MUST be derived from the spec. For every design decision in the
@@ -83,6 +101,7 @@ dropping the problem.
 ## Read list (order)
 
 1. The problem brief (above).
+1b. The prior-art artifacts — every item the prior-art block lists.
 2. The engineering rules: `docs/process/engineering-rules-verbatim.md`
    (in full — the pitfalls you enumerate are drawn from here; it is short).
 3. The threat model: `docs/spec/security.md` — **scaled to the surface.**
@@ -210,7 +229,10 @@ SPEC-GAP: yes
 ## Skill responsibilities (what `/tick analyze` does around the prompt)
 
 1. Takes the problem brief (user text or a pointer like a live-test report
-   section). Resolves `{{NEXT_ID}}` as the next free `M<N>-NNN` scanning
+   section). Enumerates prior art via the named searches in analyze.md
+   step 1b and substitutes `{{PRIOR_ART}}` (or the literal `none found
+   (searched: ...)` line, shown to the user before spawning). Resolves
+   `{{NEXT_ID}}` as the next free `M<N>-NNN` scanning
    both `docs/plan/<milestone>/tickets/` and `docs/plan/<milestone>/tick-tickets/`.
 2. Pre-allocates the analysis path and ticket paths (slugified). The analyst
    Writes them; the skill does NOT create empty files.
