@@ -1,0 +1,72 @@
+# /tick review
+
+Spawn the merged tick-reviewer gate. Invocation: `/tick review <id>`.
+
+The gate agent is defined in `.opencode/agent/tick-reviewer.md`; the
+rendered prompt template is `docs/process/tick-reviewer-prompt.md`. The
+gate is the ONLY review in the tick flow — there is no separate security
+re-audit loop and no code-reviewer.
+
+## Steps
+
+1. **Shape gate.** Run `python3 scripts/tick-lint.py
+   docs/plan/m1/tick-tickets/M<N>-NNN-*.md`. BLOCKER → refuse review (fix
+   the ticket first). WARNs → include in the mechanical report as notes.
+
+2. **Collect the mechanical report.** Write to
+   `target/tick-mech-<ID>-r<round>.txt`:
+   - `git add -N` on any untracked files, then `git diff $(git merge-base
+     main HEAD) --stat` (files touched, added, removed)
+   - the ticket's files-to-touch list (from the Approach section) vs the
+     diff's file set — both the untouched planned files and the unplanned
+     touched files
+   - any path matching an `out_of_scope` entry (grep the diff's paths)
+   - the test-log path + mtime, and whether any staged-file mtime is newer
+   - round-N stats: on rounds ≥ 2, the previous round's diff stats for the
+     must-shrink check (growth beyond the named REWORK items is a FAIL)
+   - the lint WARNs
+   Read it back into the session (the report is small; it substitutes into
+   `{{MECHANICAL_REPORT}}`).
+
+3. **Render and spawn.** Render `docs/process/tick-reviewer-prompt.md` via
+   `scripts/m1-render-prompt.py` with `TICKET_ID`, `CURRENT_ROUND`,
+   `ROUND_CAP` (from frontmatter), `TICKET_FILE_PATH`,
+   `DIFF_FILE_PATH` (the diff written to `target/tick-review-<ID>-r<round>.diff`),
+   `TEST_LOG_PATH`, `ANALYSIS_FILE_PATH` (from `analysis_ref:` — for a
+   `self` ticket, substitute the ticket's own path: the analysis IS the
+   ticket; for a 2+ decomposition, the tick-analysis/ path),
+   `MECHANICAL_REPORT` (via `@file`), `VERDICT_FILE_PATH`
+   (`target/tick-review-<ID>-r<round>.txt`). ALL paths absolute
+   (harness-mapping §6.1(d)). Spawn `tick-reviewer` fresh-context with the
+   stub: `Read <rendered-prompt-path> and follow it exactly. It names every
+   input file and the output path. Write the required artifact and reply
+   only in the format the prompt specifies.` Foreground.
+
+4. **Read back.** Parse the four-line chat reply (`VERDICT`, verdict path,
+   rework count, critical/high count). Read the verdict file from disk —
+   the on-disk artifact is the result, never the chat reply alone.
+   Contamination check: `git status --porcelain` shows only the expected
+   artifact paths.
+
+5. **Dispatch** per the verdict semantics (tick-workflow.md §4 /
+   tick-reviewer-prompt.md):
+   - **APPROVE** → record under `reviews:` (round, date, verdict, checks,
+     diff_stats); status stays `in-review`; prompt `/tick commit <id>`.
+   - **REWORK** → record; status → `in-progress`; append the REWORK ITEMS
+     verbatim to the ticket body under "Round N rework"; the developer
+     fixes ONLY those items, re-runs `mvn verify`, re-invokes this
+     subcommand (round+1).
+   - **MANUAL** → record; status → `escalated`; **notify the user with
+     the verdict's plain-English SUMMARY plus one bullet per critical/high
+     finding** — WHAT, the WRONG output example, the EXPECTED output, and
+     the SOLUTION (severity in parentheses only) — then fire
+     `/tick escalate <id>`.
+   - Round cap reached on REWORK → `escalated`, escalate menu, no round
+     beyond the cap.
+
+6. **Renames handoff.** Copy the reviewer's MAINTAINABILITY naming
+   suggestions into the eventual commit's `Renames:` trailer material —
+   they are implementor material, not additional REWORK items, unless the
+   reviewer FAILed MAINTAINABILITY (then they ARE items).
+
+Regenerate `STATUS-TICK.md` after the status change.
