@@ -5,10 +5,11 @@ status: pending
 created: 2026-08-06
 last_updated: 2026-08-06
 blocked_by: [M1-777]
-files_budget: 8
+files_budget: 9
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/translation/TranslationPipeline.java
+  - docs/spec/llm.md
   - infochat-provider/src/main/java/app/zcat/infochat/provider/summary/**
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentReplyLanguageTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/summary/SummaryProseLanguageTest.java
@@ -60,6 +61,18 @@ acceptance:
     language each time. Tests must therefore drive the failing input
     deterministically (a stubbed generator returning wrong-language
     text), never rely on observing the live model.
+  - >-
+    AMEND `docs/spec/llm.md` §Failure handling (recap) condition (b) to
+    carry the source-language qualifier M1-777 implemented. The spec
+    still states the check fails when "the output is byte-identical to
+    the input", unqualified, while the code now treats identity as a
+    failure only for an input DECLARED English. This is NOT re-litigating
+    the identity check — the decision is M1-777's and stands; it is
+    writing that decision into the spec sentence in the same commit that
+    makes the callers declare truthfully, so the two stop diverging.
+    Raised as a SPEC-CONFORMANCE WARN on the M1-777 review (round 1,
+    2026-08-06), which could not clear it: `docs/spec/llm.md` was outside
+    that ticket's `files_scope`.
   - "mvn -B -pl infochat-provider -am verify is green"
 test_plan:
   adds:
