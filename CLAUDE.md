@@ -178,24 +178,18 @@ These are project-level coding-style preferences. They are NOT reviewer-enforced
 
 ## Context budget heuristics
 
-These are working-style heuristics for keeping the main conversation's context usable across long sessions. They complement (not replace) the system-prompt's general guidance about when to spawn agents.
+- **Survey via Explore, not sequential Reads.** A code-surface survey of 3+ files you will NOT modify goes to an `Explore` subagent (file list + questions in, short summary back). Read directly: `docs/spec/`/`docs/design/` files (authoritative) and anything you are about to edit.
+- **Diagnose framework failures via subagent; your own-diff failures yourself.** Failures whose signal lives in framework bytes (Quarkus/Maven traces, flakes, infra, OOM) → an `Explore` subagent reads the raw log and returns a summary. Failures of the diff you just wrote → keep them in the main session; a fresh subagent lacks the diff context.
 
-### Survey via Explore, not sequential Reads
-- When you are about to Read 3+ source files in a row to understand an existing API surface ("what's the shape of these classes I'll consume; what method signatures exist; how does this SPI work"), spawn an `Explore` subagent instead. Hand it the file list plus the specific questions; receive a 1–2K summary. The full file bytes stay in Explore's context, not yours.
-- Excludes spec/design files under `docs/spec/` and `docs/design/` — read those directly. They are authoritative, and re-reading them later is normal.
-- Excludes files you are about to modify — you need the full content in your context for the Edit calls that follow.
-- The heuristic is "code-surface survey of files you will not modify". Anything else, prefer direct Read.
+## Shared agent memory
 
-### Diagnose framework failures via subagent; diagnose your own-diff failures yourself
-- For test failures whose stack lives entirely outside the diff you just wrote — intermittent flakes, infra failures, OOM, long framework traces (Quarkus, Spring, Hibernate internals), Maven plugin errors — route the diagnosis through an `Explore` subagent reading the raw output. Take back a 2–3 line summary plus a suggested fix location.
-- Do NOT use a subagent for "the code I just wrote doesn't work" failures. The main session has the diff context the subagent lacks; a fresh subagent would propose any of several plausible fixes without knowing which one respects your recent intent.
-- The dividing line: is the failure's signal mostly in the framework's bytes (use subagent) or mostly in the diff's bytes (do it yourself)?
+Durable, portable project knowledge lives in `.agents/memory/` (committed; index `MEMORY.md`) and machine/deployment facts for this checkout in `.agents/memory-local/` (gitignored) — readable and writable by every coding agent regardless of harness, and not auto-loaded: reading the indexes at session start is the mechanism. Write new durable facts there (`process:` commit), not only to a harness-private store; harness-specific quirks stay in the harness's own memory. Conventions and the do-not-commit rules: [`AGENTS.md`](AGENTS.md) §Memory.
 
 ## M1 workflow (in force for the v1 build)
 
-M1 work is ticket-driven via the `/m1-tick` skill. The full rule set — lifecycle, round cap, must-shrink, ticket-readiness pre-flight (deterministic linter + developer self-check), escalation, reviewer, parallelism, `mvn verify` log capture — lives in [`.claude/skills/m1-tick/SKILL.md`](.claude/skills/m1-tick/SKILL.md) §M1 workflow rules and loads when you invoke the skill. The universal workflow specification is [`docs/process/workflow.md`](docs/process/workflow.md); M1-specific framing is [`docs/plan/m1/README.md`](docs/plan/m1/README.md).
+New work runs on the analysis-first **`/tick`** flow: every ticket carries a reproduction run RED before filing (or an explicit `to-be-written`/`parked:` marker converted at start) plus a mandatory analyst-gate analysis with prior art fed in; implementation is execution with exactly four hurdle triggers; review is ONE merged gate (spec-truthness + security + test-adequacy + maintainability + scope, falsification duty — no separate per-ticket redteam loop). The flow spec is [`docs/process/tick-workflow.md`](docs/process/tick-workflow.md); the router is [`.claude/skills/tick/SKILL.md`](.claude/skills/tick/SKILL.md). Tickets live in `docs/plan/m1/tick-tickets/M1-NNN-<slug>.md`; board `docs/plan/m1/STATUS-TICK.md` (regenerated, never hand-edited). `/tick analyze <brief>` is the only door into `tick-tickets/`; `/tick next` lists runnable tickets, `/tick start <id>` begins work.
 
-Tickets live in `docs/plan/m1/tickets/M1-NNN-<slug>.md`; status board at `docs/plan/m1/STATUS.md` (regenerated, never hand-edited). Invoke `/m1-tick next` to see the next runnable ticket; `/m1-tick start <id>` to begin work. Adversarial security review is a separate skill: `/redteam`.
+`/m1-tick` is **deprecated** but stays invocable for the tickets already on its board (`docs/plan/m1/tickets/`, board `docs/plan/m1/STATUS.md`); its rules are [`docs/process/workflow.md`](docs/process/workflow.md) + [`.claude/skills/m1-tick/SKILL.md`](.claude/skills/m1-tick/SKILL.md). A ticket filed by one flow is driven by that flow only. Standalone adversarial review (milestone boundaries, releases, m1-flow tickets): `/redteam`.
 
 ### Commit prefixes (not every change is a ticket)
 
