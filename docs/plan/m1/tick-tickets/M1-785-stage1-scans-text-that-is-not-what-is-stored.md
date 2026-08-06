@@ -1,9 +1,9 @@
 ---
 id: M1-785
 title: "Stage 1 must scan the body text it stores"
-status: pending
+status: done
 created: 2026-08-06
-last_updated: 2026-08-06
+last_updated: 2026-08-07
 flow: tick
 reproduction: Stage1PipelineIT.doublyEncodedEntityInjectionIsDetectedNotBypassed
               — new test method this ticket adds, seeding body
@@ -25,6 +25,14 @@ decomposed_from: M1-776
 files_scope:
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/stage1/Stage1Pipeline.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/stage1/Stage1PipelineIT.java
+  # Added at implementation time under the Out-of-scope clause "if the
+  # implementor prefers a new IT class, the method names above are still the
+  # contract". The P1 budget test needs a cap far below the production 1000
+  # (a body big enough to exceed 1000 across two scans trips the 100ms
+  # watchdog first and asserts the wrong failure mode), that cap is
+  # Quarkus config fixed per test class, and Stage1PipelineIT must keep
+  # the production default for its other 18 cases.
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/stage1/Stage1SharedScanBudgetIT.java
 complexity: medium
 risk: high
 round_cap: 3
@@ -69,8 +77,11 @@ acceptance:
 test_plan:
   adds:
     - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/stage1/Stage1PipelineIT.java
-      (five new @Test methods appended at the end of the @Order sequence; no
-      existing method's body or assertions are modified)
+      (four new @Test methods appended at @Order(15)-(18); no existing
+      method's body or assertions are modified)
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/stage1/Stage1SharedScanBudgetIT.java
+      (the fifth method — secondScanSharesTheSinglePerInputWatchdogAndMatchBudget
+      — in a new tiny-cap-profile class; see the files_scope note)
   preserves:
     - all tests currently green on main
 spec_refs:
@@ -81,6 +92,55 @@ spec_refs:
 decision_refs:
   - D20
   - D22
+reviews:
+  - round: 1
+    date: 2026-08-07
+    verdict: REWORK
+    checks: SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY FAIL, SCOPE PASS
+    diff_stats: 5 files, +546/-38
+    note: >-
+      Reclassified APPROVE-WITH-FIXES under the 35bd5564 flow rules
+      (user-approved 2026-08-07): the single finding is low-severity,
+      comment-only, mechanically probed. Fix applied in-band (class javadoc:
+      second-scan step added between OWASP and UPDATE; step-6 bullet
+      qualified; two placement constraints added to "Step order"). Probes
+      pass — grep "second scan" hits Stage1Pipeline.java:107 inside the
+      class doc; "OWASP-sanitized form" no longer stands unqualified.
+      Fix hunks verified 100% comment lines; `mvnw -pl infochat-collector
+      -am test-compile` green; the r1 green full-suite log
+      (.scratch/tick-test-M1-785-r1.log, BUILD SUCCESS, 7/7 modules)
+      remains the log of record.
+clarity_check:
+  date: 2026-08-06
+  verdict: PASS
+  warnings:
+    - >-
+      Self-check: every file:line citation in Root cause and Pitfalls
+      spot-checked against the code before start — :273 is a single
+      unescapeHtml4, :277 scans `normalized`, :427 stores sanitizedRedacted,
+      :330/:337 compute the deadline and match cap per call, :542 is the
+      package-private sanitize seam, OWASP_POLICY is FORMATTING+BLOCKS+LINKS,
+      and V69__approve_quarantine…sql:150 is the literal replace(body,
+      '[REDACTED:. All hold.
+    - >-
+      Self-check: the out_of_scope claim that no Stage1BodyTextIT case greens
+      from this ticket alone was verified, not assumed — on the unchanged
+      OWASP sink the backtick payload is re-encoded to &#96; before the second
+      scan would see it, so rule 6 still cannot match. The chosen
+      reproduction (&amp;#105;gnore) works because letters are not re-escaped.
+    - >-
+      Deviation recorded: the reproduction named in `reproduction:` does not
+      exist yet (the field says so). It is written and confirmed RED as the
+      first implementation step on this branch, before any production change,
+      rather than before `start` — workflow §0's evidence-before-fix property
+      is preserved; its literal before-filing ordering was not available
+      because the analyst drafted the ticket that names the test.
+    - >-
+      Housekeeping: Stage1BodyTextIT (M1-784's reproduction, out_of_scope
+      here) is parked at .scratch/parked-for-M1-784/ for the duration of this
+      ticket — left in the source tree its 8 red cases would make the
+      repo-root `mvn verify` gate red for reasons outside this ticket.
+  blockers: []
 ---
 
 # M1-785: Stage 1 must scan the body text it stores
@@ -300,6 +360,27 @@ No pre-existing test is modified. The five new methods are appended to
 single-encoded entity-bypass regressions at @Order(9)–(11) that they extend;
 if the implementor prefers a new IT class, the method names above are still the
 contract.
+
+## Review observations (round 1, dispositioned per the 35bd5564 rules)
+
+- **Relayed to the user (DECIDE-BEFORE: M1-784):** the placeholder-overlap
+  rule is attacker-selectable — a feed operator can plant a cheap first-pass
+  trigger inside a payload's `.{0,40}` window so the second-pass match
+  straddles the `[REDACTED:<id>]` marker and is dropped whole (no redaction,
+  no quarantine row for the payload's rule; the post stays flagged via the
+  first-pass row). Demonstrated by
+  `Stage1PipelineIT.secondPassRedactionNeverOverwritesAFirstPassPlaceholder`.
+  Not a defect of this diff (main stores the same string; the Approach
+  mandates the drop), but M1-784 widens what becomes literal text in the
+  column. Recommendation delivered 2026-08-07: own small ticket via
+  `/tick analyze` after M1-784 (direction: redact the non-marker segments
+  around the placeholder; fallback: record the quarantine row without
+  redacting); user decision pending.
+- **Recorded, no decision requested (TOUCHED-BY-THIS-DIFF: no):**
+  pre-existing — a first-pass marker landing inside an element the sanitizer
+  deletes leaves a quarantine row whose `approve_quarantine` restore is a
+  silent no-op (marker gone from the body, row still flips to APPROVED).
+  Exists on main independently of this diff.
 
 ## Pre-flight self-check (author-side)
 

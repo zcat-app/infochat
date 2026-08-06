@@ -79,9 +79,19 @@ import java.util.regex.Matcher;
  *       quarantine row with {@code rule_id='sanitizer_exception'}
  *       per {@code docs/spec/security.md} §Failure handling
  *       ("HTML sanitizer exception → fail-closed").</li>
+ *   <li><b>Second injection scan over the sanitizer's output</b> —
+ *       re-runs the rule set on the exact string about to be stored,
+ *       charging the SAME per-post deadline and match allowance as
+ *       the first scan (no second budget). The OWASP parse is itself
+ *       a decode step: a doubly-encoded payload only turns into
+ *       readable text during HTML parsing. Hits are redacted and
+ *       quarantined like first-pass matches, except a match that
+ *       straddles an existing {@code [REDACTED:<id>]} marker is
+ *       dropped whole so the admin restore keeps matching.</li>
  *   <li><b>UPDATE post</b> — set {@code stage1_done = true},
  *       {@code stage1_flagged = (any match)}, body to the
- *       OWASP-sanitized form. {@code post.status} stays
+ *       OWASP-sanitized form with any second-pass
+ *       {@code [REDACTED:<id>]} markers woven in. {@code post.status} stays
  *       {@code 'RAW'}; the downstream M1-033 / M1-034 workers
  *       advance it from there. The ONLY exceptions are the
  *       watchdog and sanitizer-exception fail-closed paths, which
@@ -94,7 +104,12 @@ import java.util.regex.Matcher;
  * refactor that moves OWASP earlier (e.g. "sanitize input first,
  * then process") silently defeats two defenses; a refactor that
  * drops the entity pre-decode reopens the entity-bypass vector
- * documented above.
+ * documented above. The second scan stays AFTER {@code safeSanitize}
+ * — a sanitizer throw must still unwind to
+ * {@link #handleSanitizerException} before any second-pass work —
+ * and the first scan is NOT moved onto the sanitized form: the
+ * HTML-comment and {@code <<<UNTRUSTED>>>} rules (5 and 6) need the
+ * pre-parse shape only the first scan sees.
  *
  * <ul>
  *   <li><b>OWASP HTML-entity-encodes non-ASCII codepoints.</b> The
@@ -273,9 +288,13 @@ public class Stage1Pipeline {
         String entityDecoded = StringEscapeUtils.unescapeHtml4(safeBody);
         String normalized = unicodeNormalize(entityDecoded);
 
+        // One deadline and one match allowance for the whole call. Both
+        // scans share this instance, so a body that survives the first
+        // scan cannot buy itself a second full budget (M1-785).
+        ScanBudget budget = new ScanBudget(regexTimeoutMs, maxMatches);
         try {
-            List<Match> matches = findAllMatchesUnderWatchdog(normalized);
-            return handleSuccess(postId, postUid, postFetchedAt, normalized, matches);
+            List<Match> matches = findAllMatchesUnderWatchdog(normalized, budget);
+            return handleSuccess(postId, postUid, postFetchedAt, normalized, matches, budget);
         } catch (RegexInterruptedException ex) {
             return handleWatchdogAbort(postId, postUid, postFetchedAt, normalized);
         } catch (MatchOverflowException ex) {
@@ -318,25 +337,23 @@ public class Stage1Pipeline {
      * start equal-end matches (rare); ties resolve to the
      * earlier-listed rule, which is deterministic across runs.
      *
-     * <p>The accumulated {@code all} list is hard-capped at
-     * {@link #maxMatches}: as soon as a crafted body would push the
-     * list past the cap, a {@link MatchOverflowException} unwinds the
-     * scan (the dispatcher in {@link #process} routes it to the
+     * <p>Matches are charged against the caller's {@link ScanBudget},
+     * which carries {@link #maxMatches} for the whole {@link #process}
+     * call rather than per scan: as soon as a crafted body would push
+     * the total past the cap, a {@link MatchOverflowException} unwinds
+     * the scan (the dispatcher in {@link #process} routes it to the
      * fail-closed {@link #handleMatchOverflow} quarantine path). The
      * throw happens BEFORE the offending match is added, so the list
      * never allocates past the cap — never silently truncated.
      */
-    private List<Match> findAllMatchesUnderWatchdog(String body) {
-        long deadlineNanos = System.nanoTime() + (regexTimeoutMs * 1_000_000L);
-        InterruptibleCharSequence wrapper = new InterruptibleCharSequence(body, deadlineNanos);
+    private List<Match> findAllMatchesUnderWatchdog(String body, ScanBudget budget) {
+        InterruptibleCharSequence wrapper = new InterruptibleCharSequence(body, budget.deadlineNanos());
 
         List<Match> all = new ArrayList<>();
         for (Stage1RegexSet.Rule rule : Stage1RegexSet.RULES) {
             Matcher m = rule.pattern().matcher(wrapper);
             while (m.find()) {
-                if (all.size() >= maxMatches) {
-                    throw new MatchOverflowException();
-                }
+                budget.chargeOneMatch();
                 int start = m.start();
                 int end = m.end();
                 // m.group() reads from the wrapper, but the wrapper's
@@ -374,33 +391,20 @@ public class Stage1Pipeline {
      * re-process. {@code post.status} stays {@code 'RAW'}.
      */
     private Stage1Result handleSuccess(UUID postId, String postUid, Instant postFetchedAt,
-                                       String normalized, List<Match> matches) {
-        if (matches.isEmpty()) {
-            // No regex hits — OWASP-sanitize the normalized body
-            // and write the result back to post.body. The
-            // sanitization still runs on every post (Stage 1's
-            // HTML-safety guarantee) even when no injection
-            // patterns matched. Wrap in try/catch and re-throw as
-            // SanitizerFailedException so process()'s outer
-            // dispatcher routes to the fail-closed branch — per
-            // docs/spec/security.md §Failure handling, an HTML
-            // sanitizer exception must quarantine the post, not
-            // propagate uncaught (which would leave the post at
-            // RAW indefinitely and stall the eval queue).
-            String sanitizedClean = safeSanitize(normalized);
-            TransactionHelper.inTransaction(dataSource, "Stage1Pipeline", conn ->
-            updatePostBodyAndFlags(conn, postId, postFetchedAt, sanitizedClean, false));
-            return new Stage1Result(normalized, sanitizedClean, false, false);
-        }
-
+                                       String normalized, List<Match> matches, ScanBudget budget) {
         // Build redacted body and one quarantine row per match.
         // Replace right-to-left to keep earlier-match offsets stable.
+        // An empty match list is the clean path: no rows, no
+        // replacements, and the sanitize below still runs — Stage 1's
+        // HTML-safety guarantee applies to every post, matched or not.
         StringBuilder redacted = new StringBuilder(normalized);
         List<QuarantineDao.QuarantineRow> rowsToInsert = new ArrayList<>(matches.size());
+        List<String> firstPassPlaceholderIds = new ArrayList<>(matches.size());
         for (int i = matches.size() - 1; i >= 0; i--) {
             Match match = matches.get(i);
             String placeholderId = PlaceholderIds.next();
             redacted.replace(match.start(), match.end(), PlaceholderIds.marker(placeholderId));
+            firstPassPlaceholderIds.add(placeholderId);
             rowsToInsert.add(new QuarantineDao.QuarantineRow(
                 postId, postUid, postFetchedAt,
                 match.ruleId(), match.start(), match.end(),
@@ -420,13 +424,74 @@ public class Stage1Pipeline {
         // would not, leaving the consistency property
         // "post.body's placeholders match quarantine rows" broken).
         String sanitizedRedacted = safeSanitize(redacted.toString());
+
+        // Second scan: the sanitize above is an HTML parse, so it decodes
+        // a deeper-encoded payload to literal text only AFTER the first
+        // scan ran. Scan what is actually stored (M1-785). Added, never
+        // moved — rules 5 and 6 need the pre-parse shape (class doc).
+        List<Match> secondPassMatches = withoutMatchesTouchingAPlaceholder(
+            findAllMatchesUnderWatchdog(sanitizedRedacted, budget),
+            sanitizedRedacted, firstPassPlaceholderIds);
+
+        StringBuilder finalBody = new StringBuilder(sanitizedRedacted);
+        for (int i = secondPassMatches.size() - 1; i >= 0; i--) {
+            Match match = secondPassMatches.get(i);
+            String placeholderId = PlaceholderIds.next();
+            finalBody.replace(match.start(), match.end(), PlaceholderIds.marker(placeholderId));
+            rowsToInsert.add(new QuarantineDao.QuarantineRow(
+                postId, postUid, postFetchedAt,
+                match.ruleId(), match.start(), match.end(),
+                match.span(), placeholderId));
+        }
+
+        boolean flagged = !rowsToInsert.isEmpty();
+        String storedBody = finalBody.toString();
         TransactionHelper.inTransaction(dataSource, "Stage1Pipeline", conn -> {
             for (QuarantineDao.QuarantineRow row : rowsToInsert) {
                 quarantineDao.insert(conn, row);
             }
-            updatePostBodyAndFlags(conn, postId, postFetchedAt, sanitizedRedacted, true);
+            updatePostBodyAndFlags(conn, postId, postFetchedAt, storedBody, flagged);
         });
-        return new Stage1Result(normalized, sanitizedRedacted, true, false);
+        // originalBody stays `normalized`: Stage 2 judges the
+        // pre-redaction text (docs/spec/security.md §Ingest pipeline).
+        return new Stage1Result(normalized, storedBody, flagged, false);
+    }
+
+    /**
+     * Drop any second-pass match overlapping a {@code [REDACTED:<id>]}
+     * the first pass wrote: {@code approve_quarantine} restores by
+     * literal replace, so damaging one byte of a marker turns that
+     * restore into a silent no-op (M1-785 P2). Spans are located from
+     * the ids actually emitted, never by matching bracket text.
+     */
+    private static List<Match> withoutMatchesTouchingAPlaceholder(
+            List<Match> candidates, String body, List<String> placeholderIds) {
+        if (placeholderIds.isEmpty() || candidates.isEmpty()) {
+            return candidates;
+        }
+        List<int[]> protectedSpans = new ArrayList<>(placeholderIds.size());
+        for (String placeholderId : placeholderIds) {
+            String marker = PlaceholderIds.marker(placeholderId);
+            int at = body.indexOf(marker);
+            while (at >= 0) {
+                protectedSpans.add(new int[] {at, at + marker.length()});
+                at = body.indexOf(marker, at + marker.length());
+            }
+        }
+        List<Match> kept = new ArrayList<>(candidates.size());
+        for (Match candidate : candidates) {
+            boolean touches = false;
+            for (int[] span : protectedSpans) {
+                if (candidate.start() < span[1] && span[0] < candidate.end()) {
+                    touches = true;
+                    break;
+                }
+            }
+            if (!touches) {
+                kept.add(candidate);
+            }
+        }
+        return kept;
     }
 
     /**
@@ -731,5 +796,37 @@ public class Stage1Pipeline {
         boolean flagged,
         boolean quarantinedByWatchdog
     ) {
+    }
+
+    /**
+     * One deadline and one match allowance per {@link #process} call,
+     * shared by both scans: {@code docs/spec/security.md} §Ingest
+     * pipeline bounds these PER INPUT, so a per-scan budget would hand
+     * a crafted body twice the stated bound (M1-785 P1).
+     */
+    private static final class ScanBudget {
+        private final long deadlineNanos;
+        private int remainingMatches;
+
+        ScanBudget(long regexTimeoutMs, int maxMatches) {
+            this.deadlineNanos = System.nanoTime() + (regexTimeoutMs * 1_000_000L);
+            this.remainingMatches = maxMatches;
+        }
+
+        long deadlineNanos() {
+            return deadlineNanos;
+        }
+
+        /**
+         * Charge one match against the per-input allowance, throwing
+         * once it is spent. Called BEFORE the match is added so the
+         * accumulating list never allocates past the cap.
+         */
+        void chargeOneMatch() {
+            if (remainingMatches <= 0) {
+                throw new MatchOverflowException();
+            }
+            remainingMatches--;
+        }
     }
 }
