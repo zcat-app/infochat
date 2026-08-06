@@ -16,7 +16,7 @@ Checks:
   SPEC-REFS-RESOLVABLE            BLOCKER  a present spec_refs entry whose file or
                                            §section anchor does not resolve
   ANALYSIS-REF-RESOLVABLE         BLOCKER  analysis_ref missing, or a path that does
-                                           not resolve ('self' / 'none' are legal)
+                                           not resolve ('self' is legal)
   STATUS-VALUE                    BLOCKER  status outside the allowed set
   REQUIRED-SECTIONS               WARN    body missing Root cause / Pitfalls /
                                            Approach / Definition of done / Verification
@@ -217,14 +217,13 @@ def lint_file(path):
     if not analysis_ref:
         findings.append(Finding(
             "ANALYSIS-REF-RESOLVABLE", BLOCKER, ticket_id,
-            "analysis_ref missing — set 'none' (with the reason), 'self', or "
-            "a tick-analysis/ path"))
-    elif analysis_ref.strip().lower() not in {"self", "none"} and not Path(analysis_ref).exists():
+            "analysis_ref missing — every ticket is produced by /tick analyze"))
+    elif analysis_ref.strip().lower() != "self" and not Path(analysis_ref).exists():
         findings.append(Finding(
             "ANALYSIS-REF-RESOLVABLE", BLOCKER, ticket_id,
             f"analysis_ref does not resolve: {analysis_ref} "
-            "(use 'none' when §0b does not require analysis, 'self' for a "
-            "single-ticket decomposition, or a real tick-analysis/ path)"))
+            "(use 'self' for a single-ticket decomposition, or a real "
+            "tick-analysis/ path for a 2+ ticket one)"))
 
     # ---- OUT-OF-SCOPE-PRESENT ----------------------------------------------
     oos = fm.get("out_of_scope", "")

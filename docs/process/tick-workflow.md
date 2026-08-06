@@ -23,10 +23,12 @@ lens, and findings must survive falsification before they are reported.**
    a bend of the spec to the implementation. A defect ticket — one making
    the code do what the spec already says — is grounded by its reproduction
    instead, and `spec_refs` may be empty.
-2. **Reproduction before analysis.** Every ticket carries an executable
-   statement of the wrong behavior (§0). Analysis is required only where a
-   reproduction cannot settle the question (§0b). A ticket without a
-   reproduction does not exist.
+2. **Reproduction, then analysis — both mandatory.** Every ticket carries an
+   executable statement of the wrong behavior (§0) AND an analysis (§0b).
+   The order is the point: the reproduction is evidence, so the analyst
+   explains something observed instead of predicting the behavior of unread
+   code. A ticket missing either does not exist. Both gates sit before
+   implementation, where a rewrite costs a ticket rather than a diff.
 3. **Small tickets.** A problem decomposes into tickets whose implementation
    is execution, not discovery. A ticket whose analysis names 25 files is a
    decomposition failure, not a big ticket.
@@ -111,20 +113,20 @@ For a diff `mvn verify` cannot cover (docs, shell, compose), the
 reproduction is a runnable probe: the exact command plus its observed wrong
 output, pasted. Same field, same role.
 
-- A reproduction that cannot be written is not a ticket yet — it is a brief,
-  and routes to §0b.
+- A reproduction that cannot be written does not skip the gate: the brief
+  goes to §0b, whose first job is to establish why it could not be written.
 - A reproduction that passes on `main` falsifies the ticket's premise. Stop
   and report; do not file.
 - The test is written against the behavior, never against the planned
   implementation. A test that only compiles once the fix exists is a design
   sketch, not a reproduction.
 
-### 0b. Analyze — `/tick analyze <brief>` (conditional)
+### 0b. Analyze — `/tick analyze <brief>`
 
-Required when any of these holds: the problem needs 2+ tickets; the root
-cause is unknown or unverified; the change is spec-bearing; or §0's
-reproduction cannot be written. Otherwise skipped, and the ticket records
-`analysis_ref: none` with the reason.
+Mandatory for **every** ticket, and it runs on §0's evidence: the analyst is
+handed the reproduction and explains it, rather than predicting what unread
+code does. Where §0 could not produce a reproduction, the analysis says so
+and its first job is to establish why.
 
 The driver takes a problem brief (a
 live-test finding, a user report, a redteam finding, a hurdle that needs
@@ -208,9 +210,9 @@ ticket for `--parallel`. `migration_touch: true` still serializes.
   raises one blocking question. Result recorded under `clarity_check:`.
 - Set `status: in-progress`, create branch `m<N>/M<N>-NNN-<slug>` off
   `main`, regenerate `STATUS-TICK.md`.
-- No plan-writer at start: where §0b required an analysis, that analysis IS
-  the plan and was approved at draft time; otherwise the §0 reproduction is
-  the contract and the Approach is a route, not a gate.
+- No plan-writer at start: the §0b analysis IS the plan and was approved at
+  draft time. The contract is the §0 reproduction plus acceptance; the
+  Approach is a route, not a gate (§Principles 4).
 
 ### 3. Implement — execution, not discovery
 
@@ -332,8 +334,7 @@ with these deltas:
   time), §10 (preserve controls of a replaced path): apply verbatim.
   §10's "enumerate controls in acceptance at authoring time" is mandatory
   inside the Approach section whenever the change reroutes or replaces an
-  existing path. The analyst enumerates them where §0b required an
-  analysis; where it did not, the ticket's author does, at §0. A dropped
+  existing path; the analyst enumerates them at §0b. A dropped
   control is also a hurdle trigger (§Principles 4) and a SECURITY-CHECK
   item at review — the duty never depends on which door the ticket came
   through.

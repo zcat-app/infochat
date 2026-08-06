@@ -13,12 +13,12 @@ reproduction:
                                #   ChatAgentReplyLanguageTest.replyToACzechScopeIsCzech
                                # or, for a diff mvn verify cannot cover, the exact probe
                                # command plus its observed wrong output.
-analysis_ref: none
-                               # MANDATORY (tick-lint BLOCKER), one of: `none` (workflow §0b
-                               # does not require analysis — state the reason inline), `self`
-                               # (the ticket body IS the analysis), or the path of a shared
-                               # analysis document for a 2+ ticket decomposition:
-                               # docs/plan/<milestone>/tick-analysis/<slug>.md.
+analysis_ref: self
+                               # MANDATORY (tick-lint BLOCKER). Every ticket comes out of
+                               # /tick analyze, which runs on the `reproduction:` above.
+                               # `self` when the ticket body IS the analysis; otherwise the
+                               # path of the shared analysis document for a 2+ ticket
+                               # decomposition: docs/plan/<milestone>/tick-analysis/<slug>.md.
 blocked_by: []
 files_scope:                   # OPTIONAL, and never load-bearing. Supporting evidence only.
                                # It carries NO review consequence (no membership FAIL, no

@@ -19,7 +19,7 @@ The user invokes the skill as `/tick <subcommand> [args]`. Each subcommand's ful
 
 | User invocation | Procedure file |
 |---|---|
-| `/tick analyze <brief>` | [subcommands/analyze.md](subcommands/analyze.md) — conditional analysis (workflow §0b): analyst gate turns a problem brief into an analysis doc + small tickets |
+| `/tick analyze <brief>` | [subcommands/analyze.md](subcommands/analyze.md) — mandatory analysis (workflow §0b), run on §0's reproduction: analyst gate turns a brief into an analysis doc + small tickets |
 | `/tick next` | [subcommands/next.md](subcommands/next.md) — list runnable tick tickets |
 | `/tick start <id>` | [subcommands/start.md](subcommands/start.md) — begin work; lint pre-flight; no plan-writer (the §0 reproduction is the contract) |
 | `/tick start <id> --parallel` | [subcommands/start.md](subcommands/start.md) — worktree; needs a different Maven module from every in-flight ticket |

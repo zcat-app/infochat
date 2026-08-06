@@ -1,11 +1,11 @@
 # /tick analyze
 
 Turn a problem brief into a deep, spec-grounded analysis and a set of small
-tickets. This is the **conditional** door of the tick flow (workflow §0b):
-required when the problem needs 2+ tickets, the root cause is unknown or
-unverified, the change is spec-bearing, or the §0 reproduction cannot be
-written. A ticket that meets none of those skips `analyze` and records
-`analysis_ref: none` with the reason; its entry gate is the §0 reproduction.
+tickets. This is the second mandatory door of the tick flow (workflow §0b) —
+a ticket that did not come out of `analyze` does not exist. It runs AFTER
+§0's reproduction and takes it as input: explain the observed failure, do
+not predict what unread code does. Where §0 produced no reproduction, say so
+and establish why before anything else.
 
 Invocation: `/tick analyze <brief>` where `<brief>` is the problem statement
 (observed defect with evidence, a user report, a live-test finding with its
