@@ -35,7 +35,8 @@ For a long brief, take a pointer (`/tick analyze ".scratch/V1.1.0-TEST-REPORT-CL
    Render `docs/process/analyst-prompt.md` via
    `scripts/m1-render-prompt.py` with `PROBLEM_BRIEF`, `ANALYSIS_FILE_PATH`,
    `TICKET_FILE_PATHS` (newline-joined), `NEXT_ID`, then spawn the
-   `analyst` gate agent (`.opencode/agent/analyst.md`; fresh context; stub
+   `analyst` gate agent (definition and spawn form per your harness,
+   `docs/process/harness-mapping.md` §2; fresh context; stub
    `Read <rendered-prompt-path> and follow it exactly. It names every input
    file and the output paths. Reply only in the format the prompt specifies.`).
 

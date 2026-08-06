@@ -26,8 +26,8 @@ the repo root. Setup: [DEVELOPER.md](DEVELOPER.md).
 | Engineering rules (binding on every change) | [docs/process/engineering-rules-verbatim.md](docs/process/engineering-rules-verbatim.md) — read in full before changing code |
 | Project conventions + coding style | [CLAUDE.md](CLAUDE.md) §Key conventions and §Coding style — apply both; IGNORE its Claude-harness sections (§Context budget heuristics, §M1 workflow pointers into `.claude/`) |
 | Ticket workflow (lifecycle, escalation, review) | [docs/process/workflow.md](docs/process/workflow.md) |
-| Analysis-first ticket flow (NEW, runs alongside m1-tick for A/B measurement) | [docs/process/tick-workflow.md](docs/process/tick-workflow.md) — driven by the opencode-native [`/tick` skill](.agents/skills/tick/SKILL.md); tickets in `docs/plan/m1/tick-tickets/`, analyses in `tick-analysis/`, board `STATUS-TICK.md`, comparison via `scripts/tick-measure.py`. Do NOT drive tick-flow tickets with `/m1-tick` or vice versa |
-| Runnable workflow procedures | `.agents/skills/{m1-tick,redteam,deep-code-review}/SKILL.md` — thin wrappers over the single-sourced procedures in `.claude/skills/`; `/tick` is fully self-contained under `.agents/skills/tick/` (no `.claude` surface) |
+| Analysis-first ticket flow (the flow for NEW work; supersedes m1-tick, which is deprecated but still invocable for its existing board) | [docs/process/tick-workflow.md](docs/process/tick-workflow.md) — driven by the [`/tick` skill](.agents/skills/tick/SKILL.md) — one procedure under `.agents/skills/tick/subcommands/`, behind two routers split by discovery surface: `.agents/skills/tick/SKILL.md` (yours) and `.claude/skills/tick/SKILL.md` (Claude Code); tickets in `docs/plan/m1/tick-tickets/`, analyses in `tick-analysis/`, board `STATUS-TICK.md`, comparison via `scripts/tick-measure.py`. Do NOT drive tick-flow tickets with `/m1-tick` or vice versa |
+| Runnable workflow procedures | `.agents/skills/{m1-tick,redteam,redteam-multi,deep-code-review}/SKILL.md` — thin wrappers over the single-sourced procedures in `.claude/skills/`; `/tick` inverts that direction — its procedure is single-sourced under `.agents/skills/tick/subcommands/`, and `.claude/skills/tick/SKILL.md` is Claude Code's router over it |
 | Harness bindings (how YOUR tool runs the gates) | [docs/process/harness-mapping.md](docs/process/harness-mapping.md) |
 | Ticket format | [docs/process/ticket-template.md](docs/process/ticket-template.md) |
 | Contribution walk-through | [CONTRIBUTING.md](CONTRIBUTING.md) |
@@ -68,7 +68,10 @@ not these stores.
 
 - Never modify `.claude/**` or `CLAUDE.md` — that is Claude Code's config
   surface. Your tool's equivalents live in `.agents/`, `.opencode/`,
-  `.codex/`, and this file.
+  `.codex/`, and this file. One exception: `.claude/skills/tick/SKILL.md` is
+  Claude Code's router over the `/tick` procedure you own, so a change to a
+  ROUTER rule (dispatch table, cross-cutting rules) must be made in both it
+  and `.agents/skills/tick/SKILL.md`. Subcommand edits stay in `.agents/`.
 - The quality gates (code review, red-team) are fresh-context agents by
   design. Run them per
   [docs/process/harness-mapping.md](docs/process/harness-mapping.md) §2–§3 —

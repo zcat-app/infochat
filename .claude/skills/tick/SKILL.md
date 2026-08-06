@@ -1,0 +1,60 @@
+---
+name: tick
+description: Drive the analysis-first ticket flow (successor to /m1-tick). Every ticket carries a reproduction (a failing test) plus a mandatory analyst-gate analysis; implementation executes that plan (divergence on one of four triggers = hurdle report, stop); review is ONE merged gate (spec-truthness + security + test-adequacy + maintainability) with falsification duty; commit/merge as in m1-tick. Use when the user invokes `/tick <subcommand>` (analyze | next | start <id> | hurdle <id> | review <id> | commit <id> | merge <id> | status | measure | show <id> | escalate <id> | abort <id> | reopen <id>). Tickets live in docs/plan/<milestone>/tick-tickets/, analyses in tick-analysis/, board STATUS-TICK.md.
+---
+
+# /tick — analysis-first ticket flow (Claude Code entry point)
+
+The flow spec is [`docs/process/tick-workflow.md`](../../../docs/process/tick-workflow.md) — this skill is the procedure; that document is the rules. If this skill conflicts with it, the spec wins — flag the drift and stop. The ticket schema is [`docs/process/tick-ticket-template.md`](../../../docs/process/tick-ticket-template.md). The engineering rules of record are [`docs/process/engineering-rules-verbatim.md`](../../../docs/process/engineering-rules-verbatim.md) with the tick-flow deltas named in tick-workflow.md §Rules of record.
+
+## Subcommand routing
+
+Each subcommand's full procedure lives under `.agents/skills/tick/subcommands/` — **not** under this directory. That location is shared with the `.agents/` router (`.agents/skills/tick/SKILL.md`), which serves every non-Claude harness, so one procedure serves all of them and cannot drift between them. This file holds only the dispatch table and the cross-cutting rules.
+
+**Dispatch.** When the user invokes `/tick <subcommand> [args]`:
+
+1. Parse the args. Identify the subcommand.
+2. Read `.agents/skills/tick/subcommands/<subcommand>.md` fresh.
+3. Apply that file's procedure verbatim — never from memory or a stale copy.
+
+| User invocation | Procedure file |
+|---|---|
+| `/tick analyze <brief>` | `.agents/skills/tick/subcommands/analyze.md` — mandatory analysis (workflow §0b), run on §0's reproduction: analyst gate turns a brief into an analysis doc + small tickets |
+| `/tick next` | `.agents/skills/tick/subcommands/next.md` — list runnable tick tickets |
+| `/tick start <id>` | `.agents/skills/tick/subcommands/start.md` — begin work; lint pre-flight; no plan-writer (the §0 reproduction is the contract) |
+| `/tick start <id> --parallel` | `.agents/skills/tick/subcommands/start.md` — worktree; needs a different Maven module from every in-flight ticket |
+| `/tick hurdle <id>` | `.agents/skills/tick/subcommands/hurdle.md` — the implementor's stop-and-report: one of the four hurdle triggers |
+| `/tick review <id>` | `.agents/skills/tick/subcommands/review.md` — spawn the merged tick-reviewer gate |
+| `/tick commit <id>` | `.agents/skills/tick/subcommands/commit.md` — finalize the per-ticket commit |
+| `/tick merge <id>` | `.agents/skills/tick/subcommands/merge.md` — squash-merge into main |
+| `/tick status` | `.agents/skills/tick/subcommands/status.md` — regenerate STATUS-TICK.md |
+| `/tick measure` | `.agents/skills/tick/subcommands/status.md` §/tick measure — A/B comparison vs the m1 flow |
+| `/tick show <id>` | `.agents/skills/tick/subcommands/show.md` — read-only inspection |
+| `/tick escalate <id> [reason]` | `.agents/skills/tick/subcommands/escalate.md` — six-way menu for terminal escalations |
+| `/tick abort <id>` | `.agents/skills/tick/subcommands/abort.md` — cancel and roll back |
+| `/tick reopen <id>` | `.agents/skills/tick/subcommands/reopen.md` — deferred → pending |
+
+If the args match no row, print the table and stop.
+
+## Harness binding (Claude Code specifics)
+
+- **Gate agents** are spawned with the `Agent` tool: `subagent_type: "analyst"` for `/tick analyze`, `subagent_type: "tick-reviewer"` for `/tick review`. Definitions live in `.claude/agents/`. Run them in the **foreground** (`run_in_background: false`) — the driver needs the verdict before it can dispatch.
+- **Rendered prompts** are produced by `scripts/m1-render-prompt.py`, exactly as the subcommand files describe. Pass the rendered path to the agent as an absolute path, along with every placeholder path it substitutes.
+- **Blocking menus** (the six-way escalation, any Skip/Run decision) use `AskUserQuestion`. Never pair a menu with same-turn prose — the menu hides it; explain in one turn and ask in the next.
+- **`--parallel`** uses a git worktree. Note that a worktree-isolated session refuses git aimed outside its own tree, so cross-worktree merges must be driven from the main checkout.
+
+## Cross-cutting rules this skill must obey
+
+- **Every ticket carries a reproduction.** A failing test (or a probe with its observed output) naming the wrong behavior, written and run RED before the ticket is filed — workflow §0, enforced by tick-lint's REPRODUCTION-PRESENT BLOCKER. It runs BEFORE `analyze`, so the analyst explains evidence rather than predicting unread code.
+- **The analysis is mandatory.** No ticket without `analysis_ref:` — a real `tick-analysis/` document for a 2+ ticket decomposition, or `self` (the ticket body IS the analysis) for a single-ticket one. `analyze` is the only door into `tick-tickets/`.
+- **Spec is the contract** for a ticket that changes what the system promises. Implementation never bends the spec; a conflict is a hurdle with the spec-amend option, or the analyst's SPEC-GAP at draft time. A defect ticket is grounded by its reproduction and may carry empty `spec_refs`.
+- **Implementation is execution.** `/tick hurdle` fires on one of four triggers only — premise wrong, another Maven module or another in-flight ticket's file, a spec change, or a dropped control of a replaced path. A better route inside the same behavior is execution, not drift. Comment hygiene inside touched classes is in scope (new rationale ≤3 lines per call site); renames go in the commit body's `Renames:` trailer.
+- **One merged gate.** Review = the tick-reviewer agent only. No separate security re-audit loop; findings must survive falsification; critical/high → MANUAL + notify the user; medium/low with named fix → REWORK. On rounds ≥ 2 the gate dispositions every one of the previous round's REWORK items (SATISFIED / NOT-ADDRESSED / DECLINED) rather than reading the fix hunks alone.
+- **Never push.** Merge is local; push is the user's call.
+- **Never skip `mvn verify`** on a testable diff, and never silently reuse a stale log. Capture to `target/tick-test-<ID>-r<round>.log` via `.scratch/` (mvn clean deletes `target/` early — the redirect-through-`.scratch` pattern is load-bearing). Per-round review artifacts live in `.scratch/` only, for the same reason.
+- **Never amend a passed commit.** Defects after APPROVE → new ticket → new commit.
+- **Never edit `STATUS-TICK.md` by hand.** Regenerate from frontmatter.
+- **Never create a ticket file without explicit user confirmation** (repo rule; `analyze` presents the set for approval before anything lands).
+- **No shortcuts** (`--no-verify`, `-DskipTests`, `git reset --hard`). Hurdle or escalate instead.
+- **Gate hygiene.** Gate agents run fresh-context; use absolute paths in the stub and every rendered placeholder; after each gate, run `git status --porcelain` and confirm only the expected artifact changed.
+- **Two entry points, one procedure — split by discovery surface, not by product.** This file is Claude Code's router; `.agents/skills/tick/SKILL.md` is the router for every harness that discovers skills under `.agents/skills/`. Both dispatch into the same `.agents/skills/tick/subcommands/` files, which are the single source of truth. A change to a subcommand needs no counterpart edit; a change to a ROUTER (dispatch table, cross-cutting rules) must be made in both. Which products read which surface, and how each spawns a gate agent, is `docs/process/harness-mapping.md` — the only document that names tools.

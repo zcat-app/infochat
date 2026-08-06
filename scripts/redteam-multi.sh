@@ -362,7 +362,15 @@ for d in denials:
             fi
             ;;
         opencode)
-            REDTEAM_MULTI_DEPTH=1 timeout 900 opencode run --agent threat-actor \
+            # OPENCODE_DISABLE_CLAUDE_CODE_SKILLS closes the same two-tree
+            # collision the kimi slot suppresses with --skills-dir: opencode
+            # scans .claude/skills/ and .agents/skills/ and resolves a name
+            # present in both nondeterministically (§6.1(b)). Measured on the
+            # `tick` name: 2 of 5 unset runs resolved to the .claude/ copy.
+            # An auditor needs no skill at all, so switching that tree off
+            # here costs nothing and does not depend on the caller's env.
+            REDTEAM_MULTI_DEPTH=1 OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1 \
+                timeout 900 opencode run --agent threat-actor \
                 "$stub" > "$reply_file" 2>&1 || rc=$?
             ;;
         codex)

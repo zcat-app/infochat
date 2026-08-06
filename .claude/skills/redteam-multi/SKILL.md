@@ -41,24 +41,23 @@ template and threat model):
 
 ## Auditor availability on this host
 
-The script invokes every auditor by **bare name** and does NOT set the
-opencode Claude-skills kill-switch itself. On this host opencode and kimi are
-both installed but on neither's non-interactive PATH (their `~/.bashrc` lines,
-including the `opencode()` kill-switch function, do not reach the script's
-invocation). Set all of it at the call so the child processes inherit it:
+The script invokes every auditor by **bare name**. On this host opencode and
+kimi are both installed but on neither's non-interactive PATH (the `~/.bashrc`
+PATH lines do not reach the script's invocation), so set it at the call and
+the child processes inherit it:
 
 ```
-OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1 PATH="$HOME/.opencode/bin:$HOME/.kimi-code/bin:$PATH"
+PATH="$HOME/.opencode/bin:$HOME/.kimi-code/bin:$PATH"
 ```
 
 Prefix every `scripts/redteam-multi.sh` call — `preflight` and `run` — with that
-env. Each missing PATH entry silently drops an auditor; without the kill-switch
-opencode could resolve a `.claude/skills/` skill of the same name and run the
-raw Claude procedure with no harness translation (harness-mapping §6.1(b)).
-`~/.local/bin/wopencode` bakes the env var in, but the script execs `opencode`,
-not `wopencode`, so it is not a substitute. kimi needs no such variable — the
-script passes it `--skills-dir` aimed at an empty directory, which suppresses
-skill discovery from both trees outright (harness-mapping §6.3).
+env; each missing entry silently drops an auditor. Neither auditor needs a
+skills kill-switch at the call: the opencode slot sets
+`OPENCODE_DISABLE_CLAUDE_CODE_SKILLS=1` itself, and the kimi slot passes
+`--skills-dir` aimed at an empty directory, each suppressing the two-tree
+collision at its own source (harness-mapping §6.1(b), §6.3). For interactive
+opencode outside this script, `~/.local/bin/wopencode` bakes the same variable
+in.
 
 ## Steps
 

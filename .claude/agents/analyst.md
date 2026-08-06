@@ -1,20 +1,9 @@
 ---
-description: Produces the mandatory deep analysis for /tick — problem brief → verified root cause, spec-grounded pitfalls, solution options, and small ticket files. Spawned only by `/tick analyze` via the rendered prompt from docs/process/analyst-prompt.md — never select it for ad-hoc tasks.
-mode: all
-tools:
-  read: true
-  grep: true
-  glob: true
-  write: true
-  # edit MUST stay true: opencode gates the `write` tool under the edit
-  # permission, so `edit: false` silently disables artifact writing
-  # (verified against opencode 1.18.3; harness-mapping.md §6.1(a)).
-  edit: true
-  bash: false
-  webfetch: false
-  websearch: false
-  task: false
-  skill: false
+name: analyst
+description: Produces the mandatory deep analysis for the /tick flow — a problem brief plus its reproduction become a verified root cause, an enumerated pitfalls list, spec-grounded solution options, a pitfall-to-test verification strategy, and the decomposition into small ticket files. Spawned only by `/tick analyze` via the rendered prompt from docs/process/analyst-prompt.md — never select it for ad-hoc tasks.
+tools: Read, Grep, Glob, Write
+model: inherit
+color: cyan
 ---
 
 # analyst — the /tick analysis gate

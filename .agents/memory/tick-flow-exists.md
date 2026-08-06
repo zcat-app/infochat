@@ -1,23 +1,32 @@
 ---
 name: tick-flow-exists
-description: The analysis-first /tick flow runs alongside /m1-tick for A/B measurement — tickets in docs/plan/m1/tick-tickets/, reproduction gate + mandatory analyst gate at draft time, one merged review gate with bounded re-review, hurdle-report discipline, files_budget abolished. Never drive tick tickets with m1-tick or vice versa.
+description: The analysis-first /tick flow is the flow for NEW work and supersedes /m1-tick (deprecated 2026-08-06, still invocable for its existing board) — tickets in docs/plan/m1/tick-tickets/, reproduction gate + mandatory analyst gate at draft time, one merged review gate with bounded re-review, hurdle-report discipline, files_budget abolished. Never drive tick tickets with m1-tick or vice versa.
 metadata.type: process
 ---
 
-# The /tick flow (analysis-first) runs alongside /m1-tick
+# The /tick flow (analysis-first) supersedes /m1-tick
 
-Created 2026-08-06 as a parallel track, not a rewrite, so the two flows can
-be measured (`scripts/tick-measure.py`; m1 board = baseline). Spec:
-`docs/process/tick-workflow.md`; skill `.agents/skills/tick/` (opencode-native,
-NO `.claude/` surface). Refined 2026-08-06 (c34dadd9, 4e43f835, 4ffd8dea) —
-this entry reflects the post-refinement flow.
+Created 2026-08-06. `/m1-tick` was deprecated the same day — kept and still
+invocable for the tickets already on its board, not run for new work;
+`scripts/tick-measure.py` still compares the two corpora. Spec:
+`docs/process/tick-workflow.md`. One procedure —
+`.agents/skills/tick/subcommands/` — behind two routers split by DISCOVERY
+SURFACE, not by product: `.claude/skills/tick/SKILL.md` (Claude Code) and
+`.agents/skills/tick/SKILL.md` (every harness discovering under
+`.agents/skills/` — opencode, codex, kimi today). Gate agents are defined
+in all three agent dirs with bodies that carry only role + write scope; the
+rules live once, in the rendered prompts. A subcommand edit needs no
+counterpart; a ROUTER edit must be made in both. Product names belong in
+`docs/process/harness-mapping.md` only. Refined
+2026-08-06 (c34dadd9, 4e43f835, 4ffd8dea) — this entry reflects the
+post-refinement flow.
 
 Why it exists: brief-driven tickets pushed analysis to implementation time
 (deferral chains, M1-694's three redteam rounds for a relocated `sanitize`
 call, M1-771/M1-767 at six security re-audit rounds each, and 78 of 133
 refines + 34 budget-breach escalations traced to file-count arithmetic).
 
-Deltas vs m1-tick (the parts that make it measurable):
+Deltas vs m1-tick:
 
 - **Two hard gates at the door, before any code.** (1) §0 reproduction: a
   failing test (or probe with observed output) naming the wrong behavior,

@@ -1,19 +1,13 @@
 # /tick — analysis-first ticket workflow (successor to /m1-tick)
 
-This document specifies the **analysis-first** ticket flow, built alongside
-`/m1-tick` rather than replacing it, so the two flows can be measured against
-each other (see §Measurement). It is the single source of truth for the `/tick`
-skill. `/m1-tick` and its docs are untouched by this flow by design.
+This document specifies the **analysis-first** ticket flow and is the single
+source of truth for the `/tick` skill. It supersedes `/m1-tick` for new work.
+`/m1-tick` is deprecated and stays invocable for the tickets already on its
+board; its docs are untouched by this flow by design.
 
-**Why it exists.** The M1 corpus shows the failure mode of brief-driven
-tickets: analysis happens at implementation time, deferral chains grow (7+
-tickets deep), the security gate re-audits remediated diffs round after round
-(M1-771: 6 rounds, M1-767: 6), and scope bookkeeping produces more refines
-than substantive findings (78 of 133 refines + 34 budget-breach escalations
-traced to file-count arithmetic). The `/tick` flow inverts the cost curve:
-**the analysis happens at draft time, when it is free; implementation is
-execution of that analysis; review is one merged gate with an adversarial
-lens, and findings must survive falsification before they are reported.**
+**Shape.** The analysis happens at draft time, when it is free; implementation
+is execution of that analysis; review is one merged gate with an adversarial
+lens, and findings must survive falsification before they are reported.
 
 ## Principles
 
@@ -73,8 +67,8 @@ lens, and findings must survive falsification before they are reported.**
 | Reviewer gate prompt | [`tick-reviewer-prompt.md`](tick-reviewer-prompt.md) |
 | Consistency script | `scripts/tick-lint.py` |
 | Measurement script | `scripts/tick-measure.py` |
-| Skill | `.agents/skills/tick/` (router + subcommands) |
-| Gate agents | `analyst`, `tick-reviewer` (defs in `.opencode/agent/`, `.agents/agents/`) |
+| Skill | `.agents/skills/tick/subcommands/` (the procedure); routers `.claude/skills/tick/SKILL.md` (Claude Code) and `.agents/skills/tick/SKILL.md` (every harness discovering under `.agents/skills/`) |
+| Gate agents | `analyst`, `tick-reviewer` (defs in `.opencode/agent/`, `.agents/agents/`, `.claude/agents/`) |
 
 The active milestone for v1 is M1; ticket IDs continue the shared `M<N>-NNN`
 sequence (next free ID, scanning both `tickets/` and `tick-tickets/`).
@@ -159,8 +153,8 @@ ticket file is never created without explicit user confirmation). If the
 analyst cannot ground the solution in the spec, it must surface a
 **SPEC-GAP** block (what the spec says, what the problem demands) — the
 user then decides between spec-amend (new `spec:` amendment, then analysis)
-and abandoning the problem. This replaces the old flow's
-outline-fail-at-start: analysis failures happen at draft time or not at all.
+and abandoning the problem. Analysis failures happen at draft time or not at
+all.
 
 ### 1. Consistency — `scripts/tick-lint.py`
 
@@ -241,11 +235,11 @@ ticket for `--parallel`. `migration_touch: true` still serializes.
   `Renames:` trailer. Renames of identifiers NOT already in the diff are
   out of scope (suggest, don't move).
 - `mvn verify` from the repo root, full suite, captured to
-  `target/tick-test-<ID>-r<round>.log` (redirect through `.scratch/` — the
-  mvn clean hazard from the M1 flow applies identically).
-- Immediate escalations mirror the M1 triggers (premise-fail, loop
-  indicator, scope-path violation) — except they surface as hurdle reports
-  rather than menu items.
+  `target/tick-test-<ID>-r<round>.log` — written to `.scratch/` first and
+  copied to `target/` after the build, because `mvn clean` deletes the
+  repo-root `target/` early in the run.
+- Premise-fail, loop indicator and scope-path violation surface as hurdle
+  reports, never as menu items.
 
 ### 4. Review — `/tick review <id>` (one merged gate)
 
@@ -303,7 +297,6 @@ ticket for `--parallel`. `migration_touch: true` still serializes.
 
 ### 5. Commit & merge — `/tick commit <id>`, `/tick merge <id>`
 
-Identical mechanics to the M1 flow (cherry-picked as-is):
 - One commit per branch; subject `M<N>-NNN: <imperative summary>`; body =
   Context + `Alternatives considered:` + `Renames:` trailers +
   `Reviewed-by:` (reviewer verdict line, round, agent run id).
@@ -354,8 +347,7 @@ redteam evidence directory and prints a comparison table:
 - escalations per ticket (`git log --grep "<id>:"`-derived refine/esc
   commits + frontmatter `escalation_reason`)
 - security audits per ticket (files under `docs/plan/m1/redteam/`
-  matching the id) — the A/B question is whether merged-gate tickets
-  still need standalone audits
+  matching the id)
 - per-ticket diff size (files touched, lines) from `reviews[].diff_stats`
 
 Run it before drawing any conclusion about the flows; the M1 board is the
@@ -363,11 +355,20 @@ baseline.
 
 ## Harness bindings
 
-The `/tick` skill lives under `.agents/skills/tick/` — this flow is
-opencode-native and does not depend on Claude Code's surface. Gate agents
-(`analyst`, `tick-reviewer`) are defined in `.opencode/agent/` with thin
-pointers in `.agents/agents/`; the persona lives in the rendered prompt
-(analyst-prompt.md / tick-reviewer-prompt.md) exactly as the M1 gates do.
+The flow has one procedure and two entry points, split by **discovery
+surface, not by product**. Every subcommand lives under
+`.agents/skills/tick/subcommands/` and is the single source of truth; the
+routers — `.claude/skills/tick/SKILL.md` for Claude Code,
+`.agents/skills/tick/SKILL.md` for every harness that discovers skills
+under `.agents/skills/` — hold only the dispatch table and the
+cross-cutting rules, and a change to either router must be made in both. A
+new harness therefore needs no edit here: it reads one of the two surfaces,
+and which products those are is `harness-mapping.md`, the only document
+that names tools. Gate agents (`analyst`, `tick-reviewer`) are defined in
+`.opencode/agent/`, `.agents/agents/` and `.claude/agents/`; the persona
+lives in the rendered prompt (analyst-prompt.md / tick-reviewer-prompt.md)
+exactly as the M1 gates do, so the per-harness definitions carry only the
+role and the tool grant.
 Harness primitives (fresh-context spawn, verdict-file readback, blocking
 menu, worktree parallelism, contamination check) bind per
 `docs/process/harness-mapping.md` §2–§6, with the same absolute-path rule

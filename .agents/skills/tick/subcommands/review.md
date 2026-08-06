@@ -2,8 +2,9 @@
 
 Spawn the merged tick-reviewer gate. Invocation: `/tick review <id>`.
 
-The gate agent is defined in `.opencode/agent/tick-reviewer.md`; the
-rendered prompt template is `docs/process/tick-reviewer-prompt.md`. The
+The gate agent is `tick-reviewer` (definition and spawn form per your
+harness, `docs/process/harness-mapping.md` §2); the rendered prompt
+template is `docs/process/tick-reviewer-prompt.md`. The
 gate is the ONLY review in the tick flow — there is no separate security
 re-audit loop and no code-reviewer.
 
