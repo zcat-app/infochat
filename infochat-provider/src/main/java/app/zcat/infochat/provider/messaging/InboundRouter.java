@@ -128,12 +128,16 @@ import java.util.function.Consumer;
  *       BEFORE the membership write (4.1), the probation lazy-clear
  *       (5), the confirm drain (4.5), and the anchor clear (4.6) —
  *       {@code commands.md} §Input length caps forbids any DB write
- *       for an oversized chat-mode message;</li>
+ *       for an oversized chat-mode message. Like the single-line rule
+ *       it drains any pending confirm for {@code (actor.id, scope)}
+ *       before the rejection reply (M1-774) — an in-memory removal,
+ *       not a DB write;</li>
  *   <li>command body cap: a slash body longer than
  *       {@code infochat.command.body-cap} gets the fixed
  *       {@code error.command.body_too_large} reply and stops at the
  *       same position as the chat-mode cap — before the parser
- *       ({@code handleSlash}) and any DB write;</li>
+ *       ({@code handleSlash}) and any DB write. Drains any pending
+ *       confirm first, like the chat-mode cap (M1-774);</li>
  *   <li>single-line rule (M1-772): a slash body carrying any line
  *       boundary gets the fixed {@code error.command.multiline} reply
  *       and stops at the same position as the two caps — see
@@ -150,7 +154,11 @@ import java.util.function.Consumer;
  *       {@code probation_until}) is true AND the command is NOT in
  *       {@link CommandPermissions}'s allowed-during-probation set, the
  *       router emits {@code error.probation.blocked} with the time-
- *       until-unlock interpolated from the snapshot value; otherwise
+ *       until-unlock interpolated from the snapshot value — draining
+ *       any pending confirm for {@code (actor.id, scope)} first, since
+ *       a probation user can hold one ({@code /forget} is both
+ *       confirm-arming and probation-allowed) and this block returns
+ *       ahead of the step-4.5 sweep (M1-774); otherwise
  *       {@link ProbationCheck#clearIfPromoted} runs as the lazy
  *       graduation clear, but only when {@code probation_until} is
  *       non-null and already past (the NULL steady state issues no
@@ -720,6 +728,16 @@ public class InboundRouter {
             // reply, and the per-group reply rate bucket keep their spec'd
             // precedence over the cap reply.
             if (!normalized.startsWith("/") && normalized.length() > chatBodyCap) {
+                // M1-774: this cap returns ahead of the step-4.5 sweep,
+                // so it drains any pending confirm itself — an admin who
+                // armed a destructive confirm and then sends an over-cap
+                // body gets the cancellation BEFORE this rejection, not
+                // a silent TTL-long survival. Same unconditional shape as
+                // the M1-772 single-line drain (inline at the multiline
+                // branch); this site calls the shared helper below. The
+                // drain is an in-memory removal, so it does not violate
+                // §Input length caps' no-DB-write constraint.
+                drainPendingConfirm(snapshot.get().id(), msg.scope(), adapterName);
                 sendReply(msg.scope(),
                         bundleLoader.get(BundleKeys.ERROR_CHAT_BODY_TOO_LARGE, inboundContext.effectiveLanguage()),
                         adapterName);
@@ -732,6 +750,10 @@ public class InboundRouter {
             // parser (handleSlash) — same ordering rationale as the chat cap
             // above (after the authorization gates, before any DB write).
             if (normalized.startsWith("/") && normalized.length() > commandBodyCap) {
+                // M1-774: same drain as the chat-mode cap above — the
+                // pending confirm is cancelled and acknowledged before
+                // this rejection reply.
+                drainPendingConfirm(snapshot.get().id(), msg.scope(), adapterName);
                 sendReply(msg.scope(),
                         bundleLoader.get(BundleKeys.ERROR_COMMAND_BODY_TOO_LARGE, inboundContext.effectiveLanguage()),
                         adapterName);
@@ -846,6 +868,17 @@ public class InboundRouter {
             String commandName = commandNameOf(normalized);
             if (probationActor.inProbation(probationNow)) {
                 if (!commandPermissions.allowedDuringProbation(commandName)) {
+                    // M1-774: this block returns ahead of the step-4.5 sweep
+                    // and a probation user CAN be holding a pending confirm —
+                    // /forget is both confirm-arming and probation-allowed,
+                    // so the arm succeeds and any later blocked input (a
+                    // chat-mode body is blocked, commandNameOf yields
+                    // "chat-mode") short-circuits here. Drain it, same
+                    // unconditional shape as the two body caps: the blocked
+                    // body dispatches nothing, so it can never redeem the
+                    // armed payload, and this path already replies, so the
+                    // acknowledgement costs no new outbound permission.
+                    drainPendingConfirm(probationActor.id(), msg.scope(), adapterName);
                     // {0} = time until unlock; {1} = the canonical probation
                     // command list (same source /help renders), so the
                     // rejection can no longer omit an allowed command (M1-590).
@@ -867,6 +900,60 @@ public class InboundRouter {
                 probationCheck.clearIfPromoted(probationActor.id());
             }
 
+            // Early returns ahead of this sweep and the confirm drain
+            // (M1-774 enumeration — the one place the per-path decision
+            // is written down). The rule the per-path answers follow: a
+            // rejection drains iff it has resolved an actor id AND is
+            // free to emit the acknowledgement. Every exception below is
+            // one of those two capabilities missing — deliberately NOT
+            // the argument that a surviving entry can never be redeemed,
+            // which this code cannot assert: ban, group approval and
+            // probation are all states that can change inside the 60s
+            // TTL, so "no later input can redeem it" is false in general.
+            //
+            // 1. Step 1.5 rate-cap drop — no drain: fires before the
+            //    users-row read and must stay query-free AND outbound-
+            //    free (M1-044e: a hostile flood must not drive replies;
+            //    a cancellation would be amplification). A pending
+            //    entry survives here only until its TTL.
+            // 2. Transport byte cap (M1-038) — no drain: same pre-lookup
+            //    hostile-flood path, one fixed reply only.
+            // 3. Normalize-empty — no drain: pre-lookup silent return;
+            //    no actor id exists without a read.
+            // 4. Step 2 DM invite gate — vacuous: no users row means no
+            //    actor id, and confirms are keyed by users.id, so no
+            //    entry can exist.
+            // 5. Step 3 group unregistered/preban drop — vacuous:
+            //    unregistered has no users row, and a 'preban' row is
+            //    minted by banning a contact that never registered, so
+            //    it never held a users.id under which to arm one.
+            // 6. Step 4 ban reply — no drain: a ban landing mid-TTL does
+            //    leave an entry, but spec §User ban gives a banned user
+            //    ONE fixed reply per inbound message, so a cancellation
+            //    ack here is an outbound this path may not spend. The
+            //    entry expires by TTL (or is redeemable again if the
+            //    unban lands inside it — the drain is not what bounds
+            //    that; the TTL is).
+            // 7. Step 3.5 approval short-circuit — no drain: an entry
+            //    armed while the group was approved can survive a mid-
+            //    TTL status regression, bucket exhaustion, or removal.
+            //    SilentDrop must emit no outbound by contract, and the
+            //    pending/rejected FixedReply is the single reply D47
+            //    invisibility allows — a second one would disclose that
+            //    this member holds a pending confirm to a group the bot
+            //    has not accepted.
+            // 8. Chat body cap — DRAINS (this ticket); see its branch.
+            // 9. Command body cap — DRAINS (this ticket); see its branch.
+            // 10. Step 5 probation block — DRAINS (this ticket); see its
+            //    branch. Not vacuous and not inert: /forget is BOTH
+            //    confirm-arming and probation-allowed, so a probation
+            //    user can hold an entry, any blocked input (including
+            //    every chat-mode body) returns here ahead of this sweep,
+            //    and a later `/forget confirm` is itself allowed — so
+            //    the entry really is redeemable across the gap.
+            // The M1-772 single-line rejection is the reference drain
+            // (inline at the multiline branch, byte-for-byte preserved).
+            //
             // Step 4.5 — confirm-cancel sweep (M1-051). Per spec
             // §Surface conventions ("any other input cancels"): a pending
             // confirm under (actor.id, scope) that does NOT match the
@@ -1603,6 +1690,30 @@ public class InboundRouter {
             return true;
         }
         return normalized.startsWith(prefix + " ") && normalized.endsWith(" confirm");
+    }
+
+    /**
+     * Drain any pending confirmation for {@code (actorId, scope)} and
+     * emit the cancellation acknowledgement, if one exists. The
+     * unconditional shape — no {@link #isConfirmShape} consultation —
+     * mirrors the M1-772 single-line drain: a body that is about to be
+     * rejected dispatches nothing, so it can never redeem the armed
+     * payload; it is the "any other input" that spec §Surface
+     * conventions says closes the armed window, even when the body
+     * superficially matches a confirm shape on one line. {@code takeAny}
+     * is an in-memory map removal, which is why the drain may precede
+     * the parser on paths that must not touch the DB (M1-774: the two
+     * body caps). The step-4.6 anchor clear is a DB write and is
+     * deliberately NOT hoisted with it.
+     */
+    private void drainPendingConfirm(UUID actorId, ScopeRef scope, String adapterName) {
+        confirmStateService.takeAny(actorId, scope).ifPresent(cancelled ->
+                sendReply(scope,
+                        MessageFormat.format(
+                                bundleLoader.get(BundleKeys.REPLY_CONFIRM_CANCELLED,
+                                        inboundContext.effectiveLanguage()),
+                                cancelled.commandName()),
+                        adapterName));
     }
 
     private @Nullable String handleSlash(ScopeRef scope, String normalized) {

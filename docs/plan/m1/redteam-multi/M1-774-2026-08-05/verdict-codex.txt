@@ -1,0 +1,9 @@
+RED-TEAM VERDICT: FINDINGS
+
+FINDINGS:
+  - CATEGORY: DOS
+    SEVERITY: medium
+    PROMISE: "Per-group reply rate cap. Before sending any reply (fixed or command), check the per-group reply rate bucket. If the bucket is exhausted, silently drop" and the bucket "bounds total outbound replies" for all group states.
+    GAP: infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/InboundRouter.java:724-733 and :746-755 call drainPendingConfirm after the authorization/approval gate has admitted the inbound, then each sends the cap rejection. drainPendingConfirm at :1661-1679 can itself send a cancellation reply, so one group inbound admitted by the per-group reply bucket can produce two outbound replies with no second rate-cap check.
+    REPRO: An attacker who can arm a pending confirmation in an approved group sends an over-cap chat body or slash body. The router emits "Pending `…` cancelled." and then the body-too-large error. Repeating the arm-and-over-cap sequence consumes one group reply-cap admission per inbound while causing two adapter sends, defeating the cap's stated total-outbound-reply bound.
+    SUGGESTED-FIX-CLASS: rate-limit

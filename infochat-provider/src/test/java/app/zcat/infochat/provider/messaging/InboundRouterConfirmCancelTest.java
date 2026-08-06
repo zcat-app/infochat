@@ -9,11 +9,16 @@ import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.command.AssetCommandFamilyOracle;
 import app.zcat.infochat.provider.command.BanConfirm;
+import app.zcat.infochat.provider.command.CommandPermissions;
 import app.zcat.infochat.provider.command.ConfirmStateService;
+import app.zcat.infochat.provider.command.ForgetConfirm;
 import app.zcat.infochat.provider.command.asset.AssetRegistry;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -51,6 +56,14 @@ class InboundRouterConfirmCancelTest {
     private static final String ADAPTER = "inmemory";
     private static final String DM_CONTACT = "alice-dm-contact-id";
     private static final UUID ACTOR_ID = UUID.fromString("11111111-2222-3333-4444-555555555555");
+    /**
+     * Absolute instants, not {@code now()}-relative offsets: the
+     * probation gate's decision is pinned to {@link #FIXED_NOW} via an
+     * injected {@code Clock.fixed}, so these fixtures cannot rot into a
+     * date-boundary flake.
+     */
+    private static final Instant FIXED_NOW = Instant.parse("2026-08-06T12:00:00Z");
+    private static final Instant PROBATION_UNTIL = Instant.parse("2026-08-06T13:00:00Z");
 
     @Test
     void nonMatchingInputCancelsPendingAndSendsAcknowledgement() {
@@ -182,6 +195,133 @@ class InboundRouterConfirmCancelTest {
                 "outbound must be the multiline rejection, not a cancellation");
     }
 
+    @Test
+    void overCapChatBodyCancelsPendingConfirm() {
+        // M1-774: the chat-mode body cap returns ahead of the step-4.5
+        // sweep, so it drains the pending confirm itself — an admin who
+        // armed a destructive confirm and then sends an over-cap chat
+        // body gets the cancellation BEFORE the too-large reply, and
+        // the entry is not left redeemable for the rest of its TTL.
+        FakeConfirmStateService confirmState = new FakeConfirmStateService(
+                Optional.of(new BanConfirm("target-4", null, "intent-req")));
+        CapturingAdapter capture = new CapturingAdapter();
+        InboundRouter router = newRouter(confirmState, capture);
+        router.chatBodyCap = 8;
+
+        router.onMessage(dmInbound(DM_CONTACT, "a chat body far beyond the cap"), ADAPTER);
+
+        assertEquals(2, capture.captured.size(),
+                "expected one cancellation + one body-too-large reply; got: " + capture.captured);
+        assertEquals("Pending `ban` cancelled.", capture.captured.get(0).text(),
+                "first outbound must be the cancellation acknowledgement BEFORE the rejection");
+        assertEquals("bundle:" + BundleKeys.ERROR_CHAT_BODY_TOO_LARGE, capture.captured.get(1).text(),
+                "second outbound must be the chat body-cap rejection");
+        assertTrue(confirmState.calls.contains("takeAny"),
+                "the body-cap rejection must drain the pending confirm, not leave it armed");
+    }
+
+    @Test
+    void overCapCommandBodyCancelsPendingConfirmBeforeTheRejection() {
+        // M1-774: same drain on the slash-command body cap. The
+        // over-cap body dispatches nothing, so it can never redeem the
+        // armed payload; the cancellation fires first, the rejection
+        // second, and no handler sees the body.
+        FakeConfirmStateService confirmState = new FakeConfirmStateService(
+                Optional.of(new BanConfirm("target-5", null, "intent-req")));
+        CapturingAdapter capture = new CapturingAdapter();
+        CountingCommandHandler banHandler = new CountingCommandHandler("ban", "ban-dispatched");
+        InboundRouter router = newRouter(confirmState, capture);
+        router.commandHandlers = new SingletonInstance<>(banHandler);
+        router.commandBodyCap = 12;
+
+        router.onMessage(dmInbound(DM_CONTACT, "/ban target-5 padded-payload"), ADAPTER);
+
+        assertEquals(0, banHandler.dispatchCount,
+                "an over-cap command body must reach NO handler");
+        assertEquals(2, capture.captured.size(),
+                "expected one cancellation + one command body-cap reply; got: " + capture.captured);
+        assertEquals("Pending `ban` cancelled.", capture.captured.get(0).text(),
+                "first outbound must be the cancellation acknowledgement BEFORE the rejection");
+        assertEquals("bundle:" + BundleKeys.ERROR_COMMAND_BODY_TOO_LARGE, capture.captured.get(1).text(),
+                "second outbound must be the command body-cap rejection");
+        assertTrue(confirmState.calls.contains("takeAny"),
+                "the command body-cap rejection must drain the pending confirm");
+    }
+
+    @Test
+    void overCapBodyWithNoPendingConfirmRepliesOnlyOnce() {
+        // The drain is unconditional (takeAny on an empty map is a
+        // no-op), so in the common case — no pending entry — the
+        // body-cap rejection stays a single reply: no cancellation
+        // outbound, only the too-large error.
+        FakeConfirmStateService confirmState = new FakeConfirmStateService(Optional.empty());
+        CapturingAdapter capture = new CapturingAdapter();
+        InboundRouter router = newRouter(confirmState, capture);
+        router.chatBodyCap = 8;
+
+        router.onMessage(dmInbound(DM_CONTACT, "a chat body far beyond the cap"), ADAPTER);
+
+        assertEquals(1, capture.captured.size(),
+                "expected exactly one outbound (the body-cap rejection); got: " + capture.captured);
+        assertEquals("bundle:" + BundleKeys.ERROR_CHAT_BODY_TOO_LARGE, capture.captured.get(0).text(),
+                "outbound must be the body-cap rejection, not a cancellation");
+    }
+
+    @Test
+    void probationBlockedCommandCancelsPendingConfirm() {
+        // M1-774: the step-5 probation block returns ahead of the
+        // step-4.5 sweep, and it is NOT a vacuous path — /forget is
+        // both confirm-arming and probation-allowed, so a probation
+        // user really can be holding an entry when a blocked input
+        // arrives. Without this drain the entry survives the blocked
+        // input with no acknowledgement and a later `/forget confirm`
+        // (itself probation-allowed) still redeems it.
+        FakeConfirmStateService confirmState = new FakeConfirmStateService(
+                Optional.of(new ForgetConfirm()));
+        CapturingAdapter capture = new CapturingAdapter();
+        CountingCommandHandler blockedHandler =
+                new CountingCommandHandler("add-source", "add-source-dispatched");
+        InboundRouter router = newRouter(confirmState, capture, PROBATION_UNTIL, false);
+        router.commandHandlers = new SingletonInstance<>(blockedHandler);
+
+        router.onMessage(dmInbound(DM_CONTACT, "/add-source https://example.org/feed.xml"), ADAPTER);
+
+        assertEquals(0, blockedHandler.dispatchCount,
+                "a probation-blocked command must reach NO handler");
+        assertEquals(2, capture.captured.size(),
+                "expected one cancellation + one probation-blocked reply; got: " + capture.captured);
+        assertEquals("Pending `forget` cancelled.", capture.captured.get(0).text(),
+                "first outbound must be the cancellation acknowledgement BEFORE the rejection");
+        assertEquals("bundle:" + BundleKeys.ERROR_PROBATION_BLOCKED, capture.captured.get(1).text(),
+                "second outbound must be the probation-blocked rejection");
+        assertTrue(confirmState.calls.contains("takeAny"),
+                "the probation block must drain the pending confirm, not leave it armed");
+    }
+
+    @Test
+    void probationAllowedCommandLeavesTheSweepToCancel() {
+        // The complement: a probation user invoking an ALLOWED command
+        // falls through step 5 to the step-4.5 sweep, which cancels
+        // exactly once. Pins that the new drain did not double-cancel
+        // the fall-through path.
+        FakeConfirmStateService confirmState = new FakeConfirmStateService(
+                Optional.of(new ForgetConfirm()));
+        CapturingAdapter capture = new CapturingAdapter();
+        InboundRouter router = newRouter(confirmState, capture, PROBATION_UNTIL, true);
+
+        router.onMessage(dmInbound(DM_CONTACT, "/help"), ADAPTER);
+
+        // Same two outbounds the non-probation sweep scenario produces:
+        // cancellation, then the /help dispatch (unknown-command reply,
+        // no /help handler wired). One cancellation, not two.
+        assertEquals(2, capture.captured.size(),
+                "expected one cancellation + one dispatch outbound; got: " + capture.captured);
+        assertEquals("Pending `forget` cancelled.", capture.captured.get(0).text(),
+                "the sweep, not the probation block, owns this cancellation");
+        assertEquals("bundle:" + BundleKeys.ERROR_UNKNOWN_COMMAND, capture.captured.get(1).text(),
+                "second outbound must be the /help dispatch, not a duplicate cancellation");
+    }
+
     // ----- router wiring + fakes -------------------------------------------
 
     /**
@@ -192,10 +332,25 @@ class InboundRouterConfirmCancelTest {
      * the sweep at step 4.5 IS the focus of these scenarios.
      */
     private InboundRouter newRouter(FakeConfirmStateService confirmState, CapturingAdapter target) {
+        return newRouter(confirmState, target, null, true);
+    }
+
+    /**
+     * Overload carrying the step-5 probation levers: {@code
+     * probationUntil} seeds the snapshot the gate reads, and {@code
+     * allowedDuringProbation} picks the permissions stand-in. The
+     * two-arg form above pins the pre-M1-774 shape (no probation, every
+     * command allowed) so the existing sweep scenarios are unchanged.
+     */
+    private InboundRouter newRouter(
+            FakeConfirmStateService confirmState,
+            CapturingAdapter target,
+            @Nullable Instant probationUntil,
+            boolean allowedDuringProbation) {
         InboundRouter router = new InboundRouter() {
             @Override
             Optional<UserSnapshot> lookupUser(DispatchDb db, String adapter, String contactId) {
-                return Optional.of(new UserSnapshot(ACTOR_ID, "vouched", false, null));
+                return Optional.of(new UserSnapshot(ACTOR_ID, "vouched", false, probationUntil));
             }
 
             @Override
@@ -216,8 +371,14 @@ class InboundRouterConfirmCancelTest {
         // top-level classes in this package — see NoopProbationCheck
         // + NoopCommandPermissions class-level javadoc for the
         // log-silent rationale.
-        router.commandPermissions = new NoopCommandPermissions();
+        router.commandPermissions = allowedDuringProbation
+                ? new NoopCommandPermissions()
+                : new BlockingCommandPermissions();
         router.probationCheck = new NoopProbationCheck();
+        // The step-5 gate compares probationUntil against the injected
+        // Clock; pinning it keeps the blocked-path fixture off the wall
+        // clock (engineering rules §Injectable time in decision logic).
+        router.clock = Clock.fixed(FIXED_NOW, ZoneOffset.UTC);
         router.summaryAnchorRepository = new SummaryAnchorRepository() {
             @Override public void clear(UUID userId, String scopeKind, UUID scopeId) {}
         };
@@ -280,6 +441,24 @@ class InboundRouterConfirmCancelTest {
         @Override
         public void remember(UUID actor, ScopeRef scope, ConfirmStateService.PendingConfirm pending) {
             calls.add("remember");
+        }
+    }
+
+    /**
+     * Permissions stand-in that blocks every command during probation —
+     * the complement of {@link NoopCommandPermissions}, which allows
+     * every command. Only the gate predicate is overridden; the blocked
+     * reply's command listing still renders from the real
+     * {@code CommandPermissions} implementation.
+     */
+    private static final class BlockingCommandPermissions extends CommandPermissions {
+        BlockingCommandPermissions() {
+            super(new AssetCommandFamilyOracle(new AssetRegistry()));
+        }
+
+        @Override
+        public boolean allowedDuringProbation(String slashCommand) {
+            return false;
         }
     }
 

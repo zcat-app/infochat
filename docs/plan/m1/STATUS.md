@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 785 |
+| done | 786 |
 | deferred | 0 |
 | abandoned | 23 |
 | **total** | **810** |
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-774 — Intake rejections skip the confirm drain and the anchor clear (complexity: medium, risk: low)
+- M1-775 — Confirm redemption ignores retyped arguments, and pending state is never swept (complexity: high, risk: medium)
 
 ---
 
@@ -42,7 +42,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-775 — blocked_by: M1-774 (pending)
+_(none)_
 
 ---
 
@@ -61,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-774 | Intake rejections skip the confirm drain and the anchor clear | 2026-08-06 | round 1 APPROVE |
 | M1-772 | Slash-command arguments end at the first line | 2026-08-06 | round 1 APPROVE |
 | M1-771 | Echo check on the ingest anchor write | 2026-08-06 | round 1 APPROVE |
 | M1-773 | Parity-gate trigger misses a rename or delete | 2026-08-05 | round 1 APPROVE |
@@ -70,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-766 | Anchor-first degraded renderers | 2026-08-05 | round 2 APPROVE |
 | M1-765 | Anchor snapshot for saved posts | 2026-08-05 | round 1 APPROVE |
 | M1-760 | Re-drive posts whose ingest translation exhausted its attempts | 2026-08-05 | round 2 APPROVE |
-| M1-759 | Anchor-first headline display: reader-language line, bracketed original beneath | 2026-08-05 | round 1 APPROVE |
 
 ---
 
@@ -1021,6 +1021,6 @@ M1-770 (done)
 M1-771 (done)
 M1-772 (done)
 M1-773 (done)
-M1-774 (pending) ← runnable
-  └── M1-775 (pending)
+M1-774 (done)
+  └── M1-775 (pending) ← runnable
 ```

@@ -1,7 +1,7 @@
 ---
 id: M1-774
 title: "Intake rejections skip the confirm drain and the anchor clear"
-status: pending
+status: done
 created: 2026-08-06
 last_updated: 2026-08-06
 blocked_by: []
@@ -96,13 +96,224 @@ spec_refs:
   - docs/spec/commands.md §Conversation control
   - docs/spec/security.md §Authorization model
 decision_refs: []
-reviews: {}
+reviews:
+  - round: 1
+    date: 2026-08-06
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 15
+      added: 821
+      removed: 15
 overrides: []
 aborted_attempts: []
 reopens: []
-redteam_findings: []
-redteam_audits: []
+redteam_findings:
+  - date: 2026-08-06
+    category: DOS
+    severity: low
+    reported_by: [codex, opencode]
+    promise: |
+      docs/spec/security.md §Rate limiting: "Per-group reply rate (D47)
+      — a single bucket per `groups` row bounding total outbound
+      replies (fixed or command) within a sliding window", and step 3.5
+      "Before sending any reply (fixed or command), check the per-group
+      reply rate bucket."
+    gap: |
+      The bucket is drawn exactly once per admitted inbound, inside
+      GroupApprovalCheck.check (GroupApprovalCheck.java:128); sendReply
+      never consults it. Each drained rejection therefore emits two
+      bodies — the cancellation acknowledgement and the rejection —
+      against one token, on all three paths this ticket touches.
+    repro: |
+      In an approved group, arm a confirm (not admin-gated — /forget
+      and /save are available to any registered user), then send an
+      over-cap body or a probation-blocked command. One bucket draw,
+      two adapter sends.
+    suggested_fix_class: rate-limit
+    disposition: |
+      ACCEPTED AS STATED RESIDUAL (user decision, 2026-08-06). Real,
+      but not introduced or widened here: the same one-token/two-send
+      shape already exists on the M1-051 step-4.5 sweep and the M1-772
+      multiline rejection, and arming a confirm costs its own token and
+      its own reply, so the sustained ratio is unchanged. The genuine
+      divergence is that security.md describes a per-REPLY check the
+      implementation has never had (it is per-inbound); correcting that
+      sentence is a security.md amendment this ticket does not own.
+      claude examined the same question independently and returned
+      CLEAN on it (verdict-claude.txt check 6).
+  - date: 2026-08-06
+    category: DOS
+    severity: low
+    reported_by: [opencode]
+    promise: |
+      The §/retry amendment this ticket itself added to
+      docs/spec/commands.md: the listed intake rejections "return
+      before the clear and leave the anchor intact — the clear is a DB
+      write, and the pre-parser rejections commit to no DB writes for
+      the bodies they drop."
+    gap: |
+      The blanket write-free clause is false. Step 4.1 runs
+      groupAutoPromoteService.tryAutoPromote + ensureGroupMembership
+      (InboundRouter.java:835-836) BEFORE the step-5 probation gate, so
+      a group inbound reaching the probation block has already written.
+      Verified in-branch to be broader than reported: the DM invite
+      gate INSERTs an invite_code_attempt row on every attempt
+      (InviteCodeConsumer.java:118) and the group-approval gate may
+      INSERT the pending groups row. Three of the ten listed paths, not
+      one. The list itself is correct — all ten do leave the anchor
+      intact; only the shared rationale was wrong.
+    repro: |
+      A probation user @mentions an approved group with a
+      probation-blocked command: membership is upserted at step 4.1,
+      then step 5 blocks and returns ahead of the step-4.6 clear. The
+      spec sentence added by this diff tells the reader that path
+      commits no DB write.
+    suggested_fix_class: other
+    disposition: |
+      FIXED IN SCOPE (user decision, 2026-08-06). The §/retry rationale
+      is now per-path rather than blanket: the body-length caps and the
+      single-line rule are write-free because §Input length caps
+      forbids a DB write for a body that never reached the parser; the
+      remaining paths stop at their own gate, and the three that have
+      already written are named. Same overstatement class as the
+      §Surface conventions sentence corrected earlier in this ticket —
+      an accurate exception list carrying an inaccurate shared reason.
+  - date: 2026-08-06
+    category: AUTH-BYPASS
+    severity: low
+    reported_by: [opencode]
+    promise: |
+      commands.md §Surface conventions: a pending confirmation "is
+      scoped to (user, scope) and any other input cancels it" — the
+      property that stops a pending destructive confirm being redeemed
+      by input the arming admin did not intend.
+    gap: |
+      As reported: the M1-038 transport byte cap (InboundRouter:538)
+      fires before the users-row read and does not drain, so a >64KiB
+      body leaves the entry redeemable with stale args.
+    repro: |
+      As reported: arm /ban A, paste a >64KiB body, then send
+      /ban B confirm — A is banned.
+    suggested_fix_class: trust-boundary-tightening
+    disposition: |
+      NOT A FINDING AGAINST THIS DIFF (user decision, 2026-08-06).
+      Falsified in-branch: the oversized body is not load-bearing.
+      isConfirmShape (InboundRouter.java:1686-1693) matches on prefix
+      and suffix only, so `/ban A` followed directly by
+      `/ban B confirm` bans A with no oversized body anywhere in the
+      sequence — delete step 2 of the repro and the outcome is
+      identical. A byte-capped message also leaves state identical to
+      no message at all, so it grants nothing. What survives is the
+      loose match itself, which this ticket fences in out_of_scope and
+      which is now FILED AS M1-775 (commit 4657b992) together with the
+      lazy-expiry item below.
+  - date: 2026-08-06
+    category: OUT-OF-MODEL
+    severity: low
+    reported_by: [claude]
+    promise: |
+      Not a threat-model promise — raised as an out-of-model
+      observation for the user to rule on.
+    gap: |
+      ConfirmStateService's ConcurrentHashMap expires entries only
+      lazily, inside peek / takeAny / takeMatching. A (user, scope)
+      that arms a confirm and never messages again retains its payload
+      past the deadline for the process lifetime; BanConfirm carries a
+      target contact id.
+    repro: |
+      Arm any confirm-gated command, then never message again. The
+      entry outlives its TTL until process exit.
+    suggested_fix_class: other
+    disposition: |
+      ACCEPTED AS RESIDUAL, AND FILED (user decision, 2026-08-06).
+      Pre-existing and untouched here — this diff strictly increases
+      eviction opportunities by adding three drain sites. Not a flood
+      vector: one entry per (user, scope), creatable only by a
+      registered user running a confirm-gated command, so growth is
+      bounded by distinct user/scope pairs rather than by message
+      volume. §Secrets handling governs logs, the audit log and the
+      DB, not process-local maps, and security.md:2200-2210 already
+      accepts the analogous in-memory translation-cache residual — so
+      no spec sentence is added. Bundled into M1-775 as the secondary
+      item because it is the same object's lifecycle.
+  - date: 2026-08-05
+    category: OUT-OF-MODEL
+    severity: none
+    reported_by: [opencode]
+    promise: |
+      Not a threat-model promise — raised as an out-of-model
+      observation about disclosure timing.
+    gap: |
+      As reported: the caps-path drain surfaces the cancellation
+      acknowledgement one message earlier in group scope, so members
+      learn a confirm was pending sooner than they would have.
+    repro: |
+      As reported: hold a pending confirm in a group, send an over-cap
+      body, and the group sees "Pending `<command>` cancelled."
+    suggested_fix_class: other
+    disposition: |
+      FALSE POSITIVE — recorded as such, NOT as an accepted risk (user
+      decision, 2026-08-06). There is no confirm-existence secrecy to
+      erode: the arming prompt is itself emitted with reply(scope, …)
+      into the same group the confirm is keyed to, so the group has
+      already been told that a confirm was armed and which command it
+      was. The cancellation acknowledgement repeats information the
+      prompt disclosed a minute earlier. This holds in the
+      silent-TTL-expiry case too — the prompt was visible regardless
+      of whether an acknowledgement ever follows.
+redteam_audits:
+  - date: 2026-08-05
+    verdict: FINDINGS
+    auditors: [codex, opencode, claude]
+    base: 51c9aead
+    head: working tree
+    verdict_file: docs/plan/m1/redteam-multi/M1-774-2026-08-05/
+    findings_count: 2
+    out_of_model_count: 1
+    note: |
+      First multi-auditor pass, run before the probation-block drain
+      existed. claude returned UNAVAILABLE (host session limit), so
+      this pass is 2-auditor coverage. codex raised the per-group
+      reply-bucket ratio (medium); opencode raised a stale-payload
+      redemption via the M1-038 transport byte cap. The latter was
+      falsified in-branch as attributable: its >64KiB step is not
+      load-bearing — `/ban A` then `/ban B confirm` executes against A
+      with no oversized body anywhere, because isConfirmShape matches
+      on prefix+suffix only. That is the loose confirm match this
+      ticket fences in out_of_scope.
+  - date: 2026-08-06
+    verdict: FINDINGS
+    auditors: [claude, codex, opencode]
+    base: 51c9aead
+    head: working tree
+    verdict_file: docs/plan/m1/redteam-multi/M1-774-r2-2026-08-05/
+    findings_count: 2
+    out_of_model_count: 1
+    note: |
+      Re-audit of the diff after the probation-block drain and the
+      enumeration rewrite. claude CLEAN — it checked gate ordering,
+      per-(user, scope) keying, the no-DB-write claim, enumeration
+      completeness, and whether a surviving confirm can be cashed for
+      privilege (it cannot: BanCommandHandler.java:179 re-checks
+      isAdmin before takeMatching). codex and opencode both re-raised
+      the reply-bucket ratio; the cross-examination report scores it
+      "0 corroborated" only because it clustered the two by differing
+      file:line anchors. opencode additionally found the §/retry
+      write-free clause. Both dispositioned above. Its OUT-OF-MODEL
+      item (ConfirmStateService's map has lazy expiry only, so an
+      entry from a user who never messages again outlives its TTL for
+      the process lifetime) is pre-existing and untouched here.
 clarity_check:
+  date: 2026-08-06
+  verdict: PASS
+  warnings: []
+  blockers: []
 escalation_reason:
 ---
 

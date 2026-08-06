@@ -1,0 +1,96 @@
+RED-TEAM VERDICT: CLEAN
+
+Audit scope: docs/spec/security.md (full) vs the working-tree diff at
+docs/plan/m1/redteam-multi/M1-774-r2-2026-08-05/diff.patch (STATUS.md,
+the M1-774 ticket file, docs/spec/commands.md, InboundRouter.java,
+InboundRouterConfirmCancelTest.java).
+
+What the diff does: adds a `drainPendingConfirm(actorId, scope, adapter)`
+helper to InboundRouter and calls it on three intake-rejection paths that
+return ahead of the step-4.5 confirm-cancel sweep — the chat-mode body cap
+(InboundRouter.java:740), the slash-command body cap (:756) and the step-5
+probation block (:881) — plus a code-comment enumeration of the non-draining
+paths (:903-955) and matching commands.md amendments.
+
+Checks performed and their results (why this is CLEAN, not unexamined):
+
+1. Trust boundary 2 / §Authorization model ordering. All three new drains sit
+   AFTER step 1 identity resolution, step 1.5 transport cap (:534), step 2
+   invite gate (:588), step 3 group unregistered/preban drop (:636), step 4
+   ban check (:681) and step 3.5 approval gate (:696). No drain executes for
+   a banned, unregistered, preban or unapproved-group sender, and none moves
+   a gate. §User ban's "one fixed reply per inbound message" is preserved —
+   the ban branch is untouched and still returns before any drain.
+
+2. Per-(user, scope) isolation. `ConfirmStateService` is keyed by
+   `ConfirmKey(actorUserId, scope)` (ConfirmStateService.java:179) and every
+   new call passes the CURRENT sender's own `snapshot.get().id()` /
+   `probationActor.id()` with `msg.scope()`. No path lets one sender drain or
+   observe another's pending confirm, and no cross-scope key is constructed.
+
+3. §Input length caps' "no DB write for an oversized message". `takeAny` is a
+   `ConcurrentHashMap.compute` (ConfirmStateService.java:140-154) and
+   `sendReply` performs no DB access (InboundRouter.java:1552-1580). The
+   claim in the new javadoc holds; the step-4.6 anchor clear (a real DB write)
+   was correctly NOT hoisted.
+
+4. Completeness of the non-drain enumeration. Every `return;` between the
+   users-row SELECT (:577) and the sweep (:964) was enumerated: :612 (SimpleX
+   claim) and :624 (invite gate) — both inside the `snapshot.isEmpty()` branch,
+   so no users.id exists to key a confirm; :639 (group unregistered/preban) —
+   same vacuity, a preban row is minted only for a contact with no prior row
+   per §User ban; :685 (ban) and :713/:716 (approval FixedReply/SilentDrop) —
+   documented non-drains justified by §User ban's single-fixed-reply rule and
+   D47 invisibility respectively. No undrained path was found that both
+   resolves an actor id and is free to reply.
+
+5. Surviving-confirm escalation. A confirm left armed across a ban or a group
+   status regression cannot be redeemed for privilege: redemption re-enters
+   intake (ban check at :681 blocks a banned actor) and the handler re-checks
+   the tier before popping — BanCommandHandler.java:179 gates on
+   `actorOpt.get().isAdmin` BEFORE `takeMatching` at :192. A revoked admin
+   therefore cannot cash an armed `/ban` inside the TTL.
+
+6. Outbound amplification vs §Rate limiting "Per-group reply rate (D47)".
+   The per-group bucket commits one token per inbound at step 3.5
+   (GroupApprovalCheck.java:128), while the drained paths now emit two bodies.
+   This is NOT a new ratio: the pre-existing step-4.5 sweep (:964-978) and the
+   M1-772 multiline drain (:791-803) already produce cancellation+reply for one
+   token, and arming a confirm itself costs a token and a reply. Sustained
+   amplification is unchanged at <=2 replies/token, so no widening is claimed.
+
+7. Output surfaces. The cancellation body is bot-authored and deterministic —
+   `MessageFormat.format(bundle, cancelled.commandName())` where
+   `commandName()` is a closed-catalogue constant, never inbound- or
+   feed-derived. It is not LLM-authored, so §LLM output sanitizer's mandate is
+   not engaged, and no inbound text is reflected (the reflection-guard posture
+   is unaffected). Delivery still routes through `outboundDelivery.deliver`,
+   preserving the `](` chokepoint guarantee.
+
+8. Injectable-time / TTL. No new inline `now()`; the drain reuses
+   `ConfirmStateService`'s injected-Clock deadline check, and the new test
+   pins `router.clock` to a fixed instant with absolute fixtures.
+
+9. Audit coverage. Confirm cancellation is not a spec-audited event (the
+   pre-existing sweep emits no audit row either), and no audited operation was
+   rerouted or suppressed. `/audit`-visible behavior is unchanged.
+
+10. Spec amendments. The commands.md carve-outs added by the diff restate,
+    rather than weaken, existing security.md commitments (step 1.5 silence,
+    §User ban single fixed reply, D47 invisibility). The /retry anchor claim
+    is backed in code by the status filter — RetryCommandHandler.java:96
+    (`WHERE p.uid = ANY(?) AND p.status = 'READY'`).
+
+OUT-OF-MODEL:
+  - Unswept in-memory confirm state (pre-existing, NOT introduced by this
+    diff; the diff strictly increases eviction opportunities). The
+    `ConcurrentHashMap` in ConfirmStateService has lazy expiry only — an entry
+    is removed on `peek`/`takeAny`/`takeMatching` and nothing sweeps it, so a
+    (user, scope) that arms a confirm and never messages again retains its
+    payload past the TTL for the process lifetime. Payloads can carry
+    user-supplied arguments (e.g. `BanConfirm`'s target contact id).
+    §Secrets handling governs logs, the audit log and the DB, not process-local
+    caches; this is the same shape as the explicitly-accepted translation-cache
+    residual under §Secrets handling / §What's intentionally NOT in v1, and
+    `/forget` does not reach it either. Flagged so the user can decide whether
+    the threat model should say so explicitly; not counted as a finding.

@@ -62,6 +62,27 @@ live in `docs/design/03-commands.md`.
   `/stop`, which cancels a pending confirmation as a side effect
   of its "any other input" treatment and replies with the standard
   cancellation acknowledgement, even when no LLM work is in flight.
+  **Inputs rejected ahead of the cancel sweep are the exceptions,
+  and every exception is a path that *cannot* emit the
+  acknowledgement** — never a claim that the surviving confirmation
+  is unreachable, since ban, group-approval and probation state can
+  all change inside the timeout. The transport rate-cap drop, the
+  transport byte cap, and empty-after-normalization all fire before
+  the users-row read, so no actor identity exists to drain against
+  and the query-free hostile-flood path must stay query-free; the
+  DM invite gate and the group unregistered/preban drop cannot be
+  reached by a holder of a pending confirmation (no users row
+  exists to key one, and a pre-ban row is minted for a contact that
+  never registered); and the ban reply and the group-approval
+  short-circuit are each limited to the single fixed reply their
+  own rules allow — a banned user receives one fixed reply per
+  inbound message, and a second outbound to a pending, rejected or
+  removed group would disclose the pending confirmation to a group
+  the bot has not accepted. On those paths the confirmation expires
+  by the timeout. Every rejection that has resolved the sender and
+  is free to reply — the body-length caps, the single-line rule,
+  and the slow-start probation block — does cancel, exactly as any
+  other non-confirming input.
   (Per-command-
   category split timeouts are recorded as a v2 candidate; v1's
   one-timeout-fits-all keeps the state machine simple.)
@@ -1211,7 +1232,24 @@ and makes the digest query depend on row presence.
   a friendly error is returned and the anchor is left intact** (not
   cleared); the user must issue a non-`/retry` command to move past
   the cap. Any non-`/retry` input from the same (user, scope) clears
-  the anchor; `/retry` itself never advances or resets it. No effect
+  the anchor; `/retry` itself never advances or resets it. **Inputs
+  rejected ahead of the clear step are the exceptions:** the
+  transport rate-cap and byte caps, empty-after-normalization, the
+  DM invite gate, the group unregistered/preban drop, the ban reply,
+  the group-approval short-circuit, the probation block, the
+  body-length caps, and the single-line rule all return before the
+  clear and leave the anchor intact. The justification is per-path,
+  not a blanket write-free property: the body-length caps and the
+  single-line rule must not spend a DB write on a body that never
+  reached the parser (§Input length caps), while the remaining
+  paths simply stop at their own gate — and several have already
+  written by the time they do (the DM invite gate records every
+  attempt, the group-approval gate may create the pending `groups`
+  row, and a group inbound reaching the probation block has already
+  upserted its membership row).
+  A surviving anchor is safe by the status filter below:
+  its frozen UID set is re-filtered against current post status at
+  retry time. No effect
   (friendly error) when no eligible anchor exists, when the anchor
   has been cleared, when the prior command was cancelled by `/stop`,
   or when the prior command was not summary-producing.
