@@ -1,6 +1,6 @@
 ---
 name: comments-on-a-diet
-description: Comments exist only to make genuinely complex logic understandable; code should be self-documenting, javadoc stays short and useful and never replaces the documentation — details are referenced (spec/design section), not retold. Rule-doc adaptation scheduled after M1-789.
+description: Comments exist only to make genuinely complex logic understandable; code should be self-documenting, javadoc stays short and useful and never replaces the documentation — details are referenced (spec/design section), not retold. Canonical since 2026-08-07: engineering-rules §11.
 metadata:
   type: feedback
 ---

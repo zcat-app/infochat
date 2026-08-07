@@ -62,7 +62,9 @@ In addition, you apply:
   guidance derived from spec). If a design note disagrees with spec,
   the design note is wrong; flag it as spec-drift.
 - CLAUDE.md §Coding style for preference-level guidance on naming,
-  switch expressions, early-return, simplification, comment policy.
+  switch expressions, early-return, simplification; the comment policy
+  lives in engineering-rules §11 (reviewer-enforced), summarized in
+  CLAUDE.md §Engineering rules.
 
 You may read these on demand.
 

@@ -56,7 +56,9 @@ lens, and findings must survive falsification before they are reported.
    business logic, a decision, or a trap that is not visible in the
    code, stated briefly and as current truth — history and detail move
    to the ticket, the analysis, or the decisions log and are cited by
-   one stable pointer. New rationale is capped at 3 lines per call site.
+   one stable pointer (spec-section anchor, decision ID, ticket ID, or
+   `docs/plan/...` path — engineering-rules §11). New rationale is
+   capped at 3 lines per call site.
 
 ## Surfaces
 
@@ -245,8 +247,9 @@ ticket for `--parallel`. `migration_touch: true` still serializes.
   implementor removes comments that state the obvious, restate the code,
   or are stale; adds comments ONLY for business logic, a non-obvious
   decision, or a trap — brief, current-truth, javadoc included, with
-  detail and history referenced (spec section, design/analysis doc),
-  never retold (engineering-rules §11); and records suggested renames of methods,
+  detail and history cited by one stable pointer (spec-section anchor,
+  decision ID, ticket ID, or `docs/plan/...` path — engineering-rules
+  §11), never retold; and records suggested renames of methods,
   variables, parameters, fields, and classes in the commit body under a
   `Renames:` trailer. Renames of identifiers NOT already in the diff are
   out of scope (suggest, don't move).

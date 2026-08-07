@@ -79,20 +79,20 @@ substitute for the module boundary.
 - **Comment hygiene.** Inside classes the diff touches: remove stale or
   meaningless comments; do NOT add comments that restate the code; add
   comments only for business logic, a non-obvious decision, or a trap —
-  brief, current-truth, javadoc included; detail and history are
-  referenced (spec section, design/analysis doc), never retold
-  (engineering-rules §11).
-- **Spec edits land by approval.** If the diff will touch `docs/spec/**`,
-  present the exact proposed text with plain-English reasoning and wait
-  for the user's explicit yes BEFORE editing (engineering-rules §12) —
-  even when `acceptance:` lists the amendment. New spec prose is
-  rule-text only: no dates, ticket IDs, or report citations.
+  brief, current-truth, javadoc included; detail and history are cited
+  by one stable pointer (spec-section anchor, decision ID, ticket ID,
+  or `docs/plan/...` path — engineering-rules §11), never retold.
   Collect suggested renames (methods, variables, parameters, fields,
   classes) — they land in the commit body under `Renames:`. Before the
   verify, self-check the comment cap: `git diff $(git merge-base main HEAD)
   > .scratch/tick-cap-<ID>.diff && python3 scripts/tick-comment-cap.py
   .scratch/tick-cap-<ID>.diff` — fix any run of more than 3 consecutive
   added comment lines now; the reviewer FAILs what you leave.
+- **Spec edits land by approval.** If the diff will touch `docs/spec/**`,
+  present the exact proposed text with plain-English reasoning and wait
+  for the user's explicit yes BEFORE editing (engineering-rules §12) —
+  even when `acceptance:` lists the amendment. New spec prose is
+  rule-text only: no dates, ticket IDs, or report citations.
 - **Verify.** `mkdir -p .scratch && scripts/verify-serialized.sh > .scratch/tick-test-<ID>-r<round>.log 2>&1 ; ec=$? ; mkdir -p target && cp .scratch/tick-test-<ID>-r<round>.log target/tick-test-<ID>-r<round>.log ; exit $ec`
   from the repo root (full suite; the round number matches the upcoming
   review round). A red `mvn verify` from your own diff is fixed in-band;

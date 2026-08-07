@@ -28,7 +28,7 @@ re-audit loop and no code-reviewer.
    - the test-log path + mtime, and whether any staged-file mtime is newer
    - if the diff touches `docs/spec/**`: the user-approval evidence for
      the exact amendment wording (what was shown, when approved) — the
-     gate's SPEC-TRUTHNESS style leg checks this line exists
+     gate's SPEC-TRUTHNESS style leg WARNs on a missing record
      (engineering-rules §12)
    - snapshot this round's working tree FIRST: `s=$(git stash create); echo
      "${s:-$(git rev-parse HEAD)}" > .scratch/tick-review-<ID>-r<round>.tree`.

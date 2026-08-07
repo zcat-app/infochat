@@ -61,8 +61,9 @@ In addition, you apply:
   column names, profile names, etc. If a design note disagrees with
   spec, the design note is wrong; flag it.
 - CLAUDE.md §Coding style for preference-level guidance on naming,
-  switch expressions, early-return, simplification, and the comment
-  policy. These are not §1–§8 rules but they are how this codebase
+  switch expressions, early-return, simplification; the comment policy
+  lives in engineering-rules §11 (reviewer-enforced), summarized in
+  CLAUDE.md §Engineering rules. These preferences are how this codebase
   expects to be written.
 
 You may read these on demand. The skill did not embed them all in

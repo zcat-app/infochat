@@ -150,7 +150,7 @@ The verbatim text of every rule below — plus the full test-integrity rule list
 
 ### Comments are a comprehension aid, not documentation
 - Code self-documents first: names and structure carry the meaning. A comment earns its place only where genuinely complex logic cannot be simplified away — business logic, a non-obvious decision, a trap. When in doubt, leave it out: a stale comment is worse than none, because it keeps asserting a premise the code may have stopped satisfying.
-- Comments and javadoc state current truth, briefly; javadoc states the contract. Neither retells history — no chronicle of tickets, audits, or how the code came to be. Detail is referenced with one stable pointer (spec section, decision ID, `docs/plan/...` path), never summarized. Caller/usage references ("used by X", "added for the Y flow") rot and stay out.
+- Comments and javadoc state current truth, briefly; javadoc states the contract. Neither retells history — no chronicle of tickets, audits, or how the code came to be. Detail is referenced with one stable pointer (spec-section anchor, decision ID, ticket ID, or `docs/plan/...` path), never summarized. Caller/usage references ("used by X", "added for the Y flow") rot and stay out.
 - Longer comments are the rare exception and need a reason the reader would accept. Avoid clean-code-done-wrong: no stories as identifiers, no stripping a comment that guards a real trap.
 - Verbatim text in [`engineering-rules-verbatim.md`](docs/process/engineering-rules-verbatim.md) §11; the tick reviewer enforces it.
 

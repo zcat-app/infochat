@@ -89,7 +89,9 @@ not literally? Three directions, plus a style leg:
   content in new spec prose is a FAIL with the offending lines named.
   The mechanical report must record the user's approval of the exact
   wording; a missing record is a WARN (approval may have happened in
-  chat), not a FAIL.
+  chat), not a FAIL. If the diff's spec text differs from the recorded
+  approved wording, that is a FAIL — the changed wording was never
+  approved.
 
 ### SECURITY-CHECK
 Adversarial lens: audit the diff against the threat model's commitments.
@@ -115,7 +117,8 @@ downgrade to WARN or PASS.
   material).
 - Comments: the diff's comments — new ones must carry business logic, a
   decision, or a trap, briefly and as current truth; javadoc states the
-  contract and points at the spec or design/analysis doc rather than
+  contract and cites detail with one stable pointer (spec-section
+  anchor, decision ID, ticket ID, or `docs/plan/...` path) rather than
   retelling history (engineering-rules §11). Surviving old ones must not
   state the obvious or restate the code. Removed comments are fine.
 - Structure: the diff must not contort the code to avoid touching a file
