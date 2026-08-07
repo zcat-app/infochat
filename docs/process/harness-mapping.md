@@ -64,6 +64,33 @@ The stub prompt is the same everywhere:
 > file and the output path. Write the required artifact to that path and
 > reply only in the format the prompt specifies.
 
+### Worktree-fenced sessions (Claude Code)
+
+A Claude Code session can be — or, after a session-limit resume, silently
+become — isolated to a git worktree: git and the Edit/Write tools aimed at
+the shared checkout are refused, while plain Bash file operations, python
+and mvn pass. Verified consequences for the gates (M1-784, 2026-08-07):
+
+- Gate agents inherit the fence: their verdict Writes divert to the
+  WORKTREE's `.scratch/` — re-home the artifact to the shared `.scratch/`
+  and record the move.
+- Git-bound mechanics (tree snapshots, fix-hunks diffs, commit, merge)
+  cannot run as agent tool calls. First try `ExitWorktree` (action: keep) —
+  it cleared a resume-induced binding once even though the session never
+  called EnterWorktree. If the fence stands: hand those steps to a session
+  anchored at the main checkout, or have the user execute a reviewed script
+  via the `!` prefix (a user-typed command is the user acting, not the
+  agent).
+- Any mechanical substitution — a reconstructed fix diff, a sha256 manifest
+  standing in for a tree snapshot — must be disclosed in the round's
+  mechanical report so the reviewer can verify it independently rather than
+  trust it (the M1-784 r2 reviewer re-hashed the manifest and re-read every
+  amended region before its APPROVE).
+- If a gate agent TYPE is unavailable mid-flow, resume the prior round's
+  reviewer via SendMessage (rounds ≥ 2 must disposition their own round-1
+  items anyway) or spawn `general-purpose` with the standard stub; record
+  the deviation in the round's mechanical report.
+
 ## 3. Headless recipes
 
 When a tool's in-session subagent mechanism is unavailable (or you want a

@@ -200,6 +200,17 @@ independently implementable and verifiable — a ticket whose Approach
 names more than a handful of files is a decomposition failure. When a
 problem is genuinely one change, one ticket with `analysis_ref: self`.
 
+**Fixtures are calibrated to the family's END state.** An earlier ticket in
+a decomposition must not pin, by test, a behavior or representation a later
+sibling is mandated to change: either write the fixture against the state
+the LAST ticket leaves behind, or pre-authorize the later move in the
+earlier ticket's own text (`test_plan.modifies` on the later ticket, named
+at draft time). A discriminating example must discriminate — check that the
+value it pins differs between the rejected option and the chosen design
+(M1-785's escaped-prose seed pinned the renderer M1-784 was mandated to
+remove; its depth-2 example was true of both options, so the pin broke its
+own sibling and cost M1-784 a hurdle round).
+
 Allocate ticket IDs starting from {{NEXT_ID}}; the user's driver will
 confirm before any file lands.
 

@@ -31,6 +31,16 @@ plan and was approved at draft time).
     ticket is a defect in the draft, fix it before starting); for
     `analysis_ref: self` the ticket IS the analysis — skip the
     cross-read.
+  - If the ticket carries `replaces:` (or a worktree holds a superseded
+    implementation of this surface), READ the prior attempt's redteam and
+    review artifacts before any code — they are the cheapest complete list
+    of the surface's known failure modes (M1-784's round-1 hurdle was
+    pre-documented in the superseded M1-776 attempt's redteam report).
+  - Enumerate the tests each `blocked_by` ticket ADDED on the seam this
+    ticket changes, and trace every one under the planned change.
+    `test_plan.preserves` is a falsifiable claim — falsify it now, not at
+    `mvn verify` (M1-785's P10 pin was calibrated to the pre-M1-784
+    representation; the collision cost a full verify plus a hurdle).
   A genuine ambiguity → one blocking question (never an escalation). Record
   the result under `clarity_check:` in the frontmatter.
 

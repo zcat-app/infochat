@@ -68,8 +68,12 @@ SECTION_TITLES = {
     "## Verification", "## Out-of-scope", "## Context",
 }
 ACCEPTANCE_VERIFY_RE = re.compile(
+    # A TestClass.method reference is itself a named verification — items
+    # split on their first line, so "passes" may sit on a continuation
+    # line while the test name does not (M1-788 false BLOCKER).
     r"(\.\w+\(\)|\bmvn\b|\bgit\b|\bgrep\b|\bcurl\b|\bpython3\b|"
-    r"\bprobe\b|renders?|asserts?|pinned by|passes|fails)",
+    r"\bprobe\b|renders?|asserts?|pinned by|passes|fails|"
+    r"\w+(?:Test|IT)\.\w+)",
     re.IGNORECASE,
 )
 REPRODUCTION_RE = re.compile(
