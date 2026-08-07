@@ -37,8 +37,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <ul>
  *   <li>One {@code @Test} per CLOSED_LIST entry asserting the token is
  *       stripped and replaced with {@code [redacted command]}.</li>
+ *   <li>The scaffolding-marker strip pass.</li>
  *   <li>The markdown-link strip pass.</li>
- *   <li>The both-passes ordering (markdown FIRST, closed-list SECOND).</li>
+ *   <li>The pass ordering (character-deleting passes FIRST, closed-list
+ *       LAST).</li>
  *   <li>The aggregated WARN logging (one WARN per distinct token per
  *       call, carrying the exact occurrence count) captured via JUL,
  *       and the aggregated audit-row shape driven through a capturing
@@ -723,6 +725,45 @@ class LlmOutputSanitizerTest {
         assertEquals("Click for admin (" + LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT + ")",
                 output,
                 "ordering must be markdown FIRST then closed-list SECOND");
+    }
+
+    // ----- scaffolding-marker strip (M1-789) ------------------------------
+
+    @Test
+    void scaffoldingMarkersAreStrippedAndTheWrappedTextSurvives() {
+        // REPRODUCTION (the parked M1779ReproProbeIT scaffolding method):
+        // the model echoes the wrapper it was given — neither marker may
+        // reach the reader, the wrapped text must.
+        String id = "e4cea7de-0f11-4a7d-9f88-d2ecd6bcae2e";
+        String wrapped = "Série „Softwarová sklizeň\" na Root.cz se věnuje…";
+        String output = SanitizerTestDoubles.noAuditSanitizer().sanitize(
+                "<<<UNTRUSTED_CONTENT id=\"" + id + "\">>>\n"
+                        + wrapped + "\n"
+                        + "<<<END id=\"" + id + "\">>>");
+        assertEquals(wrapped, output,
+                "neither marker may survive, and the wrapped text must");
+    }
+
+    @Test
+    void aMarkerOnlyLineIsDroppedNotBlanked() {
+        // Blanking instead would lead/tail the reply with empty lines the
+        // model never wrote.
+        String output = LlmOutputSanitizer.applyScaffoldingMarkerStrip(
+                "intro\n<<<END id=\"x\">>>\noutro");
+        assertEquals("intro\noutro", output,
+                "the marker line goes; no blank line takes its place");
+    }
+
+    @Test
+    void scaffoldingStripWalksAManyLineReplyWithoutDecomposingIt() {
+        // 200k lines under the existing 3s adversarial bound: a per-line
+        // String decomposition would turn an in-cap reply (§Trust
+        // boundaries item 9) into a live-heap multiple of itself.
+        String reply = "<<<END id=\"x\">>>\nb\n".repeat(100_000);
+        assertTimeoutPreemptively(Duration.ofSeconds(3), () ->
+                assertEquals("b\n".repeat(100_000),
+                        LlmOutputSanitizer.applyScaffoldingMarkerStrip(reply),
+                        "marker-only lines drop, prose lines survive, in order"));
     }
 
     // ----- aggregated WARN logging + audit-row shape (M1-737) ----------

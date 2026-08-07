@@ -20,10 +20,13 @@ import java.util.regex.Pattern;
 
 /**
  * Sanitizer applied to LLM-authored output before it lands in an
- * outbound reply. Enforces two invariants from docs/spec/security.md
+ * outbound reply. Enforces three invariants from docs/spec/security.md
  * §LLM output sanitizer and docs/spec/commands.md §Surface conventions:
  *
  * <ol>
+ *   <li><b>No prompt scaffolding.</b> The untrusted-content wrapper the
+ *       prompt builders put around feed text, user text and tool results
+ *       is stripped when the model echoes it back into its output.</li>
  *   <li><b>Plain-text only.</b> Markdown link syntax {@code [text](url)}
  *       is rewritten to {@code text (url)} so the rendered prose carries
  *       both the visible label and the bare URL.</li>
@@ -39,12 +42,16 @@ import java.util.regex.Pattern;
  * before it is stored as {@code post.title_en}/{@code post.body_en} —
  * model output re-entering the corpus inherits every control the raw
  * body had. Every static surface here ({@link #CLOSED_LIST},
- * {@link #CLOSED_LIST_PATTERNS}, {@link #applyMarkdownLinkStrip},
+ * {@link #CLOSED_LIST_PATTERNS}, {@link #applyScaffoldingMarkerStrip},
+ * {@link #applyMarkdownLinkStrip},
  * {@link #applyClosedListStrip}, {@link #applyClosedListStripWithMatches},
  * {@link #canonicalizeForMatching}, {@link #aggregateMatchCounts},
  * {@link #breakLinkAdjacency}) is a behaviour-identical delegate kept so
  * the bean's API and its existing tests are unchanged; the transforms'
  * javadoc (the why of each pass) lives on the core declarations.
+ *
+ * <p>The ingest translator composes its own passes rather than calling
+ * {@link #sanitize(String)}; the scaffolding strip is outbound-only.
  *
  * <p>Every match is audit-logged by the CALLER, with emission AGGREGATED per
  * distinct token per {@code sanitize()} call — the docs/spec/security.md
@@ -116,11 +123,18 @@ public class LlmOutputSanitizer {
      */
     static final List<Pattern> CLOSED_LIST_PATTERNS = LlmOutputSanitizerCore.CLOSED_LIST_PATTERNS;
 
+    /** Scaffolding-marker strip pass — delegate of
+        {@link LlmOutputSanitizerCore#applyScaffoldingMarkerStrip(String)}. */
+    static String applyScaffoldingMarkerStrip(String input) {
+        return LlmOutputSanitizerCore.applyScaffoldingMarkerStrip(input);
+    }
+
     /**
      * Markdown-link strip pass — delegate of
      * {@link LlmOutputSanitizerCore#applyMarkdownLinkStrip(String)}; see
-     * there for the why. Runs FIRST so a hostile {@code [Click](/grant-admin)}
-     * cannot hide an admin command inside link syntax.
+     * there for the why. Runs AHEAD of the closed-list strip so a hostile
+     * {@code [Click](/grant-admin)} cannot hide an admin command inside
+     * link syntax.
      */
     static String applyMarkdownLinkStrip(String input) {
         return LlmOutputSanitizerCore.applyMarkdownLinkStrip(input);
@@ -197,8 +211,9 @@ public class LlmOutputSanitizer {
     }
 
     /**
-     * Run both passes in order. The output is plain text, with
-     * privileged commands replaced by {@value #REDACTED_COMMAND_REPLACEMENT}
+     * Run every pass in order. The output is plain text, with prompt
+     * scaffolding removed, privileged commands replaced by
+     * {@value #REDACTED_COMMAND_REPLACEMENT}
      * and markdown links flattened to {@code text (url)}. Every
      * closed-list match is audit-logged; the {@code audit_log} emission
      * aggregates per distinct token per call (one row carrying the
@@ -214,7 +229,11 @@ public class LlmOutputSanitizer {
         if (llmOutput == null || llmOutput.isEmpty()) {
             return "";
         }
-        String afterMarkdown = applyMarkdownLinkStrip(llmOutput);
+        // Deleting passes run before the closed-list strip: deletion can
+        // join fragments into a token the redaction never saw (spec §LLM
+        // output sanitizer).
+        String afterScaffolding = applyScaffoldingMarkerStrip(llmOutput);
+        String afterMarkdown = applyMarkdownLinkStrip(afterScaffolding);
         ClosedListStripResult result = applyClosedListStripWithMatches(afterMarkdown);
         emitAuditRows(result.matches());
         return result.rewritten();

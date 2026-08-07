@@ -293,11 +293,9 @@ public final class DisplayHeadline {
      * ordinary ASCII separator, which is precisely what lets a closed-list
      * entry match ACROSS it and be redacted and audited.
      *
-     * <p>A flag-span deletion that consumes the separator collapses the
-     * pair to ONE line. That is not a failure to handle but the redaction
-     * working: the caller then gets a single line with no subordinate, so
-     * the block renders the redacted text once rather than emitting a
-     * half-deleted line twice.
+     * <p>A one-line result means a whole-pair redaction (the survivor is
+     * exactly the redaction marker) or a deleted line; the discriminator
+     * is exact equality — see {@link #derive}.
      */
     private static AnchoredHeadline derive(String original, @Nullable String anchor,
                                            LlmOutputSanitizer llmOutputSanitizer) {
@@ -314,10 +312,16 @@ public final class DisplayHeadline {
                         + flattenToOneLine(boundForScan(original)));
         String[] lines = sanitized.split("\n", 2);
         if (lines.length < 2) {
-            // The redaction swallowed the separator: one line survives, and it
-            // carries the marker. Report it as an UNANCHORED single line so the
-            // caller's subordinate is suppressed rather than duplicating it.
             String collapsed = truncate(sanitized);
+            if (!collapsed.equals(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT)) {
+                // Not exactly the marker: the survivor's provenance is
+                // unrecoverable (a deleting pass may have dropped either
+                // line), so the headline is omitted.
+                return new AnchoredHeadline("", "", false);
+            }
+            // Exact equality, not contains: the marker literal is forgeable
+            // from a prompt-injected anchor, but an exact forgery delivers
+            // only the fixed literal. Spec: §LLM output sanitizer.
             return new AnchoredHeadline(collapsed, collapsed, false);
         }
         if (lines[0].isEmpty()) {

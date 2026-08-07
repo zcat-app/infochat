@@ -106,6 +106,9 @@ match (LlmOutputSanitizerCore.java:536,561-567) — a representation
 change (bidi/zero-width strip, NFKC) the raw-text detectors never ran
 on. Deleting passes added by M1-789/M1-790 widen the same channel
 (line drops move tokens to index 0; emphasis deletion joins fragments).
+M1-789's scaffolding strip adds a third route on landing: deleting a
+MID-LINE marker joins the flanking fragments (`TOOL_C<<<END>>>ALL:` →
+`TOOL_CALL:`) with no closed-list hit required (M1-789 review round 1).
 
 ## Pitfalls
 
@@ -172,7 +175,7 @@ tests pass unedited; provider module verify green.
 - reproduction → `ChatAgentRefusalInterceptionTest.aRefusalMarkerSurfacedOnlyBySanitizationDegradesTheTurn` — zero-width + `/ban` reply; asserts bundle reply + null commit
 - P5 (rollup) → `CategoryRollupGeneratorTest.aRefusalMarkerSurfacedBySanitizationYieldsNoRollup` — same synthesis route; asserts `Optional.empty()`
 - P5 (summary) → `SummaryProseGeneratorTest.aRefusalMarkerSurfacedBySanitizationDegradesTheCluster` — asserts degraded prose for the cluster
-- P5 (tool-call, failure-mode) → `ChatAgentRefusalInterceptionTest.aToolCallLineAssembledBySanitizationIsStripped` — a `TOOL_CALL:` line present only in the canonical/sanitized form never persists and never reaches the reader
+- P5 (tool-call, failure-mode) → `ChatAgentRefusalInterceptionTest.aToolCallLineAssembledBySanitizationIsStripped` — a `TOOL_CALL:` line present only in the canonical/sanitized form never persists and never reaches the reader; the test feeds BOTH assembly routes: the canonical-form route and M1-789's marker-join route (`TOOL_C<<<END id="x">>>ALL: {…}`, and `[REFUS<<<END id="x">>>AL: …` for the refusal arm)
 - P10 → `mvn -B -pl infochat-provider -am verify` runs ChatToolAllowlistSpecParityTest + DocumentedConfigKeyParityTest over the amended prose
 - P12 → `python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-791-*.md` resolves `blocked_by: [M1-778]`, and the flow's start gate refuses while M1-778 is not done
 - degrade-path preservation → existing plain-marker refusal tests at all three sites, unedited and green in `mvn -B -pl infochat-provider -am verify`

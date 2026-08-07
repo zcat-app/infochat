@@ -1,18 +1,18 @@
 ---
 id: M1-789
 title: "Strip scaffolding markers from LLM replies"
-status: pending
+status: done
 created: 2026-08-07
 last_updated: 2026-08-07
 flow: tick
 reproduction: >-
-  parked: .scratch/M1779ReproProbeIT.java — restore ONLY the
-  `scaffoldingMarkersMustNotReachTheReader` method (the markdown method
-  is M1-790's reproduction; restoring both would leave a permanently
-  red IT in the tree). Run RED at start, then fold the assertion into
-  `LlmOutputSanitizerTest` as the permanent test and delete the probe.
-  Evidence: .scratch/M1-779-repro-main.log:4284-4295 — "WRONG BEHAVIOR
-  ON MAIN: the wrapper opener reached the reader".
+  LlmOutputSanitizerTest.scaffoldingMarkersAreStrippedAndTheWrappedTextSurvives
+  — the parked probe's scaffolding method (the markdown method stays
+  parked under .scratch for M1-790) was restored, run RED at start
+  (.scratch/m1-789-red-run.log: "WRONG BEHAVIOR ON MAIN: the wrapper
+  opener reached the reader"), then folded into this permanent test and
+  the probe deleted. Original evidence: the M1-779 repro log lines
+  4284-4295 under .scratch.
 analysis_ref: docs/plan/m1/tick-analysis/llm-output-leaks-scaffolding-markdown.md
 blocked_by: []
 files_scope:
@@ -39,11 +39,14 @@ out_of_scope:
     may pin its survival OR its removal.
   - >-
     THE `[REFUSAL:` / `TOOL_CALL:` DETECTORS (P5). They stay on raw
-    text; M1-791 moves them. The scaffolding strip introduces no
-    FRAGMENT SYNTHESIS (it only deletes whole marker shapes); the
-    leading-line-drop route delivers bytes that were already contiguous
-    and already delivered pre-ticket (handoff §5 correction — a
-    pre-existing prefix-only weakness, not this ticket's regression).
+    text; M1-791 moves them. ACCEPTED RESIDUAL until then (review
+    round 1): deleting a MID-LINE marker joins the flanking fragments,
+    so the strip can assemble a contiguous `[REFUSAL:` / `TOOL_CALL:`
+    token the raw-text detectors never saw — this ticket's earlier
+    no-fragment-synthesis claim was wrong; it covered only the
+    leading-line-drop route, which delivers bytes that were already contiguous and already delivered pre-ticket
+    (handoff §5). M1-791's failure-mode tests must include the
+    marker-join route.
   - >-
     PROMPT WORDING and the delimiter format itself. The per-call random
     marker stays exactly as it is; D21's guarantee rests on its
@@ -89,11 +92,39 @@ spec_refs:
 decision_refs:
   - D21
   - D30
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-07
+    verdict: MANUAL
+    checks: "SPEC-TRUTHNESS PASS, SECURITY FAIL, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "13 files changed, 332 insertions(+), 45 deletions(-)"
+    findings: "1 medium (SECURITY) — mid-line marker deletion joins flanking fragments, so the strip CAN synthesize a contiguous [REFUSAL:/TOOL_CALL: token the raw-text detectors never saw; the ticket's 'no FRAGMENT SYNTHESIS' out_of_scope claim is false. Disposition is a user decision: re-sequence M1-791's detector move ahead of this ticket, or accept as a documented residual with corrected ticket + spec language."
+    verdict_file: .scratch/tick-review-M1-789-r1.txt
+  - round: 2
+    date: 2026-08-07
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY NOT-APPLICABLE, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "4 files changed (fix hunks), 25 insertions(+), 9 deletions(-); full diff 14 files, 356 insertions(+), 52 deletions(-)"
+    findings: "round-1 finding dispositioned SATISFIED (both EVALUATED-AS probes verified by the gate): residual stated in security.md:683, false claim removed from out_of_scope, M1-791 carries the marker-join route in Root cause + failure-mode Verification"
+    verdict_file: .scratch/tick-review-M1-789-r2.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  result: pass
+  date: 2026-08-07
+  notes: >-
+    No blocking questions. Citations spot-checked against main
+    (LlmOutputSanitizer.java:217-218 two-pass composition;
+    DisplayHeadline.java:316-322 collapse branch; transform home in
+    infochat-core). Superseded M1-779 redteam r1+r2 verdicts and the
+    superseded diff read before code. blocked_by is empty, so no seam
+    tests to trace. preserves claims falsified by reading: the
+    straddling-pair collapse survivor is exactly
+    REDACTED_COMMAND_REPLACEMENT (whole-pair consumption), so
+    exact-equality keeps both DisplayHeadline straddling tests green;
+    the other two straddling tests never reach derive; added tests pin
+    no markdown behavior (P16).
 ---
 
 # M1-789: Strip scaffolding markers from LLM replies

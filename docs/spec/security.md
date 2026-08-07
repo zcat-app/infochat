@@ -602,6 +602,24 @@ within one field, `LLM_OUTPUT_SANITIZED` rows fire at
 least as often as before the narrowing (aggregated per distinct token
 per call, carrying the exact occurrence count).
 
+**A pair that comes back as ONE line is reported only when that line is
+exactly the redaction marker; otherwise the headline is omitted.** No
+feed byte can forge the separator, but a character-deleting pass can
+delete it — or delete one of the two lines outright — and the survivor's
+provenance is then unrecoverable. Treating it as the publisher's own
+words is safe when a redaction merged the pair; when a deleting pass
+dropped the ORIGINAL instead, that labels LLM-authored English as the
+publisher's words and D29 (c)'s promise that a bare line is the reader's
+own language breaks on a group-broadcast surface, from nothing but a
+feed title shaped like a wrapper-marker line. The discriminator is EXACT
+equality with the marker and deliberately not "contains": the literal is
+forgeable from a prompt-injected anchor, so `contains` would hand that
+leak back, while an exact forgery can deliver only the fixed literal and
+no attacker-chosen text. Everything else — including a genuine redaction
+that left prose around the marker — degrades to the omitted shape an
+unrenderable field already produces, because that prose's provenance is
+precisely what is unknown.
+
 The cost of the whole-message bound is that a genuine mention
 of the command and a later, unrelated admin flag in the bot's own
 explanatory prose collapse into one redacted span; that is bot-authored
@@ -615,6 +633,55 @@ past the bound, which the parser still dispatches — or super-linear
 under backtracking / `find()` re-anchoring on an attacker-influenced
 reply (§Trust boundaries item 9 puts a hostile endpoint's reply in
 scope, so an in-cap reply must not be convertible into unbounded CPU).
+
+**A further strip category: prompt scaffolding.** The untrusted-content
+wrapper this document's §Prompt-injection defenses puts around feed
+text, user text and tool results (`<<<UNTRUSTED_CONTENT id="…">>>` …
+`<<<END id="…">>>`) is stripped from LLM-authored output when the model
+echoes it back. Echoing is intermittent (the model emits the wrapper only
+sometimes) and is not answerable by prompting. A wrapper line the marker
+had to itself is dropped rather than blanked. The `id` is not required to
+match, and need not be present at all, for the strip to fire: a model
+reproducing the wrapper shape has put internal framing in front of a
+reader whether or not it copied the id correctly. It may not, however,
+contain a `/`. The strip DELETES the marker, so a closed-list token
+carried inside the `id` would be gone before the closed-list pass could
+see it — no replacement marker, no WARN and no `LLM_OUTPUT_SANITIZED`
+row — and untrusted feed text reaches this pass at the render sites, so
+that text would get to choose whether the deployment records that a
+privileged command string was present. Every closed-list entry begins
+with `/` and no UUID contains one, so excluding it costs nothing for a
+real or a garbled marker while dropping a command-bearing one through
+to the closed-list pass, which redacts and audits it. **This is not a
+D21 break and must not be read as one** — the id is per-call random, so
+a leaked one does not help forge another, and D21's guarantee rests on
+that unguessability rather than on the wrapper's shape being secret.
+The defect is that scaffolding renders as though it were content. **The
+pass walks lines by index**, appending ranges into one buffer rather
+than decomposing the reply into a string per line: §Trust boundaries
+item 9 puts a hostile endpoint's reply in its input under nothing but
+the 1–8 MiB body cap, so a per-line decomposition would let an in-cap
+reply of one-character lines cost a live heap many times the payload
+that cap was sized to bound.
+
+**Pass ordering is a security property.** Every pass that DELETES
+characters — the scaffolding strip, the link-flatten — runs BEFORE the
+closed-list strip, and none runs after it. Deleting characters joins
+fragments (`/ba<<<END id="x">>>n` → `/ban`), so a pass placed
+downstream of the redaction could assemble a privileged token out of
+text the closed-list match never saw, and that token would ship
+unredacted AND unaudited. The one pass that does run after the
+replacement, the `](` neutralization, only INSERTS a space: it can
+break a token apart but never build one. The accepted residual is that
+on a match the canonical form is what gets returned, so NFKC can
+surface a wrapper marker that the earlier pass could not see on the raw
+bytes — a cosmetic leak in a reply that also carried a redacted
+command. Closing it would mean re-running a character-deleting pass
+after the redaction, which trades a redaction bypass for a cosmetic
+fix. The protocol-token detectors (`[REFUSAL:`, `TOOL_CALL:`) run on
+the raw reply upstream of every deleting pass, so a token a deletion
+assembles out of fragments is one they never saw; until they evaluate
+the sanitized text, that assembly route is an accepted residual.
 
 **Markdown flattening survives canonicalization.** The link-flatten
 pass runs on the raw output first, and again on the canonical form

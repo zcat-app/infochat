@@ -17,6 +17,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -203,6 +204,23 @@ class LlmOutputSanitizerAuditRowIT {
                 "the interrupt must still be armed when sanitize() returns, or the "
                         + "cancelled render resumes full-speed LLM calls and the cancel "
                         + "stops costing anything");
+    }
+
+    @Test
+    void aCommandInsideAMarkerIdStillProducesARow() throws SQLException {
+        // The marker id class excludes '/', so this line is not a marker:
+        // it falls through to the closed-list pass and is redacted AND
+        // rowed, not silently deleted with the marker.
+        long before = countLlmOutputSanitizedRows();
+        String result = sanitizer.sanitize("<<<END id=\"/grant-admin\">>>");
+        long after = countLlmOutputSanitizedRows();
+
+        assertFalse(result.contains("/grant-admin"),
+                "the command word must not survive; got: " + result);
+        assertTrue(result.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "the token must be redacted, not deleted with the marker; got: " + result);
+        assertEquals(1L, after - before,
+                "a command inside a marker id still produces exactly one audit row");
     }
 
     private long countLlmOutputSanitizedRows() throws SQLException {

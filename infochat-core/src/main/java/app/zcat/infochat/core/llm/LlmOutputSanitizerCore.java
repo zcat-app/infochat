@@ -40,9 +40,13 @@ import java.util.regex.Pattern;
  * output sanitizer and docs/spec/commands.md §Surface conventions:
  *
  * <ol>
+ *   <li><b>No prompt scaffolding.</b> The untrusted-content wrapper is
+ *       {@linkplain #applyScaffoldingMarkerStrip stripped} when the model
+ *       echoes it into its own output.</li>
  *   <li><b>Plain-text only.</b> Markdown link syntax {@code [text](url)}
  *       is rewritten to {@code text (url)} so the rendered prose carries
- *       both the visible label and the bare URL. Runs FIRST so a
+ *       both the visible label and the bare URL. Runs AHEAD of the
+ *       closed-list pass so a
  *       hostile {@code [Click for admin](/grant-admin)} flattens to
  *       {@code Click for admin (/grant-admin)} BEFORE the closed-list
  *       pass sees it, and runs AGAIN inside the closed-list pass over
@@ -60,6 +64,9 @@ import java.util.regex.Pattern;
  *       {@linkplain #canonicalizeForMatching canonical} form of the
  *       output, not its raw bytes — see that method for why.</li>
  * </ol>
+ *
+ * <p>Every character-deleting pass runs BEFORE the closed-list strip —
+ * see {@link #applyScaffoldingMarkerStrip} for why.
  *
  * <p>{@link #CLOSED_LIST} is hand-maintained in code to mirror
  * docs/spec/commands.md §Permission model §Closed list of
@@ -476,6 +483,84 @@ public final class LlmOutputSanitizerCore {
      */
     public static String breakLinkAdjacency(String text) {
         return text.replace("](", "] (");
+    }
+
+    /** The wrapper markers as the model may echo them; the id is optional
+        and loosely matched, but never spans a {@code /} — see
+        {@link #applyScaffoldingMarkerStrip}. */
+    private static final Pattern SCAFFOLDING_MARKER = Pattern.compile(
+            "<<<(?:UNTRUSTED_CONTENT|END)(?:\\s+id=\"[^\"/]*\")?>>>");
+
+    /** Strip echoed wrapper markers; a marker-only line is dropped, a
+        prose-carrying line keeps its prose. Contract (id class, ordering,
+        drop-not-blank): docs/spec/security.md §LLM output sanitizer. */
+    public static String applyScaffoldingMarkerStrip(String input) {
+        // Cheap out: no "<<<" means no marker, so no allocation.
+        if (input.indexOf("<<<") < 0) {
+            return input;
+        }
+        int length = input.length();
+        StringBuilder out = new StringBuilder(length);
+        Matcher matcher = SCAFFOLDING_MARKER.matcher(input);
+        boolean anyKept = false;
+        int lineStart = 0;
+        while (lineStart <= length) {
+            int newline = input.indexOf('\n', lineStart);
+            int lineEnd = newline < 0 ? length : newline;
+            // Keep-vs-drop in one scan, without building the stripped line.
+            boolean sawMarker = false;
+            boolean sawContent = false;
+            int cursor = lineStart;
+            matcher.region(lineStart, lineEnd);
+            while (matcher.find()) {
+                sawMarker = true;
+                sawContent |= hasNonWhitespace(input, cursor, matcher.start());
+                cursor = matcher.end();
+            }
+            if (sawMarker) {
+                sawContent |= hasNonWhitespace(input, cursor, lineEnd);
+            }
+            // A marker-free line is kept as it arrived, blank or not — that
+            // blankness is the model's own.
+            if (!sawMarker || sawContent) {
+                if (anyKept) {
+                    out.append('\n');
+                }
+                anyKept = true;
+                if (sawMarker) {
+                    appendWithoutMarkers(out, input, lineStart, lineEnd, matcher);
+                } else {
+                    out.append(input, lineStart, lineEnd);
+                }
+            }
+            if (newline < 0) {
+                break;
+            }
+            lineStart = newline + 1;
+        }
+        return out.toString();
+    }
+
+    /** Whether {@code [from, to)} holds a character that is not whitespace. */
+    private static boolean hasNonWhitespace(String input, int from, int to) {
+        for (int i = from; i < to; i++) {
+            if (!Character.isWhitespace(input.charAt(i))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Append {@code [from, to)} with every marker span removed. */
+    private static void appendWithoutMarkers(StringBuilder out, String input,
+                                             int from, int to, Matcher matcher) {
+        int cursor = from;
+        matcher.region(from, to);
+        while (matcher.find()) {
+            out.append(input, cursor, matcher.start());
+            cursor = matcher.end();
+        }
+        out.append(input, cursor, to);
     }
 
     /**
