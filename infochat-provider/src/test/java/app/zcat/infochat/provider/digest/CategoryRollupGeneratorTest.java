@@ -6,10 +6,12 @@ import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.ModelTask;
 import app.zcat.infochat.llm.routing.LlmRouter;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
+import app.zcat.infochat.provider.render.DisplayHeadline;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
 import org.jboss.logmanager.LogContext;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -293,6 +295,105 @@ class CategoryRollupGeneratorTest {
                 "the treat-as-untrusted instruction is preserved verbatim");
     }
 
+    // ----- M1-778: the roll-up's operand and output language ------------------
+
+    @Test
+    void promptCarriesTheEnglishAnchorInsteadOfTheSourceLanguageTitle() {
+        // Same en-direction defect as the summarizer's: a source-language
+        // operand steers the model into answering in the source's language,
+        // and this prose is declared English to the pipeline, where an `en`
+        // scope short-circuits and nothing downstream can catch it.
+        CategoryRollupGenerator gen = generatorWith(
+                new CapturingStub(), new IdentitySanitizer(), new IdentityPipeline());
+        Post czech = anchoredPost("p-cs", "Tvorba interaktivních aplikací",
+                "Building interactive applications");
+
+        String prompt = gen.buildPrompt(List.of(new Cluster("t-cs", List.of(czech))), "news").get();
+
+        assertTrue(prompt.contains("Building interactive applications"),
+                "the anchor reaches the model; got: " + prompt);
+        assertFalse(prompt.contains("Tvorba interaktivních aplikací"),
+                "the publisher's own title does not; got: " + prompt);
+    }
+
+    @Test
+    void promptFallsBackToTheSourceTitleWhenNoAnchorWasStored() {
+        CategoryRollupGenerator gen = generatorWith(
+                new CapturingStub(), new IdentitySanitizer(), new IdentityPipeline());
+        Post noAnchor = anchoredPost("p-na", "Tvorba interaktivních aplikací", null);
+
+        String prompt = gen.buildPrompt(
+                List.of(new Cluster("t-na", List.of(noAnchor))), "news").get();
+
+        assertTrue(prompt.contains("Tvorba interaktivních aplikací"),
+                "a post the ingest translator gave up on is still named; got: " + prompt);
+    }
+
+    @Test
+    void systemPromptPinsTheOutputLanguageToEnglish() {
+        // Covers the residual the anchor cannot: a non-English post whose
+        // ingest anchor is NULL still reaches the model in its own language.
+        assertTrue(CategoryRollupGenerator.ROLLUP_SYSTEM_PROMPT.contains("Always write in English"),
+                "the roll-up's output language is a contract, not the model's choice; got: "
+                        + CategoryRollupGenerator.ROLLUP_SYSTEM_PROMPT);
+        assertTrue(CategoryRollupGenerator.ROLLUP_SYSTEM_PROMPT.contains("[REFUSAL:"),
+                "the injection-defense framing is unchanged");
+    }
+
+    @Test
+    void titlelessPostWithATranslatedSentinelAnchorContributesNoLine() {
+        // IngestTranslationWorker has no sentinel guard, so a titleless
+        // non-English post carries title = UNTITLED_TITLE and a title_en
+        // that is a TRANSLATION of that sentinel. Making the field choice
+        // against the anchor would let the translated sentinel pass the
+        // renderability test and resurrect the headline M1-729 killed — and
+        // an all-titleless section would then stop tripping the M1-743 skip
+        // and ask the model to name themes across sentinels. [redteam
+        // 2026-08-06]
+        CapturingStub stub = new CapturingStub();
+        CategoryRollupGenerator gen = generatorWith(
+                stub, new IdentitySanitizer(), new IdentityPipeline());
+        Post titleless = anchoredPost("p-ts", IngestTextNormalizer.UNTITLED_TITLE, "Untitled");
+
+        Optional<String> result = gen.generateRollup(
+                List.of(new Cluster("t-ts", List.of(titleless))), "news", "en");
+
+        assertEquals(0, stub.callCount.get(),
+                "the field is chosen from the ORIGINAL, so a translated sentinel "
+                        + "contributes no line and the section skips the LLM call");
+        assertTrue(result.isEmpty(), "the category ships without a prefix");
+    }
+
+    @Test
+    void titleAnchorIsBoundedBeforeTheSanitizerSeesIt() {
+        // post.title is capped at the ingest write boundary; post.title_en is
+        // bare TEXT and capped nowhere, so the anchor is the operand that can
+        // hand the sanitizer's NFKC + closed-list scan an unbounded string.
+        // [redteam 2026-08-06, low/DOS]
+        RecordingSanitizer sanitizer = new RecordingSanitizer();
+        CategoryRollupGenerator gen = generatorWith(
+                new CapturingStub(), sanitizer, new IdentityPipeline());
+        Post hugeAnchor = anchoredPost("p-huge", "Titulek", "b".repeat(24_000));
+
+        Optional<String> prompt =
+                gen.buildPrompt(List.of(new Cluster("t-huge", List.of(hugeAnchor))), "news");
+
+        assertTrue(prompt.isPresent(), "the anchored title still contributes a line");
+        assertEquals(1, sanitizer.inputs.size(),
+                "one sanitize call over the title pair; got: " + sanitizer.inputs.size());
+        assertTrue(sanitizer.inputs.get(0).length() <= 2 * DisplayHeadline.BODY_SCAN_LIMIT + 1,
+                "each operand of the pair is bounded at BODY_SCAN_LIMIT before the "
+                        + "sanitizer sees it; got " + sanitizer.inputs.get(0).length() + " chars");
+    }
+
+    /** A Czech-source post carrying the title anchor under test. */
+    private static Post anchoredPost(String uid, String title, @Nullable String titleEn) {
+        return new Post(UUID.randomUUID(), uid, UUID.randomUUID(), "Root.cz", title,
+                "https://example.com/" + uid, "Body for " + uid, Instant.now(),
+                List.of("news"), List.of("unknown"),
+                null, null, null, null, "cs", titleEn, null);
+    }
+
     // ----- M1-743: empty headline set skips the LLM call ----------------------
 
     @Test
@@ -300,8 +401,9 @@ class CategoryRollupGeneratorTest {
         CapturingStub stub = new CapturingStub();
         CategoryRollupGenerator gen = generatorWith(stub, new IdentitySanitizer(), new IdentityPipeline());
         // The Bluesky/Nostr shape: blank titles and the untitled sentinel
-        // both resolve to no headline via DisplayHeadline.of(title, null, …)
-        // — the body fallback stays off — so NOT ONE post contributes a line.
+        // both resolve to no headline via DisplayHeadline.anchorFirst with a
+        // null body — the body fallback stays off — so NOT ONE post
+        // contributes a line.
         List<Cluster> clusters = List.of(
                 new Cluster("t-1", List.of(post("p-1", "", "body one"))),
                 new Cluster("t-2", List.of(

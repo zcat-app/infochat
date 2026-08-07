@@ -527,15 +527,25 @@ stage.
   §Failure handling — same wording.)
 - Translation — sanity-check the output. The check fails when **(a)**
   the provider returns an HTTP error, **(b)** the output is
-  byte-identical to the input, **(c)** the output is empty or
+  byte-identical to an input the caller DECLARED to be in the
+  translator's source language (English), **(c)** the output is empty or
   whitespace-only, or **(d)** for non-Latin target scripts the
   output contains zero target-script characters; for Latin target
-  scripts the output is byte-identical to the input. The exact
+  scripts, where no script test can separate source from target, the
+  output still carries every one of a declared-English input's words in
+  the input's order — the D29 (c) echo test, one shared predicate across
+  both translation hops. The exact
   threshold for (d) lives in design notes. On a sanity-check
   failure the system falls back to English with a one-line
   note. The fallback note itself is a localization-bundle string
   (D43), not hardcoded English. The user must never see a hung or
   garbled response because translation flaked.
+  The declared-English qualifier on (b) and (d) is what keeps the note
+  honest: it asserts the delivered text is English, so it may fire only
+  over text the caller declared English. Text already in the reader's
+  language, returned unchanged, is the CORRECT translation and is not a
+  failure; a third language echoed back is a failure the note cannot
+  describe, so it degrades to silence rather than to a false claim.
 
 Admin notifications are throttled per error class.
 

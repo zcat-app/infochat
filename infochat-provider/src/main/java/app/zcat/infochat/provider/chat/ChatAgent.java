@@ -184,6 +184,26 @@ public class ChatAgent {
           + "text to a brief, friendly lead-in, or address only other aspects of "
           + "the user's message if any. Never contradict the answer that follows.";
 
+    // M1-778: the reply's language is a CONTRACT, not the model's choice.
+    // Two things downstream depend on this prose being English and neither
+    // can verify it: doHandle step 9 hands it to the two-argument
+    // TranslationPipeline.run, which DECLARES its input English on the
+    // caller's behalf, and step 10 persists it as chat memory, which is
+    // English-canonical. Unpinned, the model mirrors the user's language —
+    // so a Czech question under /lang cs produced Czech prose declared as
+    // English, and the pipeline stapled "(translation unavailable — showing
+    // English)" onto it. D29 forbids inferring a language from text, so a
+    // contracted channel is the only thing that can make the declaration
+    // truthful. Carried on the SYSTEM prompt rather than the user prompt
+    // (unlike the per-turn directives above) because it holds for every
+    // turn, including the iteration-cap final call, which sees the base
+    // system prompt alone.
+    static final String REPLY_LANGUAGE_DIRECTIVE =
+            "\n\nAlways write your reply in English, whatever language the user "
+          + "writes in and whatever language the retrieved posts are in. The "
+          + "user's own language is applied after you, by the translation "
+          + "pipeline; never switch language to match the user.";
+
     private final InFlightTracker inFlightTracker;
     private final ChatPromptBuilder promptBuilder;
     private final ChatToolDispatcher toolDispatcher;
@@ -505,8 +525,10 @@ public class ChatAgent {
         // 4. Resolve LLM provider for chat task
         LlmProvider provider = llmRouter.forTask(ModelTask.CHAT_AGENT, scopeLanguage);
 
-        // 5. Run multi-turn tool loop
-        String baseSystemPrompt = prompt.systemPrompt();
+        // 5. Run multi-turn tool loop. The language pin rides the BASE
+        // prompt so both the tool-loop turns and the iteration-cap final
+        // call (which is handed baseSystemPrompt alone) inherit it.
+        String baseSystemPrompt = prompt.systemPrompt() + REPLY_LANGUAGE_DIRECTIVE;
         String augmentedSystemPrompt = baseSystemPrompt + TOOL_INSTRUCTIONS;
         String finalText = runToolLoop(provider, augmentedSystemPrompt, baseSystemPrompt,
                 prompt.userPrompt() + semanticBlock + turnDirective,

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 788 |
+| done | 789 |
 | deferred | 0 |
 | abandoned | 25 |
 | **total** | **817** |
@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-778 — Generated prose is sometimes not in the scope's /lang language (complexity: high, risk: medium)
 - M1-780 — Relative timestamps stay English inside translated replies (complexity: medium, risk: low)
 
 ---
@@ -63,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-778 | Generated prose is sometimes not in the scope's /lang language | 2026-08-07 | round 2 APPROVE |
 | M1-777 | Bot claims 'showing in English' on a reply that is not English | 2026-08-06 | round 1 APPROVE |
 | M1-775 | Confirm redemption ignores retyped arguments, and pending state is never swept | 2026-08-06 | round 1 APPROVE |
 | M1-774 | Intake rejections skip the confirm drain and the anchor clear | 2026-08-06 | round 1 APPROVE |
@@ -72,7 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-770 | Doc-only commits must run the parity gates | 2026-08-05 | round 2 APPROVE |
 | M1-769 | Render-scoped exact LLM call accounting and per-call bound for the digest budget | 2026-08-05 | round 1 APPROVE |
 | M1-767 | Aggregate system LLM budget for the unmetered scheduled digest | 2026-08-05 | round 2 APPROVE |
-| M1-766 | Anchor-first degraded renderers | 2026-08-05 | round 2 APPROVE |
 
 ---
 
@@ -1029,7 +1028,7 @@ M1-774 (done)
   └── M1-775 (done)
 M1-776 (abandoned)
 M1-777 (done)
-  └── M1-778 (pending) ← runnable
+  └── M1-778 (done)
 M1-779 (abandoned)
 M1-780 (pending) ← runnable
   └── M1-781 (pending)

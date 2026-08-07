@@ -115,7 +115,8 @@ public class TranslationPipeline {
      *     {@code scope_preferences.language}; never null.
      * @return the translated, sanitized text; or, on any reachable
      *     fallback condition (provider error, blank output, output
-     *     identical to the input, or — for a non-Latin target — output
+     *     identical to the input, output still carrying all of the
+     *     input's words in order, or — for a non-Latin target — output
      *     carrying no character of the target script), the English text
      *     plus a one-line localized note. Never null.
      */
@@ -146,7 +147,8 @@ public class TranslationPipeline {
      *     the translator returns it and it was not declared English (it
      *     is then already in a language the note cannot describe); or,
      *     on any reachable fallback condition (provider error, blank
-     *     output, English echoed back, or — for a non-Latin target —
+     *     output, English echoed back, English returned still carrying
+     *     all of its own words in order, or — for a non-Latin target —
      *     output carrying no character of the target script), the input
      *     text plus a one-line localized note. Never null.
      */
@@ -225,6 +227,35 @@ public class TranslationPipeline {
             return fallbackWithNote(postSanitizer1Text, scopeLanguage);
         }
 
+        // Condition (d), LATIN-target arm. missingTargetScript below is blind
+        // the moment the target script is Latin, and cs, es and tr all are —
+        // so a translator that pads or lightly rewords the English it was
+        // handed returns prose that is neither blank nor byte-identical and
+        // clears every remaining gate. One added character is the whole
+        // difference between condition (b)'s truthful "(translation
+        // unavailable — showing English)" and silence, and it is the WORSE
+        // outcome twice over: the reader is told nothing, and step 5 caches
+        // the English for the full TTL, so every re-ask repeats it where the
+        // (b) path would not (M1-778).
+        //
+        // Gated on the declared-English source for the same reason (b) is:
+        // the note asserts the delivered text is English, so it may not fire
+        // over text declared otherwise. Evaluated pre-sanitize, like (b) and
+        // (d), so all four conditions judge one operand — this one a bounded
+        // prefix of it, see boundForEchoScan.
+        //
+        // The predicate is CALLED, never copied — D29 (c) makes it ONE test
+        // shared across both translation hops, and its stated residuals (a
+        // reworded reply, a fluent mistranslation, a third language) are
+        // inherited here deliberately rather than re-derived.
+        if (sourceLanguage.equalsIgnoreCase("en")
+                && DisplayHeadline.displaysAsTheOriginal(
+                        boundForEchoScan(postSanitizer1Text), boundForEchoScan(translated))) {
+            LOG.warn("TranslationPipeline: translator returned the English input's own words for "
+                    + "target_language={}; falling back to English with a note", scopeLanguage);
+            return fallbackWithNote(postSanitizer1Text, scopeLanguage);
+        }
+
         // Condition (d): for a non-Latin target, output carrying zero
         // target-script characters. This is the failure (b) and (c) cannot
         // see — a translator that answers a ru-scope request in English
@@ -251,6 +282,37 @@ public class TranslationPipeline {
         translationCache.put(postSanitizer1Text, scopeLanguage, sanitized);
 
         return sanitized;
+    }
+
+    /**
+     * Bound one operand of the condition-(d) Latin-arm word walk at
+     * {@link DisplayHeadline#BODY_SCAN_LIMIT}.
+     *
+     * <p>Every OTHER caller of {@link DisplayHeadline#displaysAsTheOriginal}
+     * hands it operands something has already cut — two truncated rendered
+     * lines, or a reply through {@code prepareTranslatedHeadline}. On this
+     * leg neither operand is bounded anywhere: nothing caps the prose handed
+     * in, and the translator's reply is held only by the provider's 1-8 MiB
+     * body cap. The walk is {@code String.indexOf}, a naive O(n·m) search,
+     * and a whitespace-free reply is ONE word of that whole length — so
+     * unbounded operands make it quadratic in attacker-steerable input, on
+     * the dispatch worker and equally on the digest scheduler thread.
+     * {@code security.md} §Prompt-injection defenses rejects a regex for the
+     * outbound scan on exactly this ground ("an in-cap reply must not be
+     * convertible into unbounded CPU"), and the guard has to hold here too.
+     * [redteam 2026-08-06, medium/DOS]
+     *
+     * <p>Comparing prefixes can only make a word fail to match, never invent
+     * one, so the failure direction is a MISSED late-diverging echo — the
+     * same direction as the residuals the predicate already states, and the
+     * safe one. The cut needs no code-point care for the same reason: a
+     * split surrogate pair is compared, never rendered or stored, and at
+     * worst costs the word carrying it its match.
+     */
+    private static String boundForEchoScan(String text) {
+        return text.length() <= DisplayHeadline.BODY_SCAN_LIMIT
+                ? text
+                : text.substring(0, DisplayHeadline.BODY_SCAN_LIMIT);
     }
 
     /**

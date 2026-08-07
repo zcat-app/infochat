@@ -237,6 +237,25 @@ class TranslationPipelineTest {
     }
 
     @Test
+    void nearEchoIsCaughtOnAnInputLongerThanTheEchoScanBound() {
+        // The condition-(d) Latin arm compares BOUNDED prefixes of its two
+        // operands, because neither is bounded anywhere else on this leg and
+        // the word walk is a naive O(n·m) substring search. The bound is a
+        // DoS guard, not an escape hatch a longer reply steps past.
+        // [redteam 2026-08-06, medium/DOS]
+        String input = "English prose the translator merely pads. ".repeat(200);
+        translatorStub.setResponseText(input + ".");
+
+        String result = pipeline.run(input, "cs");
+
+        assertEquals(input + "\n" + bundleLoaderStub.noteFor("cs"), result,
+                "a padded echo longer than the scan bound must still return the "
+                        + "English text plus the fallback note");
+        assertEquals(0, sanitizer.sanitizeCallCount(),
+                "the echo fallback must NOT invoke sanitizer-2");
+    }
+
+    @Test
     void fallsBackToEnglishWhenOutputCarriesNoTargetScript() {
         String input = "English prose the translator refuses to translate.";
         // Condition (d): a translator that answers a ru-scope request in
