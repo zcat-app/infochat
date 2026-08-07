@@ -319,6 +319,42 @@ class TranslationPipelineTest {
                 "a Latin-target translation must populate the cache");
     }
 
+    @Test
+    void aReplyThatSanitizesToEmptyFallsBackToEnglish() {
+        // REPRODUCTION (M1-793): a marker-only reply passes every raw
+        // sanity check (non-blank, non-identical, no echo-walk words) but
+        // the M1-789 strip deletes it entirely — delivered as "".
+        String input = "English prose the translator answers with markers only.";
+        translatorStub.setResponseText("<<<END id=\"x\">>>");
+
+        String result = pipeline.run(input, "cs");
+
+        assertEquals(input + "\n" + bundleLoaderStub.noteFor("cs"), result,
+                "a reply that sanitizes to empty must fall back to English plus the note");
+        assertFalse(result.isEmpty(),
+                "the delivered text must never be the empty string");
+        assertTrue(cache.get(input, "cs").isEmpty(),
+                "the fallback must NOT populate the cache");
+    }
+
+    @Test
+    void conditionsBCEvaluateTheSanitizedReply() {
+        // FAILURE-MODE (M1-793): the reply is non-blank and non-identical
+        // raw — clearing the checks as they stand — but the strip deletes
+        // every line of it, so (b)/(c) must judge the sanitized bytes.
+        String input = "English prose the translator answers with markers only.";
+        translatorStub.setResponseText("<<<UNTRUSTED_CONTENT id=\"a\">>>\n<<<END id=\"b\">>>");
+
+        String result = pipeline.run(input, "cs");
+
+        assertEquals(input + "\n" + bundleLoaderStub.noteFor("cs"), result,
+                "the sanitized form must be judged by (b)/(c) and fall back");
+        assertEquals(1, sanitizer.sanitizeCallCount(),
+                "the checks must read the single sanitize-2 result — no second call");
+        assertTrue(cache.get(input, "cs").isEmpty(),
+                "the fallback must NOT populate the cache");
+    }
+
     // -- test stubs --
 
     /**

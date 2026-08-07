@@ -1,12 +1,12 @@
 ---
 id: M1-793
 title: "Evaluate translation sanity checks on the sanitized reply"
-status: pending
+status: done
 created: 2026-08-08
 last_updated: 2026-08-08
 flow: tick
 reproduction: >-
-  to-be-written: TranslationPipelineTest#aReplyThatSanitizesToEmptyFallsBackToEnglish
+  TranslationPipelineTest#aReplyThatSanitizesToEmptyFallsBackToEnglish
   — the sanity conditions (b)/(c) at TranslationPipeline.java:197-226
   evaluate the RAW translator reply, but the delivered text is the
   post-sanitize-2 form. A raw reply that is non-blank and non-identical
@@ -51,7 +51,12 @@ test_plan:
     - all tests currently green on main
 spec_refs:
   - docs/spec/llm.md §Failure handling (recap)
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-08
+    verdict: APPROVE
+    checks: SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS
+    diff_stats: 4 files, +60/-8
 overrides: []
 aborted_attempts: []
 reopens: []

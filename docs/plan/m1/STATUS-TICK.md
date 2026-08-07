@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 7 |
+| done | 8 |
 | deferred | 0 |
 | abandoned | 0 |
 | **total** | **11** |
@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-793 — Evaluate translation sanity checks on the sanitized reply (complexity: low, risk: low)
 - M1-794 — Guard against empty sanitized bodies at delivery (complexity: low, risk: low)
 
 ---
@@ -63,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-793 | Evaluate translation sanity checks on the sanitized reply | 2026-08-08 | round 1 APPROVE |
 | M1-792 | Census sanitize() caller postconditions and pin them | 2026-08-08 | round 1 APPROVE-WITH-FIXES |
 | M1-789 | Strip scaffolding markers from LLM replies | 2026-08-07 | round 2 APPROVE |
 | M1-788 | Stage 1 must canonicalize the text it stores and second-scans | 2026-08-07 | round 1 APPROVE-WITH-FIXES |
@@ -104,6 +104,6 @@ M1-789 (done)
 M1-791 (pending)
   └── M1-790 (pending) [see above]
 M1-792 (done)
-M1-793 (pending) ← runnable
+M1-793 (done)
 M1-794 (pending) ← runnable
 ```

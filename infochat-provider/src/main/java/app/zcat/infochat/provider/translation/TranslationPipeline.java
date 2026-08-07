@@ -275,6 +275,24 @@ public class TranslationPipeline {
         // audit_log row per the M1-041 per-occurrence durability commitment.
         String sanitized = llmOutputSanitizer.sanitize(translated);
 
+        // Step 4.5: conditions (b)/(c) on the DELIVERED form (M1-793) —
+        // the raw checks above cannot see deletion shapes: a marker-only
+        // reply passes (b)/(c) raw and strips to empty.
+        if (sanitized.isBlank()) {
+            LOG.warn("TranslationPipeline: translator output sanitized to blank for "
+                    + "target_language={}; falling back to English with a note", scopeLanguage);
+            return fallbackWithNote(postSanitizer1Text, scopeLanguage);
+        }
+
+        if (sanitized.equals(postSanitizer1Text)) {
+            if (!sourceLanguage.equalsIgnoreCase("en")) {
+                return postSanitizer1Text;
+            }
+            LOG.warn("TranslationPipeline: translator output sanitized to the English input for "
+                    + "target_language={}; falling back to English with a note", scopeLanguage);
+            return fallbackWithNote(postSanitizer1Text, scopeLanguage);
+        }
+
         // Step 5: cache write — the cached value is the post-sanitizer-2
         // form so hits skip step 4 (spec §Pipeline order step 5).
         // NOT populated on the failure path (the cache stores translated
