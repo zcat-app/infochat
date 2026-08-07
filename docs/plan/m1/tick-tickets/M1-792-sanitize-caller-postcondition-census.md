@@ -1,20 +1,21 @@
 ---
 id: M1-792
 title: "Census sanitize() caller postconditions and pin them"
-status: pending
+status: done
 created: 2026-08-07
-last_updated: 2026-08-07
+last_updated: 2026-08-08
 flow: tick
 reproduction: >-
-  to-be-written: LlmOutputSanitizerPostconditionTest#everyBeanCallSitePostconditionIsPinned
+  LlmOutputSanitizerPostconditionTest#everyBeanCallSitePostconditionIsPinned
   — the defect is a CLASS: callers of the shared transform rely on
   postconditions (line count, emptiness, leading bytes, token
   non-synthesis, shrinkage-to-input) that no test pins, which is why
   two redteam rounds on M1-779 each found one more caller by
   inspection (handoff §6). A test enumerating the census rows and
   asserting each documented postcondition is RED wherever a
-  postcondition is unpinned; `start` writes it RED after the census
-  document lands.
+  postcondition is unpinned; written RED at start after the census
+  document landed (ran RED on the unpinned M1-793/M1-794 follow-ups
+  and the missing canonical-form pin, GREEN after they landed).
 analysis_ref: docs/plan/m1/tick-analysis/llm-output-leaks-scaffolding-markdown.md
 blocked_by: []
 files_scope:
@@ -52,7 +53,15 @@ test_plan:
     - all tests currently green on main
 spec_refs:
   - docs/spec/security.md §LLM output sanitizer
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-08
+    verdict: APPROVE-WITH-FIXES
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY WARN, SCOPE PASS"
+    diff_stats: "6 files changed, 695 insertions(+), 12 deletions(-)"
+    findings: "1 low (MAINTAINABILITY) — new meta test's class javadoc falsely claimed the count assertion catches a code-side call site added without a census row; the test reads only the census document. Fixed per FIX ITEMS (comment-only javadoc reword)."
+    fix_probes: "grep -c 'breaks the count assertion' = 0; ./mvnw -B -pl infochat-provider -am test-compile exit 0"
+    verdict_file: .scratch/tick-review-M1-792-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
