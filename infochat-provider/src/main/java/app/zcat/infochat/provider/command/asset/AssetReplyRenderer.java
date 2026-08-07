@@ -93,10 +93,14 @@ public class AssetReplyRenderer {
         }
 
         if (snap.high24h() != null && snap.low24h() != null) {
+            // The range must contain the price: a bound that excludes it is
+            // rendered as the price itself.
+            BigDecimal high = snap.high24h().max(snap.price());
+            BigDecimal low = snap.low24h().min(snap.price());
             sb.append(MessageFormat.format(
                     bundleLoader.get(BundleKeys.REPLY_ASSET_SPREAD, language),
-                    formatPrice(snap.high24h(), snap.vsCurrency()),
-                    formatPrice(snap.low24h(), snap.vsCurrency())));
+                    formatPrice(high, snap.vsCurrency()),
+                    formatPrice(low, snap.vsCurrency())));
             sb.append('\n');
         }
 

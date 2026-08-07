@@ -1,9 +1,14 @@
 ---
 id: M1-782
 title: "Asset 24h range can exclude the current price"
-status: pending
+status: done
 created: 2026-08-06
 last_updated: 2026-08-07
+clarity_check:
+  date: 2026-08-07
+  verdict: PASS
+  warnings: []
+  blockers: []
 blocked_by: []
 files_budget: 5
 files_scope:
@@ -69,8 +74,36 @@ spec_refs:
   - docs/spec/commands.md §Asset commands
 decision_refs:
   - D39
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-07
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 4
+      added: 114
+      removed: 9
 overrides: []
+redteam_findings: []
+redteam_audits:
+  - date: 2026-08-07
+    verdict: CLEAN
+    base: 0d4d70ab (fork point)
+    head: working tree
+    verdict_file: docs/plan/m1/redteam-multi/M1-782-2026-08-07/cross-examination.md
+    out_of_model_count: 1
+    note: >-
+      redteam-multi (opencode + kimi auditors), enforced on this
+      security_relevant:false ticket at user request. Both auditors CLEAN.
+      One out-of-model item (opencode): hostile price-endpoint numeric
+      plausibility is not covered by threat-model boundary 9, and the clamp
+      can mask a nonsense spread. Disposition: accepted as a stated residual
+      by user — pre-existing, collector-side vetting out of scope.
 ---
 
 ## Why

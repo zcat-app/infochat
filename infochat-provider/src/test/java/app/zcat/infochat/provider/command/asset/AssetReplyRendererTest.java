@@ -219,6 +219,89 @@ class AssetReplyRendererTest {
                 "delta, high, and low must stay one contiguous block; got: " + rendered);
     }
 
+    /**
+     * A snapshot with {@code low_24h > price} renders a low equal to the price.
+     */
+    @Test
+    void lowAbovePriceClampsLowToPrice() {
+        AssetSnapshotReader.Snapshot snap = new AssetSnapshotReader.Snapshot(
+                "zcash", "coingecko", "usd",
+                new BigDecimal("503.92"),
+                new BigDecimal("12345678.50"),
+                new BigDecimal("524.75"),
+                new BigDecimal("505.89"),  // low above the spot
+                null,
+                new BigDecimal("-2.58"),
+                null,
+                Instant.now().minusSeconds(41),
+                "coingecko.com/en/coins/zcash"
+        );
+        AssetSnapshotReader.SnapshotResult result =
+                new AssetSnapshotReader.SnapshotResult(snap, false, Duration.ofSeconds(90));
+
+        String rendered = renderer.render(result, "Zcash", "coingecko.com/en/coins/zcash", "en");
+
+        assertTrue(rendered.contains("  24h low:  $503.92"),
+                "stale low above the price must render as the price; got: " + rendered);
+        assertTrue(rendered.contains("  24h high: $524.75"),
+                "the high bound is untouched; got: " + rendered);
+    }
+
+    /**
+     * A snapshot with {@code high_24h < price} renders a high equal to the price.
+     */
+    @Test
+    void highBelowPriceClampsHighToPrice() {
+        AssetSnapshotReader.Snapshot snap = new AssetSnapshotReader.Snapshot(
+                "zcash", "coingecko", "usd",
+                new BigDecimal("503.92"),
+                new BigDecimal("12345678.50"),
+                new BigDecimal("502.00"),  // high below the spot
+                new BigDecimal("498.00"),
+                null,
+                new BigDecimal("-2.58"),
+                null,
+                Instant.now().minusSeconds(41),
+                "coingecko.com/en/coins/zcash"
+        );
+        AssetSnapshotReader.SnapshotResult result =
+                new AssetSnapshotReader.SnapshotResult(snap, false, Duration.ofSeconds(90));
+
+        String rendered = renderer.render(result, "Zcash", "coingecko.com/en/coins/zcash", "en");
+
+        assertTrue(rendered.contains("  24h high: $503.92"),
+                "stale high below the price must render as the price; got: " + rendered);
+        assertTrue(rendered.contains("  24h low:  $498.00"),
+                "the low bound is untouched; got: " + rendered);
+    }
+
+    /**
+     * A consistent snapshot (low &lt; price &lt; high) renders its raw bounds
+     * unchanged.
+     */
+    @Test
+    void consistentSnapshotRendersBoundsUnclamped() {
+        AssetSnapshotReader.Snapshot snap = new AssetSnapshotReader.Snapshot(
+                "zcash", "coingecko", "usd",
+                new BigDecimal("503.92"),
+                new BigDecimal("12345678.50"),
+                new BigDecimal("524.75"),
+                new BigDecimal("498.00"),
+                null,
+                new BigDecimal("-2.58"),
+                null,
+                Instant.now().minusSeconds(41),
+                "coingecko.com/en/coins/zcash"
+        );
+        AssetSnapshotReader.SnapshotResult result =
+                new AssetSnapshotReader.SnapshotResult(snap, false, Duration.ofSeconds(90));
+
+        String rendered = renderer.render(result, "Zcash", "coingecko.com/en/coins/zcash", "en");
+
+        assertTrue(rendered.contains("  24h high: $524.75\n  24h low:  $498.00"),
+                "consistent bounds render raw; got: " + rendered);
+    }
+
     @Test
     void staleMarker() {
         // Snapshot older than 2 * refresh_interval → stale marker fires
