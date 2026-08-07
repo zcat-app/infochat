@@ -78,7 +78,15 @@ substitute for the module boundary.
   silently, never "fold in" new scope.
 - **Comment hygiene.** Inside classes the diff touches: remove stale or
   meaningless comments; do NOT add comments that restate the code; add
-  comments only for business logic, a non-obvious decision, or a trap.
+  comments only for business logic, a non-obvious decision, or a trap —
+  brief, current-truth, javadoc included; detail and history are
+  referenced (spec section, design/analysis doc), never retold
+  (engineering-rules §11).
+- **Spec edits land by approval.** If the diff will touch `docs/spec/**`,
+  present the exact proposed text with plain-English reasoning and wait
+  for the user's explicit yes BEFORE editing (engineering-rules §12) —
+  even when `acceptance:` lists the amendment. New spec prose is
+  rule-text only: no dates, ticket IDs, or report citations.
   Collect suggested renames (methods, variables, parameters, fields,
   classes) — they land in the commit body under `Renames:`. Before the
   verify, self-check the comment cap: `git diff $(git merge-base main HEAD)

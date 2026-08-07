@@ -75,7 +75,7 @@ Paths above are repo-relative unless prefixed with `/`.
 
 ### SPEC-TRUTHNESS-CHECK
 Did the diff implement the spec sections the ticket cites — semantically,
-not literally? Three directions:
+not literally? Three directions, plus a style leg:
 - Spec → diff: every behavioral promise in the cited sections that the
   ticket claims, present in the diff.
 - Ticket → spec: the ticket must not have bent the spec to the
@@ -84,6 +84,12 @@ not literally? Three directions:
   spec amendments).
 - Diff → spec: the diff does the spec thing; anything adjacent that the
   spec does not mention is SCOPE territory.
+- Spec prose style (engineering-rules §12): new or amended spec text
+  states rules only — no dates, ticket IDs, or report citations; journal
+  content in new spec prose is a FAIL with the offending lines named.
+  The mechanical report must record the user's approval of the exact
+  wording; a missing record is a WARN (approval may have happened in
+  chat), not a FAIL.
 
 ### SECURITY-CHECK
 Adversarial lens: audit the diff against the threat model's commitments.
@@ -108,8 +114,10 @@ downgrade to WARN or PASS.
   name the better alternative (this is the implementor's `Renames:`
   material).
 - Comments: the diff's comments — new ones must carry business logic, a
-  decision, or a trap; surviving old ones must not state the obvious or
-  restate the code. Removed comments are fine.
+  decision, or a trap, briefly and as current truth; javadoc states the
+  contract and points at the spec or design/analysis doc rather than
+  retelling history (engineering-rules §11). Surviving old ones must not
+  state the obvious or restate the code. Removed comments are fine.
 - Structure: the diff must not contort the code to avoid touching a file
   (the old budget-gaming smell) and must not introduce obscure inner
   classes or indirection with no purpose.

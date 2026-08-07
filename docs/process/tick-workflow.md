@@ -48,12 +48,15 @@ lens, and findings must survive falsification before they are reported.
    evidence; bookkeeping gates that produced refines without findings
    (`files_budget`, `files_scope` membership, negative-space) are not
    re-invented here.
-8. **Comments carry meaning, and are budgeted.** Within classes a diff
-   touches, the implementor removes stale or meaningless comments and
-   proposes better names. Comments survive only when they carry business
-   logic, a decision, or a trap that is not visible in the code. New
-   rationale is capped at 3 lines per call site; overflow moves to the
-   ticket or the decisions log and is cited by its stable anchor.
+8. **Comments carry meaning, and are budgeted.** Code self-documents
+   first; a comment earns its place only where genuinely complex logic
+   cannot be simplified away (engineering-rules §11). Within classes a
+   diff touches, the implementor removes stale or meaningless comments
+   and proposes better names. Comments survive only when they carry
+   business logic, a decision, or a trap that is not visible in the
+   code, stated briefly and as current truth — history and detail move
+   to the ticket, the analysis, or the decisions log and are cited by
+   one stable pointer. New rationale is capped at 3 lines per call site.
 
 ## Surfaces
 
@@ -241,10 +244,20 @@ ticket for `--parallel`. `migration_touch: true` still serializes.
   "don't improve comments").** Within classes the diff already touches, the
   implementor removes comments that state the obvious, restate the code,
   or are stale; adds comments ONLY for business logic, a non-obvious
-  decision, or a trap; and records suggested renames of methods,
+  decision, or a trap — brief, current-truth, javadoc included, with
+  detail and history referenced (spec section, design/analysis doc),
+  never retold (engineering-rules §11); and records suggested renames of methods,
   variables, parameters, fields, and classes in the commit body under a
   `Renames:` trailer. Renames of identifiers NOT already in the diff are
   out of scope (suggest, don't move).
+- **Spec edits land by approval (standing rule, engineering-rules
+  §12).** A diff touching `docs/spec/**` shows the user the exact
+  proposed text with plain-English reasoning BEFORE the edit lands —
+  even when the ticket's acceptance lists the amendment: the ticket
+  authorizes the work, the user approves the wording. The driver records
+  the approval in the round's mechanical report so the gate can see it.
+  New spec prose is rule-text only: no dates, ticket IDs, or report
+  citations.
 - `mvn verify` from the repo root, full suite, captured to
   `target/tick-test-<ID>-r<round>.log` — written to `.scratch/` first and
   copied to `target/` after the build, because `mvn clean` deletes the

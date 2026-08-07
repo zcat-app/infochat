@@ -5,10 +5,10 @@ metadata:
   type: feedback
 ---
 
-User direction (2026-08-07, mid-M1-789), to be folded into the rule docs
-(engineering rules, CLAUDE.md §Coding style, tick comment-hygiene rule)
-AFTER M1-789 lands — the adaptation itself is a process change the user
-reviews:
+User direction (2026-08-07, mid-M1-789). Folded into the rule docs the
+same day: engineering-rules §11 (comments) and §12 (spec), with matching
+text in tick-workflow.md, tick-reviewer-prompt.md, analyst-prompt.md,
+the tick start/review subcommands, and CLAUDE.md.
 
 - Comments are a comprehension aid for logic that cannot be simplified
   away (business logic, a non-obvious decision, a trap). They are not a

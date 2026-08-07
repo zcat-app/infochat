@@ -123,6 +123,18 @@ A `FAIL` on `TEST-INTEGRITY-CHECK` is never `REWORK`-able by the developer alone
 - **Tests are controls too.** An assertion that incidentally pins a security property (cross-adapter non-leakage, per-scope isolation) is load-bearing beyond its test name. Retargeting it onto a different code path silently removes coverage from the path users actually take; retargeting it onto a stub whose output cannot discriminate makes it vacuous. When a diff moves an assertion, say which property it was pinning and confirm the property is still pinned *on the default path*.
 - The reviewer applies this **narrowly and only to paths the diff actually reroutes** — it is not a licence to demand audits of untouched code. Where the ticket's acceptance enumerates the carried-over controls, the existing `ACCEPTANCE-CHECK` covers it; where the diff plainly drops a `sanitize` / audit / authz call that the removed lines show existed, that is a REWORK item citing both file:line pairs.
 
+## §11 Comments are a comprehension aid, not documentation
+
+- Code self-documents first: names and structure carry the meaning. A comment earns its place only where genuinely complex logic cannot be simplified away — business logic, a non-obvious decision, a trap.
+- A comment states current truth, briefly. Javadoc states the contract. Neither retells history — no chronicle of tickets, audits, or how the code came to be. Detail lives in the spec section or the design/analysis document; the comment points at it with one stable reference instead of summarizing it.
+- A stale comment is worse than none: it keeps asserting a premise the code may have stopped satisfying. Touching code means re-reading its comments as claims about the NEW code, not as prose near it.
+- Longer comments are the rare exception and need a reason the reader would accept. The anti-pattern is clean-code-done-wrong: stories as identifiers, or stripping a comment that guards a real trap.
+
+## §12 The spec changes by approval and states rules only
+
+- Any edit under `docs/spec/**` is shown to the user before it lands: the exact proposed text and a plain-English account of what commitment it adds, removes, or changes. An explicit yes follows; only then does the edit land. A ticket whose acceptance lists an amendment authorizes the work — the user still approves the wording.
+- Spec prose states what the system promises, nothing else: no dates, no ticket IDs, no references to redteam, audit, or live-test reports. A rule's motivation and history belong in the decision register, the ticket, or the analysis document. Older spec text carries such citations; they are legacy, not license, and cleaning them up is its own change, never a rider on an unrelated one.
+
 ---
 
 ## When to update this file

@@ -96,6 +96,13 @@ the implementation. Instead, finish the analysis document through the
 between a spec amendment (the amendment becomes a `spec:` ticket first) and
 dropping the problem.
 
+When a ticket's approach includes a spec amendment that rides the ticket's
+diff (the M1-779-precedent shape, not a SPEC-GAP), draft it as rule-text
+only — no dates, ticket IDs, or report citations in the spec prose; the
+analysis document carries the history (engineering-rules §12). The ticket's
+acceptance item for the amendment authorizes the work; the exact wording
+goes to the user for approval at implementation time.
+
 ---
 
 ## Read list (order)

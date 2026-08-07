@@ -26,6 +26,10 @@ re-audit loop and no code-reviewer.
      touched files
    - any path matching an `out_of_scope` entry (grep the diff's paths)
    - the test-log path + mtime, and whether any staged-file mtime is newer
+   - if the diff touches `docs/spec/**`: the user-approval evidence for
+     the exact amendment wording (what was shown, when approved) — the
+     gate's SPEC-TRUTHNESS style leg checks this line exists
+     (engineering-rules §12)
    - snapshot this round's working tree FIRST: `s=$(git stash create); echo
      "${s:-$(git rev-parse HEAD)}" > .scratch/tick-review-<ID>-r<round>.tree`.
      Rounds are not committed, so there is no prior HEAD to diff against;
