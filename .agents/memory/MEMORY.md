@@ -20,6 +20,8 @@ and this store is the shared one both worlds read.
 
 ## Process and workflow
 
+- [Spec edits need approval; spec is no journal](spec-edits-need-approval-no-journal.md) — show the exact docs/spec/ text with plain-English reasoning and wait for a yes, even when the ticket's acceptance lists the amendment; new spec text states the rule only — no dates, ticket IDs, or report citations.
+- [Comments on a diet](comments-on-a-diet.md) — comments aid genuinely complex logic only; code self-documents, javadoc stays short and references spec/design docs instead of retelling history; long comments are the rare exception; rule-doc adaptation scheduled after M1-789.
 - [The /tick flow (analysis-first) supersedes /m1-tick](tick-flow-exists.md) — the flow for NEW work (/m1-tick deprecated 2026-08-06, still invocable for its existing board): reproduction gate + mandatory analyst gate at draft time, hurdle-report discipline, one merged review gate with falsification duty, files_budget abolished; never mix flows on one ticket.
 - [Relocated controls don't travel](relocated-controls-dont-travel.md) — a diff that reroutes a path drops that path's INCIDENTAL controls (sanitize, audit row, the unit they operate on, tests that pinned a security property); invisible to the suite and to review, so enumerate them in `acceptance:` at authoring time. Engineering-rules §10.
 - [Enumerate a census by invocation, not output token](census-enumerate-by-invocation.md) — a label-based grep misses bare-content fields, so each plan pass finds a different subset; two passes finding different file sets means decompose, not refine again.
