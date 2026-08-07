@@ -46,7 +46,8 @@ and this store is the shared one both worlds read.
 
 ## Build, test and CI mechanics
 
-- [mvn -Dtest filtering is blocked by a tripwire](mvn-dtest-filter-blocked-by-tripwire.md) — cross-module `-Dtest`/`-Dit.test` always fails (parent POM `failIfNoTests=true`); targeted runs are module-scoped and UNFILTERED.
+- [mvn -Dtest filtering is blocked by a tripwire](mvn-dtest-filter-blocked-by-tripwire.md) — cross-module `-Dtest` always fails (parent POM `failIfNoTests=true`); IT-only filtering IS legal (`-Dit.test` + `-Dfailsafe.failIfNoSpecifiedTests=false`, never `-Dtest`), otherwise module-scoped and UNFILTERED.
+- [Comment-cap: point-edit comment blocks, never rewrap](comment-cap-point-edit-comment-blocks.md) — tick-comment-cap counts runs of ADDED comment lines and removed lines don't break a run, so rewrapping a 4+ line javadoc/comment block trips the cap; keep untouched lines byte-identical as context.
 - [Clean-verify monitoring](clean-verify-monitoring.md) — pause the live stack for the whole batch, launch the verify detached, never gate a poll loop on a self-matching `pgrep`.
 - [Full-suite timing flakes](full-suite-timing-flakes.md) — three flake classes, all fixed by construction; a red in these is now a REAL regression. The hazard pattern: a supervised subprocess stand-in that dies at launch runs crash recovery during your test.
 - [A green suite can be an environmental accident](green-suite-can-be-environmental-accident.md) — an unstubbed SPI passes while a real local service happens to answer; the tell is a stub with zero calls.

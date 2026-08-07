@@ -11,7 +11,7 @@ require a different procedure, this file is wrong and the procedure wins.
 Every tool column was verified empirically against the real binary — **opencode
 1.18.3** and **codex-cli 0.144.6** on 2026-07-19, **kimi-code 0.29.0** on
 2026-07-22, **kimi-code 0.31.1** on 2026-07-31 (§6.3 refresh: agent profiles,
-`run-gate.sh`). Discovery, agent resolution, config loading, and the gotchas in
+`run-gate.sh`), **kimi-code 0.34.0** (§8 6f: native in-session gate). Discovery, agent resolution, config loading, and the gotchas in
 §6.1/§6.2/§6.3 were measured, not read from docs. Two published claims turned
 out false against the real binaries (noted in place). The step not yet run on
 every tool is a live end-to-end gate (§8), which costs a real model call.
@@ -35,19 +35,20 @@ everywhere.
 
 ## 2. Gate-agent bindings
 
-Five gate agents exist: `code-reviewer`, `plan-writer`, `threat-actor`,
-`review-synthesizer`, `senior-developer`. Their roles and constraints are
+Six gate agents exist: `code-reviewer`, `plan-writer`, `threat-actor`,
+`review-synthesizer`, `senior-developer`, `tick-reviewer` (the /tick flow's
+single merged gate). Their roles and constraints are
 single-sourced in `.claude/agents/<name>.md`; their operating instructions
 arrive via the rendered prompt (primitive 2), which is why the per-tool
 definitions can stay thin pointers. The binding pattern is identical for all
-five:
+six:
 
 | Harness | Definition read | Invocation |
 |---|---|---|
 | Claude Code (native) | `.claude/agents/<name>.md` | the skill spawns the agent with the stub prompt below — status quo |
 | opencode | `.opencode/agent/<name>.md` (**`mode: all`** — see §6.1(c)) | Task-tool routing or `@<name>` mention with the stub prompt, or headless (§3) |
 | Codex CLI | **none — no repo-shippable agent definition exists** (§6.2) | `spawn_agent` with the stub prompt, or headless `codex exec` (§3) |
-| Kimi Code | `.agents/agents/<name>.md` (thin pointer + `tools` allowlist — §6.3) | headless `kimi -p` via `scripts/run-gate.sh` (§3) |
+| Kimi Code | `.agents/agents/<name>.md` (thin pointer + `tools` allowlist — §6.3) | the native in-session subagent with the stub prompt when the installed build exposes it (§8 6f); otherwise headless `kimi -p` via `scripts/run-gate.sh` (§3) |
 | Generic (any agent) | none needed | any FRESH session/process of a capable model, given the stub prompt |
 
 Codex has no per-agent definition because its spawned agents are deliberately
@@ -544,7 +545,7 @@ Codex CLI (steps 4–5 VERIFIED on 0.144.6, 2026-07-19):
    lands, and only the verdict path changed. (Not yet run — this host has no
    Codex credentials; `codex doctor` reports the auth state.)
 
-Kimi Code (steps 6a–6d VERIFIED on 0.29.0, 2026-07-22):
+Kimi Code (steps 6a–6d VERIFIED on 0.29.0, 2026-07-22; 6e on 0.31.1; 6f on 0.34.0):
 6a. ✅ Auth — `kimi provider list` prints a `Default model:` line. `kimi doctor`
     is NOT a substitute (§6.3).
 6b. ✅ Skill discovery — a same-named skill planted in both `.claude/skills/`
@@ -571,6 +572,17 @@ Kimi Code (steps 6a–6d VERIFIED on 0.29.0, 2026-07-22):
     `run-gate.sh --agent code-reviewer` loaded the profile, wrote the verdict
     to the exact absolute path, and reported `contamination=none`; a relative
     `--prompt` is refused with exit 1.
+6f. ✅ Native in-session gate (0.34.0): the build exposes the gate
+    agents as native subagent types, so `/tick review` spawned
+    `tick-reviewer` in-session with the standard stub — no `run-gate.sh`, no
+    headless process. On the M1-788 round-1 review (rendered prompt per
+    primitive 2, all paths absolute): the agent read the prompt and every
+    named input fresh-context, wrote the verdict to the exact
+    `.scratch/tick-review-M1-788-r1.txt` path, replied in the four-line
+    format, and `git status --porcelain` showed only the expected artifacts.
+    `run-gate.sh` stays the fallback for builds without the native type and
+    the process-boundary/CI path (§3).
+
 
 Any tool:
 7. Drive `/m1-tick start` (via the `.agents/skills/m1-tick` wrapper) on a
