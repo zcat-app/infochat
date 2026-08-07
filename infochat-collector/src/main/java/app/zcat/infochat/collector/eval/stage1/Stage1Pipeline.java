@@ -299,13 +299,33 @@ public class Stage1Pipeline {
         String entityDecoded = StringEscapeUtils.unescapeHtml4(safeBody);
         String normalized = unicodeNormalize(entityDecoded);
 
-        // One deadline and one match allowance for the whole call. Both
-        // scans share this instance, so a body that survives the first
-        // scan cannot buy itself a second full budget (M1-785).
-        ScanBudget budget = new ScanBudget(regexTimeoutMs, maxMatches);
         try {
-            List<Match> matches = findAllMatchesUnderWatchdog(normalized, budget);
-            return handleSuccess(postId, postUid, postFetchedAt, normalized, matches, budget);
+            ConvertedBody converted = convertAndRescan(normalized, List.of());
+            List<QuarantineDao.QuarantineRow> rowsToInsert =
+                new ArrayList<>(converted.redactions().size());
+            for (Redaction redaction : converted.redactions()) {
+                rowsToInsert.add(new QuarantineDao.QuarantineRow(
+                    postId, postUid, postFetchedAt,
+                    redaction.ruleId(), redaction.start(), redaction.end(),
+                    redaction.span(), redaction.placeholderId()));
+            }
+            boolean flagged = !rowsToInsert.isEmpty();
+            // The transaction starts only AFTER the conversion: a
+            // sanitizer throw must unwind before any write, and the
+            // inserts and the UPDATE share one transaction so a crash
+            // cannot leave quarantine rows against an unwritten body
+            // (the "post.body's placeholders match quarantine rows"
+            // consistency property). post.status stays 'RAW'.
+            TransactionHelper.inTransaction(dataSource, "Stage1Pipeline", conn -> {
+                for (QuarantineDao.QuarantineRow row : rowsToInsert) {
+                    quarantineDao.insert(conn, row);
+                }
+                updatePostBodyAndFlags(conn, postId, postFetchedAt,
+                    converted.storedBody(), flagged);
+            });
+            // originalBody stays `normalized`: Stage 2 judges the
+            // pre-redaction text (docs/spec/security.md §Ingest pipeline).
+            return new Stage1Result(normalized, converted.storedBody(), flagged, false);
         } catch (RegexInterruptedException ex) {
             return handleWatchdogAbort(postId, postUid, postFetchedAt, normalized);
         } catch (MatchOverflowException ex) {
@@ -324,7 +344,7 @@ public class Stage1Pipeline {
      * apply on the ingest path (per docs/spec/security.md §Ingest
      * pipeline parenthetical).
      */
-    private static String unicodeNormalize(String body) {
+    static String unicodeNormalize(String body) {
         String nfkc = Normalizer.normalize(body, Normalizer.Form.NFKC);
         // The bidi/zero-width strip is shared with the title/url
         // normalization (IngestTextNormalizer is the single declaration
@@ -395,31 +415,48 @@ public class Stage1Pipeline {
     }
 
     /**
-     * Success path: write quarantine rows for every match, build
-     * the redacted body, UPDATE post — all in one transaction so a
-     * crash between the quarantine inserts and the {@code stage1_done}
-     * flip cannot orphan quarantine rows for the rehydrator to
-     * re-process. {@code post.status} stays {@code 'RAW'}.
+     * Convert-plus-scan core shared with the M1-786 remediation job:
+     * first-pass scan and placeholder redaction of {@code normalized},
+     * OWASP parse down to plain text, canonicalize, then a second scan
+     * over the exact string to be stored with its own redaction — all
+     * under one {@link ScanBudget}, so a body that survives the first
+     * scan cannot buy itself a second full budget (M1-785). Returns the
+     * string to store plus one {@link Redaction} per match; the caller
+     * owns the transaction and maps each redaction to its recording
+     * shape. Throws {@link RegexInterruptedException},
+     * {@link MatchOverflowException} or {@link SanitizerFailedException}
+     * for the caller's fail-closed handling.
+     *
+     * <p>{@code protectedPlaceholderIds} are {@code [REDACTED:<id>]}
+     * markers ALREADY in the input — reachable only on the remediation
+     * path, where the stored body may carry an earlier quarantine's
+     * marker and one altered byte makes {@code approve_quarantine}'s
+     * literal replace a silent no-op; {@link #process} passes
+     * {@link List#of()} because a fresh Stage 1 input carries none.
+     * Both scans split matches around them so no emitted segment covers
+     * a marker byte (M1-786 P7, reusing M1-787's straddle rule on the
+     * first pass too).
      */
-    private Stage1Result handleSuccess(UUID postId, String postUid, Instant postFetchedAt,
-                                       String normalized, List<Match> matches, ScanBudget budget) {
-        // Build redacted body and one quarantine row per match.
+    ConvertedBody convertAndRescan(String normalized, List<String> protectedPlaceholderIds) {
+        ScanBudget budget = new ScanBudget(regexTimeoutMs, maxMatches);
+        List<Match> matches = splitMatchesAroundPlaceholders(
+            findAllMatchesUnderWatchdog(normalized, budget), normalized, protectedPlaceholderIds);
+
+        // Build redacted body and one redaction per match.
         // Replace right-to-left to keep earlier-match offsets stable.
-        // An empty match list is the clean path: no rows, no
+        // An empty match list is the clean path: no redactions, no
         // replacements, and the sanitize below still runs — Stage 1's
         // HTML-safety guarantee applies to every post, matched or not.
         StringBuilder redacted = new StringBuilder(normalized);
-        List<QuarantineDao.QuarantineRow> rowsToInsert = new ArrayList<>(matches.size());
-        List<String> firstPassPlaceholderIds = new ArrayList<>(matches.size());
+        List<Redaction> redactions = new ArrayList<>(matches.size());
+        List<String> secondPassProtectedIds = new ArrayList<>(protectedPlaceholderIds);
         for (int i = matches.size() - 1; i >= 0; i--) {
             Match match = matches.get(i);
             String placeholderId = PlaceholderIds.next();
             redacted.replace(match.start(), match.end(), PlaceholderIds.marker(placeholderId));
-            firstPassPlaceholderIds.add(placeholderId);
-            rowsToInsert.add(new QuarantineDao.QuarantineRow(
-                postId, postUid, postFetchedAt,
-                match.ruleId(), match.start(), match.end(),
-                match.span(), placeholderId));
+            secondPassProtectedIds.add(placeholderId);
+            redactions.add(new Redaction(
+                match.ruleId(), match.start(), match.end(), match.span(), placeholderId));
         }
 
         // OWASP-parse the placeholder-redacted body down to plain
@@ -429,11 +466,7 @@ public class Stage1Pipeline {
         // reduced to its text. The safeSanitize wrapper re-throws as
         // SanitizerFailedException on RuntimeException so the
         // outer dispatcher in process() takes the fail-closed
-        // branch — and IMPORTANT, the throw must happen BEFORE the
-        // transaction starts so we never commit half a write (the
-        // quarantine inserts would land but the post.body UPDATE
-        // would not, leaving the consistency property
-        // "post.body's placeholders match quarantine rows" broken).
+        // branch.
         String sanitizedRedacted = safeSanitize(redacted.toString());
 
         // Canonicalize the parse output (M1-788): the parse decodes
@@ -447,30 +480,17 @@ public class Stage1Pipeline {
         // moved — rules 5 and 6 need the pre-parse shape (class doc).
         List<Match> secondPassMatches = splitMatchesAroundPlaceholders(
             findAllMatchesUnderWatchdog(canonicalRedacted, budget),
-            canonicalRedacted, firstPassPlaceholderIds);
+            canonicalRedacted, secondPassProtectedIds);
 
         StringBuilder finalBody = new StringBuilder(canonicalRedacted);
         for (int i = secondPassMatches.size() - 1; i >= 0; i--) {
             Match match = secondPassMatches.get(i);
             String placeholderId = PlaceholderIds.next();
             finalBody.replace(match.start(), match.end(), PlaceholderIds.marker(placeholderId));
-            rowsToInsert.add(new QuarantineDao.QuarantineRow(
-                postId, postUid, postFetchedAt,
-                match.ruleId(), match.start(), match.end(),
-                match.span(), placeholderId));
+            redactions.add(new Redaction(
+                match.ruleId(), match.start(), match.end(), match.span(), placeholderId));
         }
-
-        boolean flagged = !rowsToInsert.isEmpty();
-        String storedBody = finalBody.toString();
-        TransactionHelper.inTransaction(dataSource, "Stage1Pipeline", conn -> {
-            for (QuarantineDao.QuarantineRow row : rowsToInsert) {
-                quarantineDao.insert(conn, row);
-            }
-            updatePostBodyAndFlags(conn, postId, postFetchedAt, storedBody, flagged);
-        });
-        // originalBody stays `normalized`: Stage 2 judges the
-        // pre-redaction text (docs/spec/security.md §Ingest pipeline).
-        return new Stage1Result(normalized, storedBody, flagged, false);
+        return new ConvertedBody(finalBody.toString(), redactions);
     }
 
     /**
@@ -688,8 +708,15 @@ public class Stage1Pipeline {
 
     private static void updatePostBodyAndFlags(Connection conn, UUID postId, Instant postFetchedAt,
                                                String newBody, boolean flagged) throws SQLException {
+        // Every Stage 1 body write IS the plain-text representation, so
+        // it stamps the V79 remediation marker with it — an unstamped
+        // fresh row would enter the M1-786 job's batch, whose
+        // unescape+parse conversion is not a no-op on new-format text.
+        // now() is an audit-write stamp; the marker's NULL-ness, never
+        // its value, gates pickup (engineering-rules §9 exemption).
         final String sql =
-            "UPDATE post SET body = ?, stage1_flagged = ?, stage1_done = TRUE "
+            "UPDATE post SET body = ?, stage1_flagged = ?, stage1_done = TRUE, "
+                + "       body_remediated_at = now() "
                 + "WHERE id = ? AND fetched_at = ?";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, newBody);
@@ -702,10 +729,14 @@ public class Stage1Pipeline {
 
     private static void updatePostQuarantined(Connection conn, UUID postId, Instant postFetchedAt,
                                               String wholeBodyPlaceholder) throws SQLException {
+        // The whole-body placeholder is plain ASCII text — the
+        // plain-text representation — so the fail-closed paths stamp
+        // the V79 marker too (see updatePostBodyAndFlags).
         final String sql =
             "UPDATE post SET body = ?, status = 'QUARANTINED', "
                 + "       stage1_done = TRUE, "
-                + "       status_changed_at = now() "
+                + "       status_changed_at = now(), "
+                + "       body_remediated_at = now() "
                 + "WHERE id = ? AND fetched_at = ?";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, wholeBodyPlaceholder);
@@ -805,6 +836,30 @@ public class Stage1Pipeline {
         SanitizerFailedException(Throwable cause) {
             super("Stage 1 sanitizer raised an exception", cause);
         }
+    }
+
+    /**
+     * The convert-plus-scan core's output (M1-786): the plain-text body
+     * to store and one {@link Redaction} per match (empty on the clean
+     * path — "flagged" is simply a non-empty redaction list). Kept
+     * target-agnostic so the remediation job drives the SAME conversion
+     * the live pipeline uses (P11, never a second decoder); each caller
+     * maps the redactions to its own recording shape.
+     */
+    record ConvertedBody(String storedBody, List<Redaction> redactions) {
+    }
+
+    /**
+     * One match the core redacted: the rule id, the span's UTF-16
+     * offsets in the string that scan ran over (the pre-parse form for
+     * first-pass matches, the canonical stored form for second-pass),
+     * the verbatim span, and the placeholder id woven into the body at
+     * that spot. {@link #process} and the remediation job's post path
+     * record each redaction as a quarantine row; the job's snapshot
+     * path cannot — saved_post carries no post locator columns — and
+     * logs instead.
+     */
+    record Redaction(String ruleId, int start, int end, String span, String placeholderId) {
     }
 
     /**

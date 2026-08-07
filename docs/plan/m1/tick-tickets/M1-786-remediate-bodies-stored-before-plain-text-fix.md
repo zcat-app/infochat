@@ -1,14 +1,12 @@
 ---
 id: M1-786
 title: "Remediate post and saved_post bodies stored before the plain-text fix"
-status: pending
+status: done
 created: 2026-08-06
 last_updated: 2026-08-07
 flow: tick
 reproduction: Stage1BodyRemediationIT.storedBodyWithMarkupAndEntitiesBecomesPlainText
-              — to-be-written: the seed rows need M1-784's fixed pipeline, so
-              this test cannot exist until that lands; `start` writes it and
-              runs it RED first. It seeds a post row and a saved_post
+              — seeds a post row and a saved_post
               row whose body is the pre-fix stored form
               (<p>Hello <a href="https://x.test">link</a></p> and
               We&#39;re working on it!!) and asserting both read back as
@@ -67,6 +65,11 @@ acceptance:
   - Stage1BodyRemediationIT.savedPostSnapshotIsRemediated passes (P12) — the
     /saved surface the defect was observed on renders saved_post.body, which no
     post-retention partition drop ever reaches
+  - Stage1BodyRemediationIT.aSavedPostChangedUnderTheJobRollsBackAndRetriesNextTick
+    passes (round-2 refine) — the saved_post UPDATE is guarded on the body the
+    batch read (`AND body IS NOT DISTINCT FROM ?`), so an unsave/re-save racing
+    the job's batch rolls the write back and the row is retried against the
+    current body, never overwritten with a stale conversion
   - mvn verify from the repo root is green
 test_plan:
   adds:
@@ -81,6 +84,28 @@ spec_refs:
 decision_refs:
   - D13
   - D20
+reviews:
+  - round: 1
+    date: 2026-08-07
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS FAIL, SECURITY FAIL, TEST-ADEQUACY PASS, MAINTAINABILITY WARN, SCOPE PASS"
+    diff_stats: "8 files changed, 894 insertions(+), 59 deletions(-)"
+    rework_items: 2
+    verdict_file: .scratch/tick-review-M1-786-r1.txt
+  - round: 2
+    date: 2026-08-07
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY WARN, SCOPE PASS"
+    diff_stats: "8 files changed, 984 insertions(+), 59 deletions(-)"
+    rework_dispositions: "item 1 SATISFIED, item 2 SATISFIED"
+    verdict_file: .scratch/tick-review-M1-786-r2.txt
+  - round: 3
+    date: 2026-08-07
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY WARN, SCOPE PASS"
+    diff_stats: "8 files changed, 1066 insertions(+), 60 deletions(-)"
+    rework_dispositions: "refine item (saved_post stale-read guard) SATISFIED; round 3 of cap 2 ran under the user's escalate-refine mandate (see Review observations)"
+    verdict_file: .scratch/tick-review-M1-786-r3.txt
 ---
 
 # M1-786: Remediate post and saved_post bodies stored before the plain-text fix
@@ -173,7 +198,11 @@ Stage 1 writes is a body Stage 1 scanned).
 5. Same loop shape for `saved_post` (P12). Its rows carry no `fetched_at`
    partition key and no quarantine rows of their own, so a snapshot whose scan
    matches is redacted in place and recorded; the underlying post is never
-   touched from this path.
+   touched from this path. Both tables' writes are guarded on the body the
+   batch read (`AND body IS NOT DISTINCT FROM ?`, 0-row → rollback → retry
+   next tick): a concurrent writer — an `approve_quarantine` restore on a
+   post, an unsave/re-save on a snapshot — must never be overwritten with a
+   stale conversion (round-2 refine; the post half was round-1 Finding 1).
 
 **Controls to preserve (engineering-rules §10)**
 
@@ -280,3 +309,37 @@ because of its name):
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-786-*.md
 ```
+
+## Round 1 rework
+
+REWORK ITEMS (verbatim from `.scratch/tick-review-M1-786-r1.txt`):
+
+1. Finding 1: guard the job's post UPDATE with the pre-conversion body
+   (`AND body IS NOT DISTINCT FROM ?`) and roll back on a 0-row update
+   so the row is retried against the current body
+   (Stage1BodyRemediationJob.java:215), verified by
+   Stage1BodyRemediationIT.aBodyChangedUnderTheJobRollsBackAndRetriesNextTick
+   asserting body unchanged / marker NULL / no quarantine rows after
+   the stale write, then conversion of the current body after onTick().
+2. Finding 2: split the saved_post grant in
+   V79__stage1_body_remediation_marker.sql:51 into SELECT plus
+   column-scoped `GRANT UPDATE (body, body_remediated_at)`, verified by
+   `grep -n "GRANT UPDATE (body, body_remediated_at) ON saved_post"
+   infochat-core/src/main/resources/db/migration/V79__stage1_body_remediation_marker.sql`
+   and a green `mvn verify`.
+
+## Review observations
+
+- (Round 1, RECOMMENDED-NEW-TICKET) An admin approve landing BEFORE the
+  job's first visit to a post has its restored span flattened to plain
+  text by the conversion (fail-safe: span text preserved, audit row
+  intact). DECIDE-BEFORE: first production deployment of M1-786.
+  Disposition (user, 2026-08-07): accepted as-is — single-operator
+  instance, no follow-up ticket.
+- (Round 2, RECOMMENDED-NEW-TICKET) `remediateSavedPost` carried no
+  stale-read guard, so an unsave/re-save racing the job's batch (after an
+  admin approve) could leave a re-saved snapshot permanently showing
+  pre-restore text. DECIDE-BEFORE: the job's first production drain.
+  Disposition (user, 2026-08-07): fix in this ticket via the refine arm —
+  the saved_post UPDATE gains the same body guard as the post UPDATE
+  (added acceptance item above), no follow-up ticket.
