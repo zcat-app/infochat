@@ -1,9 +1,11 @@
 ---
 id: M1-776
 title: "Ingest corrupts post body: escaped punctuation and unstripped HTML"
-status: pending
+status: abandoned
 created: 2026-08-06
-last_updated: 2026-08-06
+last_updated: 2026-08-07
+abandoned_reason: decomposed
+replaced_by: [M1-784, M1-785, M1-786, M1-787, M1-788]
 blocked_by: []
 files_budget: 10
 files_scope:

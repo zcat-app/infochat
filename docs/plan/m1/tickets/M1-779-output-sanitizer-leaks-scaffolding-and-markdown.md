@@ -1,9 +1,11 @@
 ---
 id: M1-779
 title: "LLM replies leak prompt scaffolding and markdown to the reader"
-status: pending
+status: abandoned
 created: 2026-08-06
-last_updated: 2026-08-06
+last_updated: 2026-08-07
+abandoned_reason: decomposed
+replaced_by: [M1-789, M1-790, M1-791, M1-792]
 blocked_by: []
 files_budget: 6
 files_scope:
