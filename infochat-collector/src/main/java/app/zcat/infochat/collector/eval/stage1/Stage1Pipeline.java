@@ -22,6 +22,7 @@ import java.sql.Timestamp;
 import java.text.Normalizer;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 import java.util.regex.Matcher;
@@ -91,9 +92,9 @@ import java.util.regex.Matcher;
  *       line breaks, joined text runs). Its output is canonicalized
  *       (NFKC + bidi/zero-width strip) before scan and storage (M1-788).
  *       Hits are redacted and
- *       quarantined like first-pass matches, except a match that
+ *       quarantined like first-pass matches; a match that
  *       straddles an existing {@code [REDACTED:<id>]} marker is
- *       dropped whole so the admin restore keeps matching.</li>
+ *       split around it — each non-marker segment is redacted and recorded.</li>
  *   <li><b>UPDATE post</b> — set {@code stage1_done = true},
  *       {@code stage1_flagged = (any match)}, body to the
  *       plain-text form with any second-pass
@@ -444,7 +445,7 @@ public class Stage1Pipeline {
         // a deeper-encoded payload to literal text only AFTER the first
         // scan ran. Scan what is actually stored (M1-785). Added, never
         // moved — rules 5 and 6 need the pre-parse shape (class doc).
-        List<Match> secondPassMatches = withoutMatchesTouchingAPlaceholder(
+        List<Match> secondPassMatches = splitMatchesAroundPlaceholders(
             findAllMatchesUnderWatchdog(canonicalRedacted, budget),
             canonicalRedacted, firstPassPlaceholderIds);
 
@@ -473,13 +474,15 @@ public class Stage1Pipeline {
     }
 
     /**
-     * Drop any second-pass match overlapping a {@code [REDACTED:<id>]}
-     * the first pass wrote: {@code approve_quarantine} restores by
-     * literal replace, so damaging one byte of a marker turns that
-     * restore into a silent no-op (M1-785 P2). Spans are located from
-     * the ids actually emitted, never by matching bracket text.
+     * Split second-pass matches around the first pass's
+     * {@code [REDACTED:<id>]} markers: {@code approve_quarantine}
+     * restores by literal replace, so no emitted segment may cover a
+     * marker byte — but the payload bytes around the marker still get
+     * their own quarantine row and redaction instead of the whole match
+     * going unrecorded (M1-787); spans are located from the ids actually
+     * emitted, never by matching bracket text.
      */
-    private static List<Match> withoutMatchesTouchingAPlaceholder(
+    private static List<Match> splitMatchesAroundPlaceholders(
             List<Match> candidates, String body, List<String> placeholderIds) {
         if (placeholderIds.isEmpty() || candidates.isEmpty()) {
             return candidates;
@@ -493,17 +496,32 @@ public class Stage1Pipeline {
                 at = body.indexOf(marker, at + marker.length());
             }
         }
+        // Ids arrive in reverse positional order (appended inside the
+        // right-to-left replacement loop); clipping needs ascending
+        // starts.
+        protectedSpans.sort(Comparator.comparingInt(span -> span[0]));
         List<Match> kept = new ArrayList<>(candidates.size());
         for (Match candidate : candidates) {
-            boolean touches = false;
+            int segmentStart = candidate.start();
             for (int[] span : protectedSpans) {
-                if (candidate.start() < span[1] && span[0] < candidate.end()) {
-                    touches = true;
+                if (span[1] <= candidate.start()) {
+                    continue;
+                }
+                if (span[0] >= candidate.end()) {
                     break;
                 }
+                // Overlap: emit the non-marker sub-span before this
+                // marker, then resume after it. Boundary adjacency
+                // (shared endpoint, no shared bytes) emits nothing.
+                if (segmentStart < span[0]) {
+                    kept.add(new Match(candidate.ruleId(), segmentStart, span[0],
+                        body.substring(segmentStart, span[0])));
+                }
+                segmentStart = Math.max(segmentStart, span[1]);
             }
-            if (!touches) {
-                kept.add(candidate);
+            if (segmentStart < candidate.end()) {
+                kept.add(new Match(candidate.ruleId(), segmentStart, candidate.end(),
+                    body.substring(segmentStart, candidate.end())));
             }
         }
         return kept;

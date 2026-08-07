@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 3 |
+| done | 4 |
 | deferred | 0 |
 | abandoned | 0 |
 | **total** | **5** |
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-787 — Straddled second-pass match must keep its row and redaction (complexity: medium, risk: high)
+- M1-786 — Remediate post and saved_post bodies stored before the plain-text fix (complexity: medium, risk: medium)
 
 ---
 
@@ -42,7 +42,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-786 — blocked_by: M1-784 (done), M1-787 (pending), M1-788 (done)
+_(none)_
 
 ---
 
@@ -62,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-788 | Stage 1 must canonicalize the text it stores and second-scans | 2026-08-07 | round 1 APPROVE-WITH-FIXES |
+| M1-787 | Straddled second-pass match must keep its row and redaction | 2026-08-07 | round 1 APPROVE-WITH-FIXES |
 | M1-785 | Stage 1 must scan the body text it stores | 2026-08-07 | round 1 REWORK |
 | M1-784 | Stage 1 must store post.body as plain text | 2026-08-07 | round 2 APPROVE |
 
@@ -88,8 +89,8 @@ ASCII DAG: nodes are ticket IDs (with status in parens), edges are `blocked_by` 
 ```
 M1-785 (done)
   └── M1-784 (done)
-        ├── M1-786 (pending)
-        ├── M1-787 (pending) ← runnable
+        ├── M1-786 (pending) ← runnable
+        ├── M1-787 (done)
         │     └── M1-786 (pending) [see above]
         └── M1-788 (done)
               └── M1-786 (pending) [see above]
