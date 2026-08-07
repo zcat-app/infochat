@@ -1,9 +1,24 @@
 ---
 id: M1-784
 title: "Stage 1 must store post.body as plain text"
-status: pending
+status: done
 created: 2026-08-06
-last_updated: 2026-08-06
+last_updated: 2026-08-07
+reviews:
+  - round: 1
+    date: 2026-08-07
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS WARN, SECURITY WARN, TEST-ADEQUACY FAIL, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "7 files changed, 611 insertions(+), 59 deletions(-)"
+    rework_items: 2
+    verdict_file: .scratch/tick-review-M1-784-r1.txt
+  - round: 2
+    date: 2026-08-07
+    verdict: APPROVE
+    checks: "both round-1 items SATISFIED; reconstructed fix diff independently verified by the reviewer (sha256 re-hash + direct working-tree reads)"
+    diff_stats: "fix hunks: 4 files, +60/-12"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-784-r2.txt
 flow: tick
 reproduction: Stage1BodyTextIT.htmlMarkupDoesNotReachTheBodyColumn
               (plus .blockElementsBecomeLineBreaksRatherThanRunningTogether,
@@ -28,13 +43,16 @@ blocked_by: [M1-785]
 replaces: M1-776
 files_scope:
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/stage1/Stage1Pipeline.java
+  - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/stage1/PlainTextSink.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/stage1/Stage1BodyTextIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/stage1/Stage1PipelineIT.java
   - docs/design/04-security.md
 complexity: medium
 risk: high
 round_cap: 3
 security_relevant: true
 migration_touch: false
+clarity_check: "2026-08-07 pass — citations re-verified post-M1-785 (line drift only, structures intact; second scan now at Stage1Pipeline.java:432-445); Stage1RegexSet rule 6 (```system / <system>) and rule 3 ((?m)^ prefix) confirm both synthesis cases route through the second scan with no new scan code; OWASP 20240325.1 API confirmed (PolicyFactory.apply(HtmlStreamEventReceiver) + HtmlSanitizer.sanitize); no §Census section (N/A, census is M1-786's); analysis pitfalls P4/P5/P6/P7/P9/P13 all present"
 out_of_scope:
   - adding a second HTML library (jsoup or similar) or a hand-rolled
     tag-stripping pass — the OWASP allowlist policy stays the one authority on
@@ -48,8 +66,9 @@ out_of_scope:
     saved_post.body snapshots
   - infochat-provider/**
 acceptance:
-  - Stage1BodyTextIT passes in full (11 of 11) — the reproduction; 8 of those
-    cases fail on main today
+  - Stage1BodyTextIT passes in full (12 of 12 — the 11 reproduction cases, 8
+    of which fail on main today, plus the round-1 rework's
+    whitespace-preservation case)
   - Stage1BodyTextIT.plainTextPunctuationPersistsVerbatim passes and
     .urlQueryStringPersistsAsAWorkingUrl passes (P4) — failure mode: a
     markup-free body must persist byte-identical, with no entity re-encoding
@@ -71,13 +90,25 @@ acceptance:
     sanitizer-exception fail-closed branch of docs/spec/security.md §Failure
     handling still fires through the package-private sanitize seam (P6)
   - grep -rn "M1-776-2026-08-06" infochat-collector/src returns nothing (P13)
+  - Stage1PipelineIT.legitimatelyEscapedProseIsNotOverDecoded passes with its
+    seed deepened one encoding layer (refine 2026-08-07, user-approved): the
+    stored body keeps `&lt;p&gt;` and never `<p>`, assertions byte-identical.
+    Stage 1's two defined decodes are the unescapeHtml4 pre-decode and the
+    OWASP parse whose text the sink now stores, so depth 3 is the seed that
+    discriminates bounded decoding from the fixpoint P10 rejects — the
+    depth-2 seed pinned the removed renderer, not the control
   - mvn verify from the repo root is green
 test_plan:
   adds:
     - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/stage1/Stage1BodyTextIT.java
       (the reproduction, committed by this ticket)
+  modifies:
+    - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/stage1/Stage1PipelineIT.java
+      — ONLY legitimatelyEscapedProseIsNotOverDecoded: seed one encoding
+      layer deeper plus comment/assertion-message wording; both assertions
+      byte-identical (authorized by the 2026-08-07 refine)
   preserves:
-    - all tests currently green on main
+    - all other tests currently green on main
 spec_refs:
   - docs/design/04-security.md §4.2 Layered ingest security
   - docs/spec/security.md §Ingest pipeline
@@ -251,8 +282,9 @@ step 3's control case; P6 → step 2; P7 → step 3's placeholder case; P9 →
 
 ## Definition of done
 
-- All eleven `Stage1BodyTextIT` cases pass, including the three that already
-  pass on `main` and must not regress.
+- All twelve `Stage1BodyTextIT` cases pass — including the round-1 rework's
+  whitespace case and the three that already pass on `main` and must not
+  regress.
 - A markup-free body persists byte-identical — no entity re-encoding, no
   whitespace collapsing.
 - Tags are removed and their text kept; block boundaries and `<br>` become
@@ -316,10 +348,37 @@ Rows already stored keep their current bodies — remediation, including
 `saved_post.body` snapshots, is M1-786. Nothing in `infochat-provider/**` is
 touched.
 
-No pre-existing test is modified. `Stage1BodyTextIT` is added by this ticket;
+One pre-existing test is modified, under the 2026-08-07 refine and nothing
+more: `Stage1PipelineIT.legitimatelyEscapedProseIsNotOverDecoded`'s seed goes
+one encoding layer deeper so the P10 anti-fixpoint pin discriminates the two
+bounded decodes from fixpoint chasing under the plain-text sink; its two
+assertions are byte-identical. The depth-2 seed passed only via the removed
+renderer's re-encoding — the incidental control the M1-776 redteam report
+named, which the analysis's P10 example failed to discriminate. All other
+pre-existing tests are unmodified. `Stage1BodyTextIT` is added by this ticket;
 its javadoc is rewritten to describe the implementation actually built and to
 drop the reference to a redteam file absent from `main`, and no assertion in it
 is weakened.
+
+## Round 1 rework
+
+REWORK ITEMS (verbatim from .scratch/tick-review-M1-784-r1.txt):
+
+1. Finding 1: add a whitespace-preservation case to Stage1BodyTextIT —
+   seed a markup-free body containing a blank line and a two-space run
+   (e.g. "line one\n\nline  three"), process, assert
+   assertEquals(body, selectPostBody(post.id)); evaluated via the new
+   test (suggested: multiLinePlainTextBodyPersistsByteIdentical) green in
+   the round-2 full-suite log, and failing under the
+   text.replaceAll("[ \t\n]+", " ") mutation of PlainTextSink.text().
+2. Finding 2: narrow the second-scan coverage claim in
+   docs/design/04-security.md:62 and the matching bullet at
+   Stage1Pipeline.java:119-124 to "decode products the ASCII rule set can
+   match on the stored string", deferring non-canonical decode products
+   to the §4.2 line-103 disclaimer; evaluated via
+   grep -n "covered by the second scan" docs/design/04-security.md
+   showing the qualified sentence, the CLAUDE.md parity-gate probes
+   staying silent, and the round-2 mvn verify log green.
 
 ## Pre-flight self-check (author-side)
 

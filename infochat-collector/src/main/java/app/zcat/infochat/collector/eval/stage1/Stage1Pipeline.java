@@ -8,6 +8,7 @@ import jakarta.inject.Inject;
 import org.apache.commons.text.StringEscapeUtils;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jspecify.annotations.Nullable;
+import org.owasp.html.HtmlSanitizer;
 import org.owasp.html.PolicyFactory;
 import org.owasp.html.Sanitizers;
 import org.slf4j.Logger;
@@ -61,17 +62,18 @@ import java.util.regex.Matcher;
  *   <li><b>Per-match record + redact</b> — INSERT one
  *       {@code quarantine} row per regex hit; replace the matched
  *       span in the body with {@code [REDACTED:<id>]}.</li>
- *   <li><b>OWASP allowlist HTML sanitize</b> on the redacted body
- *       — strip {@code script}, {@code style}, {@code iframe},
- *       {@code object}, {@code form}, {@code on*} event attributes,
- *       and {@code javascript:} / {@code data:} / {@code file:} URL
- *       schemes. Per §4.2's "Unicode-first, OWASP-last" rationale,
- *       OWASP runs last because its default renderer HTML-entity-
- *       encodes non-ASCII codepoints; running OWASP first would
- *       defeat the upstream NFKC pass on Unicode-obfuscated
- *       payloads. The {@code [REDACTED:[A-Z2-7]{26}]} marker is
- *       pure ASCII non-HTML-significant so OWASP leaves it
- *       intact. The call is wrapped in a try/catch over
+ *   <li><b>OWASP allowlist parse, emitted as plain text</b> on the
+ *       redacted body — strip {@code script}, {@code style},
+ *       {@code iframe}, {@code object}, {@code form}, {@code on*}
+ *       event attributes, and {@code javascript:} / {@code data:} /
+ *       {@code file:} URL schemes; the surviving event stream is
+ *       rendered by {@link PlainTextSink}, so allowlisted tags
+ *       contribute their text only (block boundaries and {@code <br>}
+ *       become single line breaks, attributes are never emitted) and
+ *       {@code post.body} stores plain text per §4.2 step 4
+ *       bullet 3 (M1-784). The {@code [REDACTED:[A-Z2-7]{26}]} marker
+ *       is pure ASCII whitespace-free text so the sink emits it
+ *       byte-exact. The call is wrapped in a try/catch over
  *       {@link RuntimeException}; on failure the pipeline takes the
  *       sanitizer-exception fail-closed branch
  *       ({@link #handleSanitizerException}) which writes
@@ -84,13 +86,15 @@ import java.util.regex.Matcher;
  *       charging the SAME per-post deadline and match allowance as
  *       the first scan (no second budget). The OWASP parse is itself
  *       a decode step: a doubly-encoded payload only turns into
- *       readable text during HTML parsing. Hits are redacted and
+ *       readable text during HTML parsing, and the plain-text emission
+ *       synthesizes structure the first scan could not see (block-close
+ *       line breaks, joined text runs). Hits are redacted and
  *       quarantined like first-pass matches, except a match that
  *       straddles an existing {@code [REDACTED:<id>]} marker is
  *       dropped whole so the admin restore keeps matching.</li>
  *   <li><b>UPDATE post</b> — set {@code stage1_done = true},
  *       {@code stage1_flagged = (any match)}, body to the
- *       OWASP-sanitized form with any second-pass
+ *       plain-text form with any second-pass
  *       {@code [REDACTED:<id>]} markers woven in. {@code post.status} stays
  *       {@code 'RAW'}; the downstream M1-033 / M1-034 workers
  *       advance it from there. The ONLY exceptions are the
@@ -112,14 +116,14 @@ import java.util.regex.Matcher;
  * pre-parse shape only the first scan sees.
  *
  * <ul>
- *   <li><b>OWASP HTML-entity-encodes non-ASCII codepoints.</b> The
- *       library's {@code HtmlStreamRenderer} encodes every char ≥
- *       U+0080 as a numeric entity (e.g. {@code ｉ} → &amp;#65353;).
- *       If OWASP runs before NFKC, the normalizer receives entity-
- *       reference text and cannot decompose the original codepoints.
- *       A Unicode-obfuscated injection ({@code ｉｇｎｏｒｅ previous
- *       instructions}, fullwidth Latin) survives the pipeline
- *       undetected — the exact threat NFKC is supposed to neutralize.</li>
+ *   <li><b>The OWASP parse drops HTML comments outright.</b> The
+ *       lexer discards comment tokens before the policy ever sees
+ *       them, so the comment-hide rule (5) can only fire on the
+ *       pre-parse form the first scan sees — and the parse's entity
+ *       decode is covered by the second scan (M1-785) only for decode
+ *       products the ASCII rule set can match on the stored string;
+ *       non-canonical products fall under §4.2's obfuscation
+ *       disclaimer.</li>
  *   <li><b>OWASP mangles {@code <<<UNTRUSTED>>>} markers.</b> The
  *       library parses these as malformed HTML and strips the
  *       {@code UNTRUSTED} token while escaping the surrounding
@@ -131,12 +135,13 @@ import java.util.regex.Matcher;
  *
  * <p>Running entity-decode FIRST and OWASP LAST on the placeholder-
  * redacted body preserves all four guarantees: entity-encoded
- * injections are exposed to the regex; HTML is sanitized; Unicode
- * is normalized while NFKC can still see the original codepoints;
- * delimiter injection is detected before OWASP gets a chance to
- * mangle the marker shape. The
+ * injections are exposed to the regex; HTML is reduced to sanitized
+ * plain text; Unicode is normalized while NFKC can still see the
+ * original codepoints; delimiter injection is detected before the
+ * parse gets a chance to mangle the marker shape. The
  * {@code [REDACTED:[A-Z2-7]{26}]} placeholder is pure ASCII
- * non-HTML-significant so OWASP leaves it intact. See
+ * whitespace-free text so the plain-text emission carries it
+ * byte-exact. See
  * {@code docs/design/04-security.md} §4.2 for the same rationale
  * at the design-tier.
  *
@@ -228,14 +233,17 @@ public class Stage1Pipeline {
 
     /**
      * OWASP allowlist policy — the §4.2 step 1 whitelist set.
-     * Sanitizers.FORMATTING covers {@code p, br, strong, em, b, i, u};
-     * Sanitizers.BLOCKS covers {@code blockquote, h1-h6, ul, ol, li,
-     * pre, code}; Sanitizers.LINKS covers anchors with http/https
-     * hrefs only (javascript:/data:/file: schemes are stripped by
-     * the LINKS sanitizer's URL filter). The composition strips
-     * {@code script}, {@code style}, {@code iframe}, {@code object},
-     * {@code form}, and every {@code on*} attribute since none of
-     * those are in any of the three named whitelists.
+     * Sanitizers.FORMATTING covers the inline set {@code b, i, font,
+     * s, u, o, sup, sub, ins, del, strong, strike, tt, code, big,
+     * small, br, span, em}; Sanitizers.BLOCKS covers {@code p, div,
+     * h1-h6, ul, ol, li, blockquote}; Sanitizers.LINKS covers anchors
+     * with http/https hrefs only (javascript:/data:/file: schemes are
+     * stripped by the LINKS sanitizer's URL filter). The composition
+     * strips {@code script}, {@code style}, {@code iframe},
+     * {@code object}, {@code form}, and every {@code on*} attribute
+     * since none of those are in any of the three named whitelists.
+     * {@link PlainTextSink}'s block-boundary set is derived from
+     * BLOCKS' element list and must move with it.
      */
     private static final PolicyFactory OWASP_POLICY =
         Sanitizers.FORMATTING
@@ -411,11 +419,11 @@ public class Stage1Pipeline {
                 match.span(), placeholderId));
         }
 
-        // OWASP-sanitize the placeholder-redacted body. The
-        // [REDACTED:[A-Z2-7]{26}] placeholders are pure ASCII non-
-        // HTML-significant characters, so OWASP leaves them intact;
-        // any remaining HTML markup in the body is sanitized as
-        // designed. The safeSanitize wrapper re-throws as
+        // OWASP-parse the placeholder-redacted body down to plain
+        // text (PlainTextSink). The [REDACTED:[A-Z2-7]{26}]
+        // placeholders are pure ASCII whitespace-free text, so the
+        // sink emits them byte-exact; any remaining HTML markup is
+        // reduced to its text. The safeSanitize wrapper re-throws as
         // SanitizerFailedException on RuntimeException so the
         // outer dispatcher in process() takes the fail-closed
         // branch — and IMPORTANT, the throw must happen BEFORE the
@@ -594,7 +602,9 @@ public class Stage1Pipeline {
     }
 
     /**
-     * Sanitizer-invocation seam. Production delegates to {@code OWASP_POLICY}.
+     * Sanitizer-invocation seam. Production runs the OWASP allowlist
+     * parse with a {@link PlainTextSink} receiver — the policy stays
+     * the one allowlist authority; only the emitter changed (M1-784).
      * Package-private and non-static (not {@code private static}) so a
      * test-scoped subclass can override it to inject a thrower and exercise the
      * {@link #handleSanitizerException} fail-closed branch (redteam Finding 2 —
@@ -605,7 +615,9 @@ public class Stage1Pipeline {
      * static-mutable-field seam (M1-377).
      */
     String sanitize(String input) {
-        return OWASP_POLICY.sanitize(input);
+        PlainTextSink sink = new PlainTextSink();
+        HtmlSanitizer.sanitize(input, OWASP_POLICY.apply(sink));
+        return sink.bodyText();
     }
 
     /**

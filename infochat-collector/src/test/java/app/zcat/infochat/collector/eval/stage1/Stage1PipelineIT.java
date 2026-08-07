@@ -531,10 +531,10 @@ class Stage1PipelineIT {
     @Test
     @Order(18)
     void legitimatelyEscapedProseIsNotOverDecoded() throws Exception {
-        // M1-785 P10. The cure for the encoding hazard is scanning what
-        // is stored, NOT decoding deeper: a post that legitimately writes
-        // about markup must keep its escaped text.
-        String body = "A post about HTML: write &amp;lt;p&amp;gt; to show a tag.";
+        // M1-785 P10, seed deepened by M1-784: Stage 1 decodes exactly
+        // twice (unescapeHtml4 pre-decode + the OWASP parse the sink
+        // stores), so one escaped layer survives; fixpoint strips it.
+        String body = "A post about HTML: write &amp;amp;lt;p&amp;amp;gt; to show a tag.";
         SeededPost post = seedPost("stage1-it-escaped-prose", body);
 
         stage1Pipeline.process(post.id, post.uid, post.fetchedAt, post.body);
@@ -543,7 +543,7 @@ class Stage1PipelineIT {
         assertTrue(stored.contains("&lt;p&gt;"),
             "escaped prose must stay escaped; got: " + stored);
         assertFalse(stored.contains("<p>"),
-            "escaped prose must not be decoded into live markup; got: " + stored);
+            "escaped prose must never be decoded to a fixpoint; got: " + stored);
     }
 
     // ---------- helpers ----------
