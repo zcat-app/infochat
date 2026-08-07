@@ -1,9 +1,11 @@
 ---
 id: M1-781
 title: "/summary over-limit notice gives advice that cannot work"
-status: pending
+status: abandoned
 created: 2026-08-06
-last_updated: 2026-08-06
+last_updated: 2026-08-07
+abandoned_reason: superseded
+replaced_by: [M1-780]
 blocked_by: [M1-780]
 files_budget: 9
 files_scope:

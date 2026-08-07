@@ -3,8 +3,8 @@ id: M1-782
 title: "Asset 24h range can exclude the current price"
 status: pending
 created: 2026-08-06
-last_updated: 2026-08-06
-blocked_by: [M1-781]
+last_updated: 2026-08-07
+blocked_by: []
 files_budget: 5
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/asset/AssetReplyRenderer.java
@@ -108,6 +108,6 @@ Zcash (coingecko)
 
 ## Relationship to M1-781
 
-`blocked_by: [M1-781]` is a soft serialization to keep the bundle-touching chain
+`blocked_by: []` is a soft serialization to keep the bundle-touching chain
 in one line. If the chosen fix provably needs no bundle edit, this ticket is
 independent and can be lifted out of the chain at start.

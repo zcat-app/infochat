@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 789 |
 | deferred | 0 |
-| abandoned | 25 |
+| abandoned | 26 |
 | **total** | **817** |
 
 ---
@@ -25,7 +25,8 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-780 — Relative timestamps stay English inside translated replies (complexity: medium, risk: low)
+- M1-780 — Reply localization defects from the v1.1.0 live test: English relative timestamps and unreachable /summary advice (complexity: medium, risk: low)
+- M1-782 — Asset 24h range can exclude the current price (complexity: low, risk: low)
 
 ---
 
@@ -42,8 +43,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-781 — blocked_by: M1-780 (pending)
-- M1-782 — blocked_by: M1-781 (pending)
+_(none)_
 
 ---
 
@@ -106,7 +106,7 @@ Tickets decided against — not implemented as this ticket. Terminal: not reopen
 ### other (1)
 - M1-591 — /summary cluster block prints classification: and tags: as two identical lines — collapse the redundancy
 
-### superseded (8)
+### superseded (9)
 - M1-031 — Provider catch-up hardening followup (3 M1-030 OUT-OF-MODEL advisories)
 - M1-372 — messaging: align the SimpleX auth-failure design note with the loopback-trusted v1 transport and drop the dead auth.fail meter
 - M1-505 — SimpleX: map inbound admin DM to the configured admin address
@@ -115,6 +115,7 @@ Tickets decided against — not implemented as this ticket. Terminal: not reopen
 - M1-637 — Queued interruptible turn is not cancellable by /stop
 - M1-662 — Reconcile the ticket-frontmatter and verdict-check record registries
 - M1-717 — Swap to a multilingual embedder and recalibrate thresholds
+- M1-781 — /summary over-limit notice gives advice that cannot work
 
 ### wont-do-infeasible (2)
 - M1-258 — ThrottledAdminNotifier: fold suppressed_count bump into the UPSERT
@@ -1031,6 +1032,6 @@ M1-777 (done)
   └── M1-778 (done)
 M1-779 (abandoned)
 M1-780 (pending) ← runnable
-  └── M1-781 (pending)
-        └── M1-782 (pending)
+  └── M1-781 (abandoned)
+M1-782 (pending) ← runnable
 ```
