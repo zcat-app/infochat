@@ -23,7 +23,7 @@ reproduction: Stage1BodyRemediationIT.storedBodyWithMarkupAndEntitiesBecomesPlai
               .scratch/V1.1.0-TEST-REPORT-CLEAN-RUN.md:94-95 (142/353 = 40 %
               of a fresh 3-hour corpus carry &#NN; entities).
 analysis_ref: docs/plan/m1/tick-analysis/ingest-corrupts-post-body-text.md
-blocked_by: [M1-784, M1-787]
+blocked_by: [M1-784, M1-787, M1-788]
 decomposed_from: M1-776
 files_scope:
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/stage1/

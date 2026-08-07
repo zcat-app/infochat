@@ -43,7 +43,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-786 — blocked_by: M1-784 (done), M1-787 (pending)
+- M1-786 — blocked_by: M1-784 (done), M1-787 (pending), M1-788 (pending)
 
 ---
 
@@ -92,4 +92,5 @@ M1-785 (done)
         ├── M1-787 (pending) ← runnable
         │     └── M1-786 (pending) [see above]
         └── M1-788 (pending) ← runnable
+              └── M1-786 (pending) [see above]
 ```
