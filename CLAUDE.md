@@ -165,8 +165,9 @@ These are project-level coding-style preferences. They are NOT reviewer-enforced
 
 ### Descriptive names
 - Prefer fully-spelled, descriptive identifiers over abbreviations. `databaseConnection` reads better than `dc`; `messageAdapter` better than `ma`; `userId` better than `uid`. The cost of a longer name is paid once when typing; the benefit is paid every time the code is read.
+- Methods are verb-first actions whose parameters carry the nouns: `setValueOrFallback(value, fallback)`, never `aSetterForVariableThatIsBeingSetWhenSomethingOrSetFallback()`. A name that needs a whole clause means the context belongs in the signature — or the method is doing too much and should be split.
 - Standard short names are still fine where the convention is universal: `i`/`j` for loop indices, `e` in a catch, `id` for an obvious primary key in scope. The bar is "would a new reader know what this means without context?"
-- Apply the same standard to test names — `findByTagReturnsEmptyWhenTagUnknown` beats `testFind3`. Tests are documentation; their names describe behavior.
+- Apply the same standard to test names — `findByTagReturnsEmptyWhenTagUnknown` beats `testFind3`. Tests are documentation; their names describe behavior, verb-first like any method: `fallsBackToEnglishWhenReplySanitizesToEmpty`, not the article-led sentence form `aReplyThatSanitizesToEmptyFallsBackToEnglish` — the leading article is padding and the verb form carries the same information at the same length.
 
 ### Prefer switch expressions
 - For multi-branch dispatch over an enum, sealed type, or fixed set of values, prefer a Java switch expression (`switch (x) { case A -> ...; case B -> ...; }`) over a chain of `if`/`else if` or a classic `switch` statement with `break`s.
