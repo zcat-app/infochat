@@ -1,7 +1,7 @@
 ---
 id: M1-780
 title: "Reply localization defects from the v1.1.0 live test: English relative timestamps and unreachable /summary advice"
-status: pending
+status: done
 created: 2026-08-06
 last_updated: 2026-08-07
 blocked_by: []
@@ -102,7 +102,37 @@ spec_refs:
   - docs/spec/commands.md §Content
 decision_refs:
   - D43
-reviews: []
+redteam_findings: []
+redteam_audits:
+  - date: 2026-08-07
+    verdict: CLEAN
+    base: 0d4d70ab2fae6d0c243aba50b20a23f31beac43b
+    head: "working tree, branch m1/M1-780-reply-localization-timestamps-summary-advice"
+    verdict_file: docs/plan/m1/redteam/M1-780-2026-08-07.md
+    out_of_model_count: 0
+    note: |
+      Gate-fired (security_relevant: true, operator-set) ahead of review
+      per the audit-first ordering. CLEAN on first pass; no remediation,
+      no re-audit owed.
+reviews:
+  - round: 1
+    date: 2026-08-07
+    verdict: APPROVE
+    checks:
+      scope_drift: PASS
+      test_integrity: PASS
+      out_of_scope: PASS
+      negative_space: PASS
+      acceptance: PASS
+    diff_stats:
+      files: 12
+      added: 146
+      removed: 23
+    note: |
+      Redteam gate ran first (operator-set security_relevant: true) and
+      returned CLEAN on this exact diff, so review saw the final tree.
+      Green verify log reused per the M1-272 skip path — only
+      docs/lifecycle files changed since it ran.
 overrides: []
 ---
 
@@ -187,6 +217,12 @@ reds the build.
 Uložené příspěvky (1 z 1 celkem — uložení jsou globální napříč DM a skupinami):
 - [e81eebbd…] Klíčová slova „auto" a „typeof" v C23 — uloženo před 0 min — tagy: technology
 ```
+
+Plural decision (recorded per acceptance): the wording **sidesteps
+plurals** — no per-plural key variants. cs/es/ru use invariable unit
+abbreviations (`před {0} min`, `hace {0} min`, `{0} мин. назад`), tr
+pairs the numeral with the singular (`{0} dakika önce`), and en keeps
+the legacy byte-identical `{0}m ago` forms.
 
 ## Expected — over-limit advice
 

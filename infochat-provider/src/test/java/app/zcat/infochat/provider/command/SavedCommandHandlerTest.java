@@ -534,6 +534,33 @@ class SavedCommandHandlerTest {
     }
 
     @Test
+    void csScopeRendersRelativeAgeInScopeLanguage() throws Exception {
+        // Acceptance pin: a relative timestamp inside a non-English
+        // reply carries no English words. The row's source language matches
+        // the cs scope, so the headline translation leg never fires and the
+        // reply is bundle text plus this render — what the reader gets.
+        String contactId = PREFIX + "age-actor";
+        inboundContext.setEffectiveLanguage("cs");
+        try {
+            UUID userId = seedUser(contactId);
+            UUID sourceId = seedSource(PREFIX + "age-source");
+            seedAnchoredSavedPost(userId, sourceId, PREFIX + "age-uid-1",
+                    "Český titulek", null, "cs", Instant.now());
+
+            OutboundMessage reply = handler.handle(new ScopeRef.Dm(contactId), "/saved");
+
+            assertTrue(reply.text().contains("uloženo před 0 min"),
+                    "cs-scope /saved must render the relative age in Czech; got: " + reply.text());
+            assertFalse(reply.text().contains("ago"),
+                    "a cs reply must contain no English 'ago'; got: " + reply.text());
+            assertFalse(reply.text().contains("0m"),
+                    "a cs reply must contain no bare English unit suffix; got: " + reply.text());
+        } finally {
+            inboundContext.setEffectiveLanguage("en");
+        }
+    }
+
+    @Test
     void enScopeRendersByteIdenticalWithZeroTranslatorCalls() throws Exception {
         // The en-scope no-op, pinned at the renderer level with the
         // TestLlmProvider spy: a byte-identical en render must not invoke

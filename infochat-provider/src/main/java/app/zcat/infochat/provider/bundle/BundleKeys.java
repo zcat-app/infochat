@@ -629,11 +629,11 @@ public final class BundleKeys {
             "reply.summary.partial_degraded_notice";
 
     /**
-     * Window over the summarizer post cap (M1-623): reply prefix
-     * announcing the explicit-decision degraded form + the narrow-with--w
-     * steer. Two interpolation tokens: {@code {0}} = total eligible posts
-     * in the window (before the retrieval cap), {@code {1}} = the
-     * summarizer post cap.
+     * Window over the summarizer post cap: reply prefix announcing the
+     * explicit-decision degraded form + the tag-filter steer naming
+     * {@code /get-tags}. Two interpolation tokens: {@code {0}} = total
+     * eligible posts in the window (before the retrieval cap),
+     * {@code {1}} = the summarizer post cap.
      */
     public static final String REPLY_SUMMARY_WINDOW_TOO_LARGE_NOTICE =
             "reply.summary.window_too_large_notice";
@@ -1118,6 +1118,20 @@ public final class BundleKeys {
 
     /** {@code /saved} empty-library reply. */
     public static final String REPLY_SAVED_EMPTY = "reply.saved.empty";
+
+    /**
+     * {@code /saved} per-row relative age, days arm. {@code {0}} = day
+     * count. One key per unit: the per-language wording sidesteps
+     * plurals (invariable unit abbreviations or numeral+singular), so
+     * there are no per-plural variants.
+     */
+    public static final String REPLY_SAVED_AGE_DAYS = "reply.saved.age.days";
+
+    /** {@code /saved} per-row relative age, hours arm — see {@link #REPLY_SAVED_AGE_DAYS}. */
+    public static final String REPLY_SAVED_AGE_HOURS = "reply.saved.age.hours";
+
+    /** {@code /saved} per-row relative age, minutes arm — see {@link #REPLY_SAVED_AGE_DAYS}. */
+    public static final String REPLY_SAVED_AGE_MINUTES = "reply.saved.age.minutes";
 
     /** {@code /saved} invoked from group scope — v1 short-circuit; T2-F lands the group-actor seam. */
     public static final String ERROR_SAVED_GROUP_NOT_IN_V1 = "error.saved.group_not_in_v1";

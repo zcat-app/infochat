@@ -512,12 +512,12 @@ public class SavedCommandHandler implements CommandHandler {
             String line = headline.isEmpty()
                     ? MessageFormat.format(noHeadlineTemplate,
                             row.postUid,
-                            relativeAge(row.savedAt),
+                            relativeAge(row.savedAt, scopeLanguage),
                             llmOutputSanitizer.sanitize(tagJoined))
                     : MessageFormat.format(lineTemplate,
                             row.postUid,
                             primaryToken,
-                            relativeAge(row.savedAt),
+                            relativeAge(row.savedAt, scopeLanguage),
                             llmOutputSanitizer.sanitize(tagJoined));
             String subordinate = DisplayHeadline.subordinateFor(
                     hit.headline(), headline.originalLine());
@@ -540,18 +540,21 @@ public class SavedCommandHandler implements CommandHandler {
         return String.join(", ", joined);
     }
 
-    private static String relativeAge(Instant savedAt) {
+    private String relativeAge(Instant savedAt, String scopeLanguage) {
         Duration age = Duration.between(savedAt, Instant.now());
         long days = age.toDays();
         if (days >= 1) {
-            return days + "d ago";
+            return MessageFormat.format(
+                    bundleLoader.get(BundleKeys.REPLY_SAVED_AGE_DAYS, scopeLanguage), days);
         }
         long hours = age.toHours();
         if (hours >= 1) {
-            return hours + "h ago";
+            return MessageFormat.format(
+                    bundleLoader.get(BundleKeys.REPLY_SAVED_AGE_HOURS, scopeLanguage), hours);
         }
         long minutes = Math.max(0L, age.toMinutes());
-        return minutes + "m ago";
+        return MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_SAVED_AGE_MINUTES, scopeLanguage), minutes);
     }
 
     private String resolveContactId(ScopeRef scope) {

@@ -780,6 +780,39 @@ class SummaryCommandHandlerTest {
     }
 
     /**
+     * At a post count no legal window brings under the cap, the
+     * over-limit notice steers at tag filtering and names
+     * {@code /get-tags} — at this volume a narrower window cannot get
+     * the user prose. The counts stay interpolated so the message
+     * tracks the profile-driven cap.
+     */
+    @Test
+    void overCapNoticeSteersToTagFilterNamingGetTags() {
+        Instant now = Instant.now();
+        List<Post> posts = List.of(
+                post(PREFIX + "ts1", "Tag steer one", now.minus(Duration.ofMinutes(1))),
+                post(PREFIX + "ts2", "Tag steer two", now.minus(Duration.ofMinutes(2))),
+                post(PREFIX + "ts3", "Tag steer three", now.minus(Duration.ofMinutes(3))));
+        eligiblePostQuery.seedPosts(posts, /* excludedCount */ 0);
+        handler.summarizerPostCap = 2;
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm(PREFIX + "tagsteer"), "/summary");
+
+        assertNull(reply, "the default-form over-cap reply self-delivers per-section and returns null");
+        String body = progressNotifier.freshSends().get(0);
+        assertTrue(body.contains("try a tag"),
+                "the notice must steer at tag filtering; got: " + body);
+        assertTrue(body.contains("/get-tags"),
+                "the notice must name /get-tags so the user can find a tag; got: " + body);
+        assertFalse(body.contains("Narrow the window"),
+                "the unreachable narrow-with--w steer must be gone; got: " + body);
+        assertFalse(body.contains("-w 6h"),
+                "the notice must not exemplify a window wider than the caller's; got: " + body);
+        assertTrue(body.contains("3 posts") && body.contains("2-post summarizer limit"),
+                "post count and cap stay interpolated; got: " + body);
+    }
+
+    /**
      * The M1-675 render-side redaction must survive the render swap. The
      * categorized form emits no headline, so the degraded prose — which
      * composes the raw feed title — is the only place a command-shaped
