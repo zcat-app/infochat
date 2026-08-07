@@ -88,7 +88,9 @@ import java.util.regex.Matcher;
  *       a decode step: a doubly-encoded payload only turns into
  *       readable text during HTML parsing, and the plain-text emission
  *       synthesizes structure the first scan could not see (block-close
- *       line breaks, joined text runs). Hits are redacted and
+ *       line breaks, joined text runs). Its output is canonicalized
+ *       (NFKC + bidi/zero-width strip) before scan and storage (M1-788).
+ *       Hits are redacted and
  *       quarantined like first-pass matches, except a match that
  *       straddles an existing {@code [REDACTED:<id>]} marker is
  *       dropped whole so the admin restore keeps matching.</li>
@@ -433,15 +435,20 @@ public class Stage1Pipeline {
         // "post.body's placeholders match quarantine rows" broken).
         String sanitizedRedacted = safeSanitize(redacted.toString());
 
+        // Canonicalize the parse output (M1-788): the parse decodes
+        // depth-2 entities to literal text only now — fold/strip so the
+        // second scan and the stored column share one canonical string.
+        String canonicalRedacted = unicodeNormalize(sanitizedRedacted);
+
         // Second scan: the sanitize above is an HTML parse, so it decodes
         // a deeper-encoded payload to literal text only AFTER the first
         // scan ran. Scan what is actually stored (M1-785). Added, never
         // moved — rules 5 and 6 need the pre-parse shape (class doc).
         List<Match> secondPassMatches = withoutMatchesTouchingAPlaceholder(
-            findAllMatchesUnderWatchdog(sanitizedRedacted, budget),
-            sanitizedRedacted, firstPassPlaceholderIds);
+            findAllMatchesUnderWatchdog(canonicalRedacted, budget),
+            canonicalRedacted, firstPassPlaceholderIds);
 
-        StringBuilder finalBody = new StringBuilder(sanitizedRedacted);
+        StringBuilder finalBody = new StringBuilder(canonicalRedacted);
         for (int i = secondPassMatches.size() - 1; i >= 0; i--) {
             Match match = secondPassMatches.get(i);
             String placeholderId = PlaceholderIds.next();

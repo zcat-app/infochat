@@ -1,12 +1,14 @@
 ---
 id: M1-788
 title: "Stage 1 must canonicalize the text it stores and second-scans"
-status: pending
+status: done
 created: 2026-08-07
 last_updated: 2026-08-07
 flow: tick
-reproduction: to-be-written — four Stage1BodyTextIT methods, written at start
-              and run RED before any fix code:
+reproduction: converted at start — four Stage1BodyTextIT methods, run RED
+              2026-08-07 before any fix code (.scratch/tick-red-M1-788.log:
+              full suite, Stage1BodyTextIT 16 tests, exactly these 4 failing,
+              each on its designed assertion; the 12 pre-existing cases green):
               .doublyEncodedInvisibleControlNeverReachesTheBodyColumn,
               .doublyEncodedFullwidthDelimiterIsFoldedAndRedacted,
               .doublyEncodedFullwidthIgnoreIsFoldedAndFlagged,
@@ -83,6 +85,15 @@ spec_refs:
 decision_refs:
   - D20
   - D30
+reviews:
+  - round: 1
+    date: 2026-08-07
+    verdict: APPROVE-WITH-FIXES
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY WARN, SCOPE PASS"
+    diff_stats: "5 files changed, 90 insertions(+), 14 deletions(-)"
+    fix_items: 1
+    fix_probes: "grep -n 'The last four' Stage1BodyTextIT.java → no hit; ./mvnw -B -pl infochat-collector -am test-compile → BUILD SUCCESS; fixed tree 9c3743bc0b4aff0eb66c1c86e03caa7d09be2654 (.scratch/tick-fixes-M1-788.tree); round-1 green log remains the log of record"
+    verdict_file: .scratch/tick-review-M1-788-r1.txt
 ---
 
 # M1-788: Stage 1 must canonicalize the text it stores and second-scans
