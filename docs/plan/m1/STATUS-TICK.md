@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-786 — Remediate post and saved_post bodies stored before the plain-text fix (complexity: medium, risk: medium)
 - M1-787 — Straddled second-pass match must keep its row and redaction (complexity: medium, risk: high)
 - M1-788 — Stage 1 must canonicalize the text it stores and second-scans (complexity: low, risk: medium)
 
@@ -44,7 +43,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-786 — blocked_by: M1-784 (done), M1-787 (pending)
 
 ---
 
@@ -89,7 +88,8 @@ ASCII DAG: nodes are ticket IDs (with status in parens), edges are `blocked_by` 
 ```
 M1-785 (done)
   └── M1-784 (done)
-        ├── M1-786 (pending) ← runnable
+        ├── M1-786 (pending)
         ├── M1-787 (pending) ← runnable
+        │     └── M1-786 (pending) [see above]
         └── M1-788 (pending) ← runnable
 ```

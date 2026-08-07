@@ -3,7 +3,7 @@ id: M1-786
 title: "Remediate post and saved_post bodies stored before the plain-text fix"
 status: pending
 created: 2026-08-06
-last_updated: 2026-08-06
+last_updated: 2026-08-07
 flow: tick
 reproduction: Stage1BodyRemediationIT.storedBodyWithMarkupAndEntitiesBecomesPlainText
               — to-be-written: the seed rows need M1-784's fixed pipeline, so
@@ -23,7 +23,7 @@ reproduction: Stage1BodyRemediationIT.storedBodyWithMarkupAndEntitiesBecomesPlai
               .scratch/V1.1.0-TEST-REPORT-CLEAN-RUN.md:94-95 (142/353 = 40 %
               of a fresh 3-hour corpus carry &#NN; entities).
 analysis_ref: docs/plan/m1/tick-analysis/ingest-corrupts-post-body-text.md
-blocked_by: [M1-784]
+blocked_by: [M1-784, M1-787]
 decomposed_from: M1-776
 files_scope:
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/stage1/
