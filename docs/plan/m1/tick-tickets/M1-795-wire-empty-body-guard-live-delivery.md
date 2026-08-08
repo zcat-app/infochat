@@ -1,13 +1,16 @@
 ---
 id: M1-795
 title: "Wire the empty-body guard into live delivery"
-status: pending
+status: done
 created: 2026-08-08
 last_updated: 2026-08-08
 flow: tick
+clarity_check: "2026-08-08 start pass — citations re-verified in-tree: deliverLlmReply at OutboundDelivery.java:147 (blank → WARN+null, no transport call; delegates to deliver); deliverFresh at StageProgressNotifier.java:289-292 calls plain deliver at :291; only callers SummaryCommandHandler.java:644,647 (/summary section bodies). Census grep re-runs clean; every returned path has a disposition row. Analysis cross-read: P1/P2/P8 carried in the ticket; P3-P7/P9 are M1-796's (chat-leg, spec amendment); P10 respected via out_of_scope. No blocking ambiguity."
 reproduction: >-
-  StageProgressNotifierTest#deliverFreshRefusesAnEmptiedLlmAuthoredBody
-  (to-be-written) — M1-794's guard seam OutboundDelivery.deliverLlmReply
+  StageProgressNotifierTest#deliverFreshRefusesAnEmptiedLlmAuthoredBody —
+  written and run RED at start (.scratch/tick-repro-M1-795-red.log:
+  "expected: <false> but was: <true>" — the blank body shipped). M1-794's
+  guard seam OutboundDelivery.deliverLlmReply
   (OutboundDelivery.java:147-154) has NO production caller (grep over
   infochat-provider/src/main returns only the definition); the live
   LLM-authored fresh-send leg StageProgressNotifier.deliverFresh
@@ -15,8 +18,7 @@ reproduction: >-
   section bodies embed LLM-authored prose) still routes through plain
   deliver, so an emptied body on that leg ships as an empty message. The
   test feeds a blank body into deliverFresh and asserts refusal (WARN, no
-  adapter send); today it ships. `start` writes the test and runs it RED
-  before any fix code (workflow §0).
+  adapter send); today it ships.
 analysis_ref: docs/plan/m1/tick-analysis/empty-body-live-delivery-wiring.md
 blocked_by: []
 files_scope:
@@ -58,6 +60,14 @@ test_plan:
 spec_refs:
   - docs/spec/security.md §LLM output sanitizer
   - docs/spec/llm.md §Failure handling (recap)
+reviews:
+  - round: 1
+    date: 2026-08-08
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "4 files changed, 86 insertions(+), 14 deletions(-)"
+    findings: "0 rework items, 0 critical/high; 4 candidate findings falsified-and-dropped (callers discard deliverFresh's boolean; WARN-capture not flaky per green run; empty-section drop is the defect being closed; refused sends emit no §6.12 metric is the seam's M1-794-approved contract)"
+    verdict_file: .scratch/tick-review-M1-795-r1.txt
 ---
 
 # M1-795: Wire the empty-body guard into live delivery

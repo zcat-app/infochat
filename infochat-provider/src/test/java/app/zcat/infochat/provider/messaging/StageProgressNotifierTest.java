@@ -5,11 +5,16 @@ import app.zcat.infochat.messaging.ProgressStage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import org.jboss.logmanager.LogContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
 
 import static app.zcat.infochat.provider.testsupport.TranslationFixtures.newRealBundleLoader;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -35,6 +40,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       failure string;</li>
  *   <li>Security: stage strings resolve from the D43 bundle and never
  *       interpolate user-authored text.</li>
+ *   <li>{@code deliverFresh} routes LLM-authored /summary bodies through
+ *       the M1-794 empty-body seam: a blank body is refused (WARN, no
+ *       transport call), a non-blank one ships unchanged (M1-795).</li>
  * </ul>
  */
 class StageProgressNotifierTest {
@@ -179,6 +187,49 @@ class StageProgressNotifierTest {
     }
 
     @Test
+    void deliverFreshRefusesAnEmptiedLlmAuthoredBody() {
+        // REPRODUCTION (M1-795): a blank LLM-authored /summary body
+        // shipped through plain deliver() as an empty message. The wired
+        // seam must refuse it: WARN, no transport call, false return.
+        CapturingHandler logCapture = new CapturingHandler();
+        org.jboss.logmanager.Logger jbossLogger =
+                LogContext.getLogContext().getLogger(OutboundDelivery.class.getName());
+        java.util.logging.Logger julLogger =
+                java.util.logging.Logger.getLogger(OutboundDelivery.class.getName());
+        jbossLogger.addHandler(logCapture);
+        julLogger.addHandler(logCapture);
+        try {
+            assertFalse(notifier.deliverFresh(SCOPE, ""),
+                    "an emptied LLM-authored body is refused, never shipped");
+            assertTrue(adapter.sends.isEmpty(), "no transport call is made");
+            long warns = logCapture.records.stream()
+                    .filter(r -> r.getLevel().intValue() >= Level.WARNING.intValue())
+                    .filter(r -> r.getMessage().contains("empty body"))
+                    .count();
+            assertEquals(1, warns, "the refusal is observable: exactly one WARN, no send");
+        } finally {
+            jbossLogger.removeHandler(logCapture);
+            julLogger.removeHandler(logCapture);
+        }
+    }
+
+    @Test
+    void deliverFreshDeliversANonBlankBodyUnchanged() {
+        // FAILURE-MODE (P1): a non-blank body ships through the seam
+        // exactly once, byte-identical; the plain-deliver leg still
+        // ships deliberately empty deterministic bodies.
+        assertTrue(notifier.deliverFresh(SCOPE, "SUMMARY SECTION PROSE"),
+                "a non-blank body is delivered through the seam");
+        assertEquals(List.of("SUMMARY SECTION PROSE"), adapter.sends,
+                "the body reaches the adapter byte-identical, exactly once");
+        assertTrue(adapter.finalizes.isEmpty(), "no finalize on the fresh-send leg");
+
+        notifier.complete(SCOPE, "");
+        assertEquals(List.of("SUMMARY SECTION PROSE", ""), adapter.sends,
+                "the plain-deliver leg keeps shipping deliberately empty deterministic bodies");
+    }
+
+    @Test
     void adapterMinEditIntervalRaisesEffectiveFloorAboveSystemFloor() {
         // With a 0ms system floor each stage would emit its own update
         // (see zeroFloorEmitsEachStageUpdateProvingCoalescingIsTimeGated).
@@ -230,6 +281,24 @@ class StageProgressNotifierTest {
     }
 
     // ----- wiring helpers --------------------------------------------------
+
+    /** JUL-style log capture for the WARN-observability assertion (M1-795). */
+    private static final class CapturingHandler extends Handler {
+        final List<LogRecord> records = new ArrayList<>();
+
+        @Override
+        public void publish(LogRecord record) {
+            records.add(record);
+        }
+
+        @Override
+        public void flush() {
+        }
+
+        @Override
+        public void close() {
+        }
+    }
 
     private static StageProgressNotifier newNotifier(MessagingAdapter adapter,
                                                      BundleLoader bundleLoader,
