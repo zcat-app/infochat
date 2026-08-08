@@ -14,7 +14,8 @@
 >
 > Each item records: **what**, **current state** (verified against code on
 > the date above), **prerequisites / tensions**, and a **verdict**:
-> `realistic-now` · `v2-milestone` · `needs-analysis` · `parked`.
+> `realistic-now` · `v2-milestone` · `needs-analysis` · `parked` ·
+> `declined` (§J only — rejected outright, no revisit track).
 
 ---
 
@@ -832,3 +833,30 @@ UNMEASURED. The design layer now lives in
 hardware correction, the evidence inventory, and **the required chat-quality
 measurement per supported language, which is the first gate to run before any
 revisit**. Verdict unchanged: `parked`, pending that measurement.
+
+---
+
+## J. Declined (out of scope)
+
+> Items considered and explicitly declined — recorded so they are not
+> re-derived. Unlike §A–§I these carry no revisit track; a new user request
+> is the only thing that reopens them.
+
+### J1. Public IPFS/IPNS publishing
+**What:** publish a static, JS-free HTML page summarizing recent activity to
+IPFS and update an IPNS name on the digest cadence, so a stable URL always
+serves the latest snapshot — an uncensorable demo of what the bot does for
+prospective users.
+
+**Current state — declined before any implementation.** A v2 design note
+existed (`public-ipfs-publishing.md`: `public` pseudo-user scope, RSS-only
+allowlist, separate read-only submodule, operator-run Kubo node). It never
+left design.
+
+**Verdict: `declined`** (user decision, 2026-08-08 — out of scope for this
+project). The idea is a publishing/demo surface, not a messaging or
+aggregator feature: it would add a third service, an IPFS node the operator
+must run, and immutable-content liability, against zero user demand. The
+design note is kept in stripped form with a decline banner
+(`docs/design/future/public-ipfs-publishing.md`); the full design detail is
+in git history.

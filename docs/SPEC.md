@@ -182,9 +182,10 @@ choices that shape every section.
 - Auth-gated price sources (KuCoin, Gemini for most endpoints,                                                                                                                                                                                        
   CoinGecko Pro). Needs the operator-secret SPI. 
 - Public IPFS/IPNS publication of periodic digests as a static
-  JS-free page, regenerated on the existing morning/evening digest cadence, intended as
-  an uncensorable demo of what the bot does. Design notes:
-  [design/future/public-ipfs-publishing.md](design/future/public-ipfs-publishing.md). 
+  JS-free page — **declined as out of scope for this project** (not
+  deferred; a new user request is the only thing that reopens it). Record:
+  [plan/future-features.md](plan/future-features.md) §J1; stripped design
+  note: [design/future/public-ipfs-publishing.md](design/future/public-ipfs-publishing.md).
 
 ## 5. Glossary
 
