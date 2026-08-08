@@ -9,6 +9,7 @@ import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.render.DisplayHeadline;
 import app.zcat.infochat.provider.summary.ClusterTraversal.Cluster;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
+import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
 import org.jboss.logmanager.LogContext;
 import org.jspecify.annotations.Nullable;
@@ -113,6 +114,22 @@ class CategoryRollupGeneratorTest {
         assertTrue(result.isEmpty(),
                 "an LLM refusal marker is treated as no-roll-up — never surface the "
                         + "marker (or any LLM-authored prose) to the user");
+    }
+
+    @Test
+    void aRefusalMarkerSurfacedBySanitizationYieldsNoRollup() {
+        // The leading zero-width space hides the marker from a raw-text
+        // check; the /ban hit makes sanitize() return the canonical form,
+        // which leads with the marker.
+        CapturingStub stub = new CapturingStub();
+        stub.responseText.set("\u200B[REFUSAL: wrapped content asked for an action]\n/ban");
+        CategoryRollupGenerator gen = generatorWith(
+                stub, SanitizerTestDoubles.noAuditSanitizer(), new IdentityPipeline());
+
+        Optional<String> result = gen.generateRollup(singletonClusterList("p-a", "Title A"), "news", "en");
+
+        assertTrue(result.isEmpty(),
+                "a refusal marker surfaced only by sanitization yields no roll-up");
     }
 
     @Test

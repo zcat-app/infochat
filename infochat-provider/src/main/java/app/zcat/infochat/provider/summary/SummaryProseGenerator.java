@@ -141,13 +141,11 @@ public class SummaryProseGenerator {
                 LlmResponse response = provider.generate(
                         ModelTask.SUMMARIZER, SUMMARIZER_SYSTEM_PROMPT, userPrompt);
                 String text = response.text().trim();
-                if (text.startsWith("[REFUSAL:") && text.endsWith("]")) {
-                    // Per docs/spec/security.md §Prompt-injection defenses: the
-                    // model emits [REFUSAL: <reason>] when the wrapped content
-                    // asks for an action. Treat refusal as a degradation
-                    // outcome on the same per-cluster boundary as empty-text
-                    // and provider-exception cases — never surface the marker
-                    // (or any LLM-authored prose) to the user.
+                String sanitized = llmOutputSanitizer.sanitize(text);
+                if (sanitized.startsWith("[REFUSAL:") && sanitized.endsWith("]")) {
+                    // security.md §Prompt-injection defenses — evaluated on
+                    // the sanitized text, since a deleting pass can join
+                    // fragments into the marker. Refusal degrades the cluster.
                     LOG.warn("SUMMARIZER returned refusal marker for topic {}; degrading",
                             cluster.topicId());
                     out.add(new ClusterProse(cluster, degradedProseFor(cluster, llmOutputSanitizer, scopeLanguage), true));
@@ -156,7 +154,10 @@ public class SummaryProseGenerator {
                             cluster.topicId());
                     out.add(new ClusterProse(cluster, degradedProseFor(cluster, llmOutputSanitizer, scopeLanguage), true));
                 } else {
-                    out.add(new ClusterProse(cluster, text, false));
+                    // ClusterProse carries the sanitized bytes: sanitized
+                    // once here, so the renderers' re-sanitize is a no-op
+                    // guard for hand-assembled records (no second audit row).
+                    out.add(new ClusterProse(cluster, sanitized, false));
                 }
             } catch (RuntimeException e) {
                 SafeLog.warn(LOG, "SUMMARIZER call failed for topic " + cluster.topicId() + "; degrading",

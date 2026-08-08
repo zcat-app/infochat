@@ -49,6 +49,24 @@ class SummaryProseGeneratorTest {
     }
 
     @Test
+    void aRefusalMarkerSurfacedBySanitizationDegradesTheCluster() {
+        // The leading zero-width space hides the marker from a raw-text
+        // check; the /ban hit makes sanitize() return the canonical form,
+        // which leads with the marker.
+        CapturingStub stub = new CapturingStub();
+        stub.responseText.set("\u200B[REFUSAL: wrapped content asked for an action]\n/ban");
+        SummaryProseGenerator gen = generatorWith(stub);
+
+        List<ClusterProse> result = gen.generate(List.of(singletonCluster("p-1", "Title 1")), "en");
+
+        assertEquals(1, result.size());
+        assertTrue(result.get(0).degraded(),
+                "a refusal marker surfaced only by sanitization degrades the cluster");
+        assertFalse(result.get(0).prose().contains("[REFUSAL:"),
+                "the marker never reaches user-visible output");
+    }
+
+    @Test
     void threeClustersInvokeLlmExactlyThreeTimes() {
         CapturingStub stub = new CapturingStub();
         stub.responseText.set("prose");

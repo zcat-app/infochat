@@ -678,10 +678,12 @@ surface a wrapper marker that the earlier pass could not see on the raw
 bytes — a cosmetic leak in a reply that also carried a redacted
 command. Closing it would mean re-running a character-deleting pass
 after the redaction, which trades a redaction bypass for a cosmetic
-fix. The protocol-token detectors (`[REFUSAL:`, `TOOL_CALL:`) run on
-the raw reply upstream of every deleting pass, so a token a deletion
-assembles out of fragments is one they never saw; until they evaluate
-the sanitized text, that assembly route is an accepted residual.
+fix. The protocol-token detectors (the structured-refusal marker
+check and the `TOOL_CALL:` strip) evaluate the sanitized output —
+they run downstream of every deleting pass, because a detector
+guards delivered bytes and therefore must evaluate delivered bytes:
+a token a deletion or canonicalization assembles out of fragments
+is one they see.
 
 **Markdown flattening survives canonicalization.** The link-flatten
 pass runs on the raw output first, and again on the canonical form

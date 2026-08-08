@@ -1,13 +1,16 @@
 ---
 id: M1-791
 title: "Run protocol-token detectors on sanitized LLM output"
-status: pending
+status: done
 created: 2026-08-07
-last_updated: 2026-08-07
+last_updated: 2026-08-08
 flow: tick
 reproduction: >-
-  to-be-written: ChatAgentRefusalInterceptionTest#aRefusalMarkerSurfacedOnlyBySanitizationDegradesTheTurn
-  — RED on main today via the canonical-form route: a reply of
+  ChatAgentRefusalInterceptionTest#aRefusalMarkerSurfacedOnlyBySanitizationDegradesTheTurn
+  — ran RED on main (3/3 new tests: the zero-width + /ban reply delivered
+  with the marker at index 0, the assembled TOOL_CALL line delivered and
+  persisted, the scaffolding-joined marker delivered) via the
+  canonical-form route: a reply of
   `<ZWSP>[REFUSAL: …] … /ban` does not trip the prefix check at
   ChatAgent.java:541 (the leading zero-width space), but `sanitize()`
   returns the CANONICAL form on the `/ban` match
@@ -71,11 +74,43 @@ spec_refs:
   - docs/spec/security.md §LLM output sanitizer
 decision_refs:
   - D21
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-08
+    verdict: APPROVE
+    checks:
+      spec_truthness: PASS
+      security: PASS
+      test_adequacy: PASS
+      maintainability: PASS
+      scope: PASS
+    diff_stats: "9 files changed, 370 insertions(+), 65 deletions(-)"
+    renames_material: "trimmedFinalText (ChatAgent) now trims approved, not finalText — candidate for the Renames: trailer"
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  lint: "tick-lint: 0 finding(s), 0 BLOCKER(s)"
+  self_check: >-
+    Citations spot-checked against post-M1-789 main: line numbers drifted
+    (prefix check ChatAgent.java:563, stripToolCalls :542/:1079, rollup
+    check CategoryRollupGenerator.java:212 with sanitize at :221, summary
+    check SummaryProseGenerator.java:144, canonical-form return
+    LlmOutputSanitizerCore.java:646-652) but every code claim holds.
+    Census grep re-runs clean; every returned path has a row. Analysis
+    pitfalls P5/P10/P12/P16 all landed. M1-778 seam tests traced under the
+    reorder: ChatAgentReplyLanguageTest (pass-through agent sanitizer),
+    SummaryProseLanguageTest + CategoryRollupGeneratorTest language arms
+    (prompt-side assertions) — unaffected. test_plan.preserves falsified
+    now: all plain-marker tests (ChatAgentRefusalInterceptTest x7,
+    refusalMarkerYieldsCategoryWithoutPrefix,
+    SummaryProseRefusalDegradeTest) run identity or sanitize-invariant
+    operands, stay green unedited; SummaryProseRefusalDegradeTest:70
+    verbatim-prose pin holds because plain prose is sanitize-invariant.
+    Coordination note: M1-792 is in-flight in the main checkout on the
+    same module (user-directed); this branch forks from main, which lacks
+    M1-792's staged postcondition test — merge order resolves via the
+    flow's rebase arm. No open ambiguity.
 ---
 
 # M1-791: Run protocol-token detectors on sanitized LLM output

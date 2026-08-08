@@ -209,16 +209,14 @@ public class CategoryRollupGenerator {
                 LOG.warn("category roll-up returned empty text; yielding category without prefix");
                 return Optional.empty();
             }
-            if (text.startsWith("[REFUSAL:") && text.endsWith("]")) {
-                // Per docs/spec/security.md §Prompt-injection defenses: the
-                // model emits [REFUSAL: <reason>] when the wrapped content
-                // asks for an action. Treat refusal as a no-roll-up outcome
-                // — never surface the marker (or any LLM-authored prose) to
-                // the user.
+            String sanitized = llmOutputSanitizer.sanitize(text);
+            if (sanitized.startsWith("[REFUSAL:") && sanitized.endsWith("]")) {
+                // security.md §Prompt-injection defenses — evaluated on the
+                // sanitized text, since a deleting pass can join fragments
+                // into the marker. Refusal is a no-roll-up outcome.
                 LOG.warn("category roll-up returned refusal marker; yielding category without prefix");
                 return Optional.empty();
             }
-            String sanitized = llmOutputSanitizer.sanitize(text);
             String translated = translationPipeline.run(sanitized, langCode);
             return Optional.of(translated);
         } catch (RuntimeException e) {

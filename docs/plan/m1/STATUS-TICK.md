@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 8 |
+| done | 9 |
 | deferred | 0 |
 | abandoned | 0 |
 | **total** | **11** |
@@ -25,6 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
+- M1-790 — Downgrade markdown for the plain-text surface (complexity: medium, risk: medium)
 - M1-794 — Guard against empty sanitized bodies at delivery (complexity: low, risk: low)
 
 ---
@@ -42,8 +43,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-790 — blocked_by: M1-789 (done), M1-791 (pending)
-- M1-791 — blocked_by: M1-778 (unknown)
+_(none)_
 
 ---
 
@@ -64,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 |---|---|---|---|
 | M1-793 | Evaluate translation sanity checks on the sanitized reply | 2026-08-08 | round 1 APPROVE |
 | M1-792 | Census sanitize() caller postconditions and pin them | 2026-08-08 | round 1 APPROVE-WITH-FIXES |
+| M1-791 | Run protocol-token detectors on sanitized LLM output | 2026-08-08 | round 1 APPROVE |
 | M1-789 | Strip scaffolding markers from LLM replies | 2026-08-07 | round 2 APPROVE |
 | M1-788 | Stage 1 must canonicalize the text it stores and second-scans | 2026-08-07 | round 1 APPROVE-WITH-FIXES |
 | M1-787 | Straddled second-pass match must keep its row and redaction | 2026-08-07 | round 1 APPROVE-WITH-FIXES |
@@ -100,8 +101,8 @@ M1-785 (done)
         └── M1-788 (done)
               └── M1-786 (done) [see above]
 M1-789 (done)
-  └── M1-790 (pending)
-M1-791 (pending)
+  └── M1-790 (pending) ← runnable
+M1-791 (done)
   └── M1-790 (pending) [see above]
 M1-792 (done)
 M1-793 (done)

@@ -534,52 +534,40 @@ public class ChatAgent {
                 prompt.userPrompt() + semanticBlock + turnDirective,
                 userId, scopeKind, scopeId, turnContext, retrievedPostUids);
 
-        // 6. Strip any residual TOOL_CALL fragments that leaked past the
-        // iteration cap — they are internal protocol, not user-visible.
-        // A fragment with balanced braces (possibly nested / multi-line) is
-        // removed whole; a partial or unbalanced fragment is removed through
-        // end-of-text so a malformed multi-line call cannot leak.
-        finalText = stripToolCalls(finalText);
+        // 6. Sanitize first: everything below evaluates the sanitized text
+        // — sanitize itself can surface a protocol token (security.md
+        // §Prompt-injection defenses); persist sees the redacted text.
+        String sanitized = outputSanitizer.sanitize(finalText);
 
-        // 7. Intercept the D21 structured refusal marker BEFORE persistence
-        // and delivery (security.md §Prompt-injection defenses). The marker
-        // is protocol surface: delivering it verbatim leaks the
-        // injection-defense convention to the counterparty it defends
-        // against, and lets the LLM author what looks like
-        // bot-authoritative bracketed status text. The check runs on the
-        // POST-strip text and is prefix-only (M1-561) — unlike
-        // SummaryProseGenerator's two-sided anchor — because strip's
-        // unbalanced-fragment drop-through can eat the marker's closing
-        // ']' ("[REFUSAL: TOOL_CALL: foo]" strips to "[REFUSAL: "), so an
-        // endsWith conjunct would re-open the leak. Prefix-only is
-        // fail-closed: trimmed text leading with the protocol token is
-        // never deliverable regardless of what follows, and since strip
-        // only deletes text, a post-strip prefix match cannot arise from a
-        // mid-prose quotation. Degrade exactly like the unavailable path —
-        // deterministic bundle string, null commit so no chat_message rows
-        // persist. The refusal reason is LLM-authored text derived from
-        // untrusted content and MUST NOT be logged (D37): userId only.
-        String trimmedFinalText = finalText.trim();
+        // 7. TOOL_CALL strip on the sanitized text: sanitize can assemble
+        // a fragment into a full line, so the strip runs after it
+        // (stripToolCalls documents the balanced/unbalanced semantics).
+        String approved = stripToolCalls(sanitized);
+
+        // 8. D21 refusal intercept on the sanitized text: sanitize can
+        // assemble the marker, and firing on one is fail-closed. Prefix-only:
+        // the strip's drop-through can eat the closing ']' (endsWith leaks).
+        String trimmedFinalText = approved.trim();
         if (trimmedFinalText.startsWith("[REFUSAL:")) {
+            // Degrade like the unavailable path; the refusal reason is
+            // LLM-authored untrusted text and MUST NOT be logged (D37).
             log.warn("CHAT_AGENT returned refusal marker for userId={}; degrading turn", userId);
             return new ChatTurnResult(
                     bundleLoader.get(BundleKeys.ERROR_CHAT_REFUSED, scopeLanguage), null, null);
         }
 
-        // 8. Sanitize BEFORE persist so admin commands never enter the DB
-        String sanitized = outputSanitizer.sanitize(finalText);
         int userTokens = ChatSessionRepository.estimateTokens(userMessage);
-        int assistantTokens = ChatSessionRepository.estimateTokens(sanitized);
+        int assistantTokens = ChatSessionRepository.estimateTokens(approved);
 
         // 9. Translate if scope language is non-en. The persisted assistant
-        // turn is the untranslated `sanitized` text (chat memory is
+        // turn is the untranslated `approved` text (chat memory is
         // English-canonical, like source post bodies); only the delivered
         // reply is translated.
         String reply;
         if (!"en".equals(scopeLanguage)) {
-            reply = translationPipeline.run(sanitized, scopeLanguage);
+            reply = translationPipeline.run(approved, scopeLanguage);
         } else {
-            reply = sanitized;
+            reply = approved;
         }
 
         // 9b. Deterministic help-block delivery — the two authorized
@@ -635,7 +623,7 @@ public class ChatAgent {
         // only the position of that pair relative to send moves.
         PendingCommit pendingCommit = () -> {
             sessionRepository.persistTurn(userId, scopeKind, scopeId, "user", userMessage, userTokens);
-            sessionRepository.persistTurn(userId, scopeKind, scopeId, "assistant", sanitized, assistantTokens);
+            sessionRepository.persistTurn(userId, scopeKind, scopeId, "assistant", approved, assistantTokens);
             return autoCompressTrigger.checkAndCompress(userId, scopeKind, scopeId, scopeLanguage);
         };
 
