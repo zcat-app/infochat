@@ -5,11 +5,16 @@ import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.group.GroupRepository;
+import org.jboss.logmanager.LogContext;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -377,5 +382,74 @@ class OutboundDeliveryTest {
         assertEquals(List.of("final ] (here", "plain final"), adapter.finalizes,
                 "finalizeInPlace breaks ]( adjacency before the adapter and passes ](-free "
                         + "bodies byte-identical");
+    }
+
+    // M1-794: the LLM-authored seam refuses bodies that sanitized to empty
+    // (P8, pinned by LlmOutputSanitizerPostconditionTest); the generic
+    // deliver() keeps shipping deliberately empty deterministic replies (P1).
+
+    @Test
+    void emptyBodyIsRefusedNotShipped() {
+        // REPRODUCTION (M1-794): the pre-guard delegate shipped "" — the
+        // seam must refuse it: no transport call, null handle like an abort.
+        RecordingMessagingAdapter adapter = new RecordingMessagingAdapter();
+        OutboundDelivery delivery = delivery(new RecordingAdminNotifier(), new RecordingGroupRepository());
+
+        MessageHandle handle = delivery.deliverLlmReply(adapter, dmMessage(""));
+
+        assertNull(handle, "an empty LLM-authored body is refused, never shipped");
+        assertTrue(adapter.sends.isEmpty(), "no transport call is made");
+    }
+
+    @Test
+    void emptyBodyRefusalLogsRatherThanSending() {
+        // FAILURE-MODE (M1-794): the refusal is observable (a WARN), no
+        // transport call, and the deterministic surface is untouched.
+        CapturingHandler logCapture = new CapturingHandler();
+        org.jboss.logmanager.Logger jbossLogger =
+                LogContext.getLogContext().getLogger(OutboundDelivery.class.getName());
+        java.util.logging.Logger julLogger =
+                java.util.logging.Logger.getLogger(OutboundDelivery.class.getName());
+        jbossLogger.addHandler(logCapture);
+        julLogger.addHandler(logCapture);
+        try {
+            RecordingMessagingAdapter adapter = new RecordingMessagingAdapter();
+            OutboundDelivery delivery = delivery(new RecordingAdminNotifier(), new RecordingGroupRepository());
+
+            assertNull(delivery.deliverLlmReply(adapter, dmMessage("")),
+                    "the LLM-authored seam refuses the empty body");
+            assertTrue(adapter.sends.isEmpty(), "the refusal makes no transport call");
+
+            delivery.deliver(adapter, dmMessage(""));
+            assertEquals(List.of(""), adapter.sends,
+                    "the generic deliver() keeps shipping deliberately empty bodies");
+
+            long warns = logCapture.records.stream()
+                    .filter(r -> r.getLevel().intValue() >= Level.WARNING.intValue())
+                    .filter(r -> r.getMessage().contains("empty body"))
+                    .count();
+            assertEquals(1, warns, "the refusal is observable: exactly one WARN, no send");
+        } finally {
+            jbossLogger.removeHandler(logCapture);
+            julLogger.removeHandler(logCapture);
+        }
+    }
+
+    /** JUL-style log capture for the WARN-observability assertion (M1-794). */
+    private static final class CapturingHandler extends Handler {
+        final List<LogRecord> records = new ArrayList<>();
+
+        @Override
+        public void publish(LogRecord record) {
+            records.add(record);
+        }
+
+        @Override
+        public void flush() {
+        }
+
+        @Override
+        public void close() {
+        }
     }
 }

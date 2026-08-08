@@ -1,20 +1,19 @@
 ---
 id: M1-794
 title: "Guard against empty sanitized bodies at delivery"
-status: pending
+status: done
 created: 2026-08-08
 last_updated: 2026-08-08
 flow: tick
 reproduction: >-
-  to-be-written: OutboundDeliveryTest#emptyBodyIsRefusedNotShipped
+  OutboundDeliveryTest#emptyBodyIsRefusedNotShipped
   — sanitize() can return "" for a non-empty reply (P8, pinned by
   LlmOutputSanitizerPostconditionTest.deletionShapesMatchTheirDocumentedPostconditions:
   a markers-only reply reduces to nothing) and NO guard exists between
   sanitize() and OutboundDelivery, so an empty body reaches the
-  transport. The display-hit cache (TranslationPipeline.java:560) would
-  also store the empty value for 24h. RED on main today: the test feeds
-  an empty body into OutboundDelivery's entry path and asserts it is
-  refused, not shipped; main ships it.
+  transport. RED on main today: the test feeds an empty body into the
+  LLM-authored delivery entry (deliverLlmReply) and asserts it is
+  refused, not shipped; the pre-guard delegate ships it.
 analysis_ref: docs/plan/m1/tick-analysis/llm-output-leaks-scaffolding-markdown.md
 blocked_by: []
 files_scope:
@@ -48,11 +47,28 @@ test_plan:
     - all tests currently green on main
 spec_refs:
   - docs/spec/llm.md §Failure handling (recap)
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-08
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "5 files changed, 107 insertions(+), 15 deletions(-)"
+    findings: "0 rework items, 0 critical/high; 4 candidate findings falsified-and-dropped (WARN leaks no user content; null-on-refusal has no production callers yet; isBlank over-refusal is the intended shape with the deterministic exemption pinned; frontmatter RED wording is honest for a new-seam guard)"
+    verdict_file: .scratch/tick-review-M1-794-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  wiring: >-
+    NO live wiring in this diff, decided deliberately: the live chat
+    terminal is an IN-PLACE placeholder finalize (M1-607:
+    dispatchChatSelfDelivering → completeDelivered → terminate →
+    finalizeInPlace), and refusing that finalize leaves a dangling
+    placeholder — a placeholder-terminal decision this ticket scopes out
+    (substitution belongs to the M1-793 fallback family). The seam guards
+    the LLM-authored fresh-delivery surface the acceptance drives;
+    follow-up owns wiring the finalize path.
+
 ---
 
 # M1-794: Guard against empty sanitized bodies at delivery
@@ -130,3 +146,23 @@ check-operand change (M1-793), no sanitize()/closed-list change (P11).
 
 This ticket is filed BY M1-792's census; its own census is the single P8
 row plus the M1-793 sibling.
+
+## Review observations
+
+Recorded from the round-1 gate (verdict APPROVE, 2026-08-08); filing any
+ticket is the user's call.
+
+- RECOMMENDED-NEW-TICKET — Wire the empty-body guard into the live
+  LLM-authored delivery path. This diff's guard sits on a new seam
+  (`deliverLlmReply`) that no production code calls; the live chat reply
+  still flows through `InboundRouter.sendReply → OutboundDelivery.deliver`
+  (InboundRouter.java:1573) and the placeholder terminal through
+  `StageProgressNotifier → OutboundDelivery.finalizeInPlace`
+  (StageProgressNotifier.java:339), neither of which refuses an emptied
+  body — so a markers-only LLM reply is still delivered as an empty
+  message on every live path today. Expected: the empty body is refused
+  (WARN, no transport call) or substituted on the live path as well; the
+  placeholder-finalize leg needs a substitution decision (refusing it
+  leaves a dangling placeholder) that the clarity note assigns to the
+  fallback family, but M1-793 is done and no open ticket owns the wiring.
+  TOUCHED-BY-THIS-DIFF: no — the live-path gap predates this diff.

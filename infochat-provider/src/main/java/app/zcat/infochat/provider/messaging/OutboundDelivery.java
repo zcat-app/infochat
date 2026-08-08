@@ -143,6 +143,16 @@ public class OutboundDelivery {
         return execute(adapter.name(), null, safe, () -> adapter.send(safe)).handle();
     }
 
+    /** LLM-authored delivery entry (M1-794): refuses a body that sanitized to empty — WARN + no transport call; {@link #deliver} keeps shipping deliberately empty deterministic replies (P1). */
+    public @Nullable MessageHandle deliverLlmReply(MessagingAdapter adapter, OutboundMessage msg) {
+        if (msg.text().isBlank()) {
+            log.warn("Outbound delivery of LLM-authored reply to channel={} refused: empty body",
+                    adapter.name());
+            return null;
+        }
+        return deliver(adapter, msg);
+    }
+
     /**
      * Deliver a group-scoped message, attributing permanent failures to
      * {@code groupId} for bot-removed cleanup. Returns the handle on

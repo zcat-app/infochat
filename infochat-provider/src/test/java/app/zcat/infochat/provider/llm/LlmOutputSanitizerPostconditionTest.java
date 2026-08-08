@@ -273,8 +273,8 @@ class LlmOutputSanitizerPostconditionTest {
                 "a marker-only line is dropped; blanking it instead fails this pin");
 
         // "" is a possible sanitize() return TODAY (P8): a markers-only
-        // reply reduces to nothing. The M1-794 empty-body follow-up must
-        // update this pin deliberately when it lands.
+        // reply reduces to nothing. M1-794's deliverLlmReply refuses the
+        // emptied shape at delivery; the pass contract itself is unchanged.
         assertEquals("", sanitizer.sanitize("<<<END id=\"x\">>>"),
                 "a markers-only reply reduces to empty today — P8's documented residual");
 
