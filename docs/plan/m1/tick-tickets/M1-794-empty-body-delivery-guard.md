@@ -166,3 +166,6 @@ ticket is the user's call.
   leaves a dangling placeholder) that the clarity note assigns to the
   fallback family, but M1-793 is done and no open ticket owns the wiring.
   TOUCHED-BY-THIS-DIFF: no — the live-path gap predates this diff.
+  FILED 2026-08-08 as M1-795 (fresh-send guard wiring) and M1-796
+  (chat-path substitution + the ChatModeIT suite-isolation fix);
+  analysis docs/plan/m1/tick-analysis/empty-body-live-delivery-wiring.md.

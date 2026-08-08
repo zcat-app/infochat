@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 10 |
 | deferred | 0 |
 | abandoned | 0 |
-| **total** | **11** |
+| **total** | **13** |
 
 ---
 
@@ -26,6 +26,8 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-790 — Downgrade markdown for the plain-text surface (complexity: medium, risk: medium)
+- M1-795 — Wire the empty-body guard into live delivery (complexity: low, risk: low)
+- M1-796 — Substitute an emptied chat reply before delivery (complexity: low, risk: low)
 
 ---
 
@@ -107,4 +109,6 @@ M1-791 (done)
 M1-792 (done)
 M1-793 (done)
 M1-794 (done)
+M1-795 (pending) ← runnable
+M1-796 (pending) ← runnable
 ```
