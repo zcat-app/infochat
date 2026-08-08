@@ -1,7 +1,7 @@
 ---
 id: M1-804
 title: "Flip the marker-drop test to the emptied-reply degrade"
-status: pending
+status: done
 created: 2026-08-08
 last_updated: 2026-08-08
 flow: tick
@@ -50,6 +50,14 @@ spec_refs:
   - docs/spec/llm.md §Failure handling (recap)
 decision_refs:
   - D43
+reviews:
+  - round: 1
+    date: 2026-08-08
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "3 files changed, 14 insertions(+), 12 deletions(-)"
+    findings: "0 rework items, 0 critical/high"
+    verdict_file: .scratch/tick-review-M1-804-r1.txt
 ---
 
 # M1-804: Flip the marker-drop test to the emptied-reply degrade

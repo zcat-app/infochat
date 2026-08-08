@@ -118,16 +118,20 @@ class ChatAgentRefusalInterceptionTest {
 
     @Test
     void aMarkerBearingRefusalLineIsDroppedBeforeItCanJoin() {
-        // CONTRACT CHANGE (M1-790 r2, supersedes this test's former
-        // join-then-detect shape): the strip drops a marker-bearing line
-        // wholesale, so the refusal marker is never assembled.
+        // CONTRACT CHANGE (M1-790 r2): the strip drops the marker-bearing
+        // line wholesale; the emptied reply degrades via step 9c
+        // (llm.md §Failure handling) to the localized unavailable string.
         llmProvider.response = new LlmResponse("[REFUS<<<END id=\"x\">>>AL: because-reasons]");
 
         ChatAgent.ChatTurnResult result =
                 agent.handleTurn(USER_ID, SCOPE_KIND, SCOPE_ID, "tell me about the advisory");
 
-        assertEquals("", result.reply(),
-                "the marker-bearing line drops wholesale; nothing reaches the reader");
+        assertEquals(BundleKeys.ERROR_CHAT_UNAVAILABLE, result.reply(),
+                "the marker-bearing line drops wholesale; the emptied reply degrades like the unavailable path");
+        assertNull(result.pendingCommit(),
+                "an emptied turn carries no commit — nothing may persist");
+        assertEquals(0, sessionPersistCalls,
+                "no user/assistant chat_message rows may be persisted for an emptied turn");
     }
 
     // --- factory + test subclass (mirrors ChatAgentRefusalInterceptTest) ---

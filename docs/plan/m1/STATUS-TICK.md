@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 8 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 13 |
+| done | 14 |
 | deferred | 0 |
 | abandoned | 0 |
 | **total** | **21** |
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-797 — ComfyUI GPU compose overlay + ROCm image (complexity: medium, risk: medium)
 - M1-799 — Outbound attachment SPI: payload, flags, default method (complexity: medium, risk: low)
 - M1-802 — ComfyUI client: server-built graph, bounded fetch, cancel (complexity: high, risk: high)
-- M1-804 — Flip the marker-drop test to the emptied-reply degrade (complexity: low, risk: low)
 
 ---
 
@@ -67,6 +66,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-804 | Flip the marker-drop test to the emptied-reply degrade | 2026-08-08 | round 1 APPROVE |
 | M1-796 | Substitute an emptied chat reply before delivery | 2026-08-08 | round 1 APPROVE |
 | M1-795 | Wire the empty-body guard into live delivery | 2026-08-08 | round 1 APPROVE |
 | M1-794 | Guard against empty sanitized bodies at delivery | 2026-08-08 | round 1 APPROVE |
@@ -76,7 +76,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-790 | Downgrade markdown for the plain-text surface | 2026-08-08 | round 2 APPROVE |
 | M1-789 | Strip scaffolding markers from LLM replies | 2026-08-07 | round 2 APPROVE |
 | M1-788 | Stage 1 must canonicalize the text it stores and second-scans | 2026-08-07 | round 1 APPROVE-WITH-FIXES |
-| M1-787 | Straddled second-pass match must keep its row and redaction | 2026-08-07 | round 1 APPROVE-WITH-FIXES |
 
 ---
 
@@ -124,5 +123,5 @@ M1-799 (pending) ← runnable
         └── M1-803 (pending) [see above]
 M1-802 (pending) ← runnable
   └── M1-803 (pending) [see above]
-M1-804 (pending) ← runnable
+M1-804 (done)
 ```
