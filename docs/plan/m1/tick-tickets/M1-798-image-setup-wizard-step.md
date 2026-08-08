@@ -41,6 +41,7 @@ acceptance:
   - "D77 firewall disclosure (redteam finding 2 fix; docs/spec/security.md §Trust boundaries off-host-exposure posture): when the operator enters a remote (two-box) URL, the step prints the requirement that the backend port be firewalled to the single Provider host — probe: run the remote-URL path and show the printed text (`grep -n firewall prod/scripts/<new-step>.sh` hits the printed requirement)."
   - "The step writes `infochat.image.base-url` into the runtime config (or records 'not enabled'), brings the overlay up for a local install, healthchecks via `/system_stats` (`curl -s http://localhost:8188/system_stats` returns JSON), and supports the re-run/edit path for existing installs (model switch = re-run, recreating the container and offering to delete the previous model's files) — probe: re-run the step on a configured install and show the switch offer."
   - "SETUP_GUIDE.md gains the /image setup section documenting profile gating, the disk/VRAM demand, and the two-box firewall requirement — probe: `grep -n '/image' SETUP_GUIDE.md` shows the new section."
+  - "Hardware scope is explicit (design addendum): the picker and the SETUP_GUIDE section state that the local container path is ROCm-only and validated on Strix Halo (gfx1151) alone — other ROCm GPUs unverified, NVIDIA not covered — probe: `grep -n -i 'gfx1151\|ROCm-only' SETUP_GUIDE.md prod/scripts/<new-step>.sh` hits in both."
   - "mvn verify from repo root is green (shell/doc-only diff; proves no drift)."
 test_plan:
   adds: []

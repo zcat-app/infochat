@@ -370,6 +370,16 @@ load-bearing (ComfyUI has no auth; `/history` holds the submitted graph).
 **The 4.4 s Mage-Flow number was measured on conda — the containerized setup
 must be re-measured before any number is printed to operators.**
 
+**Hardware scope, stated plainly: the local container path is ROCm-only and
+validated on Strix Halo (gfx1151) alone.** Other ROCm GPUs are expected to
+work but are unverified — the launch flags were measured on gfx1151 and
+`--disable-mmap` specifically works around a >64 GB unified-memory ROCm bug
+that smaller cards may not need. NVIDIA is not covered by the overlay at all
+(a CUDA variant is a separate, unscheduled decision; note the model repos'
+`nvfp4` builds would apply there, unlike on ROCm). Every operator-facing
+surface — the wizard step, SETUP_GUIDE, and eventually the README — must
+carry this scope sentence rather than implying "any GPU box".
+
 **Setup is part of the wizard, not a side script.** A new numbered step script
 under `prod/scripts/` (registered in the `setup.sh` STEPS list, alongside the
 existing steps — not a standalone like `switch-llm.sh`), plus a re-run/edit
