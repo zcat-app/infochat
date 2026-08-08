@@ -2,13 +2,16 @@ package app.zcat.infochat.provider.messaging;
 
 import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
+import app.zcat.infochat.messaging.CapabilityFlags;
 import app.zcat.infochat.messaging.FailureCategory;
 import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.MessagingException;
+import app.zcat.infochat.messaging.OutboundAttachment;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 import app.zcat.infochat.provider.group.GroupRepository;
+import app.zcat.infochat.provider.image.ImageSpool;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -17,6 +20,9 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -164,6 +170,43 @@ public class OutboundDelivery {
         return execute(adapter.name(), groupId, safe, () -> adapter.send(safe)).handle();
     }
 
+    /** Deliver a binary attachment (M1-801, D74): the text path's ladder,
+     * attribution and metrics (P23), gates before invoking (messaging.md
+     * §Required SPI surface), reclaim on completion (P3). */
+    public boolean deliverAttachment(
+            MessagingAdapter adapter, OutboundAttachment attachment,
+            ImageSpool spool, @Nullable UUID groupId) {
+        String channel = adapter.name();
+        CapabilityFlags caps = adapter.capabilities();
+        if (!caps.supportsOutboundAttachments()) {
+            log.warn("Outbound attachment to channel={} refused: adapter does not "
+                    + "support outbound attachments", channel);
+            return false;
+        }
+        long bytes = payloadBytes(attachment, channel);
+        if (bytes < 0) {
+            return false;
+        }
+        if (bytes > caps.maxOutboundAttachmentBytes()) {
+            log.warn("Outbound attachment to channel={} refused: payload of {} bytes "
+                    + "over the adapter's {} byte ceiling", channel, bytes,
+                    caps.maxOutboundAttachmentBytes());
+            return false;
+        }
+        try {
+            Outcome outcome = execute(channel, groupId, null, attachment, bytes,
+                    () -> {
+                        adapter.sendAttachment(attachment);
+                        return null;
+                    });
+            return outcome.delivered();
+        } finally {
+            // Reclaim on any terminal outcome: the sendAttachment return IS
+            // the completion signal, and an abort leaves nothing to retry.
+            spool.delete(attachment.filePath());
+        }
+    }
+
     /**
      * Deliver a sequence of group-scoped messages (a per-category digest),
      * attributing at most ONE aggregate outcome to {@code groupId}'s
@@ -288,6 +331,15 @@ public class OutboundDelivery {
      */
     private Outcome execute(String channel, @Nullable UUID groupId,
             @Nullable OutboundMessage sendMsg, DeliveryOp op) {
+        return execute(channel, groupId, sendMsg, null, 0L, op);
+    }
+
+    /** The attachment variant: {@code attachment} supplies the emission's
+     * scope and pre-measured bytes; ladder, attribution and abort
+     * semantics are the text path's. */
+    private Outcome execute(String channel, @Nullable UUID groupId,
+            @Nullable OutboundMessage sendMsg, @Nullable OutboundAttachment attachment,
+            long attachmentBytes, DeliveryOp op) {
         long currentBound = baseDelayMillis;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
@@ -295,12 +347,8 @@ public class OutboundDelivery {
                 if (groupId != null) {
                     consecutivePermanentByGroup.remove(groupId);
                 }
-                if (sendMsg != null) {
-                    adapterMetrics.outbound(channel, sendMsg.scope(),
-                            AdapterMetrics.SendOutcome.OK);
-                    adapterMetrics.messageBytes(channel,
-                            AdapterMetrics.Direction.OUTBOUND, sendMsg.text());
-                }
+                emitSendMetrics(channel, sendMsg, attachment, attachmentBytes,
+                        AdapterMetrics.SendOutcome.OK);
                 return new Outcome(true, handle);
             } catch (MessagingException e) {
                 switch (e.category()) {
@@ -308,10 +356,8 @@ public class OutboundDelivery {
                         log.warn("Outbound delivery to channel={} failed permanently, aborting reply",
                                 channel);
                         onPermanentGroupFailure(channel, groupId);
-                        if (sendMsg != null) {
-                            adapterMetrics.outbound(channel, sendMsg.scope(),
-                                    AdapterMetrics.SendOutcome.FAIL);
-                        }
+                        emitSendMetrics(channel, sendMsg, attachment, attachmentBytes,
+                                AdapterMetrics.SendOutcome.FAIL);
                         return Outcome.ABORTED;
                     }
                     case TRANSIENT -> {
@@ -320,19 +366,15 @@ public class OutboundDelivery {
                             // rest of this reply's lifecycle and alert admins.
                             onCapExhausted(channel, e);
                             onPermanentGroupFailure(channel, groupId);
-                            if (sendMsg != null) {
-                                adapterMetrics.outbound(channel, sendMsg.scope(),
-                                        AdapterMetrics.SendOutcome.FAIL);
-                            }
+                            emitSendMetrics(channel, sendMsg, attachment, attachmentBytes,
+                                    AdapterMetrics.SendOutcome.FAIL);
                             return Outcome.ABORTED;
                         }
                         if (!backOff(currentBound)) {
                             return Outcome.ABORTED;
                         }
-                        if (sendMsg != null) {
-                            adapterMetrics.outbound(channel, sendMsg.scope(),
-                                    AdapterMetrics.SendOutcome.RETRY);
-                        }
+                        emitSendMetrics(channel, sendMsg, attachment, attachmentBytes,
+                                AdapterMetrics.SendOutcome.RETRY);
                         currentBound = (long) (currentBound * growthFactor);
                     }
                 }
@@ -340,6 +382,39 @@ public class OutboundDelivery {
         }
         // Unreachable: the loop always returns on the maxAttempts-th attempt.
         return Outcome.ABORTED;
+    }
+
+    /** §6.12 emission for one send-attempt outcome: scope + byte count
+     * from the message (text) or the attachment; both null for
+     * update/finalize ops, which emit nothing here. */
+    private void emitSendMetrics(String channel, @Nullable OutboundMessage sendMsg,
+            @Nullable OutboundAttachment attachment, long attachmentBytes,
+            AdapterMetrics.SendOutcome outcome) {
+        if (attachment != null) {
+            adapterMetrics.outbound(channel, attachment.scope(), outcome);
+            // The histogram is int-sized; attachment payloads are bounded
+            // by the adapter ceiling, so the clamp is unreachable in
+            // practice and only keeps the metric type exact.
+            adapterMetrics.messageBytes(channel, AdapterMetrics.Direction.OUTBOUND,
+                    (int) Math.min(attachmentBytes, Integer.MAX_VALUE));
+        } else if (sendMsg != null) {
+            adapterMetrics.outbound(channel, sendMsg.scope(), outcome);
+            adapterMetrics.messageBytes(channel, AdapterMetrics.Direction.OUTBOUND,
+                    sendMsg.text());
+        }
+    }
+
+    /** The payload's byte length, measured once and shared by the ceiling
+     * gate and the byte metric (the inbound cap decision's single-source
+     * pattern). {@code -1} (after a WARN, no SPI call) when unreadable. */
+    private long payloadBytes(OutboundAttachment attachment, String channel) {
+        try {
+            return Files.size(Path.of(attachment.filePath()));
+        } catch (IOException e) {
+            log.warn("Outbound attachment to channel={} refused: spool file unreadable",
+                    channel);
+            return -1;
+        }
     }
 
     private void onCapExhausted(String channel, MessagingException last) {

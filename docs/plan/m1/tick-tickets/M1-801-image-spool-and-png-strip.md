@@ -1,20 +1,19 @@
 ---
 id: M1-801
 title: "tmpfs spool, age sweeper, PNG strip, delivery path"
-status: pending
+status: done
 created: 2026-08-08
 last_updated: 2026-08-08
+clarity_check: start self-check passed 2026-08-08 — lint 0 BLOCKERs (1 WARN: no §Census section, notify-and-continue); blocked_by M1-799 done; citations spot-checked clean; analysis pitfalls P2/P3/P5/P16/P23 all landed; M1-799 seam tests (MessagingAdapterAttachmentSpiTest, InMemoryAdapterTest, AdapterCapabilityContractTest) live in infochat-messaging-adapter, no overlap with files_scope
 flow: tick
 reproduction: >-
-  to-be-written: PngMetadataStripTest.stripsPromptCarryingTextChunks — the
-  intended test builds a PNG whose tEXt/iTXt chunks carry a canary prompt
-  string (the shape ComfyUI embeds: the whole workflow graph), runs the
-  strip, and asserts the output bytes contain no prompt substring while the
-  surviving chunks keep valid CRCs; it cannot compile today because no
-  binary/EXIF sanitizer exists anywhere in the codebase (design: "this
-  surface is new" — grep-verified: no PNG handling under
-  infochat-provider/src/main). `start` writes the test and runs it RED
-  before any fix code (workflow §0).
+  PngMetadataStripTest.stripsPromptCarryingTextChunks — builds a PNG whose
+  tEXt/iTXt chunks carry a canary prompt string (the shape ComfyUI embeds:
+  the whole workflow graph), runs the strip, and asserts the output bytes
+  contain no prompt substring while the surviving chunks keep valid CRCs.
+  Ran RED at start 2026-08-08 (no binary/EXIF sanitizer existed anywhere —
+  grep-verified: no PNG handling under infochat-provider/src/main);
+  now green on the implementation.
 analysis_ref: docs/plan/m1/tick-analysis/image-generation-feature.md
 blocked_by: [M1-799]
 files_scope:
@@ -64,6 +63,17 @@ decision_refs:
   - D74
   - D75
   - D76
+reviews:
+  - round: 2
+    date: 2026-08-08
+    verdict: APPROVE
+    checks:
+      SPEC-TRUTHNESS-CHECK: PASS
+      SECURITY-CHECK: PASS
+      TEST-ADEQUACY-CHECK: PASS
+      MAINTAINABILITY-CHECK: WARN
+      SCOPE-CHECK: PASS
+    diff_stats: "round-2 fix hunks: 7 files changed, 105 insertions(+), 8 deletions(-); both round-1 REWORK items SATISFIED"
 ---
 
 # M1-801: tmpfs spool, age sweeper, PNG strip, delivery path
@@ -168,3 +178,16 @@ client-side rendering. No pre-existing test is modified.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-801-image-spool-and-png-strip.md
 ```
+
+## Round 1 rework
+
+1. Finding 1: replace the overflowing bounds comparison at
+   PngMetadataStrip.java:48 with overflow-free arithmetic
+   (`length > png.length - offset - 12`), verified via the new
+   `PngMetadataStripTest.refusesChunkDeclaringLengthNearIntMax`
+   asserting InvalidPngException for a chunk declaring 0x7FFFFFFF.
+2. Finding 2: make ImageSpool.write's capacity check and write atomic
+   (`synchronized` at ImageSpool.java:35), verified via the new
+   `ImageSpoolTest.concurrentWritesNeverExceedTheCapacityBound` plus
+   `ImageSpoolTest.refusesWritesPastTheCapacityBound` staying green on
+   `mvn verify`.

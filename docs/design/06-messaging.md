@@ -361,6 +361,32 @@
   `true` with a test-scale ceiling so Provider-side delivery paths
   are testable before the production codecs exist.
 
+  **Provider-side spool lifecycle** (M1-801; the D75 privacy posture).
+  Provider owns the file lifecycle for D74's file-path payload: the
+  backend's bytes are spooled in a tmpfs directory, handed to the
+  adapter by path, and reclaimed on adapter-reported delivery
+  completion — with an age sweeper as the crash guarantee (a Provider
+  crash between fetch and send must not leak). The spool is
+  tmpfs-resident, never persistent storage, so it is RAM-backed and
+  capacity is host memory: writes refuse cleanly past the capacity
+  bound (no partial file left). The PNG metadata strip (D75: the
+  workflow graph ComfyUI embeds in text chunks, which contains the
+  prompt, is removed before delivery; pixel-bounded before stripping,
+  `commands.md` §Content) runs before the spool write. Config keys:
+
+  | Key | Default | Meaning |
+  |---|---|---|
+  | `infochat.image.spool.dir` | `/dev/shm/infochat-image-spool` | tmpfs spool directory |
+  | `infochat.image.spool.capacity-bytes` | `1073741824` | spool capacity; over-capacity writes are refused (tmpfs exhaustion is host memory exhaustion) |
+  | `infochat.image.spool.max-age` | `PT1H` | age bound for the sweeper's eviction |
+  | `infochat.image.spool.sweep-interval` | `15m` | the sweeper's cadence (@Scheduled expression default) |
+
+  The sweeper reads the injected app-wide `Clock` for its eviction
+  decision (engineering-rules §9; M1-444 pattern) — the same seam the
+  rate buckets and probation checks use — and its age bound is
+  independent of the container-side janitor window (M1-797): both
+  bound the same privacy invariant as separate layers.
+
   ---                                                                                                                                                                                                                                                   
   ## 6.3 Contract every adapter MUST honor                                            
                                                                                                                                                                                                                                                         
