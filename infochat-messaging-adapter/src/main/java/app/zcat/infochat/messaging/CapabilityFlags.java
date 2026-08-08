@@ -84,6 +84,21 @@ import java.time.Duration;
  *                                   {@link Duration#ZERO} when the
  *                                   transport imposes no floor (e.g.,
  *                                   the in-memory test double).
+ * @param supportsOutboundAttachments true when the adapter can
+ *                                   transmit a binary attachment as a
+ *                                   native file message (decision
+ *                                   D74). Defaults to false; a caller
+ *                                   with attachment work gates on this
+ *                                   flag and never invokes the
+ *                                   send-attachment SPI on a
+ *                                   false-flag adapter.
+ * @param maxOutboundAttachmentBytes the transport's ceiling on a
+ *                                   single outbound attachment;
+ *                                   meaningless when
+ *                                   {@code supportsOutboundAttachments}
+ *                                   is false. Provider refuses
+ *                                   over-ceiling payloads before
+ *                                   invoking the adapter.
  */
 public record CapabilityFlags(
         boolean supportsMentionByContactId,
@@ -94,5 +109,7 @@ public record CapabilityFlags(
         int maxSendsPerSecond,
         boolean supportsMessageEdit,
         boolean supportsTypingIndicator,
-        Duration minEditInterval) {
+        Duration minEditInterval,
+        boolean supportsOutboundAttachments,
+        int maxOutboundAttachmentBytes) {
 }

@@ -128,4 +128,21 @@ class AdapterCapabilityContractTest {
         assertFalse(simplex.supportsCodeFormatting(),
                 "design §6.4.2: SimpleX does not render code formatting");
     }
+
+    /** Interim attachment pins (M1-799 P25): production false until M1-800's pre-authorized flip; in-memory opts in. */
+    @Test
+    void interimOutboundAttachmentCapabilityPins() {
+        CapabilityFlags simplex = new SimpleXAdapter().capabilities();
+        CapabilityFlags signal = new SignalAdapter().capabilities();
+        CapabilityFlags inMemory = new InMemoryAdapter().capabilities();
+
+        assertFalse(simplex.supportsOutboundAttachments(),
+                "M1-799 interim: SimpleX attachment codec + ceiling land in M1-800");
+        assertFalse(signal.supportsOutboundAttachments(),
+                "M1-799 interim: Signal attachment codec + ceiling land in M1-800");
+        assertTrue(inMemory.supportsOutboundAttachments(),
+                "in-memory fill-in opts in so the M1-801 Provider path is testable");
+        assertTrue(inMemory.maxOutboundAttachmentBytes() > 0,
+                "in-memory declares a test-scale ceiling");
+    }
 }

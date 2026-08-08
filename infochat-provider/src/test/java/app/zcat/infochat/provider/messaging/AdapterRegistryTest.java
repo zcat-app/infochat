@@ -324,7 +324,9 @@ class AdapterRegistryTest {
                     /* maxSendsPerSecond          */ 10_000,
                     /* supportsMessageEdit        */ true,
                     /* supportsTypingIndicator    */ true,
-                    /* minEditInterval            */ Duration.ZERO);
+                    /* minEditInterval            */ Duration.ZERO,
+                    /* supportsOutboundAttachments */ false,
+                    /* maxOutboundAttachmentBytes  */ 0);
         }
     }
 }

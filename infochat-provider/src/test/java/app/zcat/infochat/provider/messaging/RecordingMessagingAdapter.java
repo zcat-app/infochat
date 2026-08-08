@@ -106,7 +106,9 @@ final class RecordingMessagingAdapter implements MessagingAdapter {
                 /* maxSendsPerSecond           */ 1,
                 supportsMessageEdit,
                 /* supportsTypingIndicator     */ true,
-                /* minEditInterval             */ minEditInterval);
+                /* minEditInterval             */ minEditInterval,
+                /* supportsOutboundAttachments */ false,
+                /* maxOutboundAttachmentBytes  */ 0);
     }
 
     @Override

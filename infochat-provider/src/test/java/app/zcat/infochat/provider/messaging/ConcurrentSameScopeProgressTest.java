@@ -288,7 +288,9 @@ class ConcurrentSameScopeProgressTest {
                     /* maxSendsPerSecond           */ 1,
                     /* supportsMessageEdit         */ true,
                     /* supportsTypingIndicator     */ true,
-                    /* minEditInterval             */ Duration.ZERO);
+                    /* minEditInterval             */ Duration.ZERO,
+                    /* supportsOutboundAttachments */ false,
+                    /* maxOutboundAttachmentBytes  */ 0);
         }
 
         @Override

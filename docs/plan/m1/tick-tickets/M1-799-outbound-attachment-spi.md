@@ -1,7 +1,7 @@
 ---
 id: M1-799
 title: "Outbound attachment SPI: payload, flags, default method"
-status: pending
+status: done
 created: 2026-08-08
 last_updated: 2026-08-08
 flow: tick
@@ -59,6 +59,15 @@ spec_refs:
   - docs/spec/messaging.md §Capability flags (minimum set)
 decision_refs:
   - D74
+reviews:
+  - round: 1
+    date: 2026-08-08
+    verdict: APPROVE-WITH-FIXES
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY WARN, SCOPE PASS"
+    diff_stats: "19 files changed, 320 insertions(+), 22 deletions(-)"
+    findings: "1 low fix item (stale OutboundChokepointArchTest prose — detection-model javadoc and violation message now name sendAttachment alongside send/update/finalizeMessage); 0 critical/high; 5 candidate findings falsified-and-dropped"
+    fixes_applied: "FIX ITEM 1 applied exactly as specified — comment/javadoc lines plus the verdict-sanctioned diagnostic string literal, zero behavior change; probes: grep -c sendAttachment OutboundChokepointArchTest.java = 4 (>= 4) PASS; ./mvnw -B -pl infochat-provider -am test-compile EXIT 0 PASS; fixed-tree snapshot .scratch/tick-fixes-M1-799.tree = 2c7bbf7aab9ad7a40c450b9bd494bfeb140401ab"
+    verdict_file: .scratch/tick-review-M1-799-r1.txt
 ---
 
 # M1-799: Outbound attachment SPI: payload, flags, default method

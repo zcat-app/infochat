@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 7 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 14 |
+| done | 15 |
 | deferred | 0 |
 | abandoned | 0 |
 | **total** | **21** |
@@ -26,7 +26,8 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-797 — ComfyUI GPU compose overlay + ROCm image (complexity: medium, risk: medium)
-- M1-799 — Outbound attachment SPI: payload, flags, default method (complexity: medium, risk: low)
+- M1-800 — SimpleX + Signal sendAttachment codecs and ceilings (complexity: high, risk: high)
+- M1-801 — tmpfs spool, age sweeper, PNG strip, delivery path (complexity: high, risk: high)
 - M1-802 — ComfyUI client: server-built graph, bounded fetch, cancel (complexity: high, risk: high)
 
 ---
@@ -45,8 +46,6 @@ _(none)_
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-798 — blocked_by: M1-797 (pending)
-- M1-800 — blocked_by: M1-799 (pending)
-- M1-801 — blocked_by: M1-799 (pending)
 - M1-803 — blocked_by: M1-800 (pending), M1-801 (pending), M1-802 (pending)
 
 ---
@@ -67,6 +66,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-804 | Flip the marker-drop test to the emptied-reply degrade | 2026-08-08 | round 1 APPROVE |
+| M1-799 | Outbound attachment SPI: payload, flags, default method | 2026-08-08 | round 1 APPROVE-WITH-FIXES |
 | M1-796 | Substitute an emptied chat reply before delivery | 2026-08-08 | round 1 APPROVE |
 | M1-795 | Wire the empty-body guard into live delivery | 2026-08-08 | round 1 APPROVE |
 | M1-794 | Guard against empty sanitized bodies at delivery | 2026-08-08 | round 1 APPROVE |
@@ -75,7 +75,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-791 | Run protocol-token detectors on sanitized LLM output | 2026-08-08 | round 1 APPROVE |
 | M1-790 | Downgrade markdown for the plain-text surface | 2026-08-08 | round 2 APPROVE |
 | M1-789 | Strip scaffolding markers from LLM replies | 2026-08-07 | round 2 APPROVE |
-| M1-788 | Stage 1 must canonicalize the text it stores and second-scans | 2026-08-07 | round 1 APPROVE-WITH-FIXES |
 
 ---
 
@@ -116,10 +115,10 @@ M1-795 (done)
 M1-796 (done)
 M1-797 (pending) ← runnable
   └── M1-798 (pending)
-M1-799 (pending) ← runnable
-  ├── M1-800 (pending)
+M1-799 (done)
+  ├── M1-800 (pending) ← runnable
   │     └── M1-803 (pending)
-  └── M1-801 (pending)
+  └── M1-801 (pending) ← runnable
         └── M1-803 (pending) [see above]
 M1-802 (pending) ← runnable
   └── M1-803 (pending) [see above]

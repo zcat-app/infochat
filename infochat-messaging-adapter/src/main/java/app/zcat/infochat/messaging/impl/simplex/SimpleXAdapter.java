@@ -85,7 +85,9 @@ public final class SimpleXAdapter implements MessagingAdapter {
             /* maxSendsPerSecond          */ 5,
             /* supportsMessageEdit        */ true,
             /* supportsTypingIndicator    */ false,
-            /* minEditInterval            */ Duration.ofMillis(600));
+            /* minEditInterval            */ Duration.ofMillis(600),
+            /* supportsOutboundAttachments */ false,
+            /* maxOutboundAttachmentBytes  */ 0); // interim; codec + measured ceiling land in M1-800
 
     static final Duration WS_READY_TIMEOUT = Duration.ofSeconds(10);
     static final Duration ACK_TIMEOUT = Duration.ofSeconds(30);

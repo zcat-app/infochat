@@ -87,7 +87,9 @@ public final class SignalAdapter implements MessagingAdapter {
             /* maxSendsPerSecond          */ 5,
             /* supportsMessageEdit        */ true,
             /* supportsTypingIndicator    */ true,
-            /* minEditInterval            */ Duration.ofMillis(600));
+            /* minEditInterval            */ Duration.ofMillis(600),
+            /* supportsOutboundAttachments */ false,
+            /* maxOutboundAttachmentBytes  */ 0); // interim; codec + measured ceiling land in M1-800
 
     private static final Duration ENDPOINT_PROBE_TIMEOUT = Duration.ofSeconds(15);
     private static final Duration ENDPOINT_PROBE_INTERVAL = Duration.ofMillis(100);

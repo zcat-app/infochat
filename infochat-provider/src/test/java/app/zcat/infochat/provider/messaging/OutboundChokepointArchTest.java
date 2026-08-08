@@ -49,7 +49,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p><b>Detection model — what this guard does and does not catch.</b>
  * A call site is matched by {@code Method name in {send, update,
- * finalizeMessage} AND target owner assignable to MessagingAdapter}, evaluated
+ * finalizeMessage, sendAttachment} AND target owner assignable to
+ * MessagingAdapter}, evaluated
  * over BOTH direct calls ({@code adapter.send(msg)}) and method references
  * ({@code adapter::send}); a future caller that types its receiver as a
  * concrete adapter subtype (e.g. {@code SimpleXAdapter}) or a sub-interface,
@@ -89,8 +90,11 @@ class OutboundChokepointArchTest {
             OutboundDelivery.class.getName(),
             "app.zcat.infochat.provider.digest.DigestDelivery$RecordingAdapter");
 
+    // sendAttachment delivers an outbound payload whose callers must keep the
+    // chokepoint's retry/attribution/metrics obligations (analysis P23;
+    // M1-801 wires the path through OutboundDelivery).
     private static final Set<String> GUARDED_METHODS =
-            Set.of("send", "update", "finalizeMessage");
+            Set.of("send", "update", "finalizeMessage", "sendAttachment");
 
     /**
      * The {@link MessagingAdapter} methods that do NOT deliver or modify an
@@ -193,8 +197,8 @@ class OutboundChokepointArchTest {
         }
 
         assertTrue(violators.isEmpty(),
-                "MessagingAdapter.send/update/finalizeMessage must be called "
-                        + "only by OutboundDelivery or DigestDelivery.RecordingAdapter "
+                "MessagingAdapter.send/update/finalizeMessage/sendAttachment must be "
+                        + "called only by OutboundDelivery or DigestDelivery.RecordingAdapter "
                         + "(the outbound chokepoint); any other caller bypasses the "
                         + "spec's ]( adjacency-break guarantee. Violators: " + violators);
     }

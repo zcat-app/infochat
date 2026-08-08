@@ -11,6 +11,7 @@ import app.zcat.infochat.messaging.FailureCategory;
 import app.zcat.infochat.messaging.Identity;
 import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingException;
+import app.zcat.infochat.messaging.OutboundAttachment;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 
@@ -141,5 +142,24 @@ class InMemoryAdapterTest {
 
         assertEquals(0, adapter.sentMessages().size());
         assertEquals(0, adapter.typingEventHistory().size());
+    }
+
+    @Test
+    void sendAttachmentRecordsThePayloadTuple() throws MessagingException {
+        InMemoryAdapter adapter = new InMemoryAdapter();
+        OutboundAttachment attachment = new OutboundAttachment(
+                new ScopeRef.Dm("alice"),
+                "/tmp/test-image.png",
+                "image/png",
+                "test-image.png",
+                "corr-att-1");
+
+        // Completion signal per the SPI javadoc: the call returns on
+        // delivery completion; a classified failure would throw instead.
+        adapter.sendAttachment(attachment);
+
+        List<OutboundAttachment> recorded = adapter.sentAttachments();
+        assertEquals(1, recorded.size());
+        assertEquals(attachment, recorded.get(0));
     }
 }

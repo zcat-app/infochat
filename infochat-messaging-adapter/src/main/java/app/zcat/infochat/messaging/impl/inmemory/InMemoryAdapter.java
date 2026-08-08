@@ -11,6 +11,7 @@ import app.zcat.infochat.messaging.MembershipEvent;
 import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.MessagingException;
+import app.zcat.infochat.messaging.OutboundAttachment;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 
@@ -66,12 +67,15 @@ public final class InMemoryAdapter implements MessagingAdapter {
             /* maxSendsPerSecond          */ 10_000,
             /* supportsMessageEdit        */ true,
             /* supportsTypingIndicator    */ true,
-            /* minEditInterval            */ Duration.ZERO);
+            /* minEditInterval            */ Duration.ZERO,
+            /* supportsOutboundAttachments */ true,
+            /* maxOutboundAttachmentBytes  */ 1_048_576); // test-scale; production ceilings verified in M1-800
 
     private final AdapterTrustLevel trustLevel;
     private final AtomicLong handleIdGen = new AtomicLong();
 
     private final List<OutboundMessage> sent = new CopyOnWriteArrayList<>();
+    private final List<OutboundAttachment> sentAttachments = new CopyOnWriteArrayList<>();
     private final List<TypingEvent> typingEvents = new CopyOnWriteArrayList<>();
     private final Map<String, List<UpdateEvent>> history = new ConcurrentHashMap<>();
     private final Map<String, Identity> knownIdentities = new ConcurrentHashMap<>();
@@ -133,6 +137,13 @@ public final class InMemoryAdapter implements MessagingAdapter {
                 List.of(new UpdateEvent(msg.text(), false))));
         sent.add(msg);
         return handle;
+    }
+
+    @Override
+    public void sendAttachment(OutboundAttachment attachment) throws MessagingException {
+        // Completion signal per the SPI javadoc: recording IS the
+        // deliver — the call returns on completion.
+        sentAttachments.add(attachment);
     }
 
     @Override
@@ -289,6 +300,11 @@ public final class InMemoryAdapter implements MessagingAdapter {
         return List.copyOf(sent);
     }
 
+    /** Snapshot of every {@link OutboundAttachment} passed to {@link #sendAttachment}. */
+    public List<OutboundAttachment> sentAttachments() {
+        return List.copyOf(sentAttachments);
+    }
+
     /**
      * Snapshot of the per-handle update history (including the
      * initial send body and the finalize body when present). Order is
@@ -333,6 +349,7 @@ public final class InMemoryAdapter implements MessagingAdapter {
     /** Reset all adapter state — test fixture isolation. */
     public void reset() {
         sent.clear();
+        sentAttachments.clear();
         typingEvents.clear();
         history.clear();
         knownIdentities.clear();

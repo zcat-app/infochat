@@ -160,6 +160,39 @@ public interface MessagingAdapter {
     MessageHandle send(OutboundMessage msg) throws MessagingException;
 
     /**
+     * Send a binary attachment (e.g. an image) to the given scope as a
+     * native file message. The payload is a file path, never bytes —
+     * signal-cli attaches by path and SimpleX file transfer completes
+     * asynchronously past this call's return — so the file MUST remain
+     * readable by the adapter for the whole transmit, and the adapter
+     * MUST NOT retain or copy the payload beyond delivery. This call
+     * blocks until the transport reports delivery completion: the
+     * return IS the completion signal, and a classified failure is
+     * raised as a {@link MessagingException} per §Failure handling
+     * ({@code docs/spec/messaging.md}); attachment sends obey the same
+     * transient/permanent classification and the same at-least-once
+     * delivery non-guarantee (D64) as text sends.
+     *
+     * <p>Provider invokes this method only on an adapter whose
+     * {@link CapabilityFlags#supportsOutboundAttachments} is true and
+     * refuses payloads above
+     * {@link CapabilityFlags#maxOutboundAttachmentBytes} before
+     * invoking it. The default therefore fails loudly — an adapter
+     * that declares the flag false and never overrides this method
+     * must not pretend to send.</p>
+     *
+     * @param attachment the outbound attachment; never null.
+     * @throws MessagingException on transport failure; classified
+     *         PERMANENT by this default for an adapter that did not
+     *         opt in.
+     */
+    default void sendAttachment(OutboundAttachment attachment) throws MessagingException {
+        throw new MessagingException(
+                FailureCategory.PERMANENT,
+                name() + " does not support outbound attachments");
+    }
+
+    /**
      * Replace the visible body of a previously-sent message.
      * Adapters whose underlying protocol does not support edits
      * ({@link CapabilityFlags#supportsMessageEdit} false) signal "not

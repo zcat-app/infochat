@@ -318,7 +318,49 @@
     string matching is forever-out-of-v1
     ([../spec/security.md](../spec/security.md) §What's intentionally
     NOT in v1).
-                                                                                   
+
+  ### 6.2.4 Outbound attachments (D74)
+
+  The outbound half of the media surface: Provider hands the adapter
+  an `OutboundAttachment` record —
+
+  ```java
+  public record OutboundAttachment(
+      ScopeRef scope,
+      String filePath,        // a PATH, never bytes (D74)
+      String mimeType,
+      String displayFileName,
+      String correlationId    // same non-null-only contract as OutboundMessage
+  ) {}
+  ```
+
+  — via `MessagingAdapter.sendAttachment(OutboundAttachment)`. The
+  payload is a file path, not bytes, because signal-cli attaches by
+  path and SimpleX file transfer completes asynchronously past
+  `send()`'s return ([../spec/messaging.md](../spec/messaging.md)
+  §Required SPI surface — *Send attachment*, decision D74).
+
+  **Completion contract.** `sendAttachment` blocks until the transport
+  reports delivery completion — success, or a classified failure per
+  [../spec/messaging.md](../spec/messaging.md) §Failure handling. The
+  return is the success signal; the throw with its `FailureCategory`
+  is the failure signal. The file MUST remain readable by the adapter
+  for the whole transmit, and the adapter MUST NOT retain or copy the
+  payload beyond delivery — the spool file is reclaimed by Provider
+  on return. Attachment sends obey the same transient/permanent
+  classification, the same bounded retry ladder, and the same
+  at-least-once delivery non-guarantee (D64) as text sends.
+
+  **Caller gate.** Provider invokes `sendAttachment` only on an
+  adapter whose `supportsOutboundAttachments` is true, and refuses
+  payloads above `maxOutboundAttachmentBytes` before invoking it; the
+  SPI default throws PERMANENT so a misinvocation on a false-flag
+  adapter fails loudly. Interim pins (M1-799): SimpleX and Signal
+  declare `false`/`0` until M1-800 verifies the wire codecs and
+  measures the transport ceilings; the in-memory test double declares
+  `true` with a test-scale ceiling so Provider-side delivery paths
+  are testable before the production codecs exist.
+
   ---                                                                                                                                                                                                                                                   
   ## 6.3 Contract every adapter MUST honor                                            
                                                                                                                                                                                                                                                         
@@ -1121,7 +1163,7 @@
   ## 6.13 What's intentionally NOT in v1
 
   - Telegram, Matrix, IRC, XMPP adapters — the SPI is designed to accept them but the v1 production set is closed at SimpleX + Signal (D32, D46). Adding a new adapter requires it to declare its trust level and identity-assertion shape per §6.2.3 and [04-security.md §4.8](04-security.md) before it can be enabled in production.
-  - Voice / file attachments — out of scope for v1.
+  - Voice messages and inbound attachments — out of scope for v1. Outbound attachments are in v1 as the D74 `/image` surface (§6.2.4).
   - Threaded replies in groups — out of scope for v1.
   - Per-message read receipts back to the bot — adapters don't surface "delivered/read" to Provider.
   - End-to-end encryption configuration in the adapter layer — handled by the messaging app itself; nothing to configure.
