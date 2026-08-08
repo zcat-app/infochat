@@ -11,6 +11,7 @@ import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.MessagingException;
+import app.zcat.infochat.messaging.OutboundAttachment;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.OutboundRateLimiter;
 import app.zcat.infochat.messaging.ScopeRef;
@@ -21,6 +22,9 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Collections;
@@ -71,6 +75,9 @@ public final class SimpleXAdapter implements MessagingAdapter {
 
     private static final Logger LOG = LoggerFactory.getLogger(SimpleXAdapter.class);
 
+    /** Single-attachment ceiling, verified against the bundled transport (design §6.2.4 §Verified ceilings): the XFTP {@code maxFileSize = 1 GiB} simplex-chat enforces on every file send. */
+    static final int MAX_OUTBOUND_ATTACHMENT_BYTES = 1_073_741_824;
+
     // maxInboundMessageBytes is single-sourced from the codec's enforcement
     // constant so the capability and the decode-time cap cannot drift; v1
     // ships the fixed 16 KiB value per docs/design/06-messaging.md §6.2.2.
@@ -86,11 +93,16 @@ public final class SimpleXAdapter implements MessagingAdapter {
             /* supportsMessageEdit        */ true,
             /* supportsTypingIndicator    */ false,
             /* minEditInterval            */ Duration.ofMillis(600),
-            /* supportsOutboundAttachments */ false,
-            /* maxOutboundAttachmentBytes  */ 0); // interim; codec + measured ceiling land in M1-800
+            /* supportsOutboundAttachments */ true,
+            /* maxOutboundAttachmentBytes  */ MAX_OUTBOUND_ATTACHMENT_BYTES);
 
     static final Duration WS_READY_TIMEOUT = Duration.ofSeconds(10);
     static final Duration ACK_TIMEOUT = Duration.ofSeconds(30);
+
+    /**
+     * Bound on the XFTP completion wait in {@link #sendAttachment}: the upload runs asynchronously past the ack, so this bounds the caller thread while covering a near-ceiling upload on a slow uplink.
+     */
+    static final Duration FILE_COMPLETION_TIMEOUT = Duration.ofMinutes(5);
 
     // §6.4.6 network-failure reconnect ladder (docs/design/06-messaging.md):
     // delay BEFORE each peer-close-triggered rebuild attempt, advancing one
@@ -831,6 +843,37 @@ public final class SimpleXAdapter implements MessagingAdapter {
         String envelope = SimpleXMessageCodec.encodeSendCommand(corrId, scope, text);
         outboundRate.acquire();
         return ws.sendCommand(corrId, envelope, ACK_TIMEOUT);
+    }
+
+    /**
+     * Send an attachment as a native file message (D74, design §6.2.4): the spool PATH crosses (never bytes, never a copy), an unreadable path fails classified PERMANENT, and the call blocks past the ack on the XFTP completion event. One rate-limiter token (§6.3.6).
+     */
+    @Override
+    public void sendAttachment(OutboundAttachment attachment) throws MessagingException {
+        requireReadableAttachment(attachment.filePath());
+        SimpleXWebSocketClient ws = requireConnected();
+        String corrId = nextCorrId();
+        String envelope = SimpleXMessageCodec.encodeSendFileCommand(
+                corrId, attachment.scope(), attachment.filePath(),
+                attachment.mimeType(), attachment.displayFileName());
+        outboundRate.acquire();
+        String chatItemId = ws.sendCommand(corrId, envelope, ACK_TIMEOUT);
+        ws.awaitFileCompletion(chatItemId, FILE_COMPLETION_TIMEOUT);
+    }
+
+    /** SPI-boundary guard: an unreadable path fails classified, never an escaping IOException nor a silent skip; metadata-only, the adapter never opens the payload. */
+    private static void requireReadableAttachment(String filePath) throws MessagingException {
+        Path path;
+        try {
+            path = Path.of(filePath);
+        } catch (InvalidPathException e) {
+            throw new MessagingException(FailureCategory.PERMANENT,
+                    "attachment path is not a valid filesystem path");
+        }
+        if (!Files.isRegularFile(path) || !Files.isReadable(path)) {
+            throw new MessagingException(FailureCategory.PERMANENT,
+                    "attachment path is not a readable file at send time");
+        }
     }
 
     @Override

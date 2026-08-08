@@ -128,6 +128,11 @@ final class SimpleXWebSocketClient {
     private final GroupInvitationConsumer groupInvitationConsumer;
 
     private final Map<String, CompletableFuture<String>> pending = new ConcurrentHashMap<>();
+    // File-send completion waiters keyed by the ack's chat-item id (D74, design §6.2.4):
+    // the XFTP upload finishes PAST the ack, so sendAttachment parks here; computeIfAbsent
+    // at both dispatch and await sites closes the ack-vs-event race.
+    private final Map<String, CompletableFuture<Void>> pendingFileCompletions =
+            new ConcurrentHashMap<>();
     // Single dedicated inbound-dispatch thread: Inbound / GroupCandidate
     // frames hop off the WS listener thread here so a blocking consumer
     // (a handler replying synchronously from onMessage) cannot deadlock
@@ -287,6 +292,9 @@ final class SimpleXWebSocketClient {
                     FailureCategory.PERMANENT,
                     "WebSocket closed before command " + entry.getKey() + " was acked"));
         }
+        failAllFileCompletions(new MessagingException(
+                FailureCategory.PERMANENT,
+                "WebSocket closed before the file transfer completed"));
         // Queued-but-undelivered inbound frames are dropped — the
         // connection is going away, matching at-most-once inbound.
         dispatchExecutor.shutdownNow();
@@ -382,6 +390,40 @@ final class SimpleXWebSocketClient {
                     "WebSocket is not yet started; cannot send corrId=" + corrId);
         }
         transmit(ws, corrId, envelopeJson);
+    }
+
+    /**
+     * Block until the XFTP completion for {@code chatItemId} (D74, design §6.2.4): success returns, a failed transfer raises classified PERMANENT, timeout classifies TRANSIENT so the Provider ladder owns the retry (D64).
+     */
+    void awaitFileCompletion(String chatItemId, Duration timeout) throws MessagingException {
+        if (closed) {
+            throw new MessagingException(FailureCategory.PERMANENT,
+                    "WebSocket is closed; cannot await file completion for chatItemId="
+                            + chatItemId);
+        }
+        CompletableFuture<Void> future =
+                pendingFileCompletions.computeIfAbsent(chatItemId, k -> new CompletableFuture<>());
+        try {
+            future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new MessagingException(FailureCategory.TRANSIENT,
+                    "interrupted while awaiting file completion for chatItemId=" + chatItemId, e);
+        } catch (TimeoutException e) {
+            throw new MessagingException(FailureCategory.TRANSIENT,
+                    "no file-completion event for chatItemId=" + chatItemId
+                            + " within " + timeout, e);
+        } catch (ExecutionException e) {
+            Throwable cause = Objects.requireNonNull(e.getCause());
+            if (cause instanceof MessagingException me) {
+                throw me;
+            }
+            throw new MessagingException(FailureCategory.PERMANENT,
+                    "file-completion future for chatItemId=" + chatItemId
+                            + " failed: " + cause.getClass().getSimpleName(), cause);
+        } finally {
+            pendingFileCompletions.remove(chatItemId);
+        }
     }
 
     /**
@@ -604,6 +646,20 @@ final class SimpleXWebSocketClient {
             case SimpleXMessageCodec.ContactAddress addr ->
                     completePending(addr.corrId(), addr.contactLink());
             case SimpleXMessageCodec.CommandError err -> failPending(err);
+            // File-send completion events complete the waiting sendAttachment on the
+            // listener thread, exactly like SendAck — queueing them would deadlock a
+            // consumer blocked in sendAttachment; computeIfAbsent covers the no-waiter gap.
+            case SimpleXMessageCodec.FileSendComplete done ->
+                    pendingFileCompletions
+                            .computeIfAbsent(done.chatItemId(), k -> new CompletableFuture<>())
+                            .complete(null);
+            case SimpleXMessageCodec.FileSendFailed failed ->
+                    pendingFileCompletions
+                            .computeIfAbsent(failed.chatItemId(), k -> new CompletableFuture<>())
+                            .completeExceptionally(new MessagingException(
+                                    FailureCategory.PERMANENT,
+                                    "simplex-chat reported the file transfer failed"
+                                            + " (chatItemId=" + failed.chatItemId() + ")"));
             case SimpleXMessageCodec.OversizeDropped od -> {
                 // §6.3.10 transport size-cap shed: silent at the boundary (no
                 // reply — emitting one below the Provider rate cap reopens the
@@ -680,6 +736,15 @@ final class SimpleXWebSocketClient {
     private void failAllPending(MessagingException ex) {
         var snapshot = Map.copyOf(pending);
         pending.clear();
+        for (var future : snapshot.values()) {
+            future.completeExceptionally(ex);
+        }
+        failAllFileCompletions(ex);
+    }
+
+    private void failAllFileCompletions(MessagingException ex) {
+        var snapshot = Map.copyOf(pendingFileCompletions);
+        pendingFileCompletions.clear();
         for (var future : snapshot.values()) {
             future.completeExceptionally(ex);
         }

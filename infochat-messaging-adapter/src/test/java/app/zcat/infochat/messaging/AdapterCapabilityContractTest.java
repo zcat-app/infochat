@@ -129,17 +129,23 @@ class AdapterCapabilityContractTest {
                 "design §6.4.2: SimpleX does not render code formatting");
     }
 
-    /** Interim attachment pins (M1-799 P25): production false until M1-800's pre-authorized flip; in-memory opts in. */
+    /**
+     * Attachment capability pins: M1-799's interim false/0 flip, pre-authorized by M1-799 acceptance item 4 (M1-800 test_plan.modifies), to true with the ceilings verified against the bundled transports (design §6.2.4).
+     */
     @Test
-    void interimOutboundAttachmentCapabilityPins() {
+    void outboundAttachmentCapabilityPins() {
         CapabilityFlags simplex = new SimpleXAdapter().capabilities();
         CapabilityFlags signal = new SignalAdapter().capabilities();
         CapabilityFlags inMemory = new InMemoryAdapter().capabilities();
 
-        assertFalse(simplex.supportsOutboundAttachments(),
-                "M1-799 interim: SimpleX attachment codec + ceiling land in M1-800");
-        assertFalse(signal.supportsOutboundAttachments(),
-                "M1-799 interim: Signal attachment codec + ceiling land in M1-800");
+        assertTrue(simplex.supportsOutboundAttachments(),
+                "M1-800: SimpleX sendAttachment codec landed");
+        assertEquals(1_073_741_824, simplex.maxOutboundAttachmentBytes(),
+                "M1-800: SimpleX ceiling is the verified XFTP maxFileSize (1 GiB)");
+        assertTrue(signal.supportsOutboundAttachments(),
+                "M1-800: Signal sendAttachment codec landed");
+        assertEquals(157_286_400, signal.maxOutboundAttachmentBytes(),
+                "M1-800: Signal ceiling is the verified 150 MiB service limit");
         assertTrue(inMemory.supportsOutboundAttachments(),
                 "in-memory fill-in opts in so the M1-801 Provider path is testable");
         assertTrue(inMemory.maxOutboundAttachmentBytes() > 0,

@@ -355,11 +355,57 @@
   adapter whose `supportsOutboundAttachments` is true, and refuses
   payloads above `maxOutboundAttachmentBytes` before invoking it; the
   SPI default throws PERMANENT so a misinvocation on a false-flag
-  adapter fails loudly. Interim pins (M1-799): SimpleX and Signal
-  declare `false`/`0` until M1-800 verifies the wire codecs and
-  measures the transport ceilings; the in-memory test double declares
-  `true` with a test-scale ceiling so Provider-side delivery paths
-  are testable before the production codecs exist.
+  adapter fails loudly. The in-memory test double declares `true`
+  with a test-scale ceiling so Provider-side delivery paths are
+  testable ahead of the production codecs.
+
+  **Verified ceilings (M1-800, measured against the bundled
+  transports).** `maxOutboundAttachmentBytes` is
+  `1_073_741_824` (1 GiB) for SimpleX and `157_286_400` (150 MiB)
+  for Signal. Measurement method, both extracted from the bundled
+  binaries the adapters spawn (provider image
+  `infochat-test-infochat-provider:latest`):
+  - SimpleX — simplex-chat v6.5.4.1 links simplexmq's XFTP
+    `maxFileSize = gb 1` (1 GiB, binary units), the soft limit its
+    send path enforces on every file message (`checkSndFile` rejects
+    an over-limit file with the `fileSize` error before any upload
+    starts); the 5 GiB `maxFileSizeHard` is the agent-internal limit
+    for standalone uploads and never applies to contact/group sends.
+  - Signal — signal-cli 0.14.5's service library declares
+    `ServiceConfig.MAX_ATTACHMENT_SIZE = 157286400` (150 MiB), the
+    Signal service's single-attachment ceiling; signal-cli performs
+    no client-side pre-check, so the adapter declares the ceiling
+    and Provider's caller gate refuses over-limit payloads before
+    the upload attempt.
+
+  **SimpleX wire form and XFTP completion signal (M1-800, verified
+  against the bundled simplex-chat v6.5.4.1).** The file send is the
+  same id-addressed `/_send <target> json …` verb as text, carrying
+  one composed message with a `filePath` member next to
+  `msgContent` (`{"filePath":"…","msgContent":{"type":"file","text":""}}`);
+  simplex-chat's composed-message parser accepts `filePath` (plain
+  file) and starts an XFTP upload (live-probed: a real upload ran,
+  emitting `sndFileProgressXFTP` frames with `sentSize`/`totalSize`).
+  The completion signal `sendAttachment` blocks on is the async
+  **`sndFileCompleteXFTP`** event whose `chatItem` carries the same
+  `itemId` the send's `newChatItems` ack returned: simplex-chat emits
+  it when the XFTP upload is done AND the file-description message is
+  handed to the recipient's queue (the `SENT` confirmation), for both
+  direct and group scopes — after it, the transport never reads the
+  local file again, so the spool file is safe to release. Failure
+  surfaces as `sndFileError` (with the chat item when one exists) or
+  as the send command's `chatCmdError` (`fileNotFound`, `fileSize`,
+  `fileIOError` tags — all classify PERMANENT). A contact that is not
+  ready degrades the same upload to `sndStandaloneFileComplete`
+  (live-probed) — the adapter treats any completion other than
+  `sndFileCompleteXFTP` on its own chat item as a PERMANENT failure
+  rather than a delivery. Verification trail: bundled-binary command
+  surface (`/file @<contact> <file_path>` help text), live WS probe
+  of a real XFTP upload, and the shipped version's source
+  (v6.5.4 tag: `Subscriber.hs` SFDONE/`checkSndInlineFTComplete`);
+  the probe host's inbound SMP delivery is broken (even the
+  profile-creation welcome never arrives), so the ready-contact
+  completion frame itself is source-verified, not live-captured.
 
   **Provider-side spool lifecycle** (M1-801; the D75 privacy posture).
   Provider owns the file lifecycle for D74's file-path payload: the

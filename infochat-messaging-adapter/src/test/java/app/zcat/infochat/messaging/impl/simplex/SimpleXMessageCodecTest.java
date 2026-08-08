@@ -239,6 +239,60 @@ class SimpleXMessageCodecTest {
                 SimpleXMessageCodec.classifyError("RCVRATELIMIT"));
     }
 
+    // --- M1-800: outbound attachment file-send encoding (D74) ---
+
+    @Test
+    void encodeSendFileCommandEmitsTheFileForm() throws Exception {
+        // The file send rides the same id-addressed /_send verb as text, one composed
+        // message whose filePath names the spool file (verified against the bundled
+        // simplex-chat v6.5.4.1; docs/design/06-messaging.md §6.2.4).
+        String frame = SimpleXMessageCodec.encodeSendFileCommand(
+                "corr-file-1",
+                new ScopeRef.Dm("contact-abc"),
+                "/var/spool/infochat/out/img-123.png",
+                "image/png",
+                "img-123.png");
+        JsonNode root = MAPPER.readTree(frame);
+        assertEquals("corr-file-1", root.get("corrId").asText(),
+                "corrId is the adapter-chosen pairing key");
+        String cmd = root.get("cmd").asText();
+        assertTrue(cmd.startsWith("/_send @contact-abc json "),
+                "DM file send addresses the contact with @<id>: " + cmd);
+        JsonNode composed = MAPPER.readTree(cmd.substring(cmd.indexOf(" json ") + 6)).get(0);
+        assertEquals("/var/spool/infochat/out/img-123.png",
+                composed.get("filePath").asText(),
+                "the file-send form carries the spool file path");
+        assertEquals("file", composed.get("msgContent").get("type").asText(),
+                "msgContent is the file type");
+        assertEquals("", composed.get("msgContent").get("text").asText(),
+                "the attachment carries no text body");
+
+        String groupFrame = SimpleXMessageCodec.encodeSendFileCommand(
+                "corr-file-2",
+                new ScopeRef.Group("group-1"),
+                "/var/spool/infochat/out/img-123.png",
+                "image/png",
+                "img-123.png");
+        String groupCmd = MAPPER.readTree(groupFrame).get("cmd").asText();
+        assertTrue(groupCmd.startsWith("/_send #group-1 json "),
+                "group file send addresses the group with #<id>: " + groupCmd);
+    }
+
+    @Test
+    void encodeSendFileCommandRejectsInjectionInScopeIds() {
+        // Same defense-in-depth as the text path (design §6.4.4): the
+        // scope ids are pasted into the command verb, so the queue-address
+        // validator re-asserts them at the file-send encode boundary.
+        assertEquals(FailureCategory.PERMANENT, assertThrows(MessagingException.class,
+                () -> SimpleXMessageCodec.encodeSendFileCommand(
+                        "corr-1", new ScopeRef.Dm("abc /_send @victim json {}"),
+                        "/tmp/f.png", "image/png", "f.png")).category());
+        assertEquals(FailureCategory.PERMANENT, assertThrows(MessagingException.class,
+                () -> SimpleXMessageCodec.encodeSendFileCommand(
+                        "corr-1", new ScopeRef.Group("group\n/_send @v json {}"),
+                        "/tmp/f.png", "image/png", "f.png")).category());
+    }
+
     // --- M1-118: queue-address character-set validation (Finding 2, INJECTION) ---
 
     @Test

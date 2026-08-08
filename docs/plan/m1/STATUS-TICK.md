@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 19 |
+| done | 20 |
 | deferred | 0 |
 | abandoned | 0 |
 | **total** | **23** |
@@ -26,7 +26,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-798 — Setup-wizard /image step with model picker (complexity: medium, risk: medium)
-- M1-800 — SimpleX + Signal sendAttachment codecs and ceilings (complexity: high, risk: high)
 - M1-802 — ComfyUI client: server-built graph, bounded fetch, cancel (complexity: high, risk: high)
 
 ---
@@ -44,7 +43,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-803 — blocked_by: M1-800 (pending), M1-801 (done), M1-802 (pending), M1-805 (done)
+- M1-803 — blocked_by: M1-800 (done), M1-801 (done), M1-802 (pending), M1-805 (done)
 
 ---
 
@@ -67,12 +66,12 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-805 | Confine ImageSpool writes to the tmpfs spool dir | 2026-08-08 | round 1 APPROVE-WITH-FIXES |
 | M1-804 | Flip the marker-drop test to the emptied-reply degrade | 2026-08-08 | round 1 APPROVE |
 | M1-801 | tmpfs spool, age sweeper, PNG strip, delivery path | 2026-08-08 | round 2 APPROVE |
+| M1-800 | SimpleX + Signal sendAttachment codecs and ceilings | 2026-08-08 | round 2 APPROVE |
 | M1-799 | Outbound attachment SPI: payload, flags, default method | 2026-08-08 | round 1 APPROVE-WITH-FIXES |
 | M1-797 | ComfyUI GPU compose overlay + ROCm image | 2026-08-08 | round 1 APPROVE |
 | M1-796 | Substitute an emptied chat reply before delivery | 2026-08-08 | round 1 APPROVE |
 | M1-795 | Wire the empty-body guard into live delivery | 2026-08-08 | round 1 APPROVE |
 | M1-794 | Guard against empty sanitized bodies at delivery | 2026-08-08 | round 1 APPROVE |
-| M1-793 | Evaluate translation sanity checks on the sanitized reply | 2026-08-08 | round 1 APPROVE |
 
 ---
 
@@ -114,7 +113,7 @@ M1-796 (done)
 M1-797 (done)
   └── M1-798 (pending) ← runnable
 M1-799 (done)
-  ├── M1-800 (pending) ← runnable
+  ├── M1-800 (done)
   │     └── M1-803 (pending)
   └── M1-801 (done)
         ├── M1-803 (pending) [see above]

@@ -98,6 +98,32 @@ final class SignalMessageCodec {
     }
 
     /**
+     * Attachment send (D74, design §6.2.4): a {@code send} carrying the spool file PATH in {@code attachments} (the bundled 0.14.5 man page's mapping of {@code --attachment}); the response arrives only after the CDN upload, so it IS the completion signal.
+     */
+    String encodeSendWithAttachment(long rpcId, String account, String recipient,
+                                    String filePath) {
+        JsonObject params = Json.createObjectBuilder()
+                .add("account", account)
+                .add("recipient", Json.createArrayBuilder().add(recipient))
+                .add("message", "")
+                .add("attachments", Json.createArrayBuilder().add(filePath))
+                .build();
+        return encodeRequest(rpcId, "send", params);
+    }
+
+    /** Group variant of {@link #encodeSendWithAttachment}. */
+    String encodeGroupSendWithAttachment(long rpcId, String account, String groupId,
+                                         String filePath) {
+        JsonObject params = Json.createObjectBuilder()
+                .add("account", account)
+                .add("groupId", groupId)
+                .add("message", "")
+                .add("attachments", Json.createArrayBuilder().add(filePath))
+                .build();
+        return encodeRequest(rpcId, "send", params);
+    }
+
+    /**
      * Edit of a prior DM, encoded as a {@code send} carrying
      * {@code editTimestamp}: signal-cli's jsonRpc methods mirror its CLI
      * command surface, and the CLI edit is {@code send --edit-timestamp} —

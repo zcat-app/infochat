@@ -124,6 +124,19 @@ final class SimpleXMessageCodec {
     }
 
     /**
+     * File-send form of the id-addressed {@code /_send} (D74, design §6.2.4): one composed message whose {@code filePath} names the spool file beside a file-typed msgContent; MIME / display name are not wire bytes here.
+     */
+    static String encodeSendFileCommand(String corrId,
+                                        ScopeRef scope,
+                                        String filePath,
+                                        String mimeType,
+                                        String displayFileName) throws MessagingException {
+        String target = targetSelector(scope);
+        String cmd = "/_send " + target + " json " + fileComposedMessageArray(filePath);
+        return envelope(corrId, cmd);
+    }
+
+    /**
      * Encode an in-place edit of a previously-sent message. {@code live=on}
      * for the progress-notifier update sequence; {@code finalize} (the
      * terminal edit) uses {@code live=off} via
@@ -259,6 +272,19 @@ final class SimpleXMessageCodec {
         return composedMessage(text).toString();
     }
 
+    /** The {@code /_send} attachment payload: a one-element array whose composed message carries {@code filePath} plus a file-typed msgContent (the array form the text path documents). */
+    private static String fileComposedMessageArray(String filePath) {
+        ObjectNode msgContent = MAPPER.createObjectNode();
+        msgContent.put("type", "file");
+        msgContent.put("text", "");
+        ObjectNode wrapper = MAPPER.createObjectNode();
+        wrapper.put("filePath", filePath);
+        wrapper.set("msgContent", msgContent);
+        ArrayNode payload = MAPPER.createArrayNode();
+        payload.add(wrapper);
+        return payload.toString();
+    }
+
     private static String envelope(String corrId, String cmd) {
         ObjectNode root = MAPPER.createObjectNode();
         root.put("corrId", corrId);
@@ -327,6 +353,15 @@ final class SimpleXMessageCodec {
             case "sentMessage", "apiSendMessageResponse" -> decodeSendAck(corrId, resp);
             case "userContactLink" -> decodeUserContactLink(corrId, resp);
             case "chatCmdError", "chatItemUpdateError" -> decodeError(corrId, resp);
+            // File-send completion/failure events (D74, design §6.2.4): only
+            // sndFileCompleteXFTP releases the waiting sendAttachment; every other
+            // completion on our chat item (legacy tag, standalone) fails it PERMANENT.
+            case "sndFileCompleteXFTP" -> decodeFileSendCompletion(resp);
+            case "sndFileError", "sndFileCancelled", "sndFileComplete",
+                 "sndStandaloneFileComplete" -> decodeFileSendFailure(resp);
+            case "sndFileStart", "sndFileProgressXFTP", "sndFileRedirectStartXFTP",
+                 "sndFileWarning" ->
+                    new Ignored("sndFile-transfer-in-progress");
             // Fixed sentinel — same rule as the chatType-non-direct branch
             // below. The top-level resp.type is attacker-influenceable
             // through the inbound frame and the Ignored.reason() value
@@ -936,6 +971,33 @@ final class SimpleXMessageCodec {
         return new SendAck(corrId == null ? "" : corrId, chatItemId);
     }
 
+    /**
+     * The {@code sndFileCompleteXFTP} completion event (design §6.2.4) — the only tag that releases the send; the chat-item id is read at the same known AChatItem {@code meta.itemId} place as the plural ack.
+     */
+    private static DecodedFrame decodeFileSendCompletion(JsonNode resp) {
+        String chatItemId = fileEventChatItemId(resp);
+        if (chatItemId == null) {
+            return new Ignored("file-completion-without-chatItemId");
+        }
+        return new FileSendComplete(chatItemId);
+    }
+
+    /**
+     * A failed / cancelled transfer — and, per design §6.2.4, any non-XFTP completion on our chat item — carrying a chat item; the free-form {@code errorMessage} is deliberately not decoded (it can carry transport prose — security.md §User content in exceptions).
+     */
+    private static DecodedFrame decodeFileSendFailure(JsonNode resp) {
+        String chatItemId = fileEventChatItemId(resp);
+        if (chatItemId == null) {
+            return new Ignored("file-failure-without-chatItem");
+        }
+        return new FileSendFailed(chatItemId);
+    }
+
+    private static @Nullable String fileEventChatItemId(JsonNode resp) {
+        return firstScalarText(
+                resp.path("chatItem").path("chatItem").path("meta").get("itemId"));
+    }
+
     private static DecodedFrame decodeError(@Nullable String corrId, JsonNode resp) {
         // Same known-field rule as decodeSendAck. On the live v6.5.4.1 wire the
         // discriminating tag is the .type of a nested error object — both
@@ -1057,7 +1119,8 @@ final class SimpleXMessageCodec {
     /** Sealed hierarchy of frame variants returned by {@link #decode}. */
     sealed interface DecodedFrame
             permits Inbound, GroupCandidate, ReceivedGroupInvitation, OversizeDropped,
-                    SendAck, ContactAddress, CommandError, Ignored {
+                    SendAck, ContactAddress, CommandError, FileSendComplete,
+                    FileSendFailed, Ignored {
     }
 
     /** A direct-message inbound that should be delivered to Provider. */
@@ -1132,6 +1195,14 @@ final class SimpleXMessageCodec {
     record CommandError(String corrId,
                         FailureCategory category,
                         String detail) implements DecodedFrame {
+    }
+
+    /** Async XFTP file-send completion (D74, design §6.2.4): the spool file is safe to release; correlated by the ack's chat-item id. */
+    record FileSendComplete(String chatItemId) implements DecodedFrame {
+    }
+
+    /** Async file-transfer failure / cancellation — or a non-XFTP completion (design §6.2.4) — carrying a chat item; the WS client fixes the category when it raises the SPI exception. */
+    record FileSendFailed(String chatItemId) implements DecodedFrame {
     }
 
     /** A frame we recognised but do not handle in this milestone. */

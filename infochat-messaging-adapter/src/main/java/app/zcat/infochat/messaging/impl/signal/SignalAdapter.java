@@ -9,6 +9,7 @@ import app.zcat.infochat.messaging.FailureCategory;
 import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.MessagingException;
+import app.zcat.infochat.messaging.OutboundAttachment;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.OutboundRateLimiter;
 import app.zcat.infochat.messaging.ScopeRef;
@@ -20,6 +21,9 @@ import java.util.Optional;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -67,6 +71,9 @@ public final class SignalAdapter implements MessagingAdapter {
 
     private static final Logger LOG = Logger.getLogger(SignalAdapter.class);
 
+    /** Single-attachment ceiling, verified against the bundled transport (design §6.2.4 §Verified ceilings): the Signal service's 150 MiB limit declared by the bundled signal-cli service library. */
+    static final int MAX_OUTBOUND_ATTACHMENT_BYTES = 157_286_400;
+
     // Values per docs/design/06-messaging.md §6.5.2: maxInboundMessageBytes
     // single-sourced from the codec's enforcement constant (v1 fixed 16 KiB
     // per §6.2.2, so the capability and the decode-time cap cannot drift),
@@ -88,8 +95,8 @@ public final class SignalAdapter implements MessagingAdapter {
             /* supportsMessageEdit        */ true,
             /* supportsTypingIndicator    */ true,
             /* minEditInterval            */ Duration.ofMillis(600),
-            /* supportsOutboundAttachments */ false,
-            /* maxOutboundAttachmentBytes  */ 0); // interim; codec + measured ceiling land in M1-800
+            /* supportsOutboundAttachments */ true,
+            /* maxOutboundAttachmentBytes  */ MAX_OUTBOUND_ATTACHMENT_BYTES);
 
     private static final Duration ENDPOINT_PROBE_TIMEOUT = Duration.ofSeconds(15);
     private static final Duration ENDPOINT_PROBE_INTERVAL = Duration.ofMillis(100);
@@ -446,6 +453,31 @@ public final class SignalAdapter implements MessagingAdapter {
     public MessageHandle send(OutboundMessage msg) throws MessagingException {
         SignalJsonRpcClient c = requireConnected("send");
         return c.send(msg);
+    }
+
+    /**
+     * Send an attachment as a native file message (D74, design §6.2.4): only the path crosses to the daemon (never bytes, never a copy), an unreadable path fails classified PERMANENT, and the client call IS the blocking completion contract.
+     */
+    @Override
+    public void sendAttachment(OutboundAttachment attachment) throws MessagingException {
+        requireReadableAttachment(attachment.filePath());
+        SignalJsonRpcClient c = requireConnected("sendAttachment");
+        c.sendAttachment(attachment);
+    }
+
+    /** Metadata-only readability guard; see {@link #sendAttachment}. */
+    private static void requireReadableAttachment(String filePath) throws MessagingException {
+        Path path;
+        try {
+            path = Path.of(filePath);
+        } catch (InvalidPathException e) {
+            throw new MessagingException(FailureCategory.PERMANENT,
+                    "attachment path is not a valid filesystem path");
+        }
+        if (!Files.isRegularFile(path) || !Files.isReadable(path)) {
+            throw new MessagingException(FailureCategory.PERMANENT,
+                    "attachment path is not a readable file at send time");
+        }
     }
 
     @Override

@@ -236,4 +236,34 @@ class SignalMessageCodecTest {
                 codec.canonicalizeAci("AABBCCDD-1111-2222-3333-444455556666"));
     }
 
+    // --- M1-800: outbound attachment encode (D74) ---
+
+    @Test
+    void encodeSendWithAttachmentCarriesThePath() {
+        // signal-cli attaches by file path: the send params carry an `attachments`
+        // array of paths (the bundled 0.14.5 man page's mapping of `--attachment`),
+        // so the spool file must stay visible to the daemon for the whole send.
+        String dmEnvelope = codec.encodeSendWithAttachment(
+                46L, "+15551234567", "+15557654321",
+                "/var/spool/infochat/out/img-123.png");
+        JsonObject dmObj = parse(dmEnvelope);
+        assertEquals("send", dmObj.getString("method"));
+        JsonObject dmParams = dmObj.getJsonObject("params");
+        assertEquals("+15551234567", dmParams.getString("account"));
+        assertEquals("+15557654321", dmParams.getJsonArray("recipient").getString(0));
+        assertEquals("/var/spool/infochat/out/img-123.png",
+                dmParams.getJsonArray("attachments").getString(0),
+                "the attachment rides as a file path, never bytes");
+        assertEquals("", dmParams.getString("message"),
+                "an attachment send carries no text body");
+
+        String groupEnvelope = codec.encodeGroupSendWithAttachment(
+                47L, "+15551234567", "group-id-base64==",
+                "/var/spool/infochat/out/img-123.png");
+        JsonObject groupParams = parse(groupEnvelope).getJsonObject("params");
+        assertEquals("group-id-base64==", groupParams.getString("groupId"));
+        assertEquals("/var/spool/infochat/out/img-123.png",
+                groupParams.getJsonArray("attachments").getString(0));
+    }
+
 }

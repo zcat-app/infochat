@@ -1,21 +1,32 @@
 ---
 id: M1-800
 title: "SimpleX + Signal sendAttachment codecs and ceilings"
-status: pending
+status: done
 created: 2026-08-08
 last_updated: 2026-08-08
+clarity_check: >-
+  Pre-flight clean 2026-08-08: tick-lint 0 findings; citations verified
+  (SimpleXMessageCodec encodeSendCommand text-only, SignalMessageCodec
+  encodeSend/encodeGroupSend text-only, SimpleXAdapter.send routes through
+  the text-only chunker; grep confirms no file-send/XFTP path in either
+  impl tree); analysis pitfalls P17/P18/P2/P23/P25 all landed; M1-799's
+  seam tests traced — only AdapterCapabilityContractTest pins the
+  production flags (covered by test_plan.modifies); provider-test fixtures
+  build their own stub CapabilityFlags and are untouched by the flip.
+  Bundled binaries present in infochat-test-infochat-provider:latest
+  (simplex-chat v6.5.4.1, signal-cli 0.14.5) — D-4 live verification is
+  feasible on this host.
 flow: tick
 reproduction: >-
-  to-be-written: SimpleXMessageCodecTest.encodeSendFileCommandEmitsTheFileForm —
-  the intended test feeds the codec (corrId, scope, path, MIME, filename) and
-  asserts the emitted simplex-chat wire command is the file-send form carrying
-  the path; it cannot compile today because SimpleXMessageCodec is text-only
-  (verified: encodeSendCommand at SimpleXMessageCodec.java:117-124 emits only
-  `/_send <target> json <text>`; the whole impl/simplex tree has no file-send
-  encoder — grep for file/XFTP returns only subprocess data-dir code).
-  SignalMessageCodec is likewise text-only (encodeSend/encodeGroupSend at
-  SignalMessageCodec.java:76-98 emit {account, recipient|groupId, message}).
-  `start` writes the test and runs it RED before any fix code (workflow §0).
+  SimpleXMessageCodecTest.encodeSendFileCommandEmitsTheFileForm (+ the
+  Signal twin SignalMessageCodecTest.encodeSendWithAttachmentCarriesThePath)
+  — written and run RED at start (2026-08-08: test-compile fails with
+  "cannot find symbol encodeSendFileCommand / encodeSendWithAttachment /
+  encodeGroupSendWithAttachment" because SimpleXMessageCodec and
+  SignalMessageCodec are text-only; encodeSendCommand at
+  SimpleXMessageCodec.java:117-124 emits only `/_send <target> json <text>`,
+  encodeSend/encodeGroupSend at SignalMessageCodec.java:76-98 emit only
+  {account, recipient|groupId, message}).
 analysis_ref: docs/plan/m1/tick-analysis/image-generation-feature.md
 blocked_by: [M1-799]
 files_scope:
@@ -51,6 +62,8 @@ test_plan:
   adds:
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXMessageCodecTest.java (new methods)
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalMessageCodecTest.java (new methods)
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapterAttachmentTest.java (failure-mode, completion-blocking, no-retention — acceptance items 6-7)
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/signal/SignalAdapterAttachmentTest.java (failure-mode + attach-by-path completion — acceptance items 4, 6)
   modifies:
     - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/AdapterCapabilityContractTest.java (the M1-799 interim false pins flip to true with verified ceilings — pre-authorized by M1-799 acceptance item 4)
   preserves:
@@ -61,6 +74,17 @@ spec_refs:
   - docs/spec/messaging.md §Failure handling
 decision_refs:
   - D74
+reviews:
+  - round: 1
+    date: 2026-08-08
+    verdict: REWORK
+    checks: {SPEC-TRUTHNESS: FAIL, SECURITY: PASS, TEST-ADEQUACY: WARN, MAINTAINABILITY: PASS, SCOPE: PASS}
+    diff_stats: "14 files changed, 796 insertions(+), 37 deletions(-)"
+  - round: 2
+    date: 2026-08-08
+    verdict: APPROVE
+    checks: {SPEC-TRUTHNESS: PASS, SECURITY: PASS, TEST-ADEQUACY: PASS, MAINTAINABILITY: PASS, SCOPE: PASS}
+    diff_stats: "14 files changed, 916 insertions(+), 37 deletions(-)"
 ---
 
 # M1-800: SimpleX + Signal sendAttachment codecs and ceilings
@@ -172,3 +196,19 @@ test is modified.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-800-adapter-attachment-codecs.md
 ```
+
+## Round 1 rework
+
+1. Finding 1: re-route the sndFileComplete tag from the success arm to the
+   failure arm at SimpleXMessageCodec.java:359 (or amend
+   docs/design/06-messaging.md:389-402 with fresh live verification that it
+   is a genuine delivery completion — code and record must agree), verified
+   via SimpleXAdapterAttachmentTest.nonXftpFileCompletionFailsClassifiedPermanent
+   asserting MessagingException PERMANENT after an ack followed by a
+   sndFileComplete frame for the same itemId.
+2. Finding 2: move sndStandaloneFileComplete from the Ignored group to the
+   failure mapping at SimpleXMessageCodec.java:361-363 so the recorded
+   degradation raises PERMANENT instead of a 5-minute timeout TRANSIENT,
+   verified via SimpleXAdapterAttachmentTest.standaloneFileCompletionFailsClassifiedPermanent
+   asserting MessagingException PERMANENT arriving well inside the test's
+   5-second WAIT.

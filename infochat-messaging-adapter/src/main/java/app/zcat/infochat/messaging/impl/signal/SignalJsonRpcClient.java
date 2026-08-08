@@ -9,6 +9,7 @@ import app.zcat.infochat.messaging.InboundMessage;
 import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingAdapter;
 import app.zcat.infochat.messaging.MessagingException;
+import app.zcat.infochat.messaging.OutboundAttachment;
 import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.OutboundRateLimiter;
 import app.zcat.infochat.messaging.ScopeRef;
@@ -138,6 +139,11 @@ class SignalJsonRpcClient {
      * normal transient and must never trigger a restart.
      */
     private static final int HUNG_TIMEOUT_THRESHOLD = 3;
+
+    /**
+     * Response bound for attachment sends (D74, design §6.2.4): the {@code send} response arrives only AFTER the CDN upload, so it must cover a near-ceiling upload on a slow uplink — the 15 s text timeout would starve it.
+     */
+    static final Duration ATTACHMENT_RESPONSE_TIMEOUT = Duration.ofMinutes(5);
 
     /**
      * Default bound on the inbound-dispatch executor's work queue. A
@@ -468,6 +474,21 @@ class SignalJsonRpcClient {
         return handle;
     }
 
+    /**
+     * Send an attachment as a native file message (D74, design §6.2.4): signal-cli attaches by PATH, and the {@code send} response arrives only after the CDN upload, so the paced call IS the blocking completion contract; no handle is tracked.
+     */
+    void sendAttachment(OutboundAttachment attachment) throws MessagingException {
+        ScopeRef scope = attachment.scope();
+        String destination = destination(scope);
+        long rpcId = rpcIdGen.incrementAndGet();
+        String request = scope instanceof ScopeRef.Group
+                ? codec.encodeGroupSendWithAttachment(rpcId, account, destination,
+                        attachment.filePath())
+                : codec.encodeSendWithAttachment(rpcId, account, destination,
+                        attachment.filePath());
+        pacedCall(rpcId, request, ATTACHMENT_RESPONSE_TIMEOUT);
+    }
+
     void update(MessageHandle handle, String body) throws MessagingException {
         SignalMessageHandle internal = lookupOpen(handle);
         if (internal.fellBack()) {
@@ -647,8 +668,13 @@ class SignalJsonRpcClient {
      */
     private SignalMessageCodec.JsonRpcMessage.Response pacedCall(long rpcId, String request)
             throws MessagingException {
+        return pacedCall(rpcId, request, responseTimeout);
+    }
+
+    private SignalMessageCodec.JsonRpcMessage.Response pacedCall(
+            long rpcId, String request, Duration timeout) throws MessagingException {
         outboundRate.acquire();
-        return call(rpcId, request);
+        return call(rpcId, request, timeout);
     }
 
     /**
@@ -660,6 +686,12 @@ class SignalJsonRpcClient {
      * throws.
      */
     private SignalMessageCodec.JsonRpcMessage.Response call(long rpcId, String request)
+            throws MessagingException {
+        return call(rpcId, request, responseTimeout);
+    }
+
+    private SignalMessageCodec.JsonRpcMessage.Response call(
+            long rpcId, String request, Duration timeout)
             throws MessagingException {
         // Captured ONCE for the whole call: the request line, the pending
         // future it registers and the response that completes it must all
@@ -686,12 +718,12 @@ class SignalJsonRpcClient {
         }
         SignalMessageCodec.JsonRpcMessage msg;
         try {
-            msg = future.get(responseTimeout.toMillis(), TimeUnit.MILLISECONDS);
+            msg = future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             conn.pending.remove(id);
             recordTimeout();
             throw new MessagingException(
-                    FailureCategory.TRANSIENT, "JSON-RPC response timed out after " + responseTimeout, e);
+                    FailureCategory.TRANSIENT, "JSON-RPC response timed out after " + timeout, e);
         } catch (InterruptedException e) {
             conn.pending.remove(id);
             Thread.currentThread().interrupt();
