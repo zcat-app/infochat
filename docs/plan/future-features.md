@@ -89,7 +89,11 @@ gfx1151 box:
   the **Flux2 latent format: 128 channels, downscale ratio 16** — a 16-channel
   SD3/Z-Image latent node sails through sampling and then fails at VAE decode.
 - Comparison points: Z-Image Turbo (5.9B) **21 s** measured; Krea 2 Turbo
-  (13.1B) ~46 s and Krea 2 raw ~5 min, both estimated, not run.
+  (13.1B, bf16, official Comfy template, euler/simple) — measured 2026-08-07:
+  8 steps @ 1 MP **53.59 s** steady-state (87.47 s cold with model load),
+  6 steps @ 1 MP **39 s**, 8 steps @ 0.6 MP **31.37 s**, 6 steps @ 0.6 MP
+  **23.78 s**. Krea 2 raw ~5 min, estimated, not run. Step/resolution tuning
+  plus the deferred ESRGAN upscale stage makes Krea viable as the quality tier.
 - Launch flags are load-bearing on gfx1151: `--disable-mmap` (without it the
   first image took **11 minutes** — a ROCm mmap bug above 64GB), plus
   `--bf16-vae`, `--highvram`, and env
