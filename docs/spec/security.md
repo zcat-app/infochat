@@ -2129,8 +2129,19 @@ sources). Application code uses the soft-delete column.
   volume is bounded by the ingest rate rather than by any user action.
   **No disclosure may state or imply that an `en`-only deployment sends
   nothing through `translator`.**
+- **`translator` also carries `/image` prompts (D73–D77 image
+  promotion).** For a scope on a non-English `/lang`, the `/image`
+  prompt — user-authored private text, D75's message-content class —
+  is translated to English by `ModelTask.TRANSLATOR` before the image
+  backend runs, so under remote routing the prompt reaches the remote
+  provider exactly as the M1-746 query-anchoring leg's text does. The
+  image backend itself is always local or operator-owned (D77); this
+  leg is the ONLY path by which an `/image` prompt can leave the
+  deployment, and the disclosure texts must name it. An `en` scope is
+  a strict no-op, as with query anchoring.
   The enumeration above covers every production call site reaching
-  `ModelTask.TRANSLATOR` as of M1-758. It is a snapshot, not a
+  `ModelTask.TRANSLATOR` as of M1-758 plus the `/image` leg added by
+  the D73–D77 promotion. It is a snapshot, not a
   guarantee: a new call site is a new leg, and the disclosure texts
   (`prod/switch-llm.sh` Phase 4 and `SETUP_GUIDE.md` §"Switching your
   AI backend later") are corrected against THIS section, so a leg

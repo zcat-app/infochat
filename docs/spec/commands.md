@@ -597,26 +597,45 @@ them to the marked region — doing so would red the build.
   *output* size, bounded by a server-side ceiling and by the adapter's
   `maxOutboundAttachmentBytes` (D74) — the server is free to reach it
   by sampling or upscaling, so the flag never constrains the sampler.
-  **Control gates**, all deterministic and evaluated before any backend
+  **The prompt is length-bounded by a profile-driven cap** and rejected
+  over cap before any gate runs — cooldown and credits meter attempts,
+  not bytes, so the bound lives at the parser. **Control gates**, all
+  deterministic and evaluated before any backend
   call (D76): a per-user cooldown in DM and group alike; per-user AND
   per-group hourly credit buckets (the gate is an AND — both must yield,
   a refund returns both), charged on attempt and refunded iff the GPU
   never ran; and a global backend queue-depth gate that refuses
   immediately — "busy, try again" — rather than silently queueing past
   budget. **Dispatch is off the router thread** through the
-  interruptible dispatcher, so `/stop` cancels a queued or running
-  generation, and a Provider-side timeout *cancels* the backend job
-  rather than abandoning it (an abandoned job keeps burning GPU).
-  **Prompt handling (D75):** the prompt is message content — never
-  logged (including error and timeout paths), never persisted, audited
-  only as a content-free `IMAGE_GENERATE` row (actor, scope, outcome).
-  When the scope's effective language is not English the prompt is
-  translated first (reusing the query-translation path), and the reply
-  echoes the English prompt actually used — the echo is the transparency
-  mechanism, the failure-mode explainer, and the durable record, which
-  lives in the user's own chat history. The workflow graph is built
+  interruptible dispatcher: `/image` joins the D35 interruptible class
+  and counts against the per-user interruptible-concurrency ceiling
+  (`security.md` §Rate limiting), so one sender cannot occupy every
+  dispatch worker with GPU-length jobs across scopes; `/stop` cancels
+  a queued or running generation, and a Provider-side timeout *cancels*
+  the backend job rather than abandoning it (an abandoned job keeps
+  burning GPU). **Prompt handling (D75):** the prompt is message
+  content — never logged (including error and timeout paths), never
+  persisted, audited only as a content-free `IMAGE_GENERATE` row
+  (actor, scope, outcome). When the scope's effective language is not
+  English the prompt is translated first (reusing the
+  query-translation path); that leg follows the deployment's
+  `translator` routing and is the only path by which a prompt can
+  leave the deployment — remote exactly when the operator routed
+  `translator` remotely, disclosed per `security.md` §Secrets handling.
+  The reply echoes the English prompt actually used, **passed through
+  the closed-list output sanitizer before rendering** — the echo is
+  attacker-influenced text in the bot's voice, and the reflecting-echo
+  rule (`security.md` §LLM output sanitizer) applies to it exactly as
+  to any other render form. The echo is the transparency mechanism, the
+  failure-mode explainer, and the durable record, which lives in the
+  user's own chat history. The workflow graph is built
   server-side; user text reaches exactly one string field of the graph.
-  **Failure contract** — every failure mode returns a localized text
+  **The backend's replies are endpoint-chosen bytes** (`security.md`
+  §Trust boundaries item 9): response bodies are read under a
+  profile-driven byte cap, the tmpfs spool carries a capacity bound,
+  and image decode is pixel-bounded before metadata stripping — the
+  values live in design notes. **Failure contract** — every failure
+  mode returns a localized text
   explanation, never silence: backend unreachable · breaker open ·
   queue over budget · credit exhausted · cooldown not elapsed · timeout
   (after cancelling the job) · adapter cannot carry attachments

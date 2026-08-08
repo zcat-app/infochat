@@ -476,3 +476,16 @@ acceptance criteria, not deferred to a separate spike.
 Tickets are carved via the `/tick` flow after P0. The Krea 2 measurement runs
 between this plan and ticket carving and decides whether the picker ships two
 options or three.
+
+**Design-time redteam: done 2026-08-07** (verdict:
+`docs/plan/m1/redteam/image-spec-promotion-2026-08-07.md` — 0 critical, 2
+high, 3 medium, 2 low, all accepted and fixed in the spec the same day). The
+fixes, now part of the spec: the translation leg is enrolled in the
+`security.md` §Secrets handling enumeration and disclosed rather than
+prohibited (it is the same exposure class as remote-routed chat); the two-box
+form requires the backend port firewalled to the single Provider host; the
+echo passes through the closed-list output sanitizer; `/image` joins the D35
+interruptible-concurrency ceiling; the backend-retention requirement is a
+verifiable end state with an acceptance check; backend replies, the spool,
+and PNG decode are byte/pixel-bounded; and the prompt carries a
+profile-driven length cap at the parser.
