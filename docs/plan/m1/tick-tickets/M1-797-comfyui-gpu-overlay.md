@@ -1,7 +1,7 @@
 ---
 id: M1-797
 title: "ComfyUI GPU compose overlay + ROCm image"
-status: pending
+status: done
 created: 2026-08-08
 last_updated: 2026-08-08
 flow: tick
@@ -24,6 +24,26 @@ files_scope:
 complexity: medium
 risk: medium
 round_cap: 2
+clarity_check:
+  lint: "tick-lint: 0 finding(s), 0 BLOCKER(s)"
+  self_check: >-
+    Start pass in the M1-797 worktree. Glob claims re-verified: only
+    docker-compose.yml + docker-compose.gpu.yml exist, no
+    docker-compose.comfyui.yml, no prod/images/. gpu.yml precedent
+    spot-checked (header carries the rootless group_add trap text the ticket
+    says to copy; llamacpp item-8 no-host-port precedent at security.md
+    §Trust boundaries verified). Analysis cross-read: P4/P21/P22/P24 are the
+    pitfalls assigned to M1-797 and all four land in the ticket; P25 et al.
+    belong to siblings. blocked_by empty, no replaces. Environment probe on
+    this Strix Halo host: /dev/kfd + /dev/dri present; rootless docker
+    confirmed (docker info SecurityOptions) and the KFD device probe from a
+    container returns DENIED with the node at 65534:65534 — the M1-744 trap
+    is live, so the live-probe steps need the §7.8.7 host-side ACL applied
+    (sudo setfacl, user action surfaced at start); all three curated models
+    present under ~/ComfyUI/models; the measured-baseline wheel source is the
+    host's pip history (rocm.nightlies.amd.com/v2/gfx1151, torch
+    2.12.0a0+rocm7.13, cp314, ubuntu 26.04 glibc 2.43) — the image mirrors
+    that stack for parity. No blocking ambiguity.
 security_relevant: true
 migration_touch: false
 out_of_scope:
@@ -54,6 +74,14 @@ spec_refs:
 decision_refs:
   - D75
   - D77
+reviews:
+  - round: 1
+    date: 2026-08-08
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY NOT-APPLICABLE, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "7 files changed, 219 insertions(+), 11 deletions(-)"
+    findings: "0 rework items, 0 critical/high; 4 candidate findings falsified-and-dropped (janitor find-delete race — janitor is the only deleter on a dedicated tmpfs; --listen 0.0.0.0 — no ports: key, compose-network-only per item 8/D77; §7.8.7 56g-cap pointer — sizing basis lives in the compose comment per base-file convention; bring-up snippet without --profile prod — mirrors the gpu.yml precedent, wizard M1-798 owns the full command). 1 RECOMMENDED-NEW-TICKET with DECIDE-BEFORE: M1-802 — ComfyUI temp/ dir is outside the tmpfs+janitor containment; constraint on the future graph builder, relayed to the user."
+    verdict_file: .scratch/tick-review-M1-797-r1.txt
 ---
 
 # M1-797: ComfyUI GPU compose overlay + ROCm image

@@ -331,9 +331,14 @@ string value. Anything looser is remote code execution.
 - **Attachment size ceilings on SimpleX and Signal** — still unverified
   (`docs/plan/future-features.md`), and they bound the maximum `--ratio`
   however the pixels are produced.
-- **ComfyUI stdout** — whether it prints the prompt text, which would land in
-  the container log; and whether `/history` is bounded or clearable. Both feed
-  the decision-10 ship blocker.
+- **ComfyUI stdout** — ~~whether it prints the prompt text~~ **settled
+  2026-08-08 (container measurement, M1-797):** stock ComfyUI 0.30.0 prints
+  no prompt text — the log carries only the content-free `got prompt` and
+  `Prompt executed in N seconds` lines. A canary prompt string hunted in
+  `docker logs` after 19 generations (one canary + the full per-model timing
+  set) returned zero hits. Whether `/history` is bounded or clearable remains
+  open for the M1-802 post-job clear (both halves feed the decision-10 ship
+  blocker).
 - **SimpleX XFTP lifetime** — whether the local file must survive until an
   upload-complete event, which decides what the delete-on-completion signal
   actually is.
@@ -418,6 +423,35 @@ prints these next to the picker so the resource demand is explicit):
 | Mage-Flow Turbo | 7.7 GB | 8.3 GB (qwen3vl_4b) | 0.33 GB | **~16.5 GB** |
 | Z-Image Turbo | 12 GB | 7.5 GB (qwen_3_4b) | 0.32 GB | **~20 GB** |
 | Krea 2 Turbo | 25 GB | 8.3 GB (qwen3vl_4b) | 0.24 GB | **~33.5 GB** |
+
+**Container re-measure (2026-08-08, M1-797) — these are the numbers the
+wizard prints.** Measured inside the `docker-compose.comfyui.yml` overlay's
+container on the Strix Halo host (same torch stack as the conda baseline:
+2.12.0a0+rocm7.13, gfx1151 nightly index; load-bearing flags verbatim), one
+warm-up plus five timed 1024px generations per curated model, unique seed
+per run (a fixed seed measures ComfyUI's node cache, not generation — the
+first fixed-seed probe recorded 0.21 s cache hits):
+
+| Model | Setting | conda mean | Container steady-state mean (5 runs) |
+|---|---|---|---|
+| Mage-Flow Turbo | 4 steps, 1024px | 4.38 s | **3.75 s** (3.66–4.06) |
+| Z-Image Turbo | 8 steps, 1024px | 21 s | **21.81 s** (21.50–22.45) |
+| Krea 2 Turbo | 8 steps, 1 MP | 53.59 s | **53.07 s** (52.57–53.99) |
+
+The load-bearing launch flags survived containerization: Mage-Flow's
+container steady state is 0.86x its conda number (the acceptance threshold
+was 2x). No conda number may be presented to operators as a container
+number.
+
+**The backend no-retention window lives in the image.** The ComfyUI image
+carries the tmpfs output dir plus an aged-file janitor sweeping files older
+than `INFOCHAT_COMFYUI_OUTPUT_TTL_MINUTES` — **default 15 minutes**
+(measured 2026-08-08: output dir empty again once every file crossed the
+window). ComfyUI has no delete API for output files, so this janitor is the
+only backend-side bound; the Provider fetches via `/view` within seconds of
+completion, so the window is a backstop, not a lifecycle. The Provider-side
+spool sweeper (M1-801) MUST exceed this window — the backend copy dies
+first, the Provider's spool copy is the surviving one for adapter retries.
 
 **Two-box deployments: remote is a URL, not an API key.** An operator may run
 ComfyUI on a second, GPU-capable box and point `infochat.image.base-url` at it

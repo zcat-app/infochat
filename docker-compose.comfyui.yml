@@ -1,0 +1,65 @@
+# Opt-in ComfyUI (ROCm) overlay for the /image backend (D73/D77). Apply as
+# a SECOND -f file — never fold these keys into the base file:
+#   docker compose -f docker-compose.yml -f docker-compose.comfyui.yml up -d
+
+# Why an overlay: devices: cannot live in the base file unconditionally —
+# Docker fails container creation when the path is absent, breaking every
+# host without an AMD GPU (docker-compose.gpu.yml is the precedent).
+
+# NO host port: ComfyUI has no authentication and executes submitted
+# graphs, so the Provider reaches it only as comfyui:8188 over the compose
+# network; the two-box form is an explicit operator action under D77.
+
+# ROOTLESS DOCKER TRAP (M1-744): under rootless Docker group_add does not
+# work — the GPU is invisible with no error. Fix is a host-side ACL on
+# /dev/kfd + /dev/dri per 07-deployment.md §7.8.7 (GIDs: `getent group`).
+
+# The image is purpose-built (prod/images/comfyui/); model assets are the
+# wizard's job (M1-798) into the named volume below — or override the
+# source dir for a host-dir layout (base-file data-dir precedent).
+services:
+  comfyui:
+    build:
+      context: prod/images/comfyui
+    image: infochat-comfyui:rocm-gfx1151
+    # A transient OOM peak restarts the service instead of leaving it dead
+    # with its compose-network DNS name unresolvable (llamacpp precedent).
+    restart: unless-stopped
+    environment:
+      # Janitor age window for the tmpfs output dir (D75 no-retention,
+      # image half). M1-801's Provider-side spool sweeper must exceed it;
+      # the value and rationale live in the design doc's addendum.
+      INFOCHAT_COMFYUI_OUTPUT_TTL_MINUTES: ${INFOCHAT_COMFYUI_OUTPUT_TTL_MINUTES:-15}
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+    group_add:
+      - "990" # render
+      - "44"  # video
+    volumes:
+      - ${INFOCHAT_COMFYUI_MODELS_DIR:-infochat-comfyui-models}:/opt/ComfyUI/models:ro
+      # tmpfs-backed output dir (D75): pixels never touch persistent
+      # storage; the janitor sweeps what the Provider already fetched.
+      # 512 MB bounds the RAM charge (~2 MB per 1024px PNG).
+      - type: tmpfs
+        target: /opt/ComfyUI/output
+        tmpfs:
+          size: 536870912
+    # torch's IPC buffers outgrow the 64 MB default /dev/shm under ROCm.
+    shm_size: 1g
+    # Blast-radius caps (M1-512 pattern): with --highvram the resident
+    # model is GTT memory charged to this cgroup; 56g covers the largest
+    # curated model (Krea 2 Turbo) plus headroom. Sizing basis in §7.8.7.
+    deploy:
+      resources:
+        limits:
+          cpus: "${INFOCHAT_COMFYUI_CPUS:-8.0}"
+          memory: "${INFOCHAT_COMFYUI_MEMORY:-56g}"
+        reservations:
+          memory: "${INFOCHAT_COMFYUI_MEMORY_RESERVATION:-8g}"
+
+volumes:
+  # Pinned name, independent of the compose project — the wizard's download
+  # targets this literal name (infochat-llamacpp-models precedent, M1-442).
+  infochat-comfyui-models:
+    name: infochat-comfyui-models

@@ -1014,11 +1014,22 @@ The overlay swaps only the two llama.cpp services to the Vulkan build of the sam
 
 ```bash
 setfacl -m u:<user>:rw /dev/dri/renderD128 /dev/dri/card1
+# ROCm additionally needs the compute kernel device (ComfyUI overlay below):
+setfacl -m u:<user>:rw /dev/kfd
 # Persist across reboots (adjust KERNEL names to `udevadm info -a /dev/dri/renderD128`):
 echo 'KERNEL=="renderD128", RUN+="/usr/bin/setfacl -m u:<user>:rw /dev/dri/renderD128"' | sudo tee /etc/udev/rules.d/99-infochat-dri.rules
 echo 'KERNEL=="card1", RUN+="/usr/bin/setfacl -m u:<user>:rw /dev/dri/card1"' | sudo tee -a /etc/udev/rules.d/99-infochat-dri.rules
+echo 'KERNEL=="kfd", RUN+="/usr/bin/setfacl -m u:<user>:rw /dev/kfd"' | sudo tee /etc/udev/rules.d/99-infochat-kfd.rules
 sudo udevadm control --reload
 ```
+
+**ComfyUI (ROCm) overlay — opt-in.** The `/image` backend (D73/D77) runs as a purpose-built ComfyUI service that exists only when `docker-compose.comfyui.yml` is applied as a second `-f` file — the same shape as the Vulkan overlay above, for the same reason: the service needs `/dev/kfd` + `/dev/dri` passed through, and a `devices:` entry in the base file would break every host without an AMD GPU.
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.comfyui.yml up -d
+```
+
+The overlay publishes NO host port (the llamacpp item-8 precedent, `docs/spec/security.md` §Trust boundaries): ComfyUI has no authentication and its API executes submitted workflow graphs, so the Provider reaches it only over the compose network as `comfyui:8188` — that is what `infochat.image.base-url` points at (D73). The two-box form (ComfyUI on a second GPU host) is an explicit operator action under D77 with the port firewalled to the single Provider host, never a default. Model assets are downloaded into the `infochat-comfyui-models` named volume by the setup wizard's image step; the image's output directory is tmpfs-backed and swept by an in-image janitor after `INFOCHAT_COMFYUI_OUTPUT_TTL_MINUTES` (default 15) — the image half of the D75 backend no-retention end state, and the value the Provider-side spool sweeper must exceed. On a rootless-Docker host the ACL runbook above must be applied INCLUDING the `/dev/kfd` line before the service can see the GPU.
 
 **No second, unused local LLM runtime.** The host systemd `ollama.service` used by the `quarkus:dev` inner loop (D49, §7.7) MUST NOT run on a box whose production deployment is the **pure-llama.cpp shape** (shape a: `--profile llamacpp --profile llamacpp-embeddings`). It is a second local LLM runtime that needlessly reserves RAM and resident model weights with no consumer — a footgun under memory pressure. Tear it down on such a host:
 
