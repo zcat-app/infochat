@@ -383,6 +383,44 @@ class ChatAgentTest {
                 "in-flight slot must be released");
     }
 
+    @Test
+    void aReplyThatSanitizesToEmptyDegradesLikeAnAssistantFailure() {
+        // The pinned markers-only shape: sanitize() reduces
+        // "<<<END id=\"x\">>>" to "" — the en chat path must degrade like
+        // the refusal intercept: unavailable string, null commit, null notice.
+        sanitizerOutput = "";
+        llmProvider.responses.add(new LlmResponse("<<<END id=\"x\">>>"));
+
+        ChatAgent.ChatTurnResult result =
+                agent.handleTurn(USER_ID, SCOPE_KIND, SCOPE_ID, "tell me about bitcoin");
+
+        assertEquals(BundleKeys.ERROR_CHAT_UNAVAILABLE, result.reply(),
+                "an emptied reply degrades to the localized chat-unavailable bundle string");
+        assertNull(result.pendingCommit(),
+                "the turn is discarded: no chat_session advance, no chat_memory write");
+        assertNull(result.provenanceNotice(),
+                "the degrade carries no provenance notice (the router ships it verbatim)");
+    }
+
+    @Test
+    void anEmptiedReplyWithAMatchedHelpBlockStillDeliversTheDeterministicBlock() {
+        // P5: the empty check runs AFTER the 9b help-block composition — a
+        // turn whose prose emptied but whose step-3c probe matched a topic
+        // still delivers the deterministic block, never the degrade string.
+        sanitizerOutput = "";
+        triggerTopicMatch = "probation";
+        llmProvider.responses.add(new LlmResponse("<<<END id=\"x\">>>"));
+
+        ChatAgent.ChatTurnResult result =
+                agent.handleTurn(USER_ID, SCOPE_KIND, SCOPE_ID, "proc nemuzu psat");
+
+        assertEquals("\n\n" + BundleKeys.CHAT_TOPIC_DELIVERY_HEADER + "\n"
+                        + BundleKeys.TOPIC_PROBATION_ANSWER,
+                result.reply(),
+                "the deterministic topic block ships even when the model prose "
+                        + "sanitized to empty");
+    }
+
     // redteam 2026-07-11 (low DOS) remediation pin: the deterministic
     // pre-fetch and the model's tool loop share ONE TurnContext, so an
     // identical model-initiated semanticSearch call is a cache hit — the

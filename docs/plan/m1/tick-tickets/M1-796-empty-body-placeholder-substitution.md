@@ -1,21 +1,22 @@
 ---
 id: M1-796
 title: "Substitute an emptied chat reply before delivery"
-status: pending
+status: done
 created: 2026-08-08
 last_updated: 2026-08-08
 flow: tick
 reproduction: >-
   EmptyLlmReplyDeliveryIT#aMarkersOnlyReplyIsNeverDeliveredEmptied
-  (parked: .scratch/parked-for-M1-795/EmptyLlmReplyDeliveryIT.java) —
+  (restored in-tree at start from .scratch/parked-for-M1-795/, with the
+  authorized P4 callCount assertion — acceptance item 1) —
   a markers-only LLM reply (sanitize() returns "", pinned by
   LlmOutputSanitizerPostconditionTest.deletionShapesMatchTheirDocumentedPostconditions)
   is delivered on the live chat path today: the placeholder finalizes with
   "\n\n"+provenance-notice (normal turn) or "" (M1-618 clarify turn).
   Run RED on main, exit=1: "expected: not equal but was: <\n\nNot based
   on your feed posts; answered from general knowledge.>"
-  (.scratch/tick-repro-M1-795-red2.log:4467-4516). `start` restores the
-  parked test in-tree and re-runs RED before any fix code (workflow §0).
+  (.scratch/tick-repro-M1-795-red2.log:4467-4516). RED re-run at start
+  (.scratch/tick-repro-M1-796-red1.log), same failure.
 analysis_ref: docs/plan/m1/tick-analysis/empty-body-live-delivery-wiring.md
 blocked_by: []
 files_scope:
@@ -64,6 +65,14 @@ spec_refs:
   - docs/spec/security.md §Failure handling
   - docs/spec/messaging.md §Progress notifications
   - docs/spec/llm.md §Failure handling (recap)
+reviews:
+  - round: 1
+    date: 2026-08-08
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "7 files changed, 198 insertions(+), 11 deletions(-)"
+    findings: "0 rework items, 0 critical/high; 4 candidate findings falsified-and-dropped (no-log degrade is covered by the LLM_OUTPUT_SANITIZED audit row; corpus-clearing setUp cannot break sibling ITs; translator-skip on blank operand is the amended rule's promised shape; blank translation cannot reach the degrade past sanity check (c))"
+    verdict_file: .scratch/tick-review-M1-796-r1.txt
 ---
 
 # M1-796: Substitute an emptied chat reply before delivery

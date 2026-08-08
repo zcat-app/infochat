@@ -89,6 +89,11 @@ class InboundRouterChatModeIT {
             exec(conn,
                     "DELETE FROM groups WHERE upstream_group_id LIKE ?",
                     GROUP_PREFIX + "%");
+            // Clear the help corpora: StubEmbeddingProvider makes the
+            // step-3c probes match every turn, which would break the
+            // exact-body assertion (same mechanism as EmptyLlmReplyDeliveryIT).
+            exec(conn,
+                    "DELETE FROM doc_embedding WHERE doc_kind IN ('topic', 'command_intent')");
         }
     }
 

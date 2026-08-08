@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 11 |
+| done | 12 |
 | deferred | 0 |
 | abandoned | 0 |
 | **total** | **13** |
@@ -26,7 +26,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-790 — Downgrade markdown for the plain-text surface (complexity: medium, risk: medium)
-- M1-796 — Substitute an emptied chat reply before delivery (complexity: low, risk: low)
 
 ---
 
@@ -62,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-796 | Substitute an emptied chat reply before delivery | 2026-08-08 | round 1 APPROVE |
 | M1-795 | Wire the empty-body guard into live delivery | 2026-08-08 | round 1 APPROVE |
 | M1-794 | Guard against empty sanitized bodies at delivery | 2026-08-08 | round 1 APPROVE |
 | M1-793 | Evaluate translation sanity checks on the sanitized reply | 2026-08-08 | round 1 APPROVE |
@@ -71,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-788 | Stage 1 must canonicalize the text it stores and second-scans | 2026-08-07 | round 1 APPROVE-WITH-FIXES |
 | M1-787 | Straddled second-pass match must keep its row and redaction | 2026-08-07 | round 1 APPROVE-WITH-FIXES |
 | M1-786 | Remediate post and saved_post bodies stored before the plain-text fix | 2026-08-07 | round 3 APPROVE |
-| M1-785 | Stage 1 must scan the body text it stores | 2026-08-07 | round 1 REWORK |
 
 ---
 
@@ -109,5 +108,5 @@ M1-792 (done)
 M1-793 (done)
 M1-794 (done)
 M1-795 (done)
-M1-796 (pending) ← runnable
+M1-796 (done)
 ```

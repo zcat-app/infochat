@@ -564,7 +564,9 @@ public class ChatAgent {
         // English-canonical, like source post bodies); only the delivered
         // reply is translated.
         String reply;
-        if (!"en".equals(scopeLanguage)) {
+        // A blank operand never reaches TranslationPipeline; only a
+        // non-blank reply is a translation candidate.
+        if (!"en".equals(scopeLanguage) && !approved.isBlank()) {
             reply = translationPipeline.run(approved, scopeLanguage);
         } else {
             reply = approved;
@@ -611,6 +613,14 @@ public class ChatAgent {
                 String header = bundleLoader.get(BundleKeys.CHAT_HELP_DELIVERY_HEADER, scopeLanguage);
                 reply = reply + "\n\n" + header + "\n" + usageBlock.get();
             }
+        }
+
+        // 9c. An emptied composed reply — no text survived the sanitizer
+        // and no deterministic block matched — degrades like the refusal
+        // intercept: localized unavailable string, null commit, null notice.
+        if (reply.isBlank()) {
+            return new ChatTurnResult(
+                    bundleLoader.get(BundleKeys.ERROR_CHAT_UNAVAILABLE, scopeLanguage), null, null);
         }
 
         // 10. Defer persistence + auto-compress to a post-delivery commit.

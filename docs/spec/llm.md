@@ -546,6 +546,14 @@ stage.
   language, returned unchanged, is the CORRECT translation and is not a
   failure; a third language echoed back is a failure the note cannot
   describe, so it degrades to silence rather than to a false claim.
+- Chat reply emptied by the output sanitizer. A chat reply that the
+  output sanitizer reduces to empty — and that no deterministic help
+  block rescued — degrades like a chat-agent failure: the localized
+  friendly error replaces the reply, the turn is discarded (no session
+  advance, no memory write), and the chat placeholder finalizes with
+  that string, never blank and never the bare retrieval-provenance
+  notice. A reply that carries a deterministic help block is not
+  empty: it is delivered as composed.
 
 Admin notifications are throttled per error class.
 
