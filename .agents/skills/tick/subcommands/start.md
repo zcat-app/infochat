@@ -51,9 +51,16 @@ Set `status: in-progress` (frontmatter) and `last_updated`. Create branch
 must land in a different Maven module from every in-flight ticket's (no
 in-flight `migration_touch: true`), and the work happens in a git worktree;
 degrade to sequential if the tool cannot operate in another working
-directory. A ticket that shares a module with an in-flight ticket runs
+directory. Check the module boundary MECHANICALLY, never from memory: list
+the tick tickets with `status: in-progress` or `in-review` (frontmatter
+under `docs/plan/m1/tick-tickets/`), take the Maven-module root of each
+one's `files_scope` paths (or its worktree's changed modules when the scope
+is absent or stale), and refuse `--parallel` on any overlap with this
+ticket's modules. A ticket whose module cannot be determined this way runs
 sequentially — a declared `files_scope` is supporting evidence, not a
-substitute for the module boundary.
+substitute for the module boundary (M1-790 and M1-796 overlapped in
+infochat-provider while both in flight; their semantic collision reached
+main red).
 
 ## Step 3 — implement (execution, not discovery)
 

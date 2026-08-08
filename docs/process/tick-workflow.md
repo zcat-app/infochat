@@ -206,9 +206,17 @@ a reviewer FAIL, see §4). `out_of_scope` remains semantic and load-bearing.
 **Parallel start requires different Maven modules.** Two tickets may run
 concurrently only when their changes land in disjoint modules — a boundary
 the build enforces, unlike a declared path list, which is a promise made
-before the code was read. `files_scope` MAY be declared as supporting
-evidence; it carries no review consequence and does not by itself qualify a
-ticket for `--parallel`. `migration_touch: true` still serializes.
+before the code was read. `start` checks this mechanically (never from
+memory): enumerate the tick tickets with `status: in-progress` /
+`in-review`, take the Maven-module root of each one's `files_scope` paths
+(or its worktree's changed modules when the scope is absent or stale), and
+refuse `--parallel` on any overlap with the candidate's modules; a ticket
+whose module cannot be determined this way runs sequentially. `files_scope`
+MAY be declared as supporting evidence; it carries no review consequence
+and does not by itself qualify a ticket for `--parallel`.
+`migration_touch: true` still serializes. (M1-790 and M1-796 overlapped in
+infochat-provider while both in flight; their semantic collision — a test
+flip against a new degrade rule, no shared file — reached main red.)
 
 ### 2. Start — `/tick start <id>`
 
@@ -344,6 +352,17 @@ ticket for `--parallel`. `migration_touch: true` still serializes.
   identical → the green log stands and no re-run happens; else it re-runs
   `mvn verify` for `complexity: high` / `risk: high`, and checks test-log
   freshness (mtime vs staged files) otherwise.
+- `merge` first refuses a stale verified tree: current `main` must be an
+  ancestor of the branch tip (`git merge-base --is-ancestor main <branch>`).
+  If main advanced after the branch's green verify, that log attests a main
+  that no longer exists — cross-ticket semantic collisions survive every
+  file-level check (the two diffs need share no path at all) and only a
+  full-suite run against CURRENT main catches them (M1-790 merged green
+  against a pre-M1-796 main and landed a red suite). Recovery: rebase the
+  branch onto fresh `main` (the STATUS-board regen is the expected
+  pseudo-conflict), re-run the full verify, then re-run `merge`; a rebase
+  that changed the diff beyond the board regen goes through `review`
+  again first.
 - `merge` squash-merges into `main` with the canonical-subject idempotency
   precheck and the conflict set rule (STATUS board regen = pseudo-conflict,
   auto-resolved; anything else = refuse).

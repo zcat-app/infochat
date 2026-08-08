@@ -17,6 +17,17 @@ main). Invocation: `/tick merge <id>`. Idempotent.
   - 1 → already merged; delete the stale branch if it resolves; done.
   - ≥2 → refuse: duplicate canonical commits (prior partial merge).
 
+- Staleness check: current `main` must be an ancestor of the branch tip
+  (`git merge-base --is-ancestor main <branch>`). If not, main advanced
+  after the branch's green verify and that log attests a main that no
+  longer exists — cross-ticket semantic collisions survive every
+  file-level check and only a full-suite run against CURRENT main catches
+  them (tick-workflow §5). Refuse. Recovery: rebase the branch onto fresh
+  `main` (the STATUS-board regen is the expected pseudo-conflict), re-run
+  the full `scripts/verify-serialized.sh` against the rebased tree, then
+  re-run `/tick merge`. A rebase that changed the diff beyond the board
+  regen goes through `/tick review` again first.
+
 ## Squash-merge path
 
 `git checkout main` → `git merge --squash <branch>` →
