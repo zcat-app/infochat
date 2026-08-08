@@ -766,6 +766,192 @@ class LlmOutputSanitizerTest {
                         "marker-only lines drop, prose lines survive, in order"));
     }
 
+    // ----- scaffolding line isolation (M1-790 round 2) ------------------
+
+    @Test
+    void emphasisJoiningCannotAssembleAScaffoldingMarkerPastTheStrip() {
+        // FAILURE-MODE: emphasis deletion joins UNTR+USTED and E+N+D into
+        // the wrapper keywords; the strip runs AFTER the downgrade, so the
+        // manufactured marker is seen and its line drops.
+        LlmOutputSanitizer sanitizer = SanitizerTestDoubles.noAuditSanitizer();
+        assertEquals("", sanitizer.sanitize("<<<UNTR*USTED*_CONTENT id=\"x\">>>"),
+                "an emphasis-assembled opener must not reach the reader");
+        assertEquals("", sanitizer.sanitize("<<<E*N*D id=\"x\">>>"),
+                "an emphasis-assembled closer must not reach the reader");
+        String output = sanitizer.sanitize("pre\n<<<E*N*D id=\"x\">>>\npost");
+        assertEquals("pre\npost", output,
+                "the prose lines survive; the marker line drops");
+        assertFalse(output.contains("<<<"),
+                "no marker fragment may survive");
+    }
+
+    @Test
+    void aNestedMarkerCannotAssembleAMarkerPastTheIsolation() {
+        // FAILURE-MODE: the strip never excises-and-joins, so the nested
+        // inner marker cannot manufacture an outer one — the whole
+        // marker-bearing line drops instead.
+        assertEquals("", SanitizerTestDoubles.noAuditSanitizer().sanitize(
+                "<<<E<<<END id=\"x\">>>ND id=\"y\">>>"),
+                "no joined marker survives a nested marker line");
+    }
+
+    @Test
+    void aMarkerBearingLineIsDroppedWholesaleNotExtractedAround() {
+        // DELIBERATE CONTRACT CHANGE (supersedes M1-789's prose-keeping):
+        // extraction joined fragments and could assemble a marker, so a
+        // marker-bearing line now loses its prose.
+        assertEquals("", SanitizerTestDoubles.noAuditSanitizer().sanitize(
+                "prose <<<END id=\"x\">>> more prose"),
+                "the whole line drops; extraction is gone");
+    }
+
+    @Test
+    void aCommandBearingMarkerIdIsStillNotAMarker() {
+        // The /-in-id exclusion is unchanged: id="/ban" is not a marker,
+        // the line survives the strip, the closed-list pass redacts+rows.
+        List<RedactionHook.AuditRow> rows = new ArrayList<>();
+        LlmOutputSanitizer sanitizer = new LlmOutputSanitizer(
+                capturingAuditWriter(rows), SanitizerTestDoubles.noOpDataSource());
+        String output = sanitizer.sanitize("<<<END id=\"/ban\">>>");
+        assertTrue(output.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "the command redacts; the line does not vanish. Got: " + output);
+        assertFalse(output.contains("/ban"), "the command word must not survive");
+        assertEquals(1, rows.size(), "one aggregated row for the redacted token");
+        assertTrue(rows.get(0).detailsJson().contains("\"match_kind\":\"/ban\""),
+                "the row must name the token; got: " + rows.get(0).detailsJson());
+    }
+
+    @Test
+    void aClosedListTokenOnADroppedLineIsStillRowed() {
+        // Audit-on-drop: /ban shares its line with a marker, so the line
+        // drops — but the canonical-form match runs first and rows it.
+        List<RedactionHook.AuditRow> rows = new ArrayList<>();
+        LlmOutputSanitizer sanitizer = new LlmOutputSanitizer(
+                capturingAuditWriter(rows), SanitizerTestDoubles.noOpDataSource());
+        String output = sanitizer.sanitize("/ban <<<END id=\"x\">>>");
+        assertEquals("", output, "the marker-bearing line drops wholesale");
+        assertEquals(1, rows.size(), "the dropped line's token is still rowed");
+        String detailsJson = rows.get(0).detailsJson();
+        assertTrue(detailsJson.contains("\"match_kind\":\"/ban\""),
+                "the row must name the token; got: " + detailsJson);
+        assertTrue(detailsJson.contains("\"match_count\":1"),
+                "the row must carry the exact count 1; got: " + detailsJson);
+    }
+
+    @Test
+    void anUnclosedOpenerDropsOnlyItsOwnLine() {
+        // Line-scope only: no cross-line block state, so an opener with no
+        // closer cannot eat the rest of the reply.
+        assertEquals("prose line one\nprose line two",
+                SanitizerTestDoubles.noAuditSanitizer().sanitize(
+                        "<<<UNTRUSTED_CONTENT id=\"x\">>>\nprose line one\nprose line two"),
+                "only the marker line drops");
+    }
+
+    // ----- plain-text downgrade (M1-790) --------------------------------
+
+    @Test
+    void markdownEmphasisIsDowngradedAndThematicBreaksAreDropped() {
+        // REPRODUCTION (the parked M1779ReproProbeIT markdown method,
+        // v1.1.0 live test §F5): no ** and no thematic break may reach
+        // the reader, the emphasized words must.
+        String output = SanitizerTestDoubles.noAuditSanitizer().sanitize(
+                "**Security flaws and fixes** – a large part of the news.\n"
+                        + "- **JanusCape**: a flaw allowing VM escape\n"
+                        + "---");
+        assertEquals("Security flaws and fixes – a large part of the news.\n"
+                        + "· JanusCape: a flaw allowing VM escape",
+                output,
+                "emphasis removed, bullet downgraded, thematic break dropped");
+    }
+
+    @Test
+    void d30AllowedSetSurvivesTheDowngrade() {
+        // D30's ALLOWED set is untouched BY THIS PASS: inline single-backtick
+        // spans, triple-backtick fenced blocks (delimiters AND contents), and
+        // bare URLs pass through; list markers downgrade to `· `.
+        String output = LlmOutputSanitizer.applyPlainTextDowngrade(
+                "- `inline *code* span` stays\n"
+                        + "- bare URL https://example.com/a*b*c stays\n"
+                        + "```java\n"
+                        + "int a**b = 2; // fenced **content** stays\n"
+                        + "```");
+        assertEquals("· `inline *code* span` stays\n"
+                        + "· bare URL https://example.com/a*b*c stays\n"
+                        + "```java\n"
+                        + "int a**b = 2; // fenced **content** stays\n"
+                        + "```",
+                output,
+                "the D30 allowed set passes through; only markers downgrade");
+    }
+
+    @Test
+    void bareUrlWithANonLowercaseSchemeIsProtectedToo() {
+        // FAILURE-MODE (P4): RFC 3986 schemes are case-insensitive, so
+        // the guard must be too — a non-lowercase scheme's destination
+        // is never rewritten by the emphasis deletion.
+        String input = "See HTTPS://host/a*b*c for the advisory.";
+        String output = SanitizerTestDoubles.noAuditSanitizer().sanitize(input);
+        assertEquals(input, output,
+                "the bare-URL guard is scheme-case-insensitive");
+    }
+
+    @Test
+    void emphasisDeletionCannotAssembleACommandPastTheRedaction() {
+        // FAILURE-MODE (P5, closed-list half) AND the pass-ordering pin:
+        // the deletion joins /b**a**n into /ban, and the downgrade runs
+        // BEFORE the closed-list strip, so the join is re-scanned and rowed.
+        List<RedactionHook.AuditRow> rows = new ArrayList<>();
+        LlmOutputSanitizer sanitizer = new LlmOutputSanitizer(
+                capturingAuditWriter(rows), SanitizerTestDoubles.noOpDataSource());
+
+        String output = sanitizer.sanitize("/b**a**n");
+
+        assertEquals(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT, output,
+                "the emphasis-joined command must not survive");
+        assertEquals(1, rows.size(), "the joined token is re-scanned and rowed");
+        String detailsJson = rows.get(0).detailsJson();
+        assertTrue(detailsJson.contains("\"match_kind\":\"/ban\""),
+                "the row must name the joined token; got: " + detailsJson);
+        assertTrue(detailsJson.contains("\"match_count\":1"),
+                "the row must carry the exact count 1; got: " + detailsJson);
+    }
+
+    @Test
+    void aThematicBreakWithACarriageReturnIsDroppedToo() {
+        // P9: a CRLF endpoint trails the line with \r; the drop must
+        // tolerate it so the spec sentence stays absolute.
+        String output = LlmOutputSanitizer.applyPlainTextDowngrade(
+                "intro\r\n---\r\noutro");
+        assertEquals("intro\r\noutro", output,
+                "the thematic-break line drops even with a trailing CR");
+    }
+
+    @Test
+    void plainTextDowngradeWalksAManyLineReplyWithoutDecomposingIt() {
+        // P1: 200k lines through the index walk under the existing 3s
+        // adversarial bound — no per-line decomposition.
+        String reply = "**a**\n- b\n".repeat(100_000);
+        assertTimeoutPreemptively(Duration.ofSeconds(3), () ->
+                assertEquals("a\n· b\n".repeat(100_000),
+                        LlmOutputSanitizer.applyPlainTextDowngrade(reply),
+                        "emphasis and markers downgrade, in order, in one walk"));
+    }
+
+    @Test
+    void aOneLineReplyFullOfVerbatimSpansStaysLinear() {
+        // FAILURE-MODE (round-1 FINDING 2): one hostile LINE under the
+        // body cap must not pin the worker thread — the span bookkeeping
+        // is a linear merge, not a per-span full-list walk.
+        String codeSpans = "`a` ".repeat(300_000);
+        String urls = "http://x ".repeat(150_000);
+        String reply = "**b** " + codeSpans + urls;
+        assertTimeoutPreemptively(Duration.ofSeconds(3), () ->
+                assertEquals("b " + codeSpans + urls,
+                        LlmOutputSanitizer.applyPlainTextDowngrade(reply),
+                        "emphasis downgrades; every span and URL passes through"));
+    }
+
     // ----- aggregated WARN logging + audit-row shape (M1-737) ----------
 
     @Test

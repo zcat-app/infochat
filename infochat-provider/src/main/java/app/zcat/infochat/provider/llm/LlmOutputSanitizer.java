@@ -13,6 +13,7 @@ import org.jboss.logging.Logger;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -20,16 +21,19 @@ import java.util.regex.Pattern;
 
 /**
  * Sanitizer applied to LLM-authored output before it lands in an
- * outbound reply. Enforces three invariants from docs/spec/security.md
+ * outbound reply. Enforces four invariants from docs/spec/security.md
  * §LLM output sanitizer and docs/spec/commands.md §Surface conventions:
  *
  * <ol>
- *   <li><b>No prompt scaffolding.</b> The untrusted-content wrapper the
- *       prompt builders put around feed text, user text and tool results
- *       is stripped when the model echoes it back into its output.</li>
+ *   <li><b>No prompt scaffolding.</b> A line carrying an echoed wrapper
+ *       marker the prompt builders put around feed, user and tool text is
+ *       dropped wholesale — extracting it could assemble a new one.</li>
  *   <li><b>Plain-text only.</b> Markdown link syntax {@code [text](url)}
  *       is rewritten to {@code text (url)} so the rendered prose carries
  *       both the visible label and the bare URL.</li>
+ *   <li><b>Markdown downgraded.</b> The emphasis, thematic breaks and
+ *       list markers the D30 surface cannot render are downgraded to
+ *       plain text; fences and verbatim spans survive.</li>
  *   <li><b>Closed-list strip.</b> Every privileged-tier command token
  *       from {@link #CLOSED_LIST} is replaced with the literal
  *       {@value #REDACTED_COMMAND_REPLACEMENT}. The match runs on the
@@ -43,7 +47,8 @@ import java.util.regex.Pattern;
  * model output re-entering the corpus inherits every control the raw
  * body had. Every static surface here ({@link #CLOSED_LIST},
  * {@link #CLOSED_LIST_PATTERNS}, {@link #applyScaffoldingMarkerStrip},
- * {@link #applyMarkdownLinkStrip},
+ * {@link #applyScaffoldingMarkerStripWithMatches},
+ * {@link #applyMarkdownLinkStrip}, {@link #applyPlainTextDowngrade},
  * {@link #applyClosedListStrip}, {@link #applyClosedListStripWithMatches},
  * {@link #canonicalizeForMatching}, {@link #aggregateMatchCounts},
  * {@link #breakLinkAdjacency}) is a behaviour-identical delegate kept so
@@ -129,6 +134,12 @@ public class LlmOutputSanitizer {
         return LlmOutputSanitizerCore.applyScaffoldingMarkerStrip(input);
     }
 
+    /** Scaffolding-marker strip with audit-on-drop matches — delegate of
+        {@link LlmOutputSanitizerCore#applyScaffoldingMarkerStripWithMatches(String)}. */
+    static LlmOutputSanitizerCore.ScaffoldingStripResult applyScaffoldingMarkerStripWithMatches(String input) {
+        return LlmOutputSanitizerCore.applyScaffoldingMarkerStripWithMatches(input);
+    }
+
     /**
      * Markdown-link strip pass — delegate of
      * {@link LlmOutputSanitizerCore#applyMarkdownLinkStrip(String)}; see
@@ -138,6 +149,13 @@ public class LlmOutputSanitizer {
      */
     static String applyMarkdownLinkStrip(String input) {
         return LlmOutputSanitizerCore.applyMarkdownLinkStrip(input);
+    }
+
+    /** Plain-text downgrade pass — delegate of
+        {@link LlmOutputSanitizerCore#applyPlainTextDowngrade(String)}; it
+        runs before the closed-list strip because deletion joins characters. */
+    static String applyPlainTextDowngrade(String input) {
+        return LlmOutputSanitizerCore.applyPlainTextDowngrade(input);
     }
 
     /**
@@ -212,9 +230,9 @@ public class LlmOutputSanitizer {
 
     /**
      * Run every pass in order. The output is plain text, with prompt
-     * scaffolding removed, privileged commands replaced by
-     * {@value #REDACTED_COMMAND_REPLACEMENT}
-     * and markdown links flattened to {@code text (url)}. Every
+     * scaffolding removed, markdown links flattened to {@code text (url)},
+     * remaining markdown downgraded, privileged commands replaced by
+     * {@value #REDACTED_COMMAND_REPLACEMENT}. Every
      * closed-list match is audit-logged; the {@code audit_log} emission
      * aggregates per distinct token per call (one row carrying the
      * exact occurrence count) with action {@code LLM_OUTPUT_SANITIZED}.
@@ -231,11 +249,23 @@ public class LlmOutputSanitizer {
         }
         // Deleting passes run before the closed-list strip: deletion can
         // join fragments into a token the redaction never saw (spec §LLM
-        // output sanitizer).
-        String afterScaffolding = applyScaffoldingMarkerStrip(llmOutput);
-        String afterMarkdown = applyMarkdownLinkStrip(afterScaffolding);
-        ClosedListStripResult result = applyClosedListStripWithMatches(afterMarkdown);
-        emitAuditRows(result.matches());
+        // output sanitizer). The scaffold strip runs AFTER the downgrade,
+        // so it also sees markers the emphasis deletion joined.
+        String afterMarkdown = applyMarkdownLinkStrip(llmOutput);
+        String afterDowngrade = applyPlainTextDowngrade(afterMarkdown);
+        LlmOutputSanitizerCore.ScaffoldingStripResult afterScaffolding =
+                applyScaffoldingMarkerStripWithMatches(afterDowngrade);
+        LlmOutputSanitizerCore.ClosedListStripResult result =
+                LlmOutputSanitizerCore.applyClosedListStripWithMatches(afterScaffolding.rewritten());
+        List<String> matches = new ArrayList<>(afterScaffolding.matches());
+        matches.addAll(result.matches());
+        // One WARN per distinct token per call over the merged matches, so
+        // the WARN stream stays 1:1 with the audit rows below.
+        for (Map.Entry<String, Integer> aggregated : aggregateMatchCounts(matches).entrySet()) {
+            LOG.warnf("LLM_OUTPUT_SANITIZED token=%s count=%d",
+                    aggregated.getKey(), aggregated.getValue());
+        }
+        emitAuditRows(matches);
         return result.rewritten();
     }
 

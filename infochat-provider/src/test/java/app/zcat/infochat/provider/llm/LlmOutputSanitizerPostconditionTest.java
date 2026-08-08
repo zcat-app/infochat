@@ -262,9 +262,7 @@ class LlmOutputSanitizerPostconditionTest {
         // the production sanitize() and asserted against the DOCUMENTED
         // postcondition; each pin catches a named mutation of the pass
         // composition (reordering, dropping the id-class exclusion), so no
-        // pin is vacuous. M1-790 has NOT landed: thematic-break and
-        // emphasis-joined shapes therefore pin the CURRENT contract, and
-        // M1-790's diff must flip them deliberately.
+        // pin is vacuous.
         LlmOutputSanitizer sanitizer = SanitizerTestDoubles.noAuditSanitizer();
 
         // Marker-only line is dropped, not blanked (M1-789).
@@ -278,18 +276,19 @@ class LlmOutputSanitizerPostconditionTest {
         assertEquals("", sanitizer.sanitize("<<<END id=\"x\">>>"),
                 "a markers-only reply reduces to empty today — P8's documented residual");
 
-        // Thematic-break line: survives TODAY (no markdown pass yet); the
-        // pin documents the pre-M1-790 contract, and M1-790 flips it.
-        assertEquals("intro\n---\noutro",
+        // Thematic-break line is dropped by the plain-text downgrade
+        // (M1-790); the pin was deliberately flipped from the pre-M1-790
+        // contract its own comment mandated.
+        assertEquals("intro\noutro",
                 sanitizer.sanitize("intro\n---\noutro"),
-                "a thematic-break line is untouched until M1-790 lands");
+                "a thematic-break line is dropped by the downgrade");
 
-        // Emphasis-joined token: not joined TODAY (no downgrade pass yet);
-        // the raw-text detectors see the un-joined spelling, and M1-790
-        // flips this pin too.
-        assertEquals("[REFUS**AL**: something]",
+        // Emphasis-joined token: the downgrade joins the fragments, and
+        // the joined marker is what the post-sanitize detectors evaluate
+        // (M1-791). Flipped deliberately from the pre-M1-790 contract.
+        assertEquals("[REFUSAL: something]",
                 sanitizer.sanitize("[REFUS**AL**: something]"),
-                "emphasis is not joined until M1-790 lands");
+                "emphasis is joined by the downgrade before any detector sees it");
 
         // The id class excludes '/' (P3): a command-bearing "marker" line
         // is NOT a marker, survives the strip, and redacts+audits through

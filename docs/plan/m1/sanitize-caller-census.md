@@ -28,9 +28,9 @@ Header (re-derived at start, 2026-08-08):
   - pin: `LlmOutputSanitizerPostconditionTest#sanitizeReturnsOriginalBytesOnNoClosedListMatch`
   - pin: `LlmOutputSanitizerPostconditionTest#sanitizeMayReturnTheCanonicalFormOnMatch`
 - Deletion shapes the shared transform introduces — marker-only line
-  dropped (M1-789, live), thematic-break line and emphasis-joined token
-  (M1-790, NOT yet landed — the pins document the current contract so
-  M1-790's diff must update them deliberately), "" a possible return today
+  dropped (M1-789, live), thematic-break line dropped and emphasis-joined
+  token joined (M1-790, live — the pins were flipped deliberately by
+  M1-790's diff as this note mandated), "" a possible return today
   (P8 — the empty-body follow-up must update the pin deliberately).
   - pin: `LlmOutputSanitizerPostconditionTest#deletionShapesMatchTheirDocumentedPostconditions`
 

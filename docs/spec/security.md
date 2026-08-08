@@ -639,42 +639,100 @@ wrapper this document's §Prompt-injection defenses puts around feed
 text, user text and tool results (`<<<UNTRUSTED_CONTENT id="…">>>` …
 `<<<END id="…">>>`) is stripped from LLM-authored output when the model
 echoes it back. Echoing is intermittent (the model emits the wrapper only
-sometimes) and is not answerable by prompting. A wrapper line the marker
-had to itself is dropped rather than blanked. The `id` is not required to
-match, and need not be present at all, for the strip to fire: a model
-reproducing the wrapper shape has put internal framing in front of a
-reader whether or not it copied the id correctly. It may not, however,
-contain a `/`. The strip DELETES the marker, so a closed-list token
-carried inside the `id` would be gone before the closed-list pass could
-see it — no replacement marker, no WARN and no `LLM_OUTPUT_SANITIZED`
-row — and untrusted feed text reaches this pass at the render sites, so
-that text would get to choose whether the deployment records that a
-privileged command string was present. Every closed-list entry begins
-with `/` and no UUID contains one, so excluding it costs nothing for a
-real or a garbled marker while dropping a command-bearing one through
-to the closed-list pass, which redacts and audits it. **This is not a
-D21 break and must not be read as one** — the id is per-call random, so
-a leaked one does not help forge another, and D21's guarantee rests on
-that unguessability rather than on the wrapper's shape being secret.
-The defect is that scaffolding renders as though it were content. **The
-pass walks lines by index**, appending ranges into one buffer rather
-than decomposing the reply into a string per line: §Trust boundaries
-item 9 puts a hostile endpoint's reply in its input under nothing but
-the 1–8 MiB body cap, so a per-line decomposition would let an in-cap
-reply of one-character lines cost a live heap many times the payload
-that cap was sized to bound.
+sometimes) and is not answerable by prompting. **A marker-bearing line
+is dropped wholesale, not extracted around**: cutting a marker out and
+rejoining the remainder is itself a deletion, and deletion joins
+fragments, so extraction could assemble a new marker out of the pieces
+at any nesting depth; dropping the line cannot. The drop is line-scope —
+no cross-line block state, so an unclosed opener eats only its own
+line. The `id` is not required to match, and need not be present at
+all, for the strip to fire: a model reproducing the wrapper shape has
+put internal framing in front of a reader whether or not it copied the
+id correctly. It may not, however, contain a `/`. A shape whose `id`
+carries one is not a marker at all, so its line is not isolated and
+falls through to the closed-list strip, which redacts and audits the
+token — every closed-list entry begins with `/` and no UUID contains
+one, so excluding it costs nothing for a real or a garbled marker while
+keeping a command-bearing shape out of the drop. The converse is
+audit-on-drop: a line that IS isolated is first matched on its
+canonical form, and any closed-list token it carries joins the call's
+aggregated WARN and `LLM_OUTPUT_SANITIZED` rows — untrusted feed text
+reaches this pass at the render sites and must not get to choose
+whether the deployment records that a privileged command string was
+present. **This is not a D21 break and must not be read as one** — the
+id is per-call random, so a leaked one does not help forge another, and
+D21's guarantee rests on that unguessability rather than on the
+wrapper's shape being secret. The defect is that scaffolding renders as
+though it were content; legitimate prose that merely quotes a marker
+loses its whole line — accepted, because the reply's source link keeps
+the quoted post reachable. **The pass walks lines by index**, appending
+ranges into one buffer rather than decomposing the reply into a string
+per line: §Trust boundaries item 9 puts a hostile endpoint's reply in
+its input under nothing but the 1–8 MiB body cap, so a per-line
+decomposition would let an in-cap reply of one-character lines cost a
+live heap many times the payload that cap was sized to bound.
+
+**A further downgrade category: markdown for the plain-text surface.**
+The messaging surface is plain text (D30), and prompting alone does not
+keep the model to it, so the sanitizer downgrades the markdown the
+surface cannot render. Emphasis is removed by deleting the paired
+delimiter runs of `*` and `_`, classified by CommonMark's flanking
+rules — a run opens only when it is not followed by whitespace and
+closes only when it is not preceded by whitespace, with `_`
+additionally never opening or closing inside a word — so arithmetic
+(`2 * 3`) and identifiers (`snake_case`) survive; two runs that can
+both open AND close pair only when the sum of their lengths is not a
+multiple of three, or both are. A thematic-break line — three or more
+of ONE of `-`, `*`, `_` with nothing but spaces or tabs between them —
+is dropped rather than blanked, tolerating a trailing carriage return
+so a CRLF endpoint cannot defeat the drop. A list marker — a bullet
+`-`, `*` or `+`, or a number of at most nine digits followed by `.` or
+`)`, each followed by a space or tab — becomes `· `. Two scopes pass
+through untouched BY THIS PASS: triple-backtick fenced blocks — a line
+whose first non-whitespace character begins a run of three or more
+backticks opens or closes a fence, fence delimiter lines and fenced
+lines are never rewritten, and a fence that is never closed leaves the
+rest of the reply untouched — and verbatim spans inside a line:
+single-backtick code spans and bare http(s) URLs. The bare-URL span is
+matched scheme-case-insensitively, because RFC 3986 schemes are
+case-insensitive and a case-sensitive guard would rewrite a
+non-lowercase-scheme destination. The pass walks lines by index into
+one buffer, never decomposing the reply into a string per line, for
+the same reason the scaffolding strip does. Emphasis deletion JOINS
+characters, so the pass runs before the closed-list strip per the
+ordering rule below, and a joined token is still scanned and rowed;
+the scaffolding strip runs AFTER this pass, so a wrapper marker the
+emphasis deletion assembles out of fragments is still seen and its
+line dropped. Four residuals are stated. Emphasis deletion can SPLIT a
+token a pre-pass match would have rowed — `/ban*x*` reduces to
+`/banx` — and the residue is accepted because the closed-list
+pattern's trailing lookahead means it is never dispatchable. On a
+closed-list match the canonical form is what gets returned, so NFKC
+can re-surface emphasis bytes the downgrade never saw on the raw
+text — cosmetic, in a reply that also carried a redacted command;
+closing it would mean a deleting pass after the redaction, which the
+ordering rule forbids. The pairing scan carries at most 1024 unmatched
+emphasis openers per line, dropping the oldest once the cap is
+exceeded, so emphasis past the cap stays undowngraded — cosmetic,
+never undelivered prose. And the walk is per-line: an opener on one
+line never pairs with a closer on a later line, so emphasis spanning a
+line boundary reaches the reader — cosmetic, accepted.
 
 **Pass ordering is a security property.** Every pass that DELETES
-characters — the scaffolding strip, the link-flatten — runs BEFORE the
-closed-list strip, and none runs after it. Deleting characters joins
-fragments (`/ba<<<END id="x">>>n` → `/ban`), so a pass placed
-downstream of the redaction could assemble a privileged token out of
-text the closed-list match never saw, and that token would ship
-unredacted AND unaudited. The one pass that does run after the
+characters — the link-flatten, the markdown downgrade, the scaffolding
+strip — runs BEFORE the closed-list strip, and none runs after it.
+Deleting characters joins fragments (`/b**a**n` → `/ban`), so a pass
+placed downstream of the redaction could assemble a privileged token
+out of text the closed-list match never saw, and that token would ship
+unredacted AND unaudited. Among the deleting passes the scaffolding
+strip runs last, after the markdown downgrade, so a wrapper marker the
+emphasis deletion assembles out of fragments is still seen and its
+line dropped. The one pass that does run after the
 replacement, the `](` neutralization, only INSERTS a space: it can
 break a token apart but never build one. The accepted residual is that
 on a match the canonical form is what gets returned, so NFKC can
-surface a wrapper marker that the earlier pass could not see on the raw
+surface a wrapper marker or emphasis that the earlier passes could not
+see on the raw
 bytes — a cosmetic leak in a reply that also carried a redacted
 command. Closing it would mean re-running a character-deleting pass
 after the redaction, which trades a redaction bypass for a cosmetic

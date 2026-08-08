@@ -40,9 +40,9 @@ import java.util.regex.Pattern;
  * output sanitizer and docs/spec/commands.md §Surface conventions:
  *
  * <ol>
- *   <li><b>No prompt scaffolding.</b> The untrusted-content wrapper is
- *       {@linkplain #applyScaffoldingMarkerStrip stripped} when the model
- *       echoes it into its own output.</li>
+ *   <li><b>No prompt scaffolding.</b> A line carrying an echoed wrapper
+ *       marker is {@linkplain #applyScaffoldingMarkerStrip dropped
+ *       wholesale} — extracting the marker could assemble a new one.</li>
  *   <li><b>Plain-text only.</b> Markdown link syntax {@code [text](url)}
  *       is rewritten to {@code text (url)} so the rendered prose carries
  *       both the visible label and the bare URL. Runs AHEAD of the
@@ -55,6 +55,9 @@ import java.util.regex.Pattern;
  *       flatten regex cannot parse is
  *       {@linkplain #neutralizeResidualLinkSyntax neutralized} instead,
  *       so the guarantee does not inherit the regex's limits.</li>
+ *   <li><b>Markdown downgraded for the plain-text surface.</b> The
+ *       {@linkplain #applyPlainTextDowngrade downgrade} removes emphasis,
+ *       drops thematic breaks, rewrites list markers to {@code · }.</li>
  *   <li><b>Closed-list strip.</b> Every privileged-tier command token
  *       from {@link #CLOSED_LIST} is replaced with the literal
  *       {@value #REDACTED_COMMAND_REPLACEMENT}. Replacement is
@@ -487,51 +490,96 @@ public final class LlmOutputSanitizerCore {
 
     /** The wrapper markers as the model may echo them; the id is optional
         and loosely matched, but never spans a {@code /} — see
-        {@link #applyScaffoldingMarkerStrip}. */
+        {@link #applyScaffoldingMarkerStripWithMatches}. */
     private static final Pattern SCAFFOLDING_MARKER = Pattern.compile(
             "<<<(?:UNTRUSTED_CONTENT|END)(?:\\s+id=\"[^\"/]*\")?>>>");
 
-    /** Strip echoed wrapper markers; a marker-only line is dropped, a
-        prose-carrying line keeps its prose. Contract (id class, ordering,
-        drop-not-blank): docs/spec/security.md §LLM output sanitizer. */
+    /** Carrier for the scaffolding strip: the rewritten text plus the
+        closed-list tokens found on dropped lines (audit-on-drop). */
+    public record ScaffoldingStripResult(String rewritten, List<String> matches) {}
+
+    /** Scaffolding-marker strip — the rewrite half of
+        {@link #applyScaffoldingMarkerStripWithMatches(String)}. */
     public static String applyScaffoldingMarkerStrip(String input) {
+        return applyScaffoldingMarkerStripWithMatches(input).rewritten();
+    }
+
+    /** Strip echoed wrapper markers, line-scope: a marker-bearing line is
+        dropped wholesale (excising and rejoining could assemble a new
+        marker), first matched canonically so a closed-list token on it is
+        rowed, not lost. Contract: docs/spec/security.md §LLM output sanitizer. */
+    public static ScaffoldingStripResult applyScaffoldingMarkerStripWithMatches(String input) {
         // Cheap out: no "<<<" means no marker, so no allocation.
         if (input.indexOf("<<<") < 0) {
-            return input;
+            return new ScaffoldingStripResult(input, List.of());
         }
         int length = input.length();
         StringBuilder out = new StringBuilder(length);
+        List<String> matches = new ArrayList<>();
         Matcher matcher = SCAFFOLDING_MARKER.matcher(input);
         boolean anyKept = false;
         int lineStart = 0;
         while (lineStart <= length) {
             int newline = input.indexOf('\n', lineStart);
             int lineEnd = newline < 0 ? length : newline;
-            // Keep-vs-drop in one scan, without building the stripped line.
-            boolean sawMarker = false;
-            boolean sawContent = false;
-            int cursor = lineStart;
             matcher.region(lineStart, lineEnd);
-            while (matcher.find()) {
-                sawMarker = true;
-                sawContent |= hasNonWhitespace(input, cursor, matcher.start());
-                cursor = matcher.end();
-            }
-            if (sawMarker) {
-                sawContent |= hasNonWhitespace(input, cursor, lineEnd);
-            }
-            // A marker-free line is kept as it arrived, blank or not — that
-            // blankness is the model's own.
-            if (!sawMarker || sawContent) {
+            if (matcher.find()) {
+                // Audit-on-drop: a closed-list token on the dropped line is
+                // still rowed (canonical-form match, reusing the machinery).
+                matches.addAll(applyClosedListStripWithMatches(
+                        input.substring(lineStart, lineEnd)).matches());
+            } else {
                 if (anyKept) {
                     out.append('\n');
                 }
                 anyKept = true;
-                if (sawMarker) {
-                    appendWithoutMarkers(out, input, lineStart, lineEnd, matcher);
-                } else {
-                    out.append(input, lineStart, lineEnd);
+                out.append(input, lineStart, lineEnd);
+            }
+            if (newline < 0) {
+                break;
+            }
+            lineStart = newline + 1;
+        }
+        return new ScaffoldingStripResult(out.toString(), matches);
+    }
+
+    /** A bare URL, scheme-case-insensitive (RFC 3986 schemes are): the
+        verbatim span the emphasis deletion must never rewrite. */
+    private static final Pattern BARE_URL_SPAN = Pattern.compile("(?i:https?)://\\S+");
+
+    /** Bound on unmatched emphasis openers carried per line: a reply of
+        nothing but openers stays linear; emphasis past the cap stays
+        undowngraded — cosmetic, never a deleted control. */
+    private static final int MAX_PENDING_EMPHASIS_OPENERS = 1024;
+
+    /** Plain-text downgrade for the D30 surface: emphasis removed per
+        CommonMark flanking, thematic-break lines dropped, list markers
+        become {@code · }. Contract: docs/spec/security.md §LLM output sanitizer. */
+    public static String applyPlainTextDowngrade(String input) {
+        int length = input.length();
+        StringBuilder out = new StringBuilder(length);
+        boolean inFence = false;
+        boolean anyKept = false;
+        int lineStart = 0;
+        while (lineStart <= length) {
+            int newline = input.indexOf('\n', lineStart);
+            int lineEnd = newline < 0 ? length : newline;
+            boolean fenceLine = isFenceDelimiterLine(input, lineStart, lineEnd);
+            if (fenceLine) {
+                inFence = !inFence;
+            }
+            if (fenceLine || inFence) {
+                if (anyKept) {
+                    out.append('\n');
                 }
+                anyKept = true;
+                out.append(input, lineStart, lineEnd);
+            } else if (!isThematicBreakLine(input, lineStart, lineEnd)) {
+                if (anyKept) {
+                    out.append('\n');
+                }
+                anyKept = true;
+                appendDowngradedLine(out, input, lineStart, lineEnd);
             }
             if (newline < 0) {
                 break;
@@ -541,26 +589,282 @@ public final class LlmOutputSanitizerCore {
         return out.toString();
     }
 
-    /** Whether {@code [from, to)} holds a character that is not whitespace. */
-    private static boolean hasNonWhitespace(String input, int from, int to) {
-        for (int i = from; i < to; i++) {
-            if (!Character.isWhitespace(input.charAt(i))) {
-                return true;
-            }
+    /** A fence delimiter line: leading spaces/tabs then a run of three or
+        more backticks (an opening fence may carry an info string). By this
+        pass a fence is opened AND closed by this shape alone. */
+    private static boolean isFenceDelimiterLine(String input, int lineStart, int lineEnd) {
+        int i = lineStart;
+        while (i < lineEnd && (input.charAt(i) == ' ' || input.charAt(i) == '\t')) {
+            i++;
         }
-        return false;
+        int runStart = i;
+        while (i < lineEnd && input.charAt(i) == '`') {
+            i++;
+        }
+        return i - runStart >= 3;
     }
 
-    /** Append {@code [from, to)} with every marker span removed. */
-    private static void appendWithoutMarkers(StringBuilder out, String input,
-                                             int from, int to, Matcher matcher) {
+    /** A thematic-break line: three or more of ONE of {@code - * _} with
+        only spaces/tabs between and an optional trailing CR; checked before
+        the list-marker rewrite, so {@code - - -} drops. */
+    private static boolean isThematicBreakLine(String input, int lineStart, int lineEnd) {
+        int contentEnd = lineEnd > lineStart && input.charAt(lineEnd - 1) == '\r'
+                ? lineEnd - 1 : lineEnd;
+        int i = lineStart;
+        while (i < contentEnd && (input.charAt(i) == ' ' || input.charAt(i) == '\t')) {
+            i++;
+        }
+        if (i >= contentEnd) {
+            return false;
+        }
+        char marker = input.charAt(i);
+        if (marker != '-' && marker != '*' && marker != '_') {
+            return false;
+        }
+        int count = 0;
+        for (int j = i; j < contentEnd; j++) {
+            char c = input.charAt(j);
+            if (c == marker) {
+                count++;
+            } else if (c != ' ' && c != '\t') {
+                return false;
+            }
+        }
+        return count >= 3;
+    }
+
+    /** One kept line: a leading list marker becomes {@code · }; the rest
+        of the line — or the whole line — gets the emphasis downgrade. */
+    private static void appendDowngradedLine(StringBuilder out, String input,
+                                             int lineStart, int lineEnd) {
+        int i = lineStart;
+        while (i < lineEnd && (input.charAt(i) == ' ' || input.charAt(i) == '\t')) {
+            i++;
+        }
+        int markerEnd = listMarkerEnd(input, i, lineEnd);
+        if (markerEnd < 0) {
+            appendEmphasisDowngraded(out, input, lineStart, lineEnd);
+            return;
+        }
+        out.append(input, lineStart, i).append('·');
+        appendEmphasisDowngraded(out, input, markerEnd, lineEnd);
+    }
+
+    /** End index of the list marker starting at {@code i} (past the bullet
+        or the ordered marker's {@code .}/{@code )}), or -1 when there is
+        none; a marker requires a following space or tab. */
+    private static int listMarkerEnd(String input, int i, int lineEnd) {
+        if (i >= lineEnd) {
+            return -1;
+        }
+        char c = input.charAt(i);
+        int markerEnd;
+        if (c == '-' || c == '*' || c == '+') {
+            markerEnd = i + 1;
+        } else if (c >= '0' && c <= '9') {
+            int j = i + 1;
+            while (j < lineEnd && j - i < 9 && input.charAt(j) >= '0' && input.charAt(j) <= '9') {
+                j++;
+            }
+            if (j >= lineEnd || (input.charAt(j) != '.' && input.charAt(j) != ')')) {
+                return -1;
+            }
+            markerEnd = j + 1;
+        } else {
+            return -1;
+        }
+        if (markerEnd >= lineEnd
+                || (input.charAt(markerEnd) != ' ' && input.charAt(markerEnd) != '\t')) {
+            return -1;
+        }
+        return markerEnd;
+    }
+
+    /** Append {@code [from, to)} with paired emphasis delimiters deleted;
+        verbatim spans pass through untouched and shield their delimiters.
+        Deletion joins characters, so this runs BEFORE the closed-list strip. */
+    private static void appendEmphasisDowngraded(StringBuilder out, String input,
+                                                 int from, int to) {
+        boolean hasEmphasisCharacter = false;
+        for (int i = from; i < to; i++) {
+            char c = input.charAt(i);
+            if (c == '*' || c == '_') {
+                hasEmphasisCharacter = true;
+                break;
+            }
+        }
+        if (!hasEmphasisCharacter) {
+            out.append(input, from, to);
+            return;
+        }
+        List<int[]> spans = verbatimSpans(input, from, to);
+        List<int[]> runs = delimiterRuns(input, from, to, spans);
+        pairEmphasis(runs);
         int cursor = from;
-        matcher.region(from, to);
-        while (matcher.find()) {
-            out.append(input, cursor, matcher.start());
-            cursor = matcher.end();
+        for (int[] run : runs) {
+            int start = run[0];
+            int end = run[1];
+            int consumedFromStart = run[2];
+            int consumedFromEnd = run[3];
+            if (consumedFromStart > 0) {
+                out.append(input, cursor, start);
+                cursor = start + consumedFromStart;
+            }
+            if (consumedFromEnd > 0) {
+                out.append(input, cursor, end - consumedFromEnd);
+                cursor = end;
+            }
         }
         out.append(input, cursor, to);
+    }
+
+    /** The line's verbatim spans as {@code [start, end)} pairs in input
+        order: single-backtick code spans, then bare URLs in the gaps. */
+    private static List<int[]> verbatimSpans(String input, int from, int to) {
+        List<int[]> codeSpans = new ArrayList<>();
+        int i = from;
+        while (i < to) {
+            if (input.charAt(i) != '`') {
+                i++;
+                continue;
+            }
+            int close = -1;
+            for (int j = i + 1; j < to; j++) {
+                if (input.charAt(j) == '`') {
+                    close = j;
+                    break;
+                }
+            }
+            if (close < 0) {
+                break;
+            }
+            codeSpans.add(new int[] { i, close + 1 });
+            i = close + 1;
+        }
+        Matcher url = BARE_URL_SPAN.matcher(input);
+        url.region(from, to);
+        // Merge the two input-ordered, self-disjoint families in one walk:
+        // a code span wins over an overlapping URL span.
+        List<int[]> spans = new ArrayList<>();
+        int codeIndex = 0;
+        int firstLiveCodeSpan = 0;
+        while (url.find()) {
+            while (codeIndex < codeSpans.size()
+                    && codeSpans.get(codeIndex)[0] < url.start()) {
+                spans.add(codeSpans.get(codeIndex));
+                codeIndex++;
+            }
+            while (firstLiveCodeSpan < codeSpans.size()
+                    && codeSpans.get(firstLiveCodeSpan)[1] <= url.start()) {
+                firstLiveCodeSpan++;
+            }
+            boolean overlapsCode = firstLiveCodeSpan < codeSpans.size()
+                    && codeSpans.get(firstLiveCodeSpan)[0] < url.end();
+            if (!overlapsCode) {
+                spans.add(new int[] { url.start(), url.end() });
+            }
+        }
+        while (codeIndex < codeSpans.size()) {
+            spans.add(codeSpans.get(codeIndex));
+            codeIndex++;
+        }
+        return spans;
+    }
+
+    /** Delimiter runs of {@code *} and {@code _} outside the verbatim
+        spans, flanking-classified so arithmetic and identifiers survive;
+        each is {@code [start, end, fromStart, fromEnd, open, close, marker]}. */
+    private static List<int[]> delimiterRuns(String input, int from, int to, List<int[]> spans) {
+        List<int[]> runs = new ArrayList<>();
+        int spanIndex = 0;
+        int i = from;
+        while (i < to) {
+            if (spanIndex < spans.size() && i >= spans.get(spanIndex)[0]) {
+                i = spans.get(spanIndex)[1];
+                spanIndex++;
+                continue;
+            }
+            char c = input.charAt(i);
+            if (c != '*' && c != '_') {
+                i++;
+                continue;
+            }
+            int runEnd = i;
+            while (runEnd < to && input.charAt(runEnd) == c) {
+                runEnd++;
+            }
+            char before = i > from ? input.charAt(i - 1) : ' ';
+            char after = runEnd < to ? input.charAt(runEnd) : ' ';
+            boolean beforeWhitespace = Character.isWhitespace(before);
+            boolean afterWhitespace = Character.isWhitespace(after);
+            boolean beforePunctuation = isEmphasisPunctuation(before);
+            boolean afterPunctuation = isEmphasisPunctuation(after);
+            boolean leftFlanking = !afterWhitespace
+                    && (!afterPunctuation || beforeWhitespace || beforePunctuation);
+            boolean rightFlanking = !beforeWhitespace
+                    && (!beforePunctuation || afterWhitespace || afterPunctuation);
+            boolean canOpen = c == '*'
+                    ? leftFlanking
+                    : leftFlanking && (!rightFlanking || beforePunctuation);
+            boolean canClose = c == '*'
+                    ? rightFlanking
+                    : rightFlanking && (!leftFlanking || afterPunctuation);
+            runs.add(new int[] { i, runEnd, 0, 0, canOpen ? 1 : 0, canClose ? 1 : 0, c });
+            i = runEnd;
+        }
+        return runs;
+    }
+
+    /** ASCII punctuation plus every non-ASCII non-letter/digit — the
+        flanking rules' punctuation class, approximated for this pass. */
+    private static boolean isEmphasisPunctuation(char c) {
+        return (c >= 0x21 && c <= 0x2F) || (c >= 0x3A && c <= 0x40)
+                || (c >= 0x5B && c <= 0x60) || (c >= 0x7B && c <= 0x7E)
+                || (c >= 0x80 && !Character.isLetterOrDigit(c));
+    }
+
+    /** Pair closers to the nearest compatible opener on a capped stack,
+        recording the consumed delimiter characters on both runs; the cap
+        keeps a reply of nothing but openers linear. */
+    private static void pairEmphasis(List<int[]> runs) {
+        List<int[]> openers = new ArrayList<>();
+        for (int[] run : runs) {
+            if (run[5] == 1) {
+                for (int openerIndex = openers.size() - 1;
+                     openerIndex >= 0 && remaining(run) > 0; openerIndex--) {
+                    int[] opener = openers.get(openerIndex);
+                    if (opener[6] != run[6] || multipleOfThreeBlocked(opener, run)) {
+                        continue;
+                    }
+                    int paired = Math.min(remaining(opener), remaining(run));
+                    opener[3] += paired;
+                    run[2] += paired;
+                    if (remaining(opener) == 0) {
+                        openers.remove(openerIndex);
+                    }
+                }
+            }
+            if (run[4] == 1 && remaining(run) > 0) {
+                openers.add(run);
+                if (openers.size() > MAX_PENDING_EMPHASIS_OPENERS) {
+                    openers.remove(0);
+                }
+            }
+        }
+    }
+
+    private static int remaining(int[] run) {
+        return (run[1] - run[0]) - run[2] - run[3];
+    }
+
+    /** CommonMark's rule: when both runs can open AND close, they match
+        only if the sum of their lengths is not a multiple of 3, or both
+        are. */
+    private static boolean multipleOfThreeBlocked(int[] opener, int[] closer) {
+        int openerLength = opener[1] - opener[0];
+        int closerLength = closer[1] - closer[0];
+        return (openerLength + closerLength) % 3 == 0
+                && openerLength % 3 != 0 && closerLength % 3 != 0;
     }
 
     /**

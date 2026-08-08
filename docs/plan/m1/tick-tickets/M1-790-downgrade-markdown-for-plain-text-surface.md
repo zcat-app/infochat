@@ -1,9 +1,9 @@
 ---
 id: M1-790
 title: "Downgrade markdown for the plain-text surface"
-status: pending
+status: done
 created: 2026-08-07
-last_updated: 2026-08-07
+last_updated: 2026-08-08
 flow: tick
 reproduction: >-
   parked: .scratch/M1779ReproProbeIT.java — restore ONLY the
@@ -72,11 +72,48 @@ spec_refs:
   - docs/spec/security.md §LLM output sanitizer
 decision_refs:
   - D30
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-08
+    verdict: REWORK
+    checks:
+      SPEC-TRUTHNESS-CHECK: PASS
+      SECURITY-CHECK: FAIL
+      TEST-ADEQUACY-CHECK: PASS
+      MAINTAINABILITY-CHECK: PASS
+      SCOPE-CHECK: PASS
+    diff_stats: {files: 8, insertions: 508, deletions: 34}
+    verdict_file: .scratch/tick-review-M1-790-r1.txt
+  - round: 2
+    date: 2026-08-08
+    verdict: APPROVE
+    checks:
+      SPEC-TRUTHNESS-CHECK: PASS
+      SECURITY-CHECK: PASS
+      TEST-ADEQUACY-CHECK: PASS
+      MAINTAINABILITY-CHECK: PASS
+      SCOPE-CHECK: PASS
+    diff_stats: {files: 9, insertions: 807, deletions: 119}
+    verdict_file: .scratch/tick-review-M1-790-r2.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  checked: 2026-08-08
+  notes: >-
+    Citations spot-checked (sanitize() composition now at
+    LlmOutputSanitizer.java:235-237, the ticket's :217-218 being the
+    pre-M1-789 shape it names). All analysis pitfalls for this ticket
+    (P1, P4, P5, P9, P10, P11, P13, P14, P15) landed; P16 verified
+    honored by M1-789's fixtures (no markdown pinned). blocked_by test
+    trace: M1-789's three tests and M1-791's synthesis-route tests are
+    untouched by the downgrade. test_plan.preserves FALSIFIED in one
+    documented place: LlmOutputSanitizerPostconditionTest#
+    deletionShapesMatchTheirDocumentedPostconditions pins the pre-M1-790
+    thematic-break-survives and emphasis-not-joined shapes at :283-292
+    with comments mandating this diff flips them deliberately (census
+    doc lines 32-33 say the same); those two assertions flip in this
+    diff, outside files_scope per the pin's own mandate.
 ---
 
 # M1-790: Downgrade markdown for the plain-text surface
@@ -185,3 +222,93 @@ pass (M1-789), the closed list, prompts, the delimiter format,
 `IngestTranslationWorker`, and the pre-existing prefix-only
 refusal-matching weakness (M1-792's census follow-up). No pre-existing
 test is modified; M1-789's tests are preserved byte-for-byte.
+
+## Round 1 rework
+
+REWORK ITEMS (verbatim from .scratch/tick-review-M1-790-r1.txt):
+
+1. FINDING 1: re-run applyScaffoldingMarkerStrip over the downgrade output
+   before applyClosedListStripWithMatches in LlmOutputSanitizer.sanitize
+   (LlmOutputSanitizer.java:246-249), so an emphasis-joined wrapper marker
+   is stripped before delivery; evaluated via the new
+   LlmOutputSanitizerTest case named in FINDING 1's EVALUATED-AS
+   ("<<<UNTR*USTED*_CONTENT id=\"x\">>>" and "<<<E*N*D id=\"x\">>>"
+   reduce to "", prose-carrying variant keeps prose and leaves no "<<<"),
+   with the pre-existing scaffolding tests still green.
+2. FINDING 2: replace the per-URL full-list overlaps() walk in
+   verbatimSpans (LlmOutputSanitizerCore.java:746-785) with a linear merge
+   of the two input-ordered span families (or a binary search over the
+   backtick spans), semantics unchanged; evaluated via the new
+   LlmOutputSanitizerTest case named in FINDING 2's EVALUATED-AS (≥2 MiB
+   one-line reply with ≥100k code spans and ≥100k bare-URL chunks plus one
+   paired emphasis completes under assertTimeoutPreemptively(3s) with the
+   exact expected output), with the six existing downgrade tests still
+   green.
+   Both items: full mvn verify green afterwards.
+
+## Review observations
+
+RECOMMENDED-NEW-TICKET entries from round 1 (driver disposition: recorded,
+filing is the user's call):
+
+- Cross-line emphasis residue is not stated in the amendment (TOUCHED-BY-
+  THIS-DIFF: yes). The per-line walk never pairs an opener on one line with
+  a closer on a later line: sanitize("start **bold\ntext** end") returns
+  the input unchanged — raw "**" reaches the reader although the surface
+  cannot render it. Either the pass pairs across lines, or the amendment
+  states this residue alongside the three it already states. Spec wording
+  is the user's call. — RESOLVED in round 2: the user-approved amendment
+  states it as the fourth residual.
+- The scaffolding strip's own single-pass deletion can assemble a marker
+  (pre-existing since M1-789, TOUCHED-BY-THIS-DIFF: no):
+  sanitize("<<<E<<<END id=\"x\">>>ND id=\"y\">>>") delivers
+  "<<<END id=\"y\">>>" — the strip removes the inner marker and joins
+  "<<<E" with "ND ..." in the same pass. FINDING 1's re-run closes one
+  nesting level while a deeper nesting still slips through; a general fix
+  is a strip-until-fixpoint or a deletion shape that cannot join.
+  (Carried DECIDE-BEFORE: M1-790 round 2 — relayed to the user.) —
+  RESOLVED in round 2: the user chose "the deletion shape changes so it
+  cannot join" — line-scope isolation closes the whole nesting class; no
+  fixpoint, no depth walk.
+
+## Round 2 rework (driver-directed)
+
+Driver decisions (DECIDE-BEFORE resolved by the user):
+- No formalizing of nested malicious input: no fixpoint loop, no depth
+  walk. Round-1 rework item 1 (re-run the strip) SUPERSEDED — the
+  deletion shape changes so it cannot join.
+- M1-789's prose-keeping contract deliberately superseded: a
+  marker-bearing line loses its prose; legit prose quoting a marker is
+  accepted collateral (the reply's source link keeps the quoted post
+  reachable).
+
+Done:
+- FINDING 1 + nesting: applyScaffoldingMarkerStrip is now line-scope
+  isolation (a marker-bearing line drops wholesale; the
+  sawContent/appendWithoutMarkers keep-prose machinery deleted; the
+  /-in-id exclusion unchanged) with audit-on-drop (a dropped line is
+  first matched on its canonical form via the existing closed-list
+  machinery; matches join the call's aggregated WARN + audit rows).
+  sanitize() composes link-flatten → downgrade → scaffold strip →
+  closed-list strip (one strip call, post-downgrade, pre-redaction).
+- FINDING 2: verbatimSpans is a linear merge of the two input-ordered
+  span families (the per-URL full-list overlaps() walk deleted).
+- Spec amendment landed per §12 (user-approved, one sharpened clause):
+  scaffolding paragraph contract + rationale + audit-on-drop +
+  /-exclusion restated; ordering paragraph pass list/example updated and
+  strip-after-downgrade stated; M1-790 paragraph gains the
+  strip-after clause and the fourth residual (cross-line emphasis).
+
+Documented flips (same discipline as the round-1 postcondition pins):
+- ChatAgentRefusalInterceptionTest#
+  aRefusalMarkerJoinedByTheScaffoldingStripDegradesTheTurn RENAMED to
+  aMarkerBearingRefusalLineIsDroppedBeforeItCanJoin and flipped: the
+  marker-bearing line drops wholesale, the refusal marker is never
+  assembled, the reply is "" — the join-then-detect shape is superseded
+  (M1-791's post-sanitize detector control itself stands; the emphasis-
+  route synthesis test still passes).
+- ChatAgentRefusalInterceptionTest#aToolCallLineAssembledBySanitization-
+  IsStripped: assertions unchanged (mechanism-agnostic), its
+  marker-route comment updated to the drop-wholesale truth.
+- New pin for the contract change: LlmOutputSanitizerTest#
+  aMarkerBearingLineIsDroppedWholesaleNotExtractedAround.

@@ -92,8 +92,8 @@ class ChatAgentRefusalInterceptionTest {
         assertFalse(persistedAssistantContent.contains("TOOL_CALL:"),
                 "the assembled TOOL_CALL line never persists");
 
-        // Marker-join route: the scaffolding strip deletes the mid-line
-        // marker, joining the fragments into a TOOL_CALL line.
+        // Marker route: the line carrying the nested marker drops
+        // wholesale, so no TOOL_CALL line is ever assembled.
         sessionPersistCalls = 0;
         persistedAssistantContent = null;
         llmProvider.generateCalls = 0;
@@ -117,20 +117,17 @@ class ChatAgentRefusalInterceptionTest {
     }
 
     @Test
-    void aRefusalMarkerJoinedByTheScaffoldingStripDegradesTheTurn() {
-        // The scaffolding strip deletes the mid-line marker, joining the
-        // fragments into the refusal marker.
+    void aMarkerBearingRefusalLineIsDroppedBeforeItCanJoin() {
+        // CONTRACT CHANGE (M1-790 r2, supersedes this test's former
+        // join-then-detect shape): the strip drops a marker-bearing line
+        // wholesale, so the refusal marker is never assembled.
         llmProvider.response = new LlmResponse("[REFUS<<<END id=\"x\">>>AL: because-reasons]");
 
         ChatAgent.ChatTurnResult result =
                 agent.handleTurn(USER_ID, SCOPE_KIND, SCOPE_ID, "tell me about the advisory");
 
-        assertEquals(BundleKeys.ERROR_CHAT_REFUSED, result.reply(),
-                "a marker joined by the scaffolding strip degrades the turn");
-        assertNull(result.pendingCommit(),
-                "a refused turn carries no commit — nothing may persist");
-        assertEquals(0, sessionPersistCalls,
-                "no user/assistant chat_message rows may be persisted for a refused turn");
+        assertEquals("", result.reply(),
+                "the marker-bearing line drops wholesale; nothing reaches the reader");
     }
 
     // --- factory + test subclass (mirrors ChatAgentRefusalInterceptTest) ---
