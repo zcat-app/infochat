@@ -694,3 +694,141 @@ same-protocol pairs, leaving the relay to justify itself on the cross-protocol
 case alone. Sequencing if it does proceed: rendezvous first; relay second, opt-in,
 Signal↔SimpleX only (both `HIGH` trust, both already working); Briar last, and
 only for its own reasons.
+
+---
+
+## I. Live text streaming (web-chat feel)
+
+> **New category (added 2026-08-08).** Streaming reveal of bot replies so slow
+> turns feel like a live web-chat interaction instead of minutes behind a
+> "Generating…" stage label. Investigated 2026-08-08 against upstream and the
+> codebase; parked the same day — the entry records the investigation so it is
+> not re-derived.
+
+### I1. Streaming reveal of bot replies via SimpleX live messages
+
+**What:** reveal the bot's answer incrementally as it is generated, by editing a
+placeholder message in place with SimpleX "live messages" (`/_update item …
+live=on`, terminal `live=off` finalize), behind a config flag: off = today's
+behaviour (coarse stage-label progress, M1-607), on = live text.
+
+**Current state — investigated 2026-08-08:**
+
+- **Upstream: available, NOT deprecated.** Live messages shipped in simplex-chat
+  v4.4 (Dec 2022) and are fully present in the latest v7.0.0 (2026-07-28); the
+  command grammar is unchanged (`/_send <ref> live=on|off`, `/_update item <ref>
+  <itemId> live=on|off json …` — v7.0.0 `src/Simplex/Chat/Library/Commands.hs`
+  :5453,:5462). The official clients use the feature themselves (their
+  updates-as-you-type UX), and the official nodejs bot lib exposes it
+  (`apiSendMessages(…, liveMessage)`, `apiUpdateChatItem(…, liveMessage)`).
+  Semantic: once an item is finalized `live=off` it can never become live again
+  (`live' = (live &&) <$> itemLive`) — matches a placeholder→finalize lifecycle.
+- **The adapter ALREADY uses it.** `SimpleXMessageCodec.encodeUpdateCommand` /
+  `encodeFinalizeCommand` emit `live=on` / `live=off` for the progress-notifier
+  path (placeholder → coalesced stage-label edits → finalize), live-proven on
+  v6.5.4.1 (the s10 live run: `/summary` finalized via `chatItemUpdated`). The
+  project pins simplex-chat v6.5.4 (Dockerfile); both it and v7.0.0 support the
+  feature — no upstream upgrade would be needed.
+- **What is missing: the token source.** `LlmProvider.generate` is single-string
+  non-streaming; none of the three provider impls parses SSE; `ChatAgent` runs a
+  blocking multi-turn tool loop. M1-607 deferred exactly this: "A streaming SPI
+  is a separate, larger decision."
+
+**Difficulty (assessed 2026-08-08): medium-high.** The transport ~20% is done
+and live-proven (coalescing 600ms floor, shared 5/s token bucket, edit-failure
+`fallback_send`, metrics). The other ~80%: a streaming LLM SPI + three provider
+impls + router/startup-assertion changes + ChatAgent wiring + a notifier
+streaming path + a capability flag + host live-validation. Multi-ticket effort.
+
+**Scope if revisited:** SimpleX-only (Signal edits are real message edits; only a
+2-hop chain is live-proven — F-live-11/M1-566). DM chat mode first; groups work
+technically but every update is a full relay message fanned out to every member.
+
+**Hurdles (in size order):**
+
+1. **Display-time reply translation — the deciding one.** The streamed prefix is
+   GENERATED text, but for non-English scopes the final visible text is its
+   D29 presentation-layer translation — the streamed content is discarded and
+   replaced wholesale, so every streamed chunk is wasted display ending in a
+   jarring full-text swap. The considered alternative (throttled chunk batches,
+   re-translated on every batch) multiplies translator LLM cost per reply and
+   still ends in the same swap. (Precision note for future readers: the
+   ingest/query-leg English pivot — embeddings, similarity search, tags — is
+   UNTOUCHED by reply streaming; the conflict is solely with display-time reply
+   translation. That is still enough to decide it.)
+2. **Sanitizer / refusal timing.** The M1-663 sanitizer regime and the D21
+   refusal intercept run AFTER generation: streamed text is pre-sanitize, and a
+   refusal cannot be unseen once revealed. Streaming temporarily displays
+   unsanitized model output — a spec/security decision, not just code.
+3. **Non-streaming LLM SPI** — the largest pure-work item.
+4. **Multi-turn tool loop** — segments that end in a tool call produce no final
+   text; must not flash tool JSON or text that gets dropped.
+5. **Pacing reality** — each edit is a full encrypted SMP message over relays
+   drawing from the shared 5/s bucket, and official clients render live updates
+   "every few seconds" anyway, so token-smoothness is unattainable; chunked
+   (~1s) updates are the realistic ceiling.
+
+**Verdict: `parked`** (user decision, 2026-08-08 — the translation conflict is
+structural, and chunk-batch re-translation is neither good practice nor resource
+sound). Revisit only if one of these changes: (a) reply translation becomes
+incremental/streaming-capable; (b) streaming is rescoped to same-language scopes
+only, with an explicit sanitizer-policy decision for pre-sanitize display; or
+(c) upstream changes the live-message economics (e.g. a first-class streaming
+bot API).
+
+**Addendum 2026-08-08 — the native-generation variant, analysed and also parked.**
+Proposed alternative: drop the English pin for chat; translate the *retrieved
+context* into the user's language, keep the user's question in the original, and
+let a language-capable model generate the reply directly in the user's language —
+which removes the translation-vs-streaming conflict (this is the summarizer's
+existing "language-aware" shortcut, llm.md §Translation flow, extended to chat).
+Findings:
+
+- **Sanitization is NOT the blocker.** `LlmOutputSanitizer` is deterministic
+  regex/line transforms; it can run ON the stream with a small hold-back buffer
+  at chunk boundaries, and the D21 refusal intercept is a prefix check that fires
+  before streaming starts. Costs: boundary-spanning-token handling, per-call audit
+  aggregation rework, and a spec amendment — leaked bytes cannot be unseen.
+- **The model evidence does not exist.** `docs/measurement/model-lang-coverage.md`
+  is tokenizer-only ("a screening tool, not a verdict"); `translator-slot.md`
+  measures translation legs, not target-language chat quality. No measurement
+  proves any local model produces chat-quality Czech/Spanish WITH tool calling.
+- **Latency math works against it.** On the shipped 4-vCPU profile generation is
+  ~8–10 tok/s and the wait is PREFILL-dominated (SETUP_GUIDE §AI backend
+  performance); the variant adds an EN→user-language context-translation leg
+  BEFORE the first token can be generated, and Czech/Spanish context runs longer
+  than English. Streaming would only ever fix the generation part.
+- **Two new structural conflicts:** `chat_memory` is English-canonical by design
+  (native-language turns break it or force a lossy back-translate per turn), and
+  the chat tool loop forces the model to interleave the English TOOL_CALL
+  protocol and English tool results with user-language prose — a harder task than
+  the translation the measurements did validate.
+- Multilingual-strong models (Qwen 30B+, best tokenizer coverage) are bench-box
+  only (~35 tok/s on Strix Halo); remote DeepSeek is the only measured fast option
+  and costs the privacy trade.
+
+Parked for the same reason: the variant converts one blocker into three
+(unmeasured model quality, memory canonicity, prefill-dominated latency plus a
+pre-generation translation leg). Revisit conditions (a) and (c) above still stand;
+additionally (d) a measured local model clearing chat-quality generation in a
+shipped non-English language, or (e) a decision to abandon English-canonical
+chat memory, would each reopen it independently.
+
+**Update 2026-08-08 (later same day) — hardware correction + design layer.**
+The addendum's latency argument cited the SETUP_GUIDE 4-vCPU figures — that is
+the **old `vps` deployment target**. The deployment target is now the **Strix
+Halo (BOSGAME) box** (Vulkan decided backend), where measured generation is
+49.5 tok/s (Vulkan head-to-head) / 35.4 tok/s (Qwen3.6-35B-A3B local) / 63.2
+tok/s (remote DeepSeek incl. network) — **the speed veto no longer applies on
+this box** (it still holds for `vps`-profile deployments, where the flag would
+simply stay off). Also corrected: supported languages are **en, cs, es, ru,
+tr** (M1-716/718/719/720), and the remembered DeepL quality verification WAS
+real but scoped to **fixture** validation for the translator legs (the
+programme's fixture-verification record, 2026-08-02: 96 lines read, 3
+corrections) — chat generation quality in the supported languages remains
+UNMEASURED. The design layer now lives in
+[`docs/design/future/live-text-streaming.md`](../design/future/live-text-streaming.md)
+— upstream status, the existing live-edit substrate, both variants, the
+hardware correction, the evidence inventory, and **the required chat-quality
+measurement per supported language, which is the first gate to run before any
+revisit**. Verdict unchanged: `parked`, pending that measurement.
