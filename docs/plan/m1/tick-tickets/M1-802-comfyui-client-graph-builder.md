@@ -1,19 +1,17 @@
 ---
 id: M1-802
 title: "ComfyUI client: server-built graph, bounded fetch, cancel"
-status: pending
+status: done
 created: 2026-08-08
-last_updated: 2026-08-08
+last_updated: 2026-08-09
 flow: tick
 reproduction: >-
-  to-be-written: ComfyUIClientTest.promptLandsInExactlyOneGraphStringField —
-  the intended test builds the workflow graph for a prompt containing JSON
-  metacharacters (quotes, braces, template-looking text), serializes, re-parses,
-  and asserts the prompt appears as exactly one string VALUE
-  (CLIPTextEncode.text) and nowhere else in the document; it cannot compile
-  today because no image-backend client exists (grep-verified: no
-  infochat.image.* key and no ComfyUI reference anywhere in Java sources).
-  `start` writes the test and runs it RED before any fix code (workflow §0).
+  ComfyUIClientTest.promptLandsInExactlyOneGraphStringField — written and run
+  RED at start (compile failure: no ComfyUIClient existed). The test builds
+  the workflow graph for a prompt containing JSON metacharacters (quotes,
+  braces, template-looking text), serializes, re-parses, and asserts the
+  prompt appears as exactly one string VALUE (CLIPTextEncode.text) and
+  nowhere else in the document.
 analysis_ref: docs/plan/m1/tick-analysis/image-generation-feature.md
 blocked_by: []
 files_scope:
@@ -61,6 +59,28 @@ spec_refs:
 decision_refs:
   - D75
   - D77
+clarity_check: "start 2026-08-08: tick-lint 0 findings. Citations verified — commands.md:613-615/:631-632/:633-635 carry the timeout-cancels, one-string-field, and endpoint-bytes text; LlmHttpSupport helpers are package-private and String-shaped (LlmHttpSupport.java:90-430, D-2 holds); scripts/lint-config-keys.py excludes infochat-provider by default (its docstring); DocumentedConfigKeyParityTest exists. Stale-claim note: M1-797/801/805/806 landed since drafting — provider/image/ now holds ImageSpool/ImageSpoolSweeper/PngMetadataStrip and infochat.image.spool.* keys are real; the ComfyUI client itself still does not exist, premise holds; the exemption ledger's infochat.image.base-url 'unbuilt' entry must come out with this ticket. LlmCircuitBreakerRegistry is ModelTask-keyed — reuse needs llm-adapter changes, so the client carries its own failure counting (recorded in the design doc). Analysis pitfalls P4/P7/P8/P9/P15/P16/P24 all present. blocked_by empty; M1-801's seam tests (ImageSpoolTest, PngMetadataStripTest) untouched by this diff. Live env: this host is the GPU box (/dev/kfd, conda spike models, M1-797 image built) — D-4 verification and the live probe run against the container with a host-dir models override."
+reviews:
+  - round: 1
+    date: 2026-08-09
+    verdict: REWORK
+    checks:
+      SPEC-TRUTHNESS-CHECK: PASS
+      SECURITY-CHECK: PASS
+      TEST-ADEQUACY-CHECK: FAIL
+      MAINTAINABILITY-CHECK: PASS
+      SCOPE-CHECK: PASS
+    diff_stats: "round-1 full diff: 8 files changed, 1279 insertions(+), 23 deletions(-)"
+  - round: 2
+    date: 2026-08-09
+    verdict: APPROVE
+    checks:
+      SPEC-TRUTHNESS-CHECK: PASS
+      SECURITY-CHECK: PASS
+      TEST-ADEQUACY-CHECK: PASS
+      MAINTAINABILITY-CHECK: PASS
+      SCOPE-CHECK: PASS
+    diff_stats: "round-2 fix hunks: 3 files changed, 41 insertions(+), 1 deletion(-); the round-1 REWORK item SATISFIED"
 ---
 
 # M1-802: ComfyUI client: server-built graph, bounded fetch, cancel
@@ -167,3 +187,13 @@ llm-adapter change. No pre-existing test is modified.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-802-comfyui-client-graph-builder.md
 ```
+
+## Round 1 rework
+
+1. Finding 1: add the stub-400 test pinning the error-type reduction in
+   ComfyUIClientTest (stub `POST /prompt` → 400 with a CANARY-bearing
+   `error.message`; assert the thrown `ResponseException` message contains
+   the error type "value_error" and not "CANARY"), evaluated via
+   `ComfyUIClientTest.backendErrorBodyIsReducedToItsErrorType` under
+   `mvn -pl infochat-provider test -Dtest=ComfyUIClientTest`, followed by
+   the full-suite `mvn verify`.

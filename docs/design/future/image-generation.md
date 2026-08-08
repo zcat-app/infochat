@@ -313,7 +313,8 @@ transport-failure helpers. A single class in the Provider, reusing the
 backend exists.
 
 Provider→ComfyUI is new egress: route it through `infochat-ssrf` or record an
-explicit configured-internal exemption.
+explicit configured-internal exemption. The exemption is the chosen path —
+recorded in §The backend client below.
 
 Generation is **not** an LLM tool and not MCP. ComfyUI exposes plain HTTP, so
 deterministic Java calls it directly; exposing generation as an LLM-callable
@@ -322,6 +323,88 @@ injection surface for nothing. The workflow graph is **built server-side** — t
 API accepts a whole graph whose nodes execute Python and touch the filesystem,
 so user text must reach exactly one field (`CLIPTextEncode.text`) as a JSON
 string value. Anything looser is remote code execution.
+
+## The backend client (endpoint shapes verified 2026-08-08)
+
+One class in the Provider (`ComfyUIClient`, decision 13), plain HTTP. The
+endpoint shapes below were ASSUMPTIONS at analysis time (analysis D-4) and
+are verified against the pinned ComfyUI commit (the Dockerfile's
+`COMFYUI_COMMIT`) running as the M1-797 container:
+
+- **Submit:** `POST /prompt` with `{"prompt": <API-format graph>}` →
+  `{"prompt_id": ...}`; 400 with `{"error": {"type": ...}}` on rejection.
+- **Queue depth:** `GET /queue` → `{"queue_running": [...],
+  "queue_pending": [...]}`; depth is the sum of both array lengths. The
+  read is the client's primitive; the gate DECISION is the command
+  handler's.
+- **Poll:** `GET /history/{prompt_id}` → `{}` until the job lands, then an
+  entry with `status.status_str` (`success` on completion) and
+  `outputs.<node>.images[] = {filename, subfolder, type}`.
+- **Cancel:** `POST /interrupt` with `{"prompt_id": ...}` interrupts a
+  RUNNING job only — a job still pending in the queue survives it — so the
+  client pairs it with `POST /queue` `{"delete": [prompt_id]}`. Both return
+  200 and are idempotent. Timeout and `/stop` share this path: a job is
+  never merely abandoned (an abandoned job keeps burning GPU).
+- **History clear (D75, Provider half):** `POST /history`
+  `{"delete": [prompt_id]}` removes the submitted-graph entry — verified
+  the entry is gone afterwards. The client clears after EVERY job —
+  completed, timed out, or failed — and a failed clear fails the
+  generation: the no-retention end state is an acceptance check, not a
+  best effort.
+- **Fetch:** `GET /view?filename=...&type=output[&subfolder=...]` serves
+  the output bytes.
+
+**SSRF exemption (recorded).** The client's egress does NOT route through
+`infochat-ssrf`. `infochat.image.base-url` is operator-configured internal
+infrastructure — the compose-network name `comfyui:8188` in the one-box
+form, a D77-firewalled private address in the two-box form — which is
+outside the security.md §SSRF enumeration (feeds / redirects /
+StreamSource / `/add-source` probes, all user-controlled URLs). Routing the
+call through the gate would block the loopback/private address the feature
+requires. The compensating control is item-9's bounded-read posture: every
+response body is endpoint-chosen bytes read under the byte cap below, and
+the connection is cut at the cap. The client additionally never follows
+redirects, so a misconfigured or compromised backend cannot re-point the
+egress at arbitrary hosts.
+
+**Graph template.** The graph is built server-side from a template file
+plus a JSON serializer — never string interpolation (the endpoint executes
+submitted graphs; interpolation is an RCE vector, D77). The template is
+API-format JSON; the prompt slot is the unique `CLIPTextEncode` text field
+carrying the sentinel `INFOCHAT_PROMPT_PLACEHOLDER`, and the client rejects
+a template without exactly one such field and exactly one `KSampler` with a
+numeric seed. The seed is randomized per job — a fixed seed measures the
+backend's node cache, not generation. The committed reference template is
+`prod/config/comfyui-workflow.json` (Mage-Flow Turbo, the wizard default);
+the setup step writes the per-model template and points the key below at
+it. The negative prompt is server-controlled text inside the template
+(decision 2).
+
+**Client configuration** (all `infochat.image.*`; the command handler gates
+on base-url presence per decision 12):
+
+| Key | Default | Meaning |
+|---|---|---|
+| `infochat.image.base-url` | unset | backend endpoint; unset → no `/image` (decision 12) |
+| `infochat.image.workflow-file` | unset | API-format graph template path; required when base-url is set |
+| `infochat.image.connect-timeout` | `PT5S` | transport connect timeout |
+| `infochat.image.call-timeout` | `PT30S` | per-HTTP-call timeout |
+| `infochat.image.job-timeout` | `PT3M` | whole-job deadline (queue wait + generation); on expiry the job is CANCELLED, never abandoned |
+| `infochat.image.poll-interval` | `PT500MS` | `/history` poll cadence |
+| `infochat.image.max-response-bytes` | `16777216` | byte cap for EVERY backend response body — 16 MiB leaves headroom over a 2048px PNG while bounding a hostile endpoint |
+
+**Breaker.** The client carries its own consecutive-transport-failure
+breaker: 3 failures → open for 30 s, then a single half-open probe — the
+LLM breaker's defaults. Reusing `LlmCircuitBreakerRegistry` would require
+llm-adapter API changes (it is keyed by `ModelTask`), which the D-2
+discipline rules out. Any response — success or application error — is
+reachability evidence; only transport failures advance the breaker. State
+is in-memory; a restart resets it.
+
+**No-content logging.** No log line on any client path (error, timeout,
+breaker) carries the prompt, the graph, or a response body — backend error
+messages are reduced to their `error.type` before they reach an exception
+message.
 
 ## Open items
 
@@ -336,9 +419,12 @@ string value. Anything looser is remote code execution.
   no prompt text — the log carries only the content-free `got prompt` and
   `Prompt executed in N seconds` lines. A canary prompt string hunted in
   `docker logs` after 19 generations (one canary + the full per-model timing
-  set) returned zero hits. Whether `/history` is bounded or clearable remains
-  open for the M1-802 post-job clear (both halves feed the decision-10 ship
-  blocker).
+  set) returned zero hits. ~~Whether `/history` is bounded or clearable
+  remains open for the M1-802 post-job clear~~ **settled 2026-08-08
+  (verified against the pinned backend commit, M1-802):** `POST /history`
+  with `{"delete": [prompt_id]}` removes the submitted-graph entry — the
+  clear is per-job and verified live; see §The backend client (both halves
+  feed the decision-10 ship blocker).
 - **SimpleX XFTP lifetime** — whether the local file must survive until an
   upload-complete event, which decides what the delete-on-completion signal
   actually is.
