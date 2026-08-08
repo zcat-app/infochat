@@ -39,6 +39,17 @@ public class ImageSpool {
                     "spooled " + totalBytes() + " bytes + " + bytes.length
                             + " would exceed capacity " + capacityBytes);
         }
+        Path spoolDir = dir.toAbsolutePath().normalize();
+        // Refuse non-bare names before anything is created: resolve()
+        // would let a '..' or absolute name escape the tmpfs spool
+        // (D75, M1-805) — a caller bug (IAE), never a capacity outcome.
+        if (fileName == null || fileName.isEmpty()
+                || fileName.indexOf('/') >= 0 || fileName.indexOf('\\') >= 0
+                || !spoolDir.resolve(fileName).normalize().startsWith(spoolDir)) {
+            throw new IllegalArgumentException(
+                    "spool name must be bare and resolve inside the spool dir: "
+                            + fileName);
+        }
         // Write to a temp sibling then move, so a crash mid-write never
         // leaves a half-written file visible to the adapter (the sweeper
         // reclaims orphaned temp files by age like any other).
@@ -59,7 +70,14 @@ public class ImageSpool {
      * so a completed delivery racing the sweeper cannot fail. */
     public void delete(String filePath) {
         try {
-            Files.deleteIfExists(dir.resolve(filePath));
+            Path spoolDir = dir.toAbsolutePath().normalize();
+            // Out-of-spool paths are no-ops — the reclaim runs in the
+            // delivery finally and must never throw (M1-805).
+            Path resolved = spoolDir.resolve(filePath).normalize();
+            if (!resolved.startsWith(spoolDir)) {
+                return;
+            }
+            Files.deleteIfExists(resolved);
         } catch (IOException e) {
             // A failed reclaim is not a delivery failure: the sweeper
             // remains the guarantee. Log nothing user-visible; the sweeper

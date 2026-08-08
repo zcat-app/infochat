@@ -1,20 +1,31 @@
 ---
 id: M1-805
 title: "Confine ImageSpool writes to the tmpfs spool dir"
-status: pending
+status: done
 created: 2026-08-08
 last_updated: 2026-08-08
 flow: tick
 reproduction: >-
-  to-be-written: ImageSpoolTest.refusesNonBareSpoolName — the intended test
-  spools a payload with a `..`-containing name (`write("../escape.png",
-  bytes)`) into a temp-dir spool and asserts the write is refused and no
-  file lands outside the spool dir; it cannot compile today because
-  `ImageSpool.write` resolves any caller-supplied name against the spool
-  dir with no confinement (round-1 review of M1-801, finding 3). `start`
-  writes the test and runs it RED before any fix code (workflow §0).
+  ImageSpoolTest.refusesNonBareSpoolName — spools a `..`-containing name
+  into a temp-dir spool and asserts the write is refused with
+  IllegalArgumentException and no file lands outside the spool dir. Written
+  and run RED at start (2026-08-08): the JDK's createTempFile prefix
+  validation incidentally refuses separator-containing names, so the
+  genuinely red shapes are the separator-free ones — bare ".." (currently
+  DirectoryNotEmptyException after creating a temp file, and would replace
+  an empty parent dir) and delete's unconfined resolve (it deletes the
+  `..`-sibling outright).
 analysis_ref: self
 blocked_by: [M1-801]
+clarity_check: >-
+  start 2026-08-08: the ticket's reproduction premise ("write resolves any
+  caller-supplied name unconfined") is partially wrong — separator names
+  are refused incidentally by JDK createTempFile prefix validation, but
+  write has no guard of its own (bare ".." escapes to a wrong-exception
+  move onto the parent dir) and delete is genuinely unconfined. The fix
+  (explicit bare-name refusal + containment) is still required; the
+  reproduction was adjusted to the separator-free shapes. No ticket scope
+  change.
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/image/ImageSpool.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/image/ImageSpoolTest.java
@@ -49,6 +60,20 @@ spec_refs:
   - docs/spec/security.md §Trust boundaries
 decision_refs:
   - D75
+reviews:
+  - round: 1
+    date: 2026-08-08
+    verdict: APPROVE-WITH-FIXES
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY WARN, SCOPE PASS"
+    diff_stats: "4 files changed, 85 insertions(+), 16 deletions(-)"
+    findings: "1 low comment/metadata-only fix item (duplicate blocked_by frontmatter line), 0 critical/high; 5 candidate findings falsified-and-dropped (symlink containment defeated by rename/delete semantics; null check traces to Approach step 2; write('.') throws IAE via createTempFile prefix length; test fixture siblings are content-identical constant bytes; absolute-name assertion is a deliberate cross-filesystem shape)"
+    fix_probes: >-
+      FIX ITEM 1 applied — duplicate `blocked_by: [M1-801]` line removed
+      from the frontmatter. Probes: `grep -c '^blocked_by:'` prints 1;
+      tick-lint reports 0 findings; `./mvnw -B -pl infochat-provider -am
+      test-compile` BUILD SUCCESS. Fixed-tree snapshot:
+      .scratch/tick-fixes-M1-805.tree = 8f0b1020e7fe2a1c760d986a0302f8c239e7d0da.
+    verdict_file: .scratch/tick-review-M1-805-r1.txt
 ---
 
 # M1-805: Confine ImageSpool writes to the tmpfs spool dir

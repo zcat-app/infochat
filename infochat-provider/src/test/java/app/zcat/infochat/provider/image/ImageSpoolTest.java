@@ -48,6 +48,47 @@ class ImageSpoolTest {
     }
 
     @Test
+    void refusesNonBareSpoolName() throws IOException {
+        // REPRODUCTION (M1-805, D75): resolve() semantics mean a '..' or
+        // absolute name escapes the tmpfs spool — refused before anything
+        // is created; the JDK only blocks separator names, so '..' is red.
+        ImageSpool spool = new ImageSpool(tempDir, 1_000_000L);
+        Path escapeTarget = tempDir.resolveSibling("escape.png");
+        assertThrows(IllegalArgumentException.class,
+                () -> spool.write("..", new byte[10]),
+                "a bare '..' name escaping the spool dir is refused");
+        assertThrows(IllegalArgumentException.class,
+                () -> spool.write("../escape.png", new byte[10]),
+                "a '..' path name escaping the spool dir is refused");
+        assertThrows(IllegalArgumentException.class,
+                () -> spool.write(escapeTarget.toString(), new byte[10]),
+                "an absolute name replacing the spool dir is refused");
+        assertTrue(Files.notExists(escapeTarget),
+                "no file lands outside the spool dir");
+        assertEquals(List.of(), listing(),
+                "the refused writes created nothing in the spool");
+    }
+
+    @Test
+    void deleteOutsideSpoolIsANoOp() throws IOException {
+        // P4 (M1-805): the reclaim runs in OutboundDelivery's finally, so
+        // an out-of-spool path must delete nothing and throw nothing.
+        ImageSpool spool = new ImageSpool(tempDir, 1_000_000L);
+        Path sibling = tempDir.resolveSibling("keep-sibling.png");
+        Path absolute = tempDir.resolveSibling("keep-absolute.png");
+        Files.write(sibling, new byte[10]);
+        Files.write(absolute, new byte[10]);
+
+        spool.delete("../keep-sibling.png");
+        spool.delete(absolute.toString());
+
+        assertTrue(Files.exists(sibling),
+                "a '..'-sibling of the spool dir is untouched");
+        assertTrue(Files.exists(absolute),
+                "an unrelated absolute path is untouched");
+    }
+
+    @Test
     void sweeperEvictsAgedFilesAndKeepsFreshOnes() throws IOException {
         // P3: the sweeper is the crash guarantee; eviction is decision-time
         // logic on the injected Clock (§9) — a fixed Clock proves it.

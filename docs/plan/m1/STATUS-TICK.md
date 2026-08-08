@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 6 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 17 |
+| done | 18 |
 | deferred | 0 |
 | abandoned | 0 |
 | **total** | **23** |
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-798 — Setup-wizard /image step with model picker (complexity: medium, risk: medium)
 - M1-800 — SimpleX + Signal sendAttachment codecs and ceilings (complexity: high, risk: high)
 - M1-802 — ComfyUI client: server-built graph, bounded fetch, cancel (complexity: high, risk: high)
-- M1-805 — Confine ImageSpool writes to the tmpfs spool dir (complexity: low, risk: medium)
 - M1-806 — ComfyUI temp/ containment: tmpfs + janitor sweep (complexity: low, risk: medium)
 
 ---
@@ -46,7 +45,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-803 — blocked_by: M1-800 (pending), M1-801 (done), M1-802 (pending), M1-805 (pending)
+- M1-803 — blocked_by: M1-800 (pending), M1-801 (done), M1-802 (pending), M1-805 (done)
 
 ---
 
@@ -65,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-805 | Confine ImageSpool writes to the tmpfs spool dir | 2026-08-08 | round 1 APPROVE-WITH-FIXES |
 | M1-804 | Flip the marker-drop test to the emptied-reply degrade | 2026-08-08 | round 1 APPROVE |
 | M1-801 | tmpfs spool, age sweeper, PNG strip, delivery path | 2026-08-08 | round 2 APPROVE |
 | M1-799 | Outbound attachment SPI: payload, flags, default method | 2026-08-08 | round 1 APPROVE-WITH-FIXES |
@@ -74,7 +74,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-794 | Guard against empty sanitized bodies at delivery | 2026-08-08 | round 1 APPROVE |
 | M1-793 | Evaluate translation sanity checks on the sanitized reply | 2026-08-08 | round 1 APPROVE |
 | M1-792 | Census sanitize() caller postconditions and pin them | 2026-08-08 | round 1 APPROVE-WITH-FIXES |
-| M1-791 | Run protocol-token detectors on sanitized LLM output | 2026-08-08 | round 1 APPROVE |
 
 ---
 
@@ -120,7 +119,7 @@ M1-799 (done)
   │     └── M1-803 (pending)
   └── M1-801 (done)
         ├── M1-803 (pending) [see above]
-        └── M1-805 (pending) ← runnable
+        └── M1-805 (done)
               └── M1-803 (pending) [see above]
 M1-802 (pending) ← runnable
   └── M1-803 (pending) [see above]
