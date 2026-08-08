@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 6 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 16 |
 | deferred | 0 |
 | abandoned | 0 |
-| **total** | **22** |
+| **total** | **23** |
 
 ---
 
@@ -29,6 +29,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-800 — SimpleX + Signal sendAttachment codecs and ceilings (complexity: high, risk: high)
 - M1-802 — ComfyUI client: server-built graph, bounded fetch, cancel (complexity: high, risk: high)
 - M1-805 — Confine ImageSpool writes to the tmpfs spool dir (complexity: low, risk: medium)
+- M1-806 — ComfyUI temp/ containment: tmpfs + janitor sweep (complexity: low, risk: medium)
 
 ---
 
@@ -125,4 +126,5 @@ M1-799 (done)
 M1-802 (pending) ← runnable
   └── M1-803 (pending) [see above]
 M1-804 (done)
+M1-806 (pending) ← runnable
 ```
