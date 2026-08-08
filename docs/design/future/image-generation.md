@@ -290,8 +290,9 @@ behaviour the feature is defined against.
 ComfyUI runs as an opt-in compose service (see the 2026-08-07 addendum below;
 the earlier conda-only assumption is superseded), and the `pi` and `vps`
 profiles cannot run it at all. So if `infochat.image.base-url` is unset,
-`/image` does not exist: absent from `HelpCommandHandler.CATALOGUE`, and a
-"image generation is not enabled on this instance" reply if invoked. This is
+`/image` does not exist: absent from `HelpCommandHandler.CATALOGUE`, and the
+standard unknown-command reply if invoked (an absent feature behaves as
+absent, not as present-but-disabled). This is
 capability gating on the D46 adapter-subset precedent, not a back-compat
 feature flag, so it does not collide with the no-feature-flags rule.
 
@@ -353,8 +354,8 @@ Decision 12 (config-gated) stands and now covers the remote question too.
 **Remote backends deferred, by design.** Hosted ComfyUI services
 (cloud.comfy.org and similar) were considered and set aside: the prompt is
 message content, and sending it to a third party breaks the no-content chain.
-The feature is **local-or-absent**: no `infochat.image.base-url`, no command,
-and the reply says "image generation is not enabled on this instance". No
+The feature is **local-or-absent**: no `infochat.image.base-url`, no command —
+invoking it yields the standard unknown-command reply, per decision 12. No
 API-key support is built. `base-url` accepting any URL does not preclude a
 future hosted-backend decision, which would need its own privacy discussion.
 
