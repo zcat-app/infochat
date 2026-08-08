@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 7 |
+| pending | 8 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 13 |
 | deferred | 0 |
 | abandoned | 0 |
-| **total** | **20** |
+| **total** | **21** |
 
 ---
 
@@ -28,6 +28,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-797 — ComfyUI GPU compose overlay + ROCm image (complexity: medium, risk: medium)
 - M1-799 — Outbound attachment SPI: payload, flags, default method (complexity: medium, risk: low)
 - M1-802 — ComfyUI client: server-built graph, bounded fetch, cancel (complexity: high, risk: high)
+- M1-804 — Flip the marker-drop test to the emptied-reply degrade (complexity: low, risk: low)
 
 ---
 
@@ -123,4 +124,5 @@ M1-799 (pending) ← runnable
         └── M1-803 (pending) [see above]
 M1-802 (pending) ← runnable
   └── M1-803 (pending) [see above]
+M1-804 (pending) ← runnable
 ```
