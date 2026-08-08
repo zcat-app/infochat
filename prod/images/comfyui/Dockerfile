@@ -6,9 +6,9 @@
 # rationale and numbers: docs/design/future/image-generation.md addendum.
 # Do not drop one without re-measuring.
 
-# Output dir lives on tmpfs (overlay) and janitor.sh sweeps aged files —
+# Output and temp dirs live on tmpfs (overlay), swept by janitor.sh —
 # the image half of the D75 no-retention end state; ComfyUI has no delete
-# API for output files (Provider-side half is M1-802's history clear).
+# API for them (Provider-side half is M1-802's history clear).
 
 FROM ubuntu:26.04
 

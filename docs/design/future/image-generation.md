@@ -453,6 +453,24 @@ completion, so the window is a backstop, not a lifecycle. The Provider-side
 spool sweeper (M1-801) MUST exceed this window — the backend copy dies
 first, the Provider's spool copy is the surviving one for adapter retries.
 
+**M1-806 extension (2026-08-08): the same containment now covers BOTH
+backend pixel directories.** ComfyUI also writes preview pixels to its temp
+directory — `folder_paths.get_temp_directory()` resolves to
+`/opt/ComfyUI/temp` at the pinned commit (probe-verified 2026-08-08) — and
+that directory is now tmpfs-backed (same 512 MB cap, same sizing basis) and
+swept by the SAME janitor on the SAME `INFOCHAT_COMFYUI_OUTPUT_TTL_MINUTES`
+window, so the D75 no-retention end state is graph-shape-independent: no
+submitted graph, current or future, can leave job-derived pixels on the
+container's writable layer. DECIDE-BEFORE answer for M1-802: retention
+containment no longer depends on graph shape, so M1-802 inherits no
+temp/-specific obligation and its existing no-leftover-output-files probe is
+backed by the image for both directories; an output-only graph (SaveImage,
+no PreviewImage) stays the intended shape as RAM efficiency (previews charge
+tmpfs RAM and the Provider never fetches them), not as a retention control.
+`input/` is deliberately NOT contained: no writer exists or is planned (the
+Provider's client surface has no upload verb) — a future graph adding a
+LoadImage-type node must re-run the census.
+
 **Two-box deployments: remote is a URL, not an API key.** An operator may run
 ComfyUI on a second, GPU-capable box and point `infochat.image.base-url` at it
 — the same mechanism as the remote-LLM profile. ComfyUI has **no

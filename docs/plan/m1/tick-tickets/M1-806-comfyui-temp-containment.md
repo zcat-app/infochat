@@ -1,7 +1,7 @@
 ---
 id: M1-806
 title: "ComfyUI temp/ containment: tmpfs + janitor sweep"
-status: pending
+status: done
 created: 2026-08-08
 last_updated: 2026-08-08
 flow: tick
@@ -33,6 +33,24 @@ files_scope:
 complexity: low
 risk: medium
 round_cap: 2
+clarity_check:
+  lint: "tick-lint: 0 finding(s), 0 BLOCKER(s)"
+  self_check: >-
+    Start pass in the M1-806 worktree (branch m1/M1-806-comfyui-temp-containment
+    off main @0b6ec6b8). Citations spot-checked against the tree, all verified:
+    docker-compose.comfyui.yml:44-47 tmpfs+size, :29-32 M1-801 TTL comment,
+    :40 models volume, :41-43 tmpfs comment; janitor.sh:3-5 header, :9 out,
+    :15 find; Dockerfile:9-11 comment, :15 pinned commit, :57 ENTRYPOINT;
+    image-generation.md:153, :446; 07-deployment.md:1032; commands.md:633-636;
+    decisions.md:94. blocked_by empty, no replaces, analysis_ref self (skip
+    cross-read). Census enumeration re-read: output/, temp/, input/, models/
+    each have a disposition row. WARN (not a blocker): the ticket's "zero
+    ComfyUI references in any Java source" wording predates M1-801 — two
+    comment-only hits in PngMetadataStripTest.java mirror ComfyUI's PNG chunk
+    shape, not a client/backend reference; substance (no ComfyUI integration
+    code, nothing writes temp/ today) holds. Environment probe: rootless
+    docker, /dev/kfd + /dev/dri present, user in render+video. No blocking
+    questions. blocked_by empty so no seam tests to trace.
 security_relevant: true
 migration_touch: false
 out_of_scope:
@@ -70,6 +88,14 @@ spec_refs:
   - docs/spec/security.md §Trust boundaries
 decision_refs:
   - D75
+reviews:
+  - round: 1
+    date: 2026-08-08
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY NOT-APPLICABLE, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "7 files changed, 59 insertions(+), 17 deletions(-)"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-806-r1.txt
 ---
 
 # M1-806: ComfyUI temp/ containment: tmpfs + janitor sweep

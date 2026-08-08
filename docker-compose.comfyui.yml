@@ -26,9 +26,9 @@ services:
     # with its compose-network DNS name unresolvable (llamacpp precedent).
     restart: unless-stopped
     environment:
-      # Janitor age window for the tmpfs output dir (D75 no-retention,
-      # image half). M1-801's Provider-side spool sweeper must exceed it;
-      # the value and rationale live in the design doc's addendum.
+      # Janitor age window for the tmpfs output and temp dirs (D75
+      # no-retention, image half). M1-801's Provider-side spool sweeper must
+      # exceed it; the value and rationale live in the design doc's addendum.
       INFOCHAT_COMFYUI_OUTPUT_TTL_MINUTES: ${INFOCHAT_COMFYUI_OUTPUT_TTL_MINUTES:-15}
     devices:
       - /dev/kfd:/dev/kfd
@@ -43,6 +43,13 @@ services:
       # 512 MB bounds the RAM charge (~2 MB per 1024px PNG).
       - type: tmpfs
         target: /opt/ComfyUI/output
+        tmpfs:
+          size: 536870912
+      # tmpfs-backed temp dir (D75/M1-806): PreviewImage previews write
+      # here; swept by the same janitor on the same window. Same 512 MB
+      # cap as output (~2 MB per 1024px PNG) — empty graph, empty tmpfs.
+      - type: tmpfs
+        target: /opt/ComfyUI/temp
         tmpfs:
           size: 536870912
     # torch's IPC buffers outgrow the 64 MB default /dev/shm under ROCm.

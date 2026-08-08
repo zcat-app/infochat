@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 18 |
+| done | 19 |
 | deferred | 0 |
 | abandoned | 0 |
 | **total** | **23** |
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-798 — Setup-wizard /image step with model picker (complexity: medium, risk: medium)
 - M1-800 — SimpleX + Signal sendAttachment codecs and ceilings (complexity: high, risk: high)
 - M1-802 — ComfyUI client: server-built graph, bounded fetch, cancel (complexity: high, risk: high)
-- M1-806 — ComfyUI temp/ containment: tmpfs + janitor sweep (complexity: low, risk: medium)
 
 ---
 
@@ -64,6 +63,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-806 | ComfyUI temp/ containment: tmpfs + janitor sweep | 2026-08-08 | round 1 APPROVE |
 | M1-805 | Confine ImageSpool writes to the tmpfs spool dir | 2026-08-08 | round 1 APPROVE-WITH-FIXES |
 | M1-804 | Flip the marker-drop test to the emptied-reply degrade | 2026-08-08 | round 1 APPROVE |
 | M1-801 | tmpfs spool, age sweeper, PNG strip, delivery path | 2026-08-08 | round 2 APPROVE |
@@ -73,7 +73,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-795 | Wire the empty-body guard into live delivery | 2026-08-08 | round 1 APPROVE |
 | M1-794 | Guard against empty sanitized bodies at delivery | 2026-08-08 | round 1 APPROVE |
 | M1-793 | Evaluate translation sanity checks on the sanitized reply | 2026-08-08 | round 1 APPROVE |
-| M1-792 | Census sanitize() caller postconditions and pin them | 2026-08-08 | round 1 APPROVE-WITH-FIXES |
 
 ---
 
@@ -124,5 +123,5 @@ M1-799 (done)
 M1-802 (pending) ← runnable
   └── M1-803 (pending) [see above]
 M1-804 (done)
-M1-806 (pending) ← runnable
+M1-806 (done)
 ```
