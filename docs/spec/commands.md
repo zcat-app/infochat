@@ -583,6 +583,50 @@ them to the marked region — doing so would red the build.
   disclose this so users are not surprised to see DM saves appear
   when running the command in a group context.
 - `/unsave <uid>` — remove from library (no confirmation).
+- `/image [--resolution|-r <WxH>] [--prompt|-p] <text…>` — generate an
+  image on the operator-configured backend and return it as an
+  attachment in the invoking scope, or return text explaining why that
+  was not possible — graceful degradation is the contract, not a
+  fallback (decision D73). **Optional by configuration:** with no
+  `infochat.image.base-url` the command does not exist — absent from
+  `/help`, unknown-command reply if invoked. Available in DM and groups
+  to any non-banned, non-probation registered user; it is deliberately
+  absent from the slow-start allowed set (D73). Bare words after the
+  command are the prompt; `--prompt|-p` captures the remainder of the
+  line verbatim (it is the last flag); `--resolution|-r <WxH>` is an
+  *output* size, bounded by a server-side ceiling and by the adapter's
+  `maxOutboundAttachmentBytes` (D74) — the server is free to reach it
+  by sampling or upscaling, so the flag never constrains the sampler.
+  **Control gates**, all deterministic and evaluated before any backend
+  call (D76): a per-user cooldown in DM and group alike; per-user AND
+  per-group hourly credit buckets (the gate is an AND — both must yield,
+  a refund returns both), charged on attempt and refunded iff the GPU
+  never ran; and a global backend queue-depth gate that refuses
+  immediately — "busy, try again" — rather than silently queueing past
+  budget. **Dispatch is off the router thread** through the
+  interruptible dispatcher, so `/stop` cancels a queued or running
+  generation, and a Provider-side timeout *cancels* the backend job
+  rather than abandoning it (an abandoned job keeps burning GPU).
+  **Prompt handling (D75):** the prompt is message content — never
+  logged (including error and timeout paths), never persisted, audited
+  only as a content-free `IMAGE_GENERATE` row (actor, scope, outcome).
+  When the scope's effective language is not English the prompt is
+  translated first (reusing the query-translation path), and the reply
+  echoes the English prompt actually used — the echo is the transparency
+  mechanism, the failure-mode explainer, and the durable record, which
+  lives in the user's own chat history. The workflow graph is built
+  server-side; user text reaches exactly one string field of the graph.
+  **Failure contract** — every failure mode returns a localized text
+  explanation, never silence: backend unreachable · breaker open ·
+  queue over budget · credit exhausted · cooldown not elapsed · timeout
+  (after cancelling the job) · adapter cannot carry attachments
+  (`supportsOutboundAttachments` false) · attachment exceeds the
+  platform limit. Argument shapes, defaults, per-model sampler settings,
+  credit/cooldown/queue values, and reply wording live in design notes.
+  **Catalogue-index note:** the `/image` line in the command index above
+  lands together with the `CommandHandler` bean that implements it —
+  `CommandCatalogueParityTest` asserts the index equals the runtime bean
+  set, so adding the line earlier would red the build.
 
 ### Asset commands
 

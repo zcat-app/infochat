@@ -125,6 +125,23 @@ Every adapter implements:
   adapter-introspection or metadata surface, and it exposes no other
   identity material (not the SimpleX queue keypair, not signal-cli
   credentials).
+- **Send attachment (optional).** Provider hands the adapter a
+  `(scope, file path, MIME type, display filename)` tuple; the adapter
+  transmits the file as a native file/image message on transports that
+  support one (decision D74). The payload is a **file path**, not
+  bytes: signal-cli attaches by path and SimpleX file transfer
+  completes asynchronously past `send()`'s return, so the file MUST
+  remain readable by the adapter for the whole transmit, and the
+  adapter reports delivery completion (success, or a classified
+  failure per §Failure handling) so Provider's spool lifecycle can
+  reclaim it — the adapter itself MUST NOT retain or copy the payload
+  beyond delivery. Provider invokes this method only when the
+  adapter's `supportsOutboundAttachments` flag is true, and refuses
+  payloads above `maxOutboundAttachmentBytes` before invoking it.
+  Attachment sends obey the same transient/permanent classification,
+  the same bounded retry ladder, and the same at-least-once delivery
+  non-guarantee (D64) as text sends; an ambiguous attachment transmit
+  may duplicate exactly as a text one may.
 - **Capability flags.** A static description of what the adapter
   supports: identity trust level, markdown rendering, message edits,
   edit minimum interval, typing indicator, membership events, and
@@ -186,10 +203,21 @@ Every adapter implements:
   transmits to this. Outbound *concurrency* is bounded separately by
   the transport's one-outstanding-send rule, not by a capability
   field.
+- `supportsOutboundAttachments` — true when the adapter can transmit a
+  binary attachment as a native file message (decision D74). Defaults
+  to false; a caller with attachment work (e.g. `/image`) gates on the
+  flag and, when it is false, answers with the text fallback its own
+  failure contract specifies — it never invokes the send-attachment
+  SPI on a false-flag adapter.
+- `maxOutboundAttachmentBytes` — the transport's ceiling on a single
+  outbound attachment. Meaningless when `supportsOutboundAttachments`
+  is false. Provider refuses over-ceiling payloads before invoking the
+  adapter; the value bounds user-facing size flags (e.g. `/image
+  --resolution`) however the bytes are produced.
 
-Future flags (richer attachments, voice, reactions, etc.) extend this                                                                                                                                                                                 
-list; v1 ships only the above. Provider must treat an unknown flag as                                                                                                                                                                                 
-"not supported" by default.
+Outbound-attachment flags joined this list with the `/image` feature
+(D74). Further flags (voice, reactions, etc.) extend this list.
+Provider must treat an unknown flag as "not supported" by default.
 
 ## Message handles
 
@@ -519,3 +547,7 @@ Provider produces plain text per decision D30. The adapter:
 - Edit-coalesce minimum interval value
 - Group `@mention` stripping responsibility (adapter vs. Provider)
 - Localization-bundle key naming 
+- The attachment payload record shape and the Provider-side spool
+  lifecycle (tmpfs directory, delete-on-completion, age sweeper)
+- Per-adapter outbound attachment size ceilings and wire encoding
+  (SimpleX XFTP, signal-cli file-path attach)
