@@ -464,6 +464,19 @@ first-load noise). One scene is not a quality guarantee — the tier keeps its
 "quality may differ slightly" label and bf16 stays the recommended default —
 but there is no visible collapse that would justify dropping the tier.
 
+**Coarse ETA in the progress message.** Decision 8 already shows queue
+position; the ETA turns position into time, which is what the user actually
+wants. The mechanism is one multiplication: `(queue position + 1) × per-model
+measured steady-state constant`, where the constant is an operator config
+value **seeded by the setup step's container re-measurement** (the same probe
+M1-797's acceptance runs). Render it rounded ("~25 s", optionally a range),
+never as a countdown: ComfyUI's HTTP API reports queue depth but not in-job
+progress, and `--resolution`/the upscale stage shift real time, so precision
+would be a lie. The queue-depth refusal reuses it ("busy, ~N min backlog").
+Mage-Flow-class latencies make the ETA a nicety; Krea-class latencies and a
+deep queue are where it earns its bundle key. The interpolated value is an
+integer — inside the progress-string scalar-parameter rule.
+
 **Ship blockers become acceptance criteria.** The five open items above that
 gate shipping — `/history` suppression (decision 10), stdout prompt logging,
 PNG workflow-embedding strip, SimpleX XFTP file lifetime, SimpleX/Signal
