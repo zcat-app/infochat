@@ -113,7 +113,8 @@ choices that shape every section.
   profiles.
 - Auto-compress near the profile-defined context window ceiling.
 - `TranslationProvider` SPI; English by default; opt-in per-scope language                                                                                                                                                                            
-  via `/lang`. Concrete impls: English + Czech.
+  via `/lang`. Concrete impls: the enabled language set declared by
+  `LanguageRegistry`.
 - Code-formatting convention (backticks) with adapter capability flag.
 - In-place progress updates for long-running requests, with                                                                                                                                                                                           
   adapter-capability-gated fallback.
@@ -171,7 +172,6 @@ choices that shape every section.
   evidence of demand.
 - Admin web UI (instead of admin chat commands).
 - More sophisticated cross-source linking (topic modeling).
-- Concrete `TranslationProvider` impls beyond English + Czech.
 - Auto-detect language from user message; v1 requires opt-in via `/lang`.
 - Sybil resistance (adapter-dependent; deferred to v2).
 - Live ticker mode for asset commands (websocket-driven, in-place                                                                                                                                                                                     
@@ -180,12 +180,7 @@ choices that shape every section.
 - On-chain verbs for asset commands (`/zcash blocknumber`,                                                                                                                                                                                            
   `/monero hashrate`, etc.). Needs an explorer-adapter SPI.
 - Auth-gated price sources (KuCoin, Gemini for most endpoints,                                                                                                                                                                                        
-  CoinGecko Pro). Needs the operator-secret SPI. 
-- Public IPFS/IPNS publication of periodic digests as a static
-  JS-free page — **declined as out of scope for this project** (not
-  deferred; a new user request is the only thing that reopens it). Record:
-  [plan/future-features.md](plan/future-features.md) §J1; stripped design
-  note: [design/future/public-ipfs-publishing.md](design/future/public-ipfs-publishing.md).
+  CoinGecko Pro). Needs the operator-secret SPI.
 
 ## 5. Glossary
 
@@ -259,8 +254,8 @@ choices that shape every section.
   A source post's stored body is never *rewritten* — a non-English post is
   translated to English once at ingest into an additional derived field, and
   a retrieved post's rendered headline may be translated at display time
-  (D29). v1 implementations: English
-  (pass-through) + Czech. See `llm.md` §Translation flow.
+  (D29). Implementations: English (pass-through) plus the enabled language
+  set declared by `LanguageRegistry`. See `llm.md` §Translation flow.
 - **Outbox**: the persist-before-enqueue pattern for ingest. A post is
   written to the DB with `status = 'RAW'` before it is enqueued for
   evaluation; a startup rehydrator re-enqueues anything left `RAW` after
