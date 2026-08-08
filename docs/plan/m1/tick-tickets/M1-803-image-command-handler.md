@@ -15,7 +15,7 @@ reproduction: >-
   index at docs/spec/commands.md:206-248 has no /image line). `start` writes
   the test and runs it RED before any fix code (workflow §0).
 analysis_ref: docs/plan/m1/tick-analysis/image-generation-feature.md
-blocked_by: [M1-800, M1-801, M1-802]
+blocked_by: [M1-800, M1-801, M1-802, M1-805]
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/
   - infochat-provider/src/main/java/app/zcat/infochat/provider/messaging/

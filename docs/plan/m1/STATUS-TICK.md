@@ -11,13 +11,13 @@
 | Status | Count |
 |---|---|
 | pending | 6 |
-| in-progress | 0 |
+| in-progress | 1 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 15 |
 | deferred | 0 |
 | abandoned | 0 |
-| **total** | **21** |
+| **total** | **22** |
 
 ---
 
@@ -27,7 +27,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-797 — ComfyUI GPU compose overlay + ROCm image (complexity: medium, risk: medium)
 - M1-800 — SimpleX + Signal sendAttachment codecs and ceilings (complexity: high, risk: high)
-- M1-801 — tmpfs spool, age sweeper, PNG strip, delivery path (complexity: high, risk: high)
 - M1-802 — ComfyUI client: server-built graph, bounded fetch, cancel (complexity: high, risk: high)
 
 ---
@@ -36,8 +35,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 | ID | Title | Status | Last review |
 |---|---|---|---|
-
-_(none)_
+| M1-801 | tmpfs spool, age sweeper, PNG strip, delivery path | in-progress | round 1 REWORK on 2026-08-08 |
 
 ---
 
@@ -46,7 +44,8 @@ _(none)_
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-798 — blocked_by: M1-797 (pending)
-- M1-803 — blocked_by: M1-800 (pending), M1-801 (pending), M1-802 (pending)
+- M1-803 — blocked_by: M1-800 (pending), M1-801 (in-progress), M1-802 (pending), M1-805 (pending)
+- M1-805 — blocked_by: M1-801 (in-progress)
 
 ---
 
@@ -118,8 +117,10 @@ M1-797 (pending) ← runnable
 M1-799 (done)
   ├── M1-800 (pending) ← runnable
   │     └── M1-803 (pending)
-  └── M1-801 (pending) ← runnable
-        └── M1-803 (pending) [see above]
+  └── M1-801 (in-progress)
+        ├── M1-803 (pending) [see above]
+        └── M1-805 (pending)
+              └── M1-803 (pending) [see above]
 M1-802 (pending) ← runnable
   └── M1-803 (pending) [see above]
 M1-804 (done)
