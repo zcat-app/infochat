@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 21 |
 | deferred | 0 |
 | abandoned | 0 |
-| **total** | **23** |
+| **total** | **24** |
 
 ---
 
@@ -25,8 +25,8 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-798 — Setup-wizard /image step with model picker (complexity: medium, risk: medium)
 - M1-803 — /image command handler: gates, translation, echo, audit (complexity: high, risk: high)
+- M1-807 — ComfyUI image carve: VAE-Utils node + flag re-verify (complexity: low, risk: medium)
 
 ---
 
@@ -43,7 +43,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-798 — blocked_by: M1-807 (pending)
 
 ---
 
@@ -111,7 +111,6 @@ M1-794 (done)
 M1-795 (done)
 M1-796 (done)
 M1-797 (done)
-  └── M1-798 (pending) ← runnable
 M1-799 (done)
   ├── M1-800 (done)
   │     └── M1-803 (pending) ← runnable
@@ -123,4 +122,6 @@ M1-802 (done)
   └── M1-803 (pending) [see above]
 M1-804 (done)
 M1-806 (done)
+M1-807 (pending) ← runnable
+  └── M1-798 (pending)
 ```
