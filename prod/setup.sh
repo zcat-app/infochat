@@ -15,6 +15,7 @@ STATE_FILE="$RUNTIME_DIR/.setup-state"
 SECRETS_FILE="$RUNTIME_DIR/secrets.env"
 CONFIG_FILE="$RUNTIME_DIR/application.properties"
 COMPOSE_FILE="$REPO_ROOT/docker-compose.yml"
+COMFYUI_COMPOSE_FILE="$REPO_ROOT/docker-compose.comfyui.yml"
 
 # Full wizard step sequence (§7.7.2 "Structure"): the orchestrator is the single
 # place the step list is registered — leaf subscripts never self-register, so a
@@ -26,6 +27,7 @@ STEPS=(
   "2-secrets.sh:Generate DB-role secrets"
   "3-postgres.sh:Start Postgres + bootstrap roles"
   "4-llm.sh:Configure the LLM backend"
+  "4b-image.sh:Configure the /image backend (optional)"
   "5-bootstrap.sh:Install bootstrap sources and asset defaults"
   "6-adapter.sh:Register messaging adapters"
   "7-apps.sh:Start Collector then Provider"
@@ -167,8 +169,15 @@ do_reset() {
   # Probe before acting (M1-464). `compose ps -aq` over the four profiles lists this
   # project's containers — exactly the set `down` would remove; the network probe
   # catches a leftover network with no container still attached.
+
+  # The comfyui overlay file is merged into BOTH the probe and the down:
+  # comfyui lives only in docker-compose.comfyui.yml (step 4b starts it),
+  # and a base-file-only teardown leaves it running (M1-395, P31).
+
+  # Its models volume has a pinned name and survives plain `down`
+  # (keep-the-models posture).
   local container_ids
-  container_ids="$(docker compose -f "$COMPOSE_FILE" "${env_file_args[@]}" "${profiles[@]}" ps -aq 2>/dev/null || true)"
+  container_ids="$(docker compose -f "$COMPOSE_FILE" -f "$COMFYUI_COMPOSE_FILE" "${env_file_args[@]}" "${profiles[@]}" ps -aq 2>/dev/null || true)"
   local network_name="${COMPOSE_PROJECT_NAME:-$(basename "$REPO_ROOT")}_default"
   local has_runtime=0
   if [[ -n "$container_ids" ]] || docker network inspect "$network_name" >/dev/null 2>&1; then
@@ -203,8 +212,8 @@ do_reset() {
   fi
 
   if [[ "$has_runtime" -eq 1 ]]; then
-    echo "+ docker compose -f $COMPOSE_FILE ${profiles[*]} down"
-    docker compose -f "$COMPOSE_FILE" "${env_file_args[@]}" "${profiles[@]}" down
+    echo "+ docker compose -f $COMPOSE_FILE -f $COMFYUI_COMPOSE_FILE ${profiles[*]} down"
+    docker compose -f "$COMPOSE_FILE" -f "$COMFYUI_COMPOSE_FILE" "${env_file_args[@]}" "${profiles[@]}" down
   fi
   # Remove pgdata after `down` has detached the postgres container. Safe even
   # when nothing was running (an orphaned volume from a prior kept reset).

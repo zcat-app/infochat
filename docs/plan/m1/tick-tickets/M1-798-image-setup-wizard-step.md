@@ -1,9 +1,9 @@
 ---
 id: M1-798
 title: "Setup-wizard /image step: picker, templates, ETA probe"
-status: pending
+status: done
 created: 2026-08-08
-last_updated: 2026-08-09
+last_updated: 2026-08-10
 flow: tick
 reproduction: >-
   Probe (wizard scripts are not mvn-covered):
@@ -69,7 +69,22 @@ spec_refs:
 decision_refs:
   - D73
   - D77
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-09
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS FAIL, SECURITY PASS, TEST-ADEQUACY NOT-APPLICABLE, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "8 files changed, 1005 insertions(+), 15 deletions(-)"
+    findings: "3 rework items (1 medium, 2 low); 0 critical/high; 6 candidate findings falsified-and-dropped; 0 RECOMMENDED-NEW-TICKET entries"
+    verdict_file: .scratch/tick-review-M1-798-r1.txt
+  - round: 2
+    date: 2026-08-10
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY NOT-APPLICABLE, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "8 files changed, 1060 insertions(+), 20 deletions(-)"
+    findings: "0 rework items; 0 critical/high; all 3 round-1 REWORK items dispositioned SATISFIED; 0 RECOMMENDED-NEW-TICKET entries"
+    verdict_file: .scratch/tick-review-M1-798-r2.txt
+clarity_check: "start 2026-08-09 pass — tick-lint 0 findings; reproduction RED on main (grep -n image prod/setup.sh → no match); citations verified (setup.sh:19-33 STEPS, 1-profile.sh:11 VALID_PROFILES, design doc :846-871 container table 4.07/22.37/22.41 verbatim, ComfyUIClient.java:483-524 validatePromptSlot/validateSampler); analysis pitfalls P15/P22/P24/P26/P27/P28/P29/P30/P31/P32 + firewall half all present; prior-art artifacts READ per start.md superseded-implementation rule (worktree r1 REWORK verdict: 2 findings carried as acceptance items 10/11, 4 falsified-and-dropped — the picker-honesty falsification was against the OLD 3.75/21.81/53.07 table and is re-established against the new table by item 3; P32 restart residual out of scope to M1-803); P28 decode-wiring assumption already disproved live by M1-807 item 5 (exact VAELoader+VAEUtils_VAEDecodeTiled graph ran 896×672→1792×1344 @ 22.73 s in the rebuilt container); old-brief harvest staged as the starting point per analysis §Prior art disposition (mechanics survive falsification, content does not); blocked_by M1-807 done and added no tests, preserves-trace vacuous. D-3/P28 RESOLVED 2026-08-09 (user decision): the Krea template bakes the 2x stage — VAELoader(Wan2.1_VAE_upscale2x) + VAEUtils_VAEDecodeTiled(upscale=-1) + lanczos exact fit; node source at the pinned commit verified auto-upscale (12ch head -> pixel_shuffle 2x; 3ch VAEs decode 1x). The item-4 picker is implemented as an honest three-option menu: spacepxl 2x (DEFAULT, decision 5), krea2RealVae 1x (RECOMMENDED decoder label, decision 4), stock qwen_image_vae 1x (FALLBACK label, decision 4) — the stage node is VAEUtils_VAEDecodeTiled for every choice, so item 7's shape holds; a two-option menu whose choice the 2x-baked template ignores would repeat the round-1 SPEC-TRUTHNESS failure shape"
 ---
 
 # M1-798: Setup-wizard /image step: picker, templates, ETA probe
@@ -236,3 +251,23 @@ test is modified.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-798-image-setup-wizard-step.md
 ```
+
+## Round 1 rework
+
+1. FINDING 1: stop/remove the comfyui container and run the
+   delete-previous-files offer on a local-to-remote switch, in
+   prod/scripts/4b-image.sh's remote branch (:818-858), reusing
+   stop_comfyui_if_present (:329-334) and the offer block (:759-802) with
+   an empty shared-blob set — verified by
+   `awk '/^  remote\)/,/^  none\)/' prod/scripts/4b-image.sh | grep -c stop_comfyui_if_present`
+   >= 1 and the live switch probe leaving `ps -q comfyui` empty with the
+   delete offer printed.
+2. FINDING 2: reconcile the spacepxl licence label — verify the HF card and
+   either record Apache-2.0 in docs/design/future/image-generation.md's
+   licence paragraph or print the undeclared-licence label at
+   prod/scripts/4b-image.sh:452-455 and SETUP_GUIDE.md:384-386 — verified
+   by the grep probe in FINDING 2's EVALUATED-AS.
+3. FINDING 3: replace the conda-derived "~22.5 s" with the container
+   figure "~22.7 s" (or no number) at prod/scripts/4b-image.sh:425 —
+   verified by `grep -n '22\.5 s' prod/scripts/4b-image.sh` printing
+   nothing.

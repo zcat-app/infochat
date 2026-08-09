@@ -220,7 +220,7 @@ overwrite your answers.
 
 ## What the wizard asks you
 
-The wizard runs nine short steps in order. Most need no input — they just do
+The wizard runs ten short steps in order. Most need no input — they just do
 their job and move on. Here's the whole journey in plain language:
 
 | Step | What happens | Does it ask you anything? |
@@ -230,13 +230,15 @@ their job and move on. Here's the whole journey in plain language:
 | **2. Secrets** | Creates strong random passwords for the database | No |
 | **3. Database** | Starts the database and waits until it's ready | No |
 | **4. AI model** | Sets up the AI brain | Yes — pick `ollama`, `llamacpp`, or `remote` (default `ollama`) |
+| **4b. Image generation** | Optional: sets up the `/image` command (local ROCm container or a remote ComfyUI box) | Yes — enable or skip; if enabled, pick one of three models in two tiers |
 | **5. Sources** | Installs a starter list of news/social sources | Optional — a custom sources file, and whether to enable the price commands (default Yes) |
 | **6. Messaging** | Connects your SimpleX and/or Signal account | Yes — which app(s), where the program is, and the bot's account |
 | **7. Start apps** | Builds and launches infochat (this is the slow one) | No |
 | **8. Verify** | Confirms infochat is up and healthy | No |
 
-The three steps that actually need a decision from you are **1 (Profile)**,
-**4 (AI model)**, and **6 (Messaging)** — covered next.
+The steps that actually need a decision from you are **1 (Profile)**,
+**4 (AI model)**, **4b (Image generation, optional)**, and **6 (Messaging)** —
+covered next.
 
 ### The one question you must not skip: who's the admin?
 
@@ -320,6 +322,93 @@ embeddings model, and the post content used to match posts by meaning never
 leaves your machine. The wizard prints a per-task disclosure before you type
 your key; the leg-by-leg detail for `translator` is under
 [Switching your AI backend later](#what-translator-sends-leg-by-leg).
+
+### Step 4b — Image generation (`/image`) (optional)
+
+infochat can generate images with the `/image` command. This is **optional and
+off by default** — if you skip it, the command simply doesn't exist (there is
+no half-enabled state). Enable it here if you want it; you can always re-run
+this step later to turn it on, switch the model, or turn it off.
+
+**What it needs.** `/image` runs a [ComfyUI](https://www.comfy.org/) backend.
+You have three choices:
+
+| Pick this | Best for | What you need |
+|---|---|---|
+| **local** | A single box with an AMD GPU | An AMD ROCm GPU and 13–34 GB of free disk (see below) |
+| **remote** | A second, GPU-equipped machine you own | A ComfyUI you run on that box, reachable over your LAN |
+| **none** *(default)* | Everyone else | Nothing — `/image` stays off |
+
+**Hardware scope, said plainly.** The **local** path is **ROCm-only and
+validated on Strix Halo (gfx1151) alone.** Other ROCm GPUs are expected to
+work but are unverified, and NVIDIA is not covered at all. If your box has no
+AMD GPU, choose **remote** or **none**.
+
+**Profile gating.** The wizard only offers **local** on profiles that can have
+a GPU — `laptop` and `remote-llm`. On `pi` and `vps` (no usable GPU) you are
+offered **remote** or **none** only.
+
+**The model picker (local).** If you choose **local**, you pick one of three
+models, each in two tiers. The wizard prints the measured per-image latency and
+the disk footprint **before** you commit to a multi-GB download:
+
+| Model | Setting | Latency (container-measured) | Disk, recommended bf16 | Disk, smaller tier |
+|---|---|---|---|---|
+| Mage-Flow Turbo | 4 steps @ 1024 | ~4.07 s | ~16.5 GB | ~13 GB |
+| Z-Image Turbo | 8 steps @ 1024 | ~22.37 s (steady state) | ~20 GB | ~11.5 GB |
+| Krea 2 Turbo | 6 steps @ 0.6 MP | ~22.41 s | ~34.5 GB | ~20 GB |
+
+Z-Image's number is the steady state — a first run takes ~28.6 s while kernels
+autotune. Krea samples at 0.6 MP and its decode stage delivers 1792×1344
+(~2.4 MP) — see the decode choice below.
+
+The **recommended (bf16)** tier is the best quality. The **smaller-footprint**
+tier is the same speed, about half the disk, with a slight quality cost —
+useful when the image model must share the box with the LLM stack. The wizard
+also needs enough free **memory/VRAM** for the model it downloads (on the
+validated Strix Halo shape the model lives in unified system memory), and it
+checks both disk and memory before downloading anything.
+
+**Krea's decode choice (local).** A Krea install bakes ONE decode pipeline
+into its workflow template:
+
+1. **spacepxl 2× decode** *(default)* — decodes the 0.6 MP sample straight to
+   1792×1344 in about the same time as a 1× decode.
+2. **krea2RealVae 1×** — the recommended 1× decoder: visibly crisper than
+   stock, no tint.
+3. **stock qwen_image_vae 1×** — the fallback decoder: the right choice for
+   text-heavy renders.
+
+**Community assets.** Krea downloads two community VAE files; the wizard
+prints their licence status before fetching them: `krea2RealVae_v10`
+(artsyww/KREA2REALVAE) is licence-UNDECLARED on its HuggingFace card, and the
+spacepxl `Wan2.1_VAE_upscale2x` card declares Apache-2.0. Treat both as
+community assets and verify the cards before redistributing.
+
+**Preflight.** Before any download, the wizard HEAD-checks every model asset
+URL — for Krea including the two community VAE files — and verifies the disk
+and memory the chosen tier needs — a dead link or a too-small disk aborts the
+step with nothing fetched.
+
+**The speed figure the bot prints.** After a local install the wizard times
+the template it just wrote — one warm-up plus five timed generations against
+your own container — and stores the mean as the ETA constant for `/image`
+progress messages. Nothing is looked up from a table, and a remote install
+stores no figure at all (nothing was measured on that box).
+
+**The two-box (remote) firewall requirement.** If you choose **remote**, the
+wizard prints a requirement you must follow: ComfyUI has **no authentication**
+and its API executes submitted workflow graphs, so its endpoint is effectively
+code execution on whatever box hosts it. You **must firewall the backend port so
+that only the single Provider host can reach it** — a "private LAN" alone is not
+a control. The remote box must be your own infrastructure (never a third-party
+hosted service), and prompts cross the LAN in cleartext HTTP.
+
+**Switching models later.** The installed model is a property of the instance,
+not a per-chat setting. To change it, **re-run this step** and choose *switch* —
+the wizard recreates the ComfyUI container and offers to delete the previous
+model's files to reclaim disk. (Model files are yours and are kept unless you
+confirm the delete.)
 
 ### Step 5 — Your sources (optional customization)
 
@@ -697,6 +786,7 @@ Three things to know before you do:
 | `prod/scripts/2-secrets.sh` | Generate the DB-role passwords | `--defaults` (no-op — no prompts) |
 | `prod/scripts/3-postgres.sh` | Start Postgres and wait until healthy | `--defaults` (no-op — no prompts) |
 | `prod/scripts/4-llm.sh` | Provision the LLM backend; write the LLM + embeddings config | `--defaults` (takes the profile's default backend) |
+| `prod/scripts/4b-image.sh` | Optional: provision the `/image` backend (local ROCm ComfyUI or a remote box); write `infochat.image.*` | `--defaults` (takes `none` — does not enable); `--dry-run` (print the profile gate + model picker and exit) |
 | `prod/scripts/5-bootstrap.sh` | Seed `bootstrap-sources.json` and wire the asset (price) commands | `--defaults` (uses the bundled defaults) |
 | `prod/scripts/6-adapter.sh` | Configure the messaging adapter(s); capture the bootstrap-admin credential (SimpleX claim-token / Signal contact id) | `--defaults` (takes `simplex` and the default dirs; still prompts for the values a human must supply) |
 | `prod/scripts/6b-simplex-provision.sh` | Provision the SimpleX bot identity (profile + address + auto-accept) and **re-print the bot's contact link**. A no-op when SimpleX isn't enabled. Run it to recover the link, which the wizard prints only during step 7 and never saves. | _(no `--defaults`)_ |
@@ -728,13 +818,18 @@ The post-setup **helper** scripts are documented in the main sections above:
 The wizard writes only to `prod/runtime/` (git-ignored):
 
 - `prod/runtime/application.properties` — the generated configuration (profile,
-  LLM endpoints, adapter blocks).
+  LLM endpoints, adapter blocks, and — only if step 4b enabled it — the
+  `infochat.image.*` keys for the `/image` backend).
 - `prod/runtime/secrets.env` — generated DB passwords, the optional LLM API
   key, adapter admin credentials (SimpleX claim-token / Signal contact id), and
   adapter data-dir paths. Created with
   `0600` permissions and fed to Docker Compose via `--env-file` (never sourced
   into a shell), so pasted values containing `#`, `$`, or `&` can't break or
   execute. The committed template is `prod/config/secrets.env.example`.
+- `prod/runtime/comfyui-workflow.json` — only if step 4b enabled `/image`: the
+  chosen model's workflow template that the Provider's image client builds
+  graphs from. Model weights themselves go into the
+  `infochat-comfyui-models` Docker volume (local install), not `prod/runtime/`.
 
 The bot's **messaging identity** does *not* live in either file above — it lives
 in the adapter data directories (`prod/runtime/signal-cli/`,

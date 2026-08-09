@@ -206,6 +206,10 @@ services:
       # (/app), the same file the Collector's BootstrapAssetsLoader reads. Sources
       # are Collector-only, so the Provider mounts assets alone. Read-only.
       - ./prod/runtime/bootstrap-assets.json:/app/bootstrap-assets.json:ro
+      # /image workflow template (§7.7.2 step 4b): written by 4b-image.sh when
+      # /image is enabled; the Provider's ComfyUIClient reads it via
+      # infochat.image.workflow-file. Read-only. Absent until step 4b runs.
+      - ./prod/runtime/comfyui-workflow.json:/app/comfyui-workflow.json:ro
       # Adapter identity material captured out-of-band in step 6 (§7.5, §7.7.2):
       # bind-mounted at the adapter's configured data-dir so the running adapters
       # read the queue keypair / signal-cli account dir they validate at startup.

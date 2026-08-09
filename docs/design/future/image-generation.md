@@ -508,7 +508,13 @@ prints these next to the picker so the resource demand is explicit):
 |---|---|---|---|---|
 | Mage-Flow Turbo | 7.7 GB | 8.3 GB (qwen3vl_4b) | 0.33 GB | **~16.5 GB** |
 | Z-Image Turbo | 12 GB | 7.5 GB (qwen_3_4b) | 0.32 GB | **~20 GB** |
-| Krea 2 Turbo | 25 GB | 8.3 GB (qwen3vl_4b) | 0.24 GB | **~33.5 GB** |
+| Krea 2 Turbo | 25 GB | 8.3 GB (qwen3vl_4b) | 0.24 GB (stock) + 0.51 GB (krea2RealVae_v10, measured 507 591 212 B) + 0.51 GB (Wan2.1_VAE_upscale2x_imageonly_real_v1, measured 507 684 560 B) | **~34.5 GB** |
+
+The two Krea community VAE files (Final decision 5) are measured on this
+host: `krea2RealVae_v10.safetensors` 507 591 212 bytes and
+`Wan2.1_VAE_upscale2x_imageonly_real_v1.safetensors` 507 684 560 bytes —
+the wizard prints them in the Krea disk demand and HEAD-checks both before
+any download.
 
 **Container re-measure (2026-08-08, M1-797) — these are the numbers the
 wizard prints.** Measured inside the `docker-compose.comfyui.yml` overlay's
@@ -752,10 +758,11 @@ Where this addendum contradicts earlier sections, this addendum wins.
 The 2× VAE decode costs ~0.1 s over the 1× decode: Krea delivers 2.4 MP
 at 22.5 s — faster than native 1 MP (39.55 s). Same-seed crops in
 /tmp/opencode/img-measure/samples/vae_cmp_*.png. Licenses: the
-ComfyUI-VAE-Utils node repo is MIT; both VAE weights are UNDECLARED on
-HuggingFace (krea2RealVae is a community derivative hosted by a mirror) —
-the wizard prints them as community assets with that label, same posture
-as the curated model tiers.
+ComfyUI-VAE-Utils node repo is MIT; krea2RealVae is licence-UNDECLARED on
+HuggingFace (a community derivative hosted by a mirror), while the spacepxl
+Wan2.1-VAE-upscale2x card declares Apache-2.0 (card + README frontmatter
+re-verified 2026-08-09) — the wizard prints both as community assets with
+those labels, same posture as the curated model tiers.
 
 **Final decisions 2026-08-09 (v1 scope, user-approved):**
 
