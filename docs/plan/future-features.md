@@ -112,6 +112,31 @@ gfx1151 box:
   to hit it by sampling higher or by upscaling. The only infochat-visible costs
   are a few seconds of added latency (shifting the queue/rate-cap budget) and a
   larger attachment. Not measured; at 4.38 s it is not needed to ship.
+  **Update 2026-08-09 — revived, and widened to all three models.** Found while
+  preparing M1-798 (the ETA-constant work exposed it): the shipped pipeline
+  bakes sampler settings into the workflow template with no operator-visible
+  configuration, and this deferred upscale stage was dropped by the
+  seven-ticket analysis decomposition entirely — none of M1-797..M1-806
+  carries it, although the design addendum names it in the Krea 2 tier
+  ("pairs with the ESRGAN upscale stage to recover output resolution").
+  Re-scoped (user-approved direction 2026-08-09, numbers pending
+  measurement): the upscaler becomes an OPTIONAL pipeline stage for ALL three
+  models, on/off decided at setup time and baked into the per-model workflow
+  template by the wizard step — Mage-Flow to reach bigger outputs (it is
+  already fast), Z-Image because it is trained/optimized for 1024×1024 and
+  other sampling resolutions gamble quality (sample at 1024, upscale to
+  target), Krea 2 as the crucial case (0.6 MP sweet spot + upscale should
+  recover 1 MP-class output near Z-Image's ~22 s instead of 53 s native).
+  Diffusion steps become operator configuration the same way, with per-model
+  recommended values from the measurements. `--resolution` stays the final
+  output size; a converter maps it to per-model sampling density + upscale.
+  Stock-node support verified at the pinned ComfyUI commit (spandrel-based
+  UpscaleModelLoader + internally-tiled ImageUpscaleWithModel +
+  ImageScaleToTotalPixels; no custom nodes, no image change);
+  models/upscale_models/ is empty today. A container measurement spike gates
+  the ship and runs before M1-798 starts (M1-798 prints the numbers and
+  writes the templates, so the decision is an INPUT to it). Design layer:
+  `docs/design/future/image-generation.md`, addendum 2026-08-09.
 - **Unverified:** the attachment size limits SimpleX and Signal impose. Those
   bound maximum output resolution however the pixels are produced, so they need
   checking before `--ratio` accepts large sizes.

@@ -651,3 +651,251 @@ interruptible-concurrency ceiling; the backend-retention requirement is a
 verifiable end state with an acceptance check; backend replies, the spool,
 and PNG decode are byte/pixel-bounded; and the prompt carries a
 profile-driven length cap at the parser.
+
+## Addendum 2026-08-09 — pipeline configurability: diffusion steps + optional upscaler
+
+Found while preparing M1-798: the ETA constant is per-model, but the
+pipeline it would describe is not configurable — sampler settings are baked
+into the workflow template with no operator-visible knob, and the ESRGAN
+upscale stage named in the Krea 2 tier decision above was dropped by the
+seven-ticket analysis decomposition (none of M1-797..M1-806 carries it).
+Where this addendum contradicts earlier sections, this addendum wins.
+
+**Decisions (2026-08-09; numbers pending the measurement spike below):**
+
+1. **Diffusion steps are operator configuration with per-model recommended
+   values** — Mage-Flow 4 steps (container-measured 3.75 s), Z-Image 8 steps
+   (container-measured 21.81 s), Krea 2 6 steps @ 0.6 MP (23.78 s
+   conda-measured ONLY — container re-measurement is required before the
+   wizard may print it, P22).
+2. **The upscaler is an optional pipeline stage, available for all three
+   models, on/off at setup time.** Per-model motivation: Mage-Flow — bigger
+   outputs (it is already fast enough); Z-Image — trained/optimized for
+   1024×1024, other sampling resolutions gamble quality, so its shape is
+   sample-at-1024 + upscale-to-target; Krea 2 — the crucial case, currently
+   the slowest model: the 0.6 MP sweet spot + upscale should land near
+   Z-Image's ~22 s for 1 MP-class output with Krea's ratio flexibility,
+   versus 53 s native 1 MP.
+3. **Configuration is setup-time and baked by the wizard step (M1-798's
+   shape), never runtime.** The step writes the per-model template: steps,
+   sampling resolution, and — iff the operator enabled the upscaler — the
+   upscale nodes plus the chosen upscaler model (a ~17–67 MB download added
+   to the preflight/download path). The Provider cannot change any of it;
+   changing = re-running the step, the model-switch shape ("Model switching
+   is an operator operation, never a chat command"). Runtime configuration
+   was explicitly rejected as ringing yet another complexity.
+4. **`--resolution` remains the final output size, per job.** A converter
+   maps requested output (dimensions; resolution = density + dimensions) to
+   per-model sampling density + upscale, unifying all three models behind
+   one flag. This target is the one per-job numeric input beyond prompt +
+   seed — set through the JSON serializer like the seed, so the P15
+   property (user text reaches exactly one string field) is preserved.
+   DECIDE-BEFORE the follow-up analysis: how the handler learns the baked
+   sampling resolution (candidate: the step writes it alongside
+   base-url/workflow-file/ETA constant, keeping the handler model-agnostic),
+   and whether the target lands as ImageScaleToTotalPixels megapixels or
+   exact W/H after the model upscale.
+5. **Stock nodes only — verified at the pinned commit (6f7cd7fc).**
+   `UpscaleModelLoader` (comfy_extras/nodes_upscale_model.py) is
+   spandrel-based and loads any single-image model spandrel 0.4.x supports
+   (ESRGAN/RRDB family, SwinIR, HAT, DAT, OmniSR, ...) from
+   `models/upscale_models/`; `ImageUpscaleWithModel` is internally tiled
+   (512 px tiles, 32 px overlap — memory-bounded at large outputs);
+   `ImageScaleToTotalPixels`/`ImageScale` (lanczos etc.) provide exact final
+   sizing and the zero-model baseline. No custom nodes — the image stays
+   pinned and minimal. The M1-802 client already accepts an upscale template
+   unchanged: validation requires exactly one prompt placeholder + one
+   KSampler (both survive), and the output read is graph-shape-independent
+   (`firstOutputImage` iterates all output nodes).
+6. **The measurement spike gates the ship** and runs BEFORE M1-798 starts
+   (protocol = M1-797's: one warm-up + five timed container runs, unique
+   seeds): (a) Krea 2 @ 6 steps/0.6 MP alone — validates the conda→container
+   transfer (Mage-Flow came out 0.86×) and is needed for M1-798's honesty
+   regardless of the upscaler outcome; (b) the upscale cost isolated: fixed
+   0.6 MP input → 1 MP and 2 MP outputs, per candidate; (c) the full
+   pipeline 6 steps/0.6 MP + upscale versus Krea native 1 MP (53.07 s) and
+   Z-Image (21.81 s); (d) bounds sanity at the max target: PNG bytes versus
+   the 16 MiB response cap (sized for "2048px PNG"), spool capacity, tmpfs
+   output cap, and the SimpleX/Signal attachment ceilings (M1-800). Numbers
+   land in THIS document; only container numbers reach the wizard.
+
+**Upscaler candidates (all load via the stock UpscaleModelLoader):**
+
+| Candidate | ~Size | License (verified 2026-08-09) | Character |
+|---|---|---|---|
+| 4x-UltraSharp | 67 MB | **CC-BY-NC-SA-4.0** | de-facto general-purpose favourite; sharp (§B2's named default) |
+| RealESRGAN_x4plus | 64 MB | project BSD-3 (verify card at download) | the classic baseline; robust, softer |
+| 4x_NMKD-Siax | 64 MB | community — verify (likely NC) | general-purpose, fewer halos |
+| 4x_foolhardy_Remacri | 64 MB | community — verify (likely NC) | photo-leaning, natural texture |
+| RealESRGAN_x4plus_anime_6B / 4x-AnimeSharp | 17 / 64 MB | verify | illustration-leaning; only if that content class matters |
+| DAT/HAT/SwinIR family | 16–60 MB | per-model | newer architectures, better metrics; spandrel supports, unproven here |
+| lanczos (no model) | 0 | n/a | baseline/fallback; interpolation, no detail synthesis |
+
+**VAE-decode lever results 2026-08-09 (conda env, same protocol):**
+
+| Config | s | Output |
+|---|---|---|
+| Krea base + krea2RealVae (1×) | 22.14 | 896×672, visibly crisper than stock, no tint |
+| Krea base + spacepxl Wan2.1-VAE-upscale2x (2× decode) | 22.54 | 1792×1344, sharp, no tint |
+
+The 2× VAE decode costs ~0.1 s over the 1× decode: Krea delivers 2.4 MP
+at 22.5 s — faster than native 1 MP (39.55 s). Same-seed crops in
+/tmp/opencode/img-measure/samples/vae_cmp_*.png. Licenses: the
+ComfyUI-VAE-Utils node repo is MIT; both VAE weights are UNDECLARED on
+HuggingFace (krea2RealVae is a community derivative hosted by a mirror) —
+the wizard prints them as community assets with that label, same posture
+as the curated model tiers.
+
+**Final decisions 2026-08-09 (v1 scope, user-approved):**
+
+1. **No diffusion upscaler in v1.** PiD (broken on AMD upstream, #14273)
+   and the ESRGAN family (+22–45 s on gfx1151) are excluded, evidence
+   recorded above.
+2. **The converter ships:** `--resolution WxH` is the final output
+   contract; ratio is steered at sampling (per-model pixel budget at the
+   requested ratio, dims rounded to /16); resolution is steered at the fit
+   stage. Budgets: Krea 0.6 MP @ 6 steps, Mage 1 MP @ 4 steps, Z-Image
+   1 MP @ 8 steps (sample-at-ratio; the 1024-lock-in gamble recorded as an
+   open measurement).
+3. **Fit stages per model (v1):** Krea — spacepxl 2× VAE decode when the
+   target is ~2× the sampling budget (ceiling 2.4 MP), lanczos down for
+   exact targets at or under the decoded size; Mage — sample directly at
+   the target (sampling is 4 s-class), lanczos exact-fit, ceiling 2 MP;
+   Z-Image — sample at 1 MP, lanczos fit, ceiling 1 MP hard (soft lanczos
+   up to 2 MP labelled). Ceilings also bounded by the 16 MiB response cap
+   and the adapter attachment ceilings (M1-800).
+4. **krea2RealVae ships as Krea's recommended decoder** (drop-in via stock
+   VAELoader, zero image change); stock `qwen_image_vae` remains the
+   fallback (right choice for text-heavy renders per fblissjr's
+   decoder-isolation read).
+5. **spacepxl 2× ships in v1** (user decision: before first ship,
+   accepting the image re-validation and the undeclared-weight risk):
+   `prod/images/comfyui/` gains spacepxl/ComfyUI-VAE-Utils (MIT) and the
+   M1-797 load-bearing flags are re-verified with the node present; the
+   wizard downloads the two VAE files into the models dir with preflight
+   like the checkpoints.
+6. **Stack bump (ROCm 7.14 / flash-attn gfx1151) deferred** to a
+   post-ship ticket (~18–24 % per uncompiled.tools; requires full
+   re-measurement and wizard-number refresh).
+7. **Ticket impact:** M1-798 is re-analyzed before start — the picker
+   gains the VAE choice (krea2RealVae recommended / stock fallback), the
+   per-model steps (4/8/6), the new container numbers (22.41/22.14/22.54
+   Krea row family), license printing for community assets, and the VAE
+   downloads; a small carve (image node add + flag re-verification) rides
+   with it or lands as its own ticket per the re-analysis. M1-803 keeps
+   the guardrail: `--resolution` wired as output contract, per-job latent
+   dims serializer-set (the converter's only per-job numeric inputs).
+
+All model candidates are 4× native; exact targets are reached by
+model-upscale then scale-to-size (the converter's tail). REJECTED:
+SUPIR-class diffusion upscalers (wall clock + VRAM) and custom-node
+upscalers like UltimateSDUpscale (image change + supply-chain surface) —
+the stock tiled ImageUpscaleWithModel already handles memory.
+
+**Late addition (2026-08-09, user-raised): NVIDIA PiD — license-blocked,
+exploratory.** PiD (Pixel Diffusion Decoder, arXiv:2605.23902) reformulates
+the latent→pixel DECODE as a conditional pixel-space diffusion model:
+decode + 4× super-resolution in one 4-step-distilled pass, up to 4K.
+Comfy-Org repackages checkpoints for the flux / flux2 / qwenimage latent
+spaces. Fit notes, all verified against the tree:
+
+- **Stock support at the PINNED commit** — `comfy_extras/nodes_pid.py`
+  (PiDConditioning node) is already in 6f7cd7fc; no commit bump, no custom
+  nodes, no image change.
+- **All three models' latent spaces are covered:** Z-Image(-Turbo) is named
+  in the PiD card (flux format); Flux2's 128-channel latents (Mage-Flow's
+  format) auto-detect under `flux`; Krea 2 is FLUX.2-based (VERIFY its VAE
+  is the flux2 VAE at measurement time).
+- **The P15 property survives:** PiDConditioning consumes the SAME positive
+  conditioning — user text still reaches exactly one string field.
+- Footprint ~2.6 GB bf16 (~1.3 GB int8_convrot; int8 buys no speed on
+  gfx1151 per the tier measurement) — small next to the checkpoints.
+- It elegantly dissolves Z-Image's 1024 training lock-in: sample native
+  1024, decode to 2K/4K.
+
+**Blockers:** (1) LICENSE — NSCLv1, "only ... non-commercial (research or
+evaluation) purposes"; the wizard's curated picker is a ship path and the
+project selects on license sanity (Mage-Flow's MIT is recorded in §B2).
+User attestation 2026-08-09: this deployment has no commercial plans, so
+PiD enters the measurement; the curated-picker question re-opens if the
+deployment's nature ever changes (same rule as the NC-licensed ESRGAN
+candidates above). (2) UNMEASURED on gfx1151 — 4 pixel-space steps at
+2K–4K in bf16, co-resident with the LLM stack; no numbers exist.
+(3) BUDGETS — it replaces VAEDecode (a pipeline-shape change, not an added
+tail), and 4K PNGs exceed the 16 MiB response cap (sized for 2048px),
+forcing a cap + adapter-ceiling review. Disposition: enters the measurement
+spike as an EXPLORATORY candidate; if the numbers are compelling the
+curated-picker license question gets its own discussion, otherwise it
+closes. The ship path stays the ESRGAN family.
+
+**PiD wiring — verified 2026-08-09 against the official Comfy-Org template
+(`utility_pid_latent_upscale_dit`) and the pinned commit:** the upscale pass
+is UNETLoader(pid checkpoint) + its OWN text encoder (CLIPLoader type
+`pixeldit`, the Gemma 2 2B encoder — bf16 on gfx1151, fp8 buys nothing) +
+CLIPTextEncode(prompt) + PiDConditioning(positive, base-graph latent,
+latent_format, degrade_sigma=0) + EmptyChromaRadianceLatentImage at the
+TARGET output WxH (the pixel-space noise latent — this is where the
+converter's per-job target lands) + SamplerCustom(KSamplerSelect `lcm`,
+BasicScheduler `simple`, 4 steps, cfg 1) + VAEDecode with the built-in
+`pixel_space` no-op VAE. Two template consequences for the client: the
+prompt reaches a SECOND CLIPTextEncode (the P15 "exactly one string field"
+wording needs the serializer-fills-both-fields amendment, or the PiD encode
+bakes a static text — a measurement question), and the per-job target size
+lands as the pixel-latent dimensions (numeric, serializer-set).
+
+**Measurement results 2026-08-09 (spike, container, M1-797 protocol; graphs
+and samples under /tmp/opencode/img-measure/):**
+
+| Config (steady-state mean, 5 runs) | s | Output |
+|---|---|---|
+| Krea 2, 6 st @ 0.6 MP (base) | 22.41 | 896×672 |
+| Krea 2, 6 st @ 1 MP (base) | 39.55 | 1024² |
+| Krea 2 base + lanczos → 1 / 2 MP | 22.50 / 22.61 | scaling is free |
+| Krea 2 base + RealESRGAN_x4plus → 1 / 2 MP | 44.47 / 45.19 | +22 s |
+| Krea 2 base + 4x-UltraSharp → 1 / 2 MP | 44.93 / 45.07 | +22 s |
+| Mage-Flow, 4 st @ 1024 (base) | 4.07 | 1024² |
+| Mage-Flow + RealESRGAN → 1 MP | 48.76 | +44 s |
+| Mage-Flow + lanczos → 1 / 2 MP | 4.06 / 4.06 | free |
+| Z-Image, 8 st @ 1024 (base, steady state) | 22.37 | 1024² |
+
+Findings: (1) **the ESRGAN family is dead on gfx1151** — the RRDB CNN adds
+20–45 s regardless of target (ROCm has no fast path for it), versus the
+"few seconds" §B2 assumed; lanczos is free but synthesizes nothing. (2) Krea
+2's 6 st @ 0.6 MP container number validates the conda 23.78 s (0.94×) and
+lands at Z-Image's 1 MP time — the sweet-spot hypothesis holds. (3) The
+Z-Image 28.64 s first-pass figure was a warm-up/autotune artifact; steady
+state 22.37 s matches M1-797's 21.81 s. (4) **PiD's cost profile is the
+opposite of ESRGAN's** (added time ≈ 2 s @ 1 MP, 5 s @ 2 MP, 15 s @ 4 MP,
+~163 s @ 16.8 MP — scales with output pixels) BUT **every PiD output came
+out BLACK** with graphs wired exactly per the official template (ELM Gemma,
+lcm/simple/4/cfg 1, pixel_space VAE, target-size pixel latent). The PiD
+timings are therefore mechanical only and meaningless until the blank
+output is fixed; debugging moves to the conda env by hand, against the
+official template (`utility_pid_latent_upscale_dit`, in
+comfyui-workflow-templates ≥ 0.11.31) and PR #14103's attached examples.
+The spike's ship-relevant verdict stands on the ESRGAN/lanczos numbers.
+(5) **PiD-on-AMD is broken upstream — disposition closed 2026-08-09.**
+Comfy-Org/ComfyUI#14273 (gfx1201/RX 9070 XT, ROCm): PiD outputs noise at
+upscaled targets and green-tinted images at 1× targets, with BOTH
+nvidia/PiD's own inference code and the official PR-#14103 workflow, while
+every other workflow on the same setup works; closed as not planned, no
+fix. Our gfx1151 black outputs are the same failure family on a second AMD
+architecture — not a graph bug. PiD is therefore excluded on this
+deployment hardware unless someone debugs the ROCm pixel-space-DiT path
+themselves; the manual conda session can confirm with Merserk's
+`pid_upscale_complete.json` (LoadImage → PiDUpscale) as the A/B, but the
+expected result is broken. Remaining upscale-ish levers, untested and
+ROCm-plausible (plain VAE decodes): krea2RealVae drop-in sharpness and
+spacepxl Wan2.1-VAE-upscale2x decode-time 2× (fblissjr/krea-explorations
+docs/krea2_vae.md), plus the base-stack speedup lever (ROCm 7.14 /
+flash-attn gfx1151 builds, ~18–24% per uncompiled.tools and the kyuz0
+toolbox).
+
+**Ticket impact.** M1-798's brief changes (template content, the upscaler
+download + option in the picker, ETA probe measuring the FINAL template) —
+re-analyze before it starts; the `m1/M1-798-...` worktree has no commits
+yet, so nothing is lost. M1-803 is unaffected in scope but carries the
+guardrail: wire `--resolution` as an output-size contract, template-opaque
+(never assume sampling resolution == output resolution). The M1-802 client
+needs no change to carry the stage itself; the per-job target-size input
+lands with the converter decision.
