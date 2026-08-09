@@ -18,6 +18,7 @@ measured or assumed, and cannot re-check it when the world changes.
 |---|---|
 | [translator-slot.md](translator-slot.md) | Which model fills `ModelTask.TRANSLATOR`, and whether the English pivot (D29) needs a dedicated MT model. Answer: nothing beats the model already in the slot. |
 | [track-a-screening-in-progress.md](track-a-screening-in-progress.md) | Track A slot screening, round 1 (run 1, mechanical only): which local candidates lead per task. **In progress** — no slot decision yet; T5 run 2, judged predicates and the gold panel are outstanding. |
+| [lang-quality.md](lang-quality.md) | Whether local candidates can chat in cs/es/tr/ru well enough to simplify the English-pivot pipeline, and their EN↔X translation quality. Answer: chat simplification supported for all four languages with gemma-4-26b-a4b; qwen fails L0 hygiene despite tying on judgement; all three locals tie the incumbent on translation. |
 
 ## Conventions
 
