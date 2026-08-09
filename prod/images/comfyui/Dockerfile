@@ -13,6 +13,7 @@
 FROM ubuntu:26.04
 
 ARG COMFYUI_COMMIT=6f7cd7fceaaf60d2669b554936394a7412c6fde5
+ARG VAE_UTILS_COMMIT=d69e7afaa9edc3cd99096dc063ec37e71b2d1184
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 \
@@ -43,6 +44,15 @@ RUN curl -fsSL "https://github.com/comfyanonymous/ComfyUI/archive/${COMFYUI_COMM
 # Bare torch/torchvision/torchaudio entries in requirements.txt are already
 # satisfied by the pinned ROCm builds above; pip leaves them untouched.
 RUN pip install --no-cache-dir -r /opt/ComfyUI/requirements.txt
+
+# spacepxl/ComfyUI-VAE-Utils (MIT) pinned — node VAEUtils_VAEDecodeTiled,
+# the Krea 2x VAE-decode fit stage (Final decision 5,
+# docs/design/future/image-generation.md). No requirements file.
+RUN mkdir -p /opt/ComfyUI/custom_nodes \
+    && curl -fsSL "https://github.com/spacepxl/ComfyUI-VAE-Utils/archive/${VAE_UTILS_COMMIT}.tar.gz" \
+        | tar -xz -C /opt/ComfyUI/custom_nodes \
+    && mv "/opt/ComfyUI/custom_nodes/ComfyUI-VAE-Utils-${VAE_UTILS_COMMIT}" \
+        /opt/ComfyUI/custom_nodes/ComfyUI-VAE-Utils
 
 COPY janitor.sh /opt/janitor.sh
 RUN chmod +x /opt/janitor.sh

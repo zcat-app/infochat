@@ -1,7 +1,7 @@
 ---
 id: M1-807
 title: "ComfyUI image carve: VAE-Utils node + flag re-verify"
-status: pending
+status: done
 created: 2026-08-09
 last_updated: 2026-08-09
 flow: tick
@@ -59,6 +59,15 @@ spec_refs:
 decision_refs:
   - D75
   - D77
+clarity_check: "start 2026-08-09 pass — tick-lint 0 findings; reproduction re-run RED on main (grep -c → 0); citations verified (Dockerfile:15 COMFYUI_COMMIT, :5-7 flag comment, 61 lines no custom_nodes; design doc :739/:771-776/:790-793); analysis P21/P22/P33/P34 all present; no §Census (image/doc diff); node pre-check: local clone d69e7afaa9edc3cd99096dc063ec37e71b2d1184, MIT, NO requirements.txt, imports only torch/safetensors/tqdm/ComfyUI builtins — zero new deps, nothing to pin; host ComfyUI at the same 6f7cd7f pin as the image, so the conda 22.54 s spacepxl measurement applies to the image stack"
+reviews:
+  - round: 1
+    date: 2026-08-09
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY NOT-APPLICABLE, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "4 files changed, 28 insertions(+), 8 deletions(-)"
+    findings: "0 rework items; 0 critical/high; 2 candidate findings falsified-and-dropped (D75 canary-grep unevidenced — falsified structurally, janitor/tmpfs byte-identical; tarball without SHA-256 — falsified by threat model, supply-chain on operator infra out of scope v1)"
+    verdict_file: .scratch/tick-review-M1-807-r1.txt
 ---
 
 # M1-807: ComfyUI image carve: VAE-Utils node + flag re-verify

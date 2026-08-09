@@ -529,6 +529,17 @@ container steady state is 0.86x its conda number (the acceptance threshold
 was 2x). No conda number may be presented to operators as a container
 number.
 
+**VAE-Utils carve re-verification (2026-08-09, M1-807).** The image now
+carries spacepxl/ComfyUI-VAE-Utils at pinned commit
+`d69e7afaa9edc3cd99096dc063ec37e71b2d1184` (MIT; node id
+`VAEUtils_VAEDecodeTiled`, the Krea 2x VAE-decode fit stage). With the node
+present the load-bearing flags were re-measured, same protocol: Mage-Flow
+Turbo 4 steps 1024px container steady state **4.03 s** (5 runs, 0.92x the
+conda 4.38 s — within the 2x threshold). Krea 2 Turbo 6 steps @ 0.6 MP with
+VAELoader(Wan2.1_VAE_upscale2x_imageonly_real_v1) + VAEUtils_VAEDecodeTiled:
+container steady state **22.73 s** (3 runs, 22.57–22.81), output 1792x1344
+— exactly 2x the 896x672 latent, matching the conda VAE-lever measurement.
+
 **The backend no-retention window lives in the image.** The ComfyUI image
 carries the tmpfs output dir plus an aged-file janitor sweeping files older
 than `INFOCHAT_COMFYUI_OUTPUT_TTL_MINUTES` — **default 15 minutes**
