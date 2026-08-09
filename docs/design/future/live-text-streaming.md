@@ -152,11 +152,23 @@ M1-716 gate + M1-060/M1-718/M1-719/M1-720): **en, cs, es, ru, tr**.
 | fixture-verification record of the translator measurement programme (2026-08-02) | DeepL/Google back-translation verified the **fixture** translations: 12 docs × 8 languages, 96 lines read, 3 corrected | model output — this verified the TEST DATA, not any model |
 | language-enablement tickets (M1-716/718/719/720, M1-761, M1-778) | bundle parity (D43) + mechanical target-script check (a cs/ru reply contains Latin/Cyrillic) + the M1-778 fix for prose ignoring `/lang` | human- or judge-scored quality of generated chat prose per language |
 | live test sessions (2026-07-29 backup, `test-clients/admin/*-langcs.log`) | `/lang cs` config round-trip works | chat quality — the logs are config confirmations only |
+| `docs/measurement/lang-quality.md` (2026-08-09) | chat-quality prose in cs/es/tr/ru vs the incumbent bar: gemma-4-26b-a4b cleared ALL FOUR languages (tie + zero defects); qwen3.6-35b-a3b tied on judgement but failed L0 hygiene in every cell (code-switch English collapse, tr refusal misfires, ru runaway loop); all three locals tie the incumbent on EN↔X translation | tool-loop behaviour in-language (no TOOL_CALL in the campaign), grounded chat with retrieved context (parametric-only leg), chat_memory canonicity, prefill latency with translated context |
 
 **The gap:** no measurement exists that any model — local or remote — produces
 chat-quality prose in cs/es/ru/tr while running the tool loop. The DeepL-based
 verification that was remembered from the measurement programme WAS real, but
 its scope was fixture verification for the translator legs, not model quality.
+
+**Update 2026-08-09 — gap PARTIALLY closed.** The lang-quality campaign
+(`docs/measurement/lang-quality.md`) measured chat-quality prose in
+cs/es/tr/ru on the deployment box: gemma-4-26b-a4b cleared the bar in all
+four languages (tie with the incumbent + zero defects); qwen tied on
+judgement but failed L0 hygiene everywhere. Revisit condition (d) is thus
+partially met — what remains open is exactly the second half of the gap
+sentence above: the tool loop in-language and grounded context (the campaign
+ran plain chat, parametric-only by design). Follow-on proposal 2026-08-10:
+switchable translation pipeline — future-features §D5 — direct mode skips
+display translation, which removes hurdle 1 of §I1 for direct-mode scopes.
 
 ## The required measurement (gate for revisiting)
 

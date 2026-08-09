@@ -383,6 +383,66 @@ are majority one non-English language that Postgres stems. The change is small
 when it comes: M1-745 already isolates it to one comparison
 (`source.language <> 'en'`) and one DDL literal.
 
+### D5. Switchable translation pipeline (pivot vs direct generation)
+**What:** an enable/disable switch on the reply path (user proposal,
+2026-08-10), configurable at TWO levels: a **deployment-level** default
+(operator config) and a **per-user override** — a user command toggles the
+mode for their own scopes (command shape TBD, `/lang`-family preference).
+**ON (pivot, today's behaviour):** the chat model replies in
+English under `REPLY_LANGUAGE_DIRECTIVE` and the display leg translates into
+the declared language — works with any strong-English model (e.g.
+qwen3.6-35b-a3b: track-a chat 88.5% vs the incumbent's 80.8%). **OFF
+(direct):** a model that cleared the in-language bar (today:
+gemma-4-26b-a4b) generates the reply directly in the declared language; the
+display leg is skipped — one fewer LLM round-trip on the user-perceived path.
+Query translation (X→EN under D58) stays in BOTH modes: the embedding DB is
+English. Per-user level means one deployment can serve both modes at once;
+the compatibility constraint (direct only with bar-clearing models) binds at
+ whichever level chooses direct.
+
+**Current state / evidence.** The lang-quality campaign (2026-08-09,
+`docs/measurement/lang-quality.md`) supplied the measurement this direction
+was waiting on:
+
+- gemma cleared the chat bar in **all four** languages (tie incumbent + zero
+  defects); holds the user's language under code-switched input, typos, and
+  pressure turns.
+- qwen tied the incumbent on judgement in every cell but FAILED L0 hygiene in
+  every cell — whole-turn English collapse on code-switched input in all four
+  languages, Turkish refusal misfires, a runaway loop. Direct mode must
+  therefore be **restricted to models that cleared the in-language bar**, or
+  this failure class recurs.
+- All three locals tie the incumbent on EN↔X translation (CometKiwi within
+  ±0.003, zero defects) — the surviving translation legs can move local too.
+- Side finding: the incumbent itself fails its own hygiene bar in cs/ru/tr
+  (refusal-token misfires without retrieval context) — a fixable
+  shipped-prompt problem, recorded.
+
+**Connection to streaming (§I1).** Direct mode removes I1's deciding hurdle —
+the conflict between display-time reply translation and a streamed prefix —
+for direct-mode scopes: the reply is generated in the scope language, so
+there is nothing to swap and streaming becomes composable. Pivot scopes keep
+today's behaviour (no streaming). The switch turns two mutually exclusive
+features into a per-mode pairing (generalizes I1 revisit condition (b)).
+
+**Prerequisites / tensions:**
+
+- **Mini-E2E measurement first** (the remaining gap): grounded direct chat —
+  EN retrieved posts injected, reply in X — per language: language holding
+  with English context, grounding/citation accuracy, no bleed; plus an A/B on
+  whether retrieved context needs translating at all (the cheaper hypothesis:
+  gemma reads English context directly). The campaign's DIRECT leg was
+  parametric-only by design; the tool loop in-language is also unmeasured.
+- **`chat_memory` canonicity** (I1 open decision 2): native-language turns
+  break English-canonical memory or force a persist-time back-translate.
+- **Spec amendment:** D29/D58 scope (display leg becomes conditional),
+  `REPLY_LANGUAGE_DIRECTIVE` conditional on the switch, declared-language
+  contract (declared by channel, never inferred) holds in both modes;
+  degradation fallback direct→pivot.
+
+**Verdict: `needs-analysis`** — direction evidence-backed as of 2026-08-09;
+the gates are the mini-E2E measurement + the memory-canonicity design.
+
 ---
 
 ## E. Smaller polish (data mostly exists)
@@ -858,6 +918,21 @@ UNMEASURED. The design layer now lives in
 hardware correction, the evidence inventory, and **the required chat-quality
 measurement per supported language, which is the first gate to run before any
 revisit**. Verdict unchanged: `parked`, pending that measurement.
+
+**Update 2026-08-09 — the measurement gate RAN, and partially cleared.** The
+required chat-quality measurement was run as the lang-quality campaign
+(`docs/measurement/lang-quality.md`): gemma-4-26b-a4b cleared the chat bar in
+ALL FOUR shipped non-English languages (tie incumbent + zero defects);
+qwen3.6-35b-a3b tied on judgement but failed L0 hygiene in every cell
+(whole-turn English collapse on code-switched input, tr refusal misfires, ru
+runaway loop). Revisit condition (d) is therefore PARTIALLY met: chat-quality
+prose in the shipped languages is now measured — but the tool-loop and
+grounded-context parts of the gap remain open (the campaign ran plain chat,
+parametric-only). Separately, the 2026-08-10 user proposal reframes the
+translation conflict as mode-dependent: a switchable translation pipeline
+(**§D5**) whose direct mode skips display translation — removing this entry's
+deciding hurdle for direct-mode scopes and making streaming composable per
+mode. Verdict unchanged: `parked`, pending the remaining gates.
 
 ---
 
