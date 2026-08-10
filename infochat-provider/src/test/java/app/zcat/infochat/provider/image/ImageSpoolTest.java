@@ -18,6 +18,7 @@ import java.util.concurrent.Future;
 import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -29,6 +30,15 @@ class ImageSpoolTest {
 
     @TempDir
     Path tempDir;
+
+    @Test
+    void absentSpoolDirIsAnEmptySpool() throws IOException {
+        ImageSpool spool = new ImageSpool(tempDir.resolve("absent-spool"), 1_000_000L);
+        Instant now = Instant.parse("2026-08-10T12:00:00Z");
+
+        assertEquals(List.of(), spool.agedFiles(now, Duration.ofHours(1)));
+        assertDoesNotThrow(() -> spool.evictAgedFiles(now, Duration.ofHours(1)));
+    }
 
     @Test
     void refusesWritesPastTheCapacityBound() throws IOException {

@@ -1,20 +1,20 @@
 ---
 id: M1-814
 title: "Treat an absent image spool as empty in the sweeper"
-status: pending
+status: done
 created: 2026-08-10
 last_updated: 2026-08-10
 flow: tick
 reproduction: >-
-  to-be-written: ImageSpoolTest.absentSpoolDirIsAnEmptySpool — constructs
-  ImageSpool over a path that does not exist (a fresh @TempDir child never
-  created), calls agedFiles(now, maxAge) and evictAgedFiles(now, maxAge),
-  and asserts an empty candidate list with no exception. RED on main:
-  agedFiles opens Files.newDirectoryStream(dir) unconditionally
-  (ImageSpool.java:107), so the absent directory throws
-  NoSuchFileException — the exact exception the live Provider logs as
-  "Image spool sweep failed" on every 15-minute cadence before any image
-  request (bench/livetest-10-08-26.md E7).
+  ImageSpoolTest.absentSpoolDirIsAnEmptySpool — constructs ImageSpool over a
+  path that does not exist (a fresh @TempDir child never created), calls
+  agedFiles(now, maxAge) and evictAgedFiles(now, maxAge), and asserts an empty
+  candidate list with no exception. RED before the boundary check:
+  agedFiles opened Files.newDirectoryStream(dir) unconditionally
+  (ImageSpool.java:107), so the absent directory threw NoSuchFileException —
+  the exact exception the live Provider logs as "Image spool sweep failed" on
+  every 15-minute cadence before any image request (bench/livetest-10-08-26.md
+  E7).
 analysis_ref: docs/plan/m1/tick-analysis/livetest-image-defects.md
 blocked_by: []
 files_scope:
@@ -53,11 +53,24 @@ test_plan:
 spec_refs: []
 decision_refs:
   - D74
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-10
+    verdict: APPROVE-WITH-FIXES
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY WARN, SCOPE PASS"
+    diff_stats: "5 files changed, 74 insertions(+), 17 deletions(-)"
+    findings: "1 low (MAINTAINABILITY) — agedFiles's absent-spool boundary contract was undocumented; the reviewer-required Javadoc sentence was applied with zero executable-line changes."
+    fix_probes: "sed -n '95,110p' ImageSpool.java | grep -qi absent exit 0; ./mvnw -B -pl infochat-provider -am test-compile exit 0 (.scratch/tick-fixes-M1-814-testcompile.log, BUILD SUCCESS, 6/6 modules); fixed-tree snapshot .scratch/tick-fixes-M1-814.tree = c461ae23464438c167daa42df79f1d6cb3afc4ed; round-1 green log remains target/tick-test-M1-814-r1.log."
+    verdict_file: .scratch/tick-review-M1-814-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-10
+  verdict: WARN
+  warnings:
+    - "SPEC-REFS-RESOLVABLE: spec_refs is empty — legal for this defect because the reproduction is the contract"
+  blockers: []
 ---
 
 # M1-814: Treat an absent image spool as empty in the sweeper

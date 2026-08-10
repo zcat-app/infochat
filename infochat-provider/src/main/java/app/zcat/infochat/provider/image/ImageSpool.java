@@ -100,10 +100,16 @@ public class ImageSpool {
 
     /** The spool files older than {@code now - maxAge} — the sweeper's
      * candidate set. Time is passed in, never read here, so the decision
-     * runs on the injected app-wide {@code Clock} (§9, M1-444 pattern). */
+     * runs on the injected app-wide {@code Clock} (§9, M1-444 pattern).
+     * An absent spool directory is an empty spool: the tmpfs dir exists only
+     * after the first write, so a missing directory yields an empty candidate
+     * set, not an IO failure (D74; design 06-messaging.md §6.2.4). */
     public java.util.List<Path> agedFiles(Instant now, Duration maxAge) throws IOException {
         Instant cutoff = now.minus(maxAge);
         java.util.List<Path> aged = new java.util.ArrayList<>();
+        if (Files.notExists(dir)) {
+            return aged;
+        }
         try (DirectoryStream<Path> entries = Files.newDirectoryStream(dir)) {
             for (Path entry : entries) {
                 if (Files.isRegularFile(entry)
