@@ -771,7 +771,10 @@ Where this addendum contradicts earlier sections, this addendum wins.
    ratio at the budget, rounded /16) and swaps the fit node
    ImageScaleToTotalPixels → ImageScale(width,height); no-flag jobs keep the
    baked graph untouched. (3) The converter is ONE unified model-agnostic
-   rule — sample at budget at the requested ratio, lanczos exact fit.
+   rule — sample at budget at the requested ratio, lanczos exact fit. The
+   pinned ComfyUI ImageScale schema requires `crop` and permits `disabled` or
+   `center`; the converter uses `disabled`, so exact sizing never crops the
+   image.
    Recorded deviation from Final decision 3: Mage samples at its 1 MP budget
    for all targets rather than directly at the target (Mage targets over
    1 MP are lanczos-upscaled from 1 MP — a quality nuance, user-approved to

@@ -155,10 +155,38 @@ class ComfyUIClientTest {
         assertEquals(768, graph.path("9").path("inputs").path("height").asLong());
         assertEquals("lanczos", graph.path("9").path("inputs").path("upscale_method").asText(),
                 "the baked lanczos method survives the swap");
+        assertEquals("disabled", graph.path("9").path("inputs").path("crop").asText(),
+                "the exact-size ImageScale disables cropping");
         assertTrue(graph.path("9").path("inputs").path("megapixels").isMissingNode(),
                 "the megapixels scalar is gone after the swap");
         assertTrue(graph.path("9").path("inputs").path("resolution_steps").isMissingNode(),
                 "the resolution_steps scalar is gone after the swap");
+    }
+
+    @Test
+    void resolutionGraphCarriesTheImageScaleCropInput() throws Exception {
+        ComfyUIClient client = configuredClient(stubServer(), Duration.ofMinutes(1));
+
+        JsonNode graph = JSON.readTree(client.buildGraph("a prompt", 512, 768));
+
+        assertEquals("disabled", graph.path("9").path("inputs").path("crop").asText(),
+                "the exact-size ImageScale must carry the installed node's required crop input");
+    }
+
+    @Test
+    void resolutionGraphsForTheLiveFailedRatiosCarryCrop() throws Exception {
+        ComfyUIClient client = configuredClient(stubServer(), Duration.ofMinutes(1));
+        long[][] targets = {{1600, 900}, {600, 600}, {1024, 768}, {768, 1024}};
+
+        for (long[] target : targets) {
+            JsonNode fitInputs = JSON.readTree(client.buildGraph("a prompt", target[0], target[1]))
+                    .path("9").path("inputs");
+
+            assertEquals("disabled", fitInputs.path("crop").asText(),
+                    "the ImageScale crop input must be disabled for " + target[0] + "x" + target[1]);
+            assertEquals(target[0], fitInputs.path("width").asLong());
+            assertEquals(target[1], fitInputs.path("height").asLong());
+        }
     }
 
     @Test

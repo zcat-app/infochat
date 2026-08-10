@@ -144,6 +144,7 @@ public class ComfyUIClient {
         fitInputs.remove("resolution_steps");
         fitInputs.put("width", targetWidth);
         fitInputs.put("height", targetHeight);
+        fitInputs.put("crop", "disabled");
         return serialize(graph);
     }
 

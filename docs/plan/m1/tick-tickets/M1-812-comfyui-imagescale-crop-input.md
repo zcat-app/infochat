@@ -1,12 +1,12 @@
 ---
 id: M1-812
 title: "ComfyUI ImageScale crop input on -r graphs"
-status: pending
+status: done
 created: 2026-08-10
 last_updated: 2026-08-10
 flow: tick
 reproduction: >-
-  to-be-written: ComfyUIClientTest.resolutionGraphCarriesTheImageScaleCropInput —
+  ComfyUIClientTest.resolutionGraphCarriesTheImageScaleCropInput —
   builds client.buildGraph(prompt, 512, 768) against the wizard-shape
   template fixture, re-parses, and asserts the swapped fit node's inputs
   carry crop="disabled" next to width/height. RED on main: the builder sets
@@ -57,11 +57,21 @@ test_plan:
 spec_refs:
   - docs/spec/commands.md §Content
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-10
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "5 files changed, 48 insertions(+), 12 deletions(-)"
+    verdict_file: .scratch/tick-review-M1-812-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-10
+  verdict: PASS
+  warnings: []
+  blockers: []
 ---
 
 # M1-812: ComfyUI ImageScale crop input on -r graphs
