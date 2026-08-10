@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 32 |
+| done | 33 |
 | deferred | 0 |
 | abandoned | 0 |
 | **total** | **34** |
@@ -26,7 +26,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-816 — Image e2e release gate: configured pipeline proof (complexity: medium, risk: medium)
-- M1-817 — Image resolution floor and limit-error wording (complexity: low, risk: low)
 
 ---
 
@@ -62,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-817 | Image resolution floor and limit-error wording | 2026-08-11 | round 2 APPROVE |
 | M1-815 | Strip internal config identifiers from LLM output | 2026-08-11 | round 2 APPROVE |
 | M1-814 | Treat an absent image spool as empty in the sweeper | 2026-08-10 | round 1 APPROVE-WITH-FIXES |
 | M1-813 | Write IMAGE_GENERATE rows on queue-depth failures | 2026-08-10 | round 1 APPROVE |
@@ -71,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-809 | Wizard download preflight parity and fail-fast guidance | 2026-08-10 | round 2 APPROVE |
 | M1-808 | Run wizard download containers on the host network | 2026-08-10 | round 1 APPROVE |
 | M1-803 | /image command handler: gates, translation, echo, audit | 2026-08-10 | round 3 APPROVE |
-| M1-798 | Setup-wizard /image step: picker, templates, ETA probe | 2026-08-10 | round 2 APPROVE |
 
 ---
 
@@ -129,7 +128,7 @@ M1-808 (done)
         └── M1-810 (done)
 M1-811 (done)
   ├── M1-816 (pending) ← runnable
-  └── M1-817 (pending) ← runnable
+  └── M1-817 (done)
 M1-812 (done)
   └── M1-816 (pending) [see above]
 M1-813 (done)

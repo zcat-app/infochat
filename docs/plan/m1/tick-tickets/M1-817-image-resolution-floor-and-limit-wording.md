@@ -1,12 +1,12 @@
 ---
 id: M1-817
 title: "Image resolution floor and limit-error wording"
-status: pending
+status: done
 created: 2026-08-10
-last_updated: 2026-08-10
+last_updated: 2026-08-11
 flow: tick
 reproduction: >-
-  to-be-written: ImageCommandParserTest.belowFloorResolutionIsRejectedBeforeAnyGate —
+  ImageCommandParserTest.belowFloorResolutionIsRejectedBeforeAnyGate —
   parses `/image -r 1x1024 a cat` (a plausible typo; 1,024 px) against the
   floor 16,384 and asserts a Failure carrying IMAGE_ERROR_RESOLUTION_TOO_SMALL.
   RED on main: validateResolution (ImageCommandParser.java:96-118) rejects only
@@ -85,11 +85,49 @@ test_plan:
 spec_refs:
   - docs/spec/commands.md §Content
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-11
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS WARN, SECURITY PASS, TEST-ADEQUACY FAIL, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "15 files changed, 187 insertions(+), 36 deletions(-)"
+    findings: "1 low rework item, 0 critical/high"
+    verdict_file: .scratch/tick-review-M1-817-r1.txt
+  - round: 2
+    date: 2026-08-11
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "reconstructed fix hunk: 1 file, +9/-0; full current diff: 15 files, +225/-37"
+    notes: "Round-1 REWORK item SATISFIED; full mvn verify green."
+    verdict_file: .scratch/tick-review-M1-817-r2.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  lint: "tick-lint: 0 finding(s), 0 BLOCKER(s)"
+  self_check: >-
+    Pass, no blocking question. Parser/handler/config citations and the two
+    census enumerations were spot-checked against this worktree; analysis_ref
+    is self. M1-811's added tests were traced: the shipped-ceiling and
+    refusal tests pin the shared ceiling/strip path, while its handler
+    over-ceiling test preserves the content-free failure contract; none adds
+    a parser minimum or conflicts with this ticket's floor seam. blocked_by
+    M1-811 is done, and no tick ticket is in-progress or in-review.
+  wording_approval: >-
+    On 2026-08-10 the user explicitly approved the exact applied wording:
+    EN small "That resolution is too small (at least about {0}x{1}).";
+    EN large "That resolution is too large (up to about {0}x{1})."; CS
+    small "Toto rozlišení je příliš malé (alespoň přibližně {0}x{1})." and
+    large "Toto rozlišení je příliš velké (nejvýše přibližně {0}x{1})."; ES
+    small "Esa resolución es demasiado pequeña (al menos aproximadamente
+    {0}x{1})." and large "Esa resolución es demasiado grande (como máximo
+    aproximadamente {0}x{1})."; RU small "Это разрешение слишком маленькое
+    (не менее примерно {0}x{1})." and large "Это разрешение слишком большое
+    (не более примерно {0}x{1})."; TR small "Bu çözünürlük çok küçük (en az
+    yaklaşık {0}x{1} deneyin)." and large "Bu çözünürlük çok büyük (en fazla
+    yaklaşık {0}x{1} deneyin)."; spec text "The `--resolution|-r` value is
+    also bounded by a server-side pixel floor and is rejected at the parser
+    before any gate runs when its pixel product is below that floor."
 ---
 
 # M1-817: Image resolution floor and limit-error wording
@@ -398,3 +436,9 @@ python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-817-image-resolution-f
 
 The lint gate is the mechanical half of readiness; `start` refuses on a
 BLOCKER. Full check table: `docs/process/tick-workflow.md` §1.
+
+## Round 1 rework
+
+REWORK ITEMS (verbatim from `.scratch/tick-review-M1-817-r1.txt`):
+
+1. Add the handler-boundary over-ceiling reply assertion described in FINDING 1, evaluated via `ImageCommandHandlerTest.overCeilingResolutionIsRejectedLocalizedWithSuggestedDimensions` and its exact `reply.text()` assertion for `That resolution is too large (up to about 2236x2236).`.

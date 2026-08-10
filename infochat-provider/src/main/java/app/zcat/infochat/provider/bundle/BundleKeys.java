@@ -2172,8 +2172,11 @@ public final class BundleKeys {
     /** Parser reject: a {@code --resolution} value that is not {@code WxH}. */
     public static final String IMAGE_ERROR_BAD_RESOLUTION = "image.error.bad_resolution";
 
-    /** Parser reject: a resolution above the server-side pixel ceiling; {@code {0}} = the ceiling. */
+    /** Parser reject: a resolution above the server-side pixel ceiling; {@code {0}} = width, {@code {1}} = height. */
     public static final String IMAGE_ERROR_RESOLUTION_TOO_LARGE = "image.error.resolution_too_large";
+
+    /** Parser reject: a resolution below the server-side pixel floor; {@code {0}} = width, {@code {1}} = height. */
+    public static final String IMAGE_ERROR_RESOLUTION_TOO_SMALL = "image.error.resolution_too_small";
 
     /** Parser reject: no prompt text at all. */
     public static final String IMAGE_ERROR_MISSING_PROMPT = "image.error.missing_prompt";

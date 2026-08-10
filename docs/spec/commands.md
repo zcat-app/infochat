@@ -600,7 +600,10 @@ them to the marked region — doing so would red the build.
   by sampling or upscaling, so the flag never constrains the sampler.
   **The prompt is length-bounded by a profile-driven cap** and rejected
   over cap before any gate runs — cooldown and credits meter attempts,
-  not bytes, so the bound lives at the parser. **Control gates**, all
+  not bytes, so the bound lives at the parser. The `--resolution|-r` value is
+  also bounded by a server-side pixel floor and is rejected at the parser
+  before any gate runs when its pixel product is below that floor. **Control
+  gates**, all
   deterministic and evaluated before any backend
   call (D76): a per-user cooldown in DM and group alike; per-user AND
   per-group hourly credit buckets (the gate is an AND — both must yield,

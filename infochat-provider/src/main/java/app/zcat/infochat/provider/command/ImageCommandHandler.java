@@ -112,6 +112,10 @@ public class ImageCommandHandler implements CommandHandler {
     @ConfigProperty(name = "infochat.image.max-output-pixels", defaultValue = "5000000")
     long maxOutputPixels;
 
+    /** Server-side output-size floor bounding the parser's {@code --resolution} check. */
+    @ConfigProperty(name = "infochat.image.min-output-pixels", defaultValue = "16384")
+    long minOutputPixels;
+
     /** The per-model steady-state seconds the setup step seeds from the
      * container re-measurement; unset → position shown without an ETA. */
     @ConfigProperty(name = "infochat.image.steady-state-seconds")
@@ -133,7 +137,7 @@ public class ImageCommandHandler implements CommandHandler {
         }
 
         ImageCommandParser.ParseResult parsed =
-                ImageCommandParser.parse(rawText, promptMaxChars, maxOutputPixels);
+                ImageCommandParser.parse(rawText, promptMaxChars, maxOutputPixels, minOutputPixels);
         if (parsed instanceof ImageCommandParser.Failure failure) {
             return reply(scope, format(failure.bundleKey(), failure.interpolationArgs().toArray()));
         }

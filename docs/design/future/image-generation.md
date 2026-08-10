@@ -215,6 +215,7 @@ profile-driven in `application.properties`:
 | `infochat.image.max-queue-depth` | 3 | 3 | global backend depth at/above which the command refuses immediately |
 | `infochat.image.prompt-max-chars` | 500 | 300 | prompt length cap — rejected before any gate runs |
 | `infochat.image.max-output-pixels` | 5000000 | 5000000 | output pixel ceiling — bounds the parser's `--resolution` check and the strip's IHDR check on every output |
+| `infochat.image.min-output-pixels` | 16384 | 16384 | output pixel floor — bounds the parser's `--resolution` check |
 | `infochat.image.steady-state-seconds` | unset | unset | per-model steady-state seconds the setup wizard seeds from the container re-measurement; unset → position shown without an ETA |
 
 The cooldown is a 1-token bucket whose window IS the cooldown, reusing
@@ -247,8 +248,8 @@ variant when the steady-state constant is unset),
 PNG, spool failure), `IMAGE_ERROR_SEND_FAILED` (post-GPU delivery
 failure — the spec's eight do not name it, the no-refund arm needs a
 voice), the parser's `IMAGE_ERROR_PROMPT_TOO_LONG` /
-`IMAGE_ERROR_BAD_RESOLUTION` / `IMAGE_ERROR_RESOLUTION_TOO_LARGE` /
-`IMAGE_ERROR_MISSING_PROMPT`, the progress pair
+`IMAGE_ERROR_BAD_RESOLUTION` / `IMAGE_ERROR_RESOLUTION_TOO_SMALL` /
+`IMAGE_ERROR_RESOLUTION_TOO_LARGE` / `IMAGE_ERROR_MISSING_PROMPT`, the progress pair
 `IMAGE_PROGRESS_GENERATING_ETA` / `IMAGE_PROGRESS_GENERATING_NO_ETA`,
 and the echo `IMAGE_REPLY_ECHO`.
 

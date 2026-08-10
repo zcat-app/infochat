@@ -132,6 +132,7 @@ class ImageCommandHandlerTest {
         handler.imageBaseUrl = Optional.of("http://comfyui:8188");
         handler.promptMaxChars = 500;
         handler.maxOutputPixels = 2_000_000L;
+        handler.minOutputPixels = 16_384L;
         handler.steadyStateSeconds = Optional.empty();
 
         InboundContext context = new InboundContext();
@@ -174,6 +175,32 @@ class ImageCommandHandlerTest {
                 "the static flag gate runs before the queue read");
         assertTrue(rateCapBucket.tryAcquireImageUserCredit(userId),
                 "zero credits drawn — the flag gate runs BEFORE charging (P2)");
+    }
+
+    @Test
+    void belowFloorResolutionIsRejectedLocalizedAndFree() {
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm("alice"), "/image -r 1x1024 a cat");
+
+        assertEquals(java.text.MessageFormat.format(
+                bundleLoader.get(BundleKeys.IMAGE_ERROR_RESOLUTION_TOO_SMALL), "4", "4096"),
+                reply.text());
+        assertTrue(rateCapBucket.tryAcquireImageUserCredit(userId),
+                "the parser rejection runs before the user credit gate");
+        assertTrue(rateCapBucket.tryAcquireImageGroupCredit(groupId),
+                "the parser rejection runs before the group credit gate");
+        assertEquals(0, client.queueDepthCalls.get(), "the parser rejection skips backend calls");
+        assertEquals(0, client.generateCalls.get(), "the parser rejection skips generation");
+        assertTrue(auditWriter.rowsFor(AuditAction.IMAGE_GENERATE).isEmpty(),
+                "the parser rejection writes no IMAGE_GENERATE row");
+    }
+
+    @Test
+    void overCeilingResolutionIsRejectedLocalizedWithSuggestedDimensions() {
+        handler.maxOutputPixels = 5_000_000L;
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm("alice"), "/image -r 3000x3000 a cat");
+
+        assertEquals("That resolution is too large (up to about 2236x2236).", reply.text());
     }
 
     @Test
