@@ -590,8 +590,10 @@ fetch_asset() {
   fi
   echo "+ download $url -> $MODELS_VOLUME/$dest"
   # -u 0:0: a freshly-created named volume's root dir is root-owned (the
-  # fetch_gguf rationale); the read-only presence probe stays non-root.
-  docker run --rm -u 0:0 -v "$MODELS_VOLUME:/models" "$CURL_IMAGE" -fL --retry 3 --create-dirs -o "/models/$dest" "$url"
+  # fetch_gguf rationale); the read-only presence probe stays non-root. The
+  # download runs in the host netns with name-only proxy-env forwarding: the
+  # preflight proves the host path, so the fetch uses that same path.
+  docker run --rm -u 0:0 --network host -e HTTP_PROXY -e HTTPS_PROXY -e ALL_PROXY -e NO_PROXY -v "$MODELS_VOLUME:/models" "$CURL_IMAGE" -fL --retry 3 --create-dirs -o "/models/$dest" "$url"
 }
 
 # Generate the per-model API-format workflow template the Provider's

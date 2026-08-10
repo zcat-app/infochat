@@ -1,7 +1,7 @@
 ---
 id: M1-808
 title: "Run wizard download containers on the host network"
-status: pending
+status: done
 created: 2026-08-10
 last_updated: 2026-08-10
 flow: tick
@@ -15,7 +15,7 @@ reproduction: >-
   pass, then `curl: (6) Could not resolve host: huggingface.co` kills the
   first download; `docker run --rm --network host curlimages/curl:8.11.1 -sI
   --max-time 8 https://huggingface.co` returns HTTP/2 200 on the same host.
-  Intended test (to-be-written at start):
+  Named test (written at start, run RED on the unfixed scripts, now green):
   LlamacppWiringTest.oneShotDownloadContainersUseTheHostNetworkPath.
 analysis_ref: docs/plan/m1/tick-analysis/wizard-download-container-network.md
 blocked_by: []
@@ -82,7 +82,14 @@ spec_refs:
   - docs/spec/security.md §Trust boundaries
   - docs/design/07-deployment.md §7.7.2 First-run setup wizard
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-10
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "6 files changed, 66 insertions(+), 14 deletions(-)"
+    findings: "0 rework items; 0 critical/high; 3 candidate findings falsified-and-dropped (post-verify log freshness — defeated by disclosed driver statement + 15/15 green argv-asserting run + byte-identical cap snapshot + commit's tree-identity recheck; findFirst-only download assertion — defeated by single fetch_gguf docker-run line serving both call sites; host-netns loopback reach — defeated by argv-only pinned-image shape, no port exposed, operator is principal); 1 RECOMMENDED-NEW-TICKET (lowercase proxy vars not forwarded; TOUCHED-BY-THIS-DIFF: yes; recorded under Review observations)"
+    verdict_file: .scratch/tick-review-M1-808-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -229,3 +236,18 @@ Class: one-shot provisioning containers performing outbound network I/O
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-808-wizard-downloads-host-network.md
 ```
+
+## Review observations
+
+Round 1 RECOMMENDED-NEW-TICKET (TOUCHED-BY-THIS-DIFF: yes, no DECIDE-BEFORE —
+recorded, no decision requested; filing a ticket is the user's call): the
+three download invocations forward only the UPPERCASE proxy names
+(`-e HTTP_PROXY -e HTTPS_PROXY -e ALL_PROXY -e NO_PROXY`), exactly as this
+ticket promised. On a host whose proxy is configured only in the lowercase
+shell form (`http_proxy=...`, which host curl honors), the 4b preflight HEAD
+passes through the proxy while the download container receives no proxy
+variable and tries a direct connection — the same "preflight passes,
+download dies" wall this family removes, for the corporate-proxy host class.
+Candidate follow-up: additionally forward the lowercase twins in the same
+name-only form (still set -u-safe). Not a finding of this round — the
+ticket-as-written promised the four uppercase names and delivered them.

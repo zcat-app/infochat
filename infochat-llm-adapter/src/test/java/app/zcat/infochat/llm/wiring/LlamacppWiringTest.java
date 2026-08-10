@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -323,6 +324,28 @@ class LlamacppWiringTest {
 
     @Test
     @EnabledOnOs(OS.LINUX)
+    void oneShotDownloadContainersUseTheHostNetworkPath(@TempDir Path tmp) throws Exception {
+        // The one-shot download runs in the host netns (the path the reachability
+        // preflight proves) with the host's proxy env forwarded name-only; the
+        // probe-absent switch makes the shim issue the download, so the argv is real.
+        runWizard(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS,
+                Map.of("FAKE_DOCKER_PROBE_ABSENT", "1"));
+
+        String download = downloadInvocationFromDockerArgv(Files.readString(tmp.resolve("docker-argv.log")));
+        assertTrue(containsToken(download, "--network host"),
+                "the one-shot GGUF download must run in the host netns (M1-808):\n" + download);
+        for (String proxyVar : List.of("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY")) {
+            assertTrue(containsToken(download, "-e " + proxyVar),
+                    "the download must forward the host's " + proxyVar + " in name-only form (M1-808):\n" + download);
+        }
+        assertTrue(containsToken(download, "-u 0:0"),
+                "the download must keep the root-write flag (M1-808):\n" + download);
+        assertTrue(containsToken(download, "-v infochat-llamacpp-models:/models"),
+                "the download must keep the pinned model-volume mount (M1-442):\n" + download);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
     void switchingAwayFromRemoteToLlamacppClearsStaleRemoteApiKeys(@TempDir Path tmp) throws Exception {
         // Seed the runtime as a prior `remote` run left it: seven generative api-key
         // lines + an embeddings api-key in application.properties, and the
@@ -360,6 +383,11 @@ class LlamacppWiringTest {
 
     /** Run prod/scripts/4-llm.sh with a fake docker on PATH; return generated props. */
     private Map<String, String> runWizard(Path tmp, String stdin) throws Exception {
+        return runWizard(tmp, stdin, Map.of());
+    }
+
+    /** runWizard plus extra env for the drive (e.g. the probe-absent switch). */
+    private Map<String, String> runWizard(Path tmp, String stdin, Map<String, String> extraEnv) throws Exception {
         Path repoRoot = repoRoot();
         Path runtime = Files.createDirectories(tmp.resolve("runtime"));
         // Seed the profile 1-profile.sh would have written (vps has a nomic embedder),
@@ -383,6 +411,7 @@ class LlamacppWiringTest {
         // The fake docker appends each invocation's argv here so the test can read
         // back the `-v <volume>:/models` argument fetch_gguf passes (M1-442).
         env.put("FAKE_DOCKER_ARGV", tmp.resolve("docker-argv.log").toString());
+        env.putAll(extraEnv);
 
         Process p = pb.start();
         p.getOutputStream().write(stdin.getBytes(StandardCharsets.UTF_8));
@@ -417,6 +446,9 @@ class LlamacppWiringTest {
                 + "      *" + EMB_GGUF + ") echo \"" + EMB_SHA + "  $last\" ;;\n"
                 + "      *) echo \"0000000000000000000000000000000000000000000000000000000000000000  $last\" ;;\n"
                 + "    esac\n"
+                + "  fi\n"
+                + "  if [ \"$ep\" = \"ls\" ] && [ -n \"$FAKE_DOCKER_PROBE_ABSENT\" ]; then\n"
+                + "    exit 1\n"  // opt-in: report the volume probe ABSENT so the download is issued and recorded
                 + "  fi\n"
                 + "  exit 0\n"  // ls reports present (skip download); download/rm no-op
                 + "fi\n"
@@ -453,6 +485,20 @@ class LlamacppWiringTest {
         Matcher m = Pattern.compile("-v (\\S+):/models").matcher(argv);
         assertTrue(m.find(), "fetch_gguf must pass a `-v <volume>:/models` argument:\n" + argv);
         return m.group(1);
+    }
+
+    /** The recorded download invocation — the argv line carrying `-fL -o` (the download, not a probe). */
+    private String downloadInvocationFromDockerArgv(String argv) {
+        return argv.lines()
+                .filter(l -> l.contains("-fL") && l.contains("-o "))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError(
+                        "no download invocation recorded in the fake-docker argv:\n" + argv));
+    }
+
+    /** True when the line carries the exact whitespace-delimited token (name-only -e flags stay unexpanded). */
+    private boolean containsToken(String line, String token) {
+        return Pattern.compile("(^|\\s)" + Pattern.quote(token) + "(\\s|$)").matcher(line).find();
     }
 
     /** The volume alias a compose service mounts at /models. */

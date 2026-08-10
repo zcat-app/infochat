@@ -226,8 +226,10 @@ fetch_gguf() {
     # named volume's root dir is owned by root — a non-root write to /models
     # is denied. Run the write (and the mismatch-rm below) as root; curl -o
     # leaves the GGUF world-readable, so the non-root llama.cpp server still
-    # reads it. The presence/checksum probes stay non-root (reads only).
-    docker run --rm -u 0:0 -v infochat-llamacpp-models:/models "$CURL_IMAGE" -fL -o "/models/$file" "$url"
+    # reads it. The presence/checksum probes stay non-root (reads only). The
+    # download runs in the host netns with name-only proxy-env forwarding:
+    # reachability is proven on the host path, so the fetch uses it.
+    docker run --rm -u 0:0 --network host -e HTTP_PROXY -e HTTPS_PROXY -e ALL_PROXY -e NO_PROXY -v infochat-llamacpp-models:/models "$CURL_IMAGE" -fL -o "/models/$file" "$url"
   fi
   if [[ -n "$expected" ]]; then
     actual="$(docker run --rm -v infochat-llamacpp-models:/models --entrypoint sha256sum "$CURL_IMAGE" "/models/$file" | awk '{print $1}')"

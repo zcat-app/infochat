@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 24 |
+| done | 25 |
 | deferred | 0 |
 | abandoned | 0 |
 | **total** | **27** |
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-808 — Run wizard download containers on the host network (complexity: low, risk: medium)
+- M1-809 — Wizard download preflight parity and fail-fast guidance (complexity: low, risk: low)
 
 ---
 
@@ -42,7 +42,6 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-809 — blocked_by: M1-808 (pending)
 - M1-810 — blocked_by: M1-809 (pending)
 
 ---
@@ -62,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-808 | Run wizard download containers on the host network | 2026-08-10 | round 1 APPROVE |
 | M1-803 | /image command handler: gates, translation, echo, audit | 2026-08-10 | round 3 APPROVE |
 | M1-798 | Setup-wizard /image step: picker, templates, ETA probe | 2026-08-10 | round 2 APPROVE |
 | M1-807 | ComfyUI image carve: VAE-Utils node + flag re-verify | 2026-08-09 | round 1 APPROVE |
@@ -71,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-804 | Flip the marker-drop test to the emptied-reply degrade | 2026-08-08 | round 1 APPROVE |
 | M1-801 | tmpfs spool, age sweeper, PNG strip, delivery path | 2026-08-08 | round 2 APPROVE |
 | M1-800 | SimpleX + Signal sendAttachment codecs and ceilings | 2026-08-08 | round 2 APPROVE |
-| M1-799 | Outbound attachment SPI: payload, flags, default method | 2026-08-08 | round 1 APPROVE-WITH-FIXES |
 
 ---
 
@@ -124,7 +123,7 @@ M1-804 (done)
 M1-806 (done)
 M1-807 (done)
   └── M1-798 (done)
-M1-808 (pending) ← runnable
-  └── M1-809 (pending)
+M1-808 (done)
+  └── M1-809 (pending) ← runnable
         └── M1-810 (pending)
 ```

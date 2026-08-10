@@ -229,7 +229,10 @@ fetch_gguf() {
     echo "  skip GGUF download ($file already present)"
   else
     echo "  + download $url -> volume infochat-llamacpp-models/$file"
-    docker run --rm -u 0:0 -v infochat-llamacpp-models:/models "$CURL_IMAGE" -fL -o "/models/$file" "$url"
+    # No-shell host-netns download: the fetch uses the path the host's own
+    # network proves, with the host's proxy env forwarded name-only (unset
+    # vars are silently omitted, set -u safe).
+    docker run --rm -u 0:0 --network host -e HTTP_PROXY -e HTTPS_PROXY -e ALL_PROXY -e NO_PROXY -v infochat-llamacpp-models:/models "$CURL_IMAGE" -fL -o "/models/$file" "$url"
   fi
   if [[ -n "$expected" ]]; then
     actual="$(docker run --rm -v infochat-llamacpp-models:/models --entrypoint sha256sum "$CURL_IMAGE" "/models/$file" | awk '{print $1}')"
