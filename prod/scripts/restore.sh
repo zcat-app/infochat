@@ -701,7 +701,16 @@ PLACED+=("LLM models in their Docker volumes (reused as-is on a re-run)")
 # clone already has the identity restored from the bundle — re-provisioning could
 # create a NEW SimpleX address and break the "same contact link" clone guarantee.
 echo "+ build app images"
-compose build infochat-collector infochat-provider
+build_rc=0
+compose build infochat-collector infochat-provider || build_rc=$?
+if [[ "$build_rc" -ne 0 ]]; then
+  echo "FAIL: image build failed over the host's own network path (builds run host-network, M1-810)." >&2
+  echo "      Check host connectivity: VPN, proxy, or firewall. If you use a proxy, export" >&2
+  echo "      HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY — the Docker builder forwards them to" >&2
+  echo "      the build steps automatically — and re-run. No infochat container depends on" >&2
+  echo "      container DNS: downloads and builds both use the host path." >&2
+  exit "$build_rc"
+fi
 echo "+ start Collector (wait up to ${COLLECTOR_WAIT_TIMEOUT}s for healthy — it runs Flyway, an idempotent no-op over the restored schema)"
 compose up -d --wait --wait-timeout "$COLLECTOR_WAIT_TIMEOUT" infochat-collector
 

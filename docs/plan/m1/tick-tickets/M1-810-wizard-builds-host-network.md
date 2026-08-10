@@ -1,7 +1,7 @@
 ---
 id: M1-810
 title: "Run wizard image builds on the host network"
-status: pending
+status: done
 created: 2026-08-10
 last_updated: 2026-08-10
 flow: tick
@@ -18,7 +18,7 @@ reproduction: >-
   and only worked with `docker build --network=host` (local memory entry) —
   no script-provided way through for a first-time user, who dies at step 7
   (7-apps.sh:62) and, on a fresh GPU host, at 4b's implicit comfyui build
-  (4b-image.sh:801). Intended test (to-be-written at start):
+  (4b-image.sh:801). Test (written at start, run RED on main):
   BuildHostNetworkWiringTest.appImageBuildsDeclareTheHostNetwork.
 analysis_ref: docs/plan/m1/tick-analysis/wizard-download-container-network.md
 blocked_by: [M1-809]
@@ -57,7 +57,7 @@ out_of_scope:
     /image overlay) — orthogonal to network context; censused, not fixed
     here.
 acceptance:
-  - "REPRODUCTION, now passing: BuildHostNetworkWiringTest.appImageBuildsDeclareTheHostNetwork (to-be-written at start; infochat-provider wiring package, repo-root compose-read pattern of RestoreWiringTest/LlamacppWiringTest) — asserts the infochat-collector and infochat-provider service blocks in docker-compose.yml and the comfyui block in docker-compose.comfyui.yml each declare `network: host` inside their build: section, and that NONE of the three files declares `network_mode` on any service (FAILURE-MODE: a service-level network_mode — runtime host networking, forbidden as a default per docs/spec/security.md §Trust boundaries — fails the test, as does a missing key under any build: block). RED on main: no compose file declares a build network today (grep-verified)."
+  - "REPRODUCTION, now passing: BuildHostNetworkWiringTest.appImageBuildsDeclareTheHostNetwork (written at start, RED on main; infochat-provider wiring package, repo-root compose-read pattern of RestoreWiringTest/LlamacppWiringTest) — asserts the infochat-collector and infochat-provider service blocks in docker-compose.yml and the comfyui block in docker-compose.comfyui.yml each declare `network: host` inside their build: section, and that NONE of the three files declares `network_mode` on any service (FAILURE-MODE: a service-level network_mode — runtime host networking, forbidden as a default per docs/spec/security.md §Trust boundaries — fails the test, as does a missing key under any build: block). RED on main: no compose file declares a build network today (grep-verified)."
   - "Live render proof on the divergent host (analysis P11): `docker compose -f docker-compose.yml --env-file prod/runtime/secrets.env --profile prod config` prints `network: host` under BOTH app services' build: blocks, and `docker compose -f docker-compose.yml -f docker-compose.comfyui.yml config` prints it under comfyui — proves the host's compose (v5.4.0) accepts and renders the key rather than rejecting or silently ignoring it."
   - "Live build proof on the divergent host: one cold rebuild completes end-to-end — `docker compose -f docker-compose.yml --env-file prod/runtime/secrets.env --profile prod build --no-cache infochat-collector` exits 0 (RUN-step egress — mvn dependency tree + apt-get — works over the host path; this IS the step-7 first-run shape), then the warm-cache rebuild the wizard would run is re-verified green."
   - "Mechanics preserved (analysis §Controls to preserve item 6, engineering-rules §10): the compose change adds ONLY the network key — probes: `grep -n 'context:\\|dockerfile:' docker-compose.yml` still hits :97-98 and :169-170 unchanged, `grep -n 'image: infochat-comfyui' docker-compose.comfyui.yml` still hits the tag; upgrade.sh's rollback flow keeps its ordering and exit behavior (guidance wraps only — probe: `bash -n` on every touched script); RestoreWiringTest stays green — including nonIgnorablePgRestoreErrorAbortsBeforeImageBuildAndBringUp (no build argv after a failed gate) and sourceStoppedFlagReachesProviderStart (bring-up ordering through the build argv) — and DoctorWiringTest + LlamacppWiringTest stay green; mvn verify from the repo root is green."
@@ -83,11 +83,37 @@ spec_refs:
   - docs/design/07-deployment.md §7.7.2 First-run setup wizard
   - docs/spec/security.md §Trust boundaries
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-10
+    verdict: APPROVE-WITH-FIXES
+    checks: "SPEC-TRUTHNESS WARN, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "17 files changed, 384 insertions(+), 29 deletions(-) (incl. sibling-stream docs/plan churn, falsified-and-dropped by the gate)"
+    findings: "2 fix items (0 critical/high, both low SPEC-TRUTHNESS evidence gaps): missing compose-config render capture (acceptance item 2); unrecorded compose floor for build: network (acceptance item 6, commit-body record). 6 candidate findings falsified-and-dropped (sibling docs/plan churn, restore.sh partial-state note, upgrade.sh rollback exit behavior, BuildKit proxy sentence, warm-cache capture, compose build --network ASSUMPTION, 17:27 ComfyUIClientTest flake)"
+    fix_probes: "ITEM 1 applied: render captured to .scratch/tick-render-M1-810.log on the divergent host (compose v5.4.0; prod/runtime/secrets.env absent on this box — repo-shipped prod/config/secrets.env.example stood in, noted in the log) — `grep -c 'network: host'` prints 3, key inside infochat-collector, infochat-provider and comfyui build blocks. ITEM 2 deferred to /tick commit by the verdict's own wording: commit body must carry the verified compose floor for build: network + source (probe: `git log -1 --format=%B | grep -iE 'compose floor|build: network'`). Zero file lines changed by the fixes (comment-only constraint trivially satisfied); ./mvnw -B -pl infochat-provider -am test-compile green 2026-08-10 (.scratch/tick-fixes-M1-810-testcompile.log, BUILD SUCCESS, 6/6 modules); fixed-tree snapshot .scratch/tick-fixes-M1-810.tree = 276e2f16. Round's green log of record: target/tick-test-M1-810-r1.log."
+    verdict_file: .scratch/tick-review-M1-810-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  checked: 2026-08-10
+  result: >-
+    Pass, no blocking question. Citations spot-checked: docker-compose.yml:96
+    and :168, docker-compose.comfyui.yml:22, 7-apps.sh:62, upgrade.sh:155 and
+    :272, 0-doctor.sh:79-85, DoctorWiringTest.java:56 all exact. Two line
+    drifts from M1-808/M1-809 landing after the analysis: restore.sh's build
+    is now :704 (ticket :695) and 4b-image.sh's implicit comfyui up is now
+    :815 (ticket :801) — sites unambiguous, wraps go where the command sits.
+    Census re-run: grep hits restore.sh:287 (help-text echo) and
+    4-llm.sh:161 (comment) with no rows — neither launches a build; the grep
+    also misses 7-apps.sh:62's `compose -f ... build` shape, covered by the
+    table from the analysis — census is complete in substance. Analysis
+    pitfalls P5/P6/P11/P12/P13 all landed. blocked_by M1-809's tests are all
+    LlamacppWiringTest drives of 4-llm.sh (disjoint from this ticket's seams);
+    its restore.sh download-guidage region is disjoint from the build wrap.
+    RestoreWiringTest pins verified present (:457 no-build-after-failed-gate,
+    :555 bring-up ordering through the build argv) — an if-wrap around the
+    same command at the same position preserves both.
 escalation_reason:
 ---
 

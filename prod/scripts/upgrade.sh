@@ -149,10 +149,18 @@ wait_healthy() {
 # restart. $1 is the pre-upgrade SHA; $2 is the DB backup artifact path for the
 # manual schema-restore note.
 rollback() {
-  local sha="$1" db_artifact="$2"
+  local sha="$1" db_artifact="$2" build_rc=0
   echo "+ rolling back working tree to $sha and rebuilding" >&2
   git -C "$REPO_ROOT" checkout "$sha"
-  compose build "${APP_SERVICES[@]}"
+  compose build "${APP_SERVICES[@]}" || build_rc=$?
+  if [[ "$build_rc" -ne 0 ]]; then
+    echo "FAIL: rollback rebuild failed over the host's own network path (builds run host-network, M1-810)." >&2
+    echo "      Check host connectivity: VPN, proxy, or firewall. If you use a proxy, export" >&2
+    echo "      HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY — the Docker builder forwards them to" >&2
+    echo "      the build steps automatically — and re-run. No infochat container depends on" >&2
+    echo "      container DNS: downloads and builds both use the host path." >&2
+    return "$build_rc"
+  fi
   start_apps
   echo "rolled back to $sha." >&2
   echo "NOTE: code is rolled back, but a Flyway migration that already applied during the" >&2
@@ -270,7 +278,12 @@ main() {
     exit 1
   fi
   if ! compose build "${APP_SERVICES[@]}"; then
-    echo "FAIL: build failed at ${new_sha} — rolling back code." >&2
+    echo "FAIL: build failed at ${new_sha} over the host's own network path (builds run host-network, M1-810)." >&2
+    echo "      Check host connectivity: VPN, proxy, or firewall. If you use a proxy, export" >&2
+    echo "      HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY — the Docker builder forwards them to" >&2
+    echo "      the build steps automatically — and re-run. No infochat container depends on" >&2
+    echo "      container DNS: downloads and builds both use the host path." >&2
+    echo "FAIL: rolling back code." >&2
     rollback "$original_sha" "$db_artifact"
     exit 1
   fi

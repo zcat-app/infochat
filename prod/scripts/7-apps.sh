@@ -59,7 +59,16 @@ fi
 # attributable and keeps the readiness wait meaningful (M1-392). Idempotent:
 # unchanged sources rebuild from the layer cache.
 echo "+ docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod build infochat-collector infochat-provider"
-docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod build infochat-collector infochat-provider
+build_rc=0
+docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod build infochat-collector infochat-provider || build_rc=$?
+if [[ "$build_rc" -ne 0 ]]; then
+  echo "FAIL: image build failed over the host's own network path (builds run host-network, M1-810)." >&2
+  echo "      Check host connectivity: VPN, proxy, or firewall. If you use a proxy, export" >&2
+  echo "      HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY — the Docker builder forwards them to" >&2
+  echo "      the build steps automatically — and re-run. No infochat container depends on" >&2
+  echo "      container DNS: downloads and builds both use the host path." >&2
+  exit "$build_rc"
+fi
 echo "images: built."
 
 # Provision the SimpleX bot identity (profile + address + auto-accept) AFTER the

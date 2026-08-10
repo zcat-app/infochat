@@ -21,6 +21,8 @@ services:
   comfyui:
     build:
       context: prod/images/comfyui
+      # Builds run on the host's network path — default-bridge build containers die on DNS on the divergent host class (M1-810).
+      network: host
     image: infochat-comfyui:rocm-gfx1151
     # A transient OOM peak restarts the service instead of leaving it dead
     # with its compose-network DNS name unresolvable (llamacpp precedent).
