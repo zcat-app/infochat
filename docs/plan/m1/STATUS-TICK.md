@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 26 |
 | deferred | 0 |
 | abandoned | 0 |
-| **total** | **27** |
+| **total** | **33** |
 
 ---
 
@@ -26,6 +26,11 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-810 — Run wizard image builds on the host network (complexity: medium, risk: medium)
+- M1-811 — Align the image pixel ceiling with the default output (complexity: low, risk: low)
+- M1-812 — ComfyUI ImageScale crop input on -r graphs (complexity: low, risk: low)
+- M1-813 — Write IMAGE_GENERATE rows on queue-depth failures (complexity: low, risk: low)
+- M1-814 — Treat an absent image spool as empty in the sweeper (complexity: low, risk: low)
+- M1-815 — Strip internal config identifiers from LLM output (complexity: medium, risk: medium)
 
 ---
 
@@ -42,7 +47,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-816 — blocked_by: M1-811 (pending), M1-812 (pending)
 
 ---
 
@@ -126,4 +131,11 @@ M1-807 (done)
 M1-808 (done)
   └── M1-809 (done)
         └── M1-810 (pending) ← runnable
+M1-811 (pending) ← runnable
+  └── M1-816 (pending)
+M1-812 (pending) ← runnable
+  └── M1-816 (pending) [see above]
+M1-813 (pending) ← runnable
+M1-814 (pending) ← runnable
+M1-815 (pending) ← runnable
 ```
