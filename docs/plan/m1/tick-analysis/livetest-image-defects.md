@@ -224,11 +224,19 @@ Numbered fresh for THIS analysis; carried pitfalls from
   (commands.md:634-638); security.md:1896-1900 states the posture for
   exactly this class of limit — a bound "documented only as an exposure note
   … could be widened … which is the dangerous direction for a limit whose
-  whole job is bounding unattended generative volume." Raising it is
-  justified ONLY by the measured default output, must keep bounding the
-  16 MiB response cap, the 1 GiB spool capacity, and the adapter ceilings
-  (SimpleX 1 GiB / Signal 150 MiB, 06-messaging.md:362-365 — all comfortably
-  above 2.5 MP PNGs), and the design-doc row must move WITH the value
+  whole job is bounding unattended generative volume." The value follows
+  the headroom rule (user decision 2026-08-10): the deployment's own
+  default output must sit WELL BELOW the ceiling — ceiling = 2x the
+  measured default 2,408,448 px rounded to 5,000,000 (~2.1x headroom) —
+  and stops at the user-declared upper bound of ambition: 4096x4096-class
+  requests are OUT of v1 scope (no upscaler in v1; "we are not a graphic
+  studio, just a simple chat bot on a home box"), so 5 MP is the
+  enforcement point. Sanity at 5,000,000: a worst-case PNG is ~6-8 MB,
+  still under the 16 MiB fetch cap (infochat.image.max-response-bytes),
+  far under the 1 GiB spool capacity and the adapter ceilings (SimpleX
+  1 GiB / Signal 150 MiB, 06-messaging.md:362-365), and
+  refusesOversizedDimensions tests the bound MECHANISM, not the value, so
+  it stays green unedited. The design-doc row must move WITH the value
   (DocumentedConfigKeyParityTest gates key NAMES; the table is the value's
   home of record). M1-801's strip mechanics stay untouched: overflow-free
   bound arithmetic and IHDR-only read (PngMetadataStrip.java:47-70, M1-801
@@ -358,20 +366,31 @@ Numbered fresh for THIS analysis; carried pitfalls from
    (docker-compose, gates "MVP done"), and the M1-797/M1-802 precedent is
    probe-shaped acceptance. The in-suite half of M1-816 covers what CAN run
    in CI (the wiring at shipped config).
+10. **E8: raise the ceiling to admit 4096x4096-class (~16.8 MP)
+    requests.** Rejected by USER DECLARATION (2026-08-10), not analyst
+    judgment: 4K-class output is out of v1 scope — no upscaler in v1, "we
+    are not a graphic studio, just a simple chat bot on a home box." The
+    5 MP ceiling is the enforcement point of that declared upper bound of
+    ambition; a future option to raise toward 4K-class re-opens the
+    declaration, it does not re-litigate this analysis.
 
 ## Chosen approach
 
 Option 1. Spec refs per decision are cited in each ticket's `spec_refs:`.
 
 - **M1-811 (E8):** raise `infochat.image.max-output-pixels` 2000000 →
-  2500000 (application.properties:230 + ImageCommandHandler.java:110 default
-  + design table row :217 value AND bounds wording, D-1) — 2.5 MP covers the
-  measured 2,408,448-px default under the decision-3 2.4 MP Krea ceiling
-  with headroom, and stays bounded by the 16 MiB response cap / spool /
-  adapter ceilings (P1). Make the `InvalidPngException` catch speak: one
-  WARN naming the bound (structural message only, P2). Implements
-  commands.md:634-638's delegated pixel bound at a value the configured
-  pipeline satisfies.
+  5000000 (application.properties:230 + ImageCommandHandler.java:110 default
+  + design table row :217 value AND bounds wording, D-1) — the headroom rule
+  (user decision 2026-08-10): ceiling = 2x the measured default
+  2,408,448 px rounded to 5,000,000, so the default sits well below the
+  ceiling (~2.1x headroom); and the enforcement point of the user-declared
+  upper bound of ambition — 4096x4096-class requests are out of v1 scope
+  ("we are not a graphic studio, just a simple chat bot on a home box").
+  Sanity holds at 5 MP: worst-case PNG ~6-8 MB, under the 16 MiB fetch cap,
+  far under the spool / adapter ceilings (P1). Make the
+  `InvalidPngException` catch speak: one WARN naming the bound (structural
+  message only, P2). Implements commands.md:634-638's delegated pixel bound
+  at a value the configured pipeline satisfies.
 - **M1-812 (E10):** `fitInputs.put("crop", "disabled")` in the converter
   swap (ComfyUIClient.java:140-146) — the latent is already sampled at the
   requested ratio, so cropping is never the contract (D-4). Extends the

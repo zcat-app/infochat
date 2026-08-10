@@ -43,8 +43,8 @@ out_of_scope:
     design notes; the design-table row is the value's home of record.
 acceptance:
   - "PngMetadataStripTest.shippedCeilingAcceptsTheMeasuredDefaultOutput passes — REPRODUCTION (written and run RED at start). The shipped ceiling accepts the measured default output 1792x1344 (commands.md §Content: the pixel bound is delegated to design notes — the configured pipeline's own default output must pass it; bench E12 proved the delivery path works once it does)."
-  - "The value lands in BOTH sites: `grep -n '^infochat.image.max-output-pixels=' infochat-provider/src/main/resources/application.properties` prints 2500000, and `grep -n 'max-output-pixels' infochat-provider/src/main/java/app/zcat/infochat/provider/command/ImageCommandHandler.java` shows the matching @ConfigProperty defaultValue (a missing key must not fall back to a value that rejects the default output)."
-  - "The design-table row moves with the value (P1): docs/design/future/image-generation.md's shipped-gate-values row reads 2500000 and its Bounds column names BOTH surfaces the key bounds — the --resolution parser check and the strip's IHDR check on every output (analysis D-1: the old wording named only --resolution) — Verify: `grep -n 'max-output-pixels' docs/design/future/image-generation.md` plus DocumentedConfigKeyParityTest green via mvn verify."
+  - "The value lands in BOTH sites: `grep -n '^infochat.image.max-output-pixels=' infochat-provider/src/main/resources/application.properties` prints 5000000, and `grep -n 'max-output-pixels' infochat-provider/src/main/java/app/zcat/infochat/provider/command/ImageCommandHandler.java` shows the matching @ConfigProperty defaultValue (a missing key must not fall back to a value that rejects the default output)."
+  - "The design-table row moves with the value (P1): docs/design/future/image-generation.md's shipped-gate-values row reads 5000000 and its Bounds column names BOTH surfaces the key bounds — the --resolution parser check and the strip's IHDR check on every output (analysis D-1: the old wording named only --resolution) — Verify: `grep -n 'max-output-pixels' docs/design/future/image-generation.md` plus DocumentedConfigKeyParityTest green via mvn verify."
   - "ImageCommandHandlerTest.overCeilingOutputFailsLoudlyAndContentFree passes — FAILURE-MODE (analysis P2): the stub client returns a PNG whose IHDR exceeds the handler's ceiling; asserts the generic IMAGE_ERROR_GENERATION_FAILED terminal, exactly one content-free IMAGE_GENERATE row {\"outcome\":\"failed\"}, no spool file created, AND the rejection is observable — Verify: review grep of the diff shows the InvalidPngException catch emits one WARN whose arguments are the exception's structural message (dimensions + bound; PngMetadataStrip.java:45-69 builds messages from parsed integers and fixed strings only) and nothing else — never the prompt, graph, or response body (D75/D37)."
   - "The bound still bounds (P1): PngMetadataStripTest.refusesOversizedDimensions passes UNEDITED at the raised value — a hostile IHDR over the ceiling is still refused before any strip output (redteam finding 6's intent preserved)."
   - "mvn verify from repo root is green."
@@ -98,12 +98,21 @@ Numbered consistently with the analysis document.
 
 - P1: the ceiling is a DOS bound, not a tunable — redteam finding 6 put it
   in the spec (commands.md:634-638); security.md:1896-1900 names widening
-  such a limit "the dangerous direction". The raise is justified by the
-  MEASURED default output only, must stay below the 16 MiB response cap /
-  1 GiB spool / adapter ceilings (all verified comfortably above 2.5 MP
-  PNGs — 06-messaging.md:362-365), and the design-table row moves WITH the
-  value, including its Bounds wording (D-1). Strip mechanics untouched
-  (M1-801 round-1 fixes: overflow-free arithmetic, IHDR-only read).
+  such a limit "the dangerous direction". The value follows the headroom
+  rule (user decision 2026-08-10): the deployment's own default output must
+  sit WELL BELOW the ceiling — ceiling = 2x the measured default
+  2,408,448 px rounded to 5,000,000 (~2.1x headroom) — and stops at the
+  user-declared upper bound of ambition: 4096x4096-class requests are OUT
+  of v1 scope (no upscaler in v1; "we are not a graphic studio, just a
+  simple chat bot on a home box"), so 5 MP is the enforcement point. Sanity
+  at 5,000,000: a worst-case PNG is ~6-8 MB, still under the 16 MiB fetch
+  cap (infochat.image.max-response-bytes) and far under the 1 GiB spool and
+  the adapter ceilings (Signal 150 MiB / SimpleX 1 GiB,
+  06-messaging.md:362-365); refusesOversizedDimensions tests the bound
+  MECHANISM, not the value, and stays green unedited. The design-table row
+  moves WITH the value, including its Bounds wording (D-1). Strip mechanics
+  untouched (M1-801 round-1 fixes: overflow-free arithmetic, IHDR-only
+  read).
 - P2: the new log line stays content-free — D75/D37. The exception message
   is structural-only (dimensions, offsets, bound — verified at
   PngMetadataStrip.java:45-69), so logging it is safe; the prompt, graph,
@@ -122,11 +131,16 @@ pipeline's own default output satisfies.
      per chunk — PngMetadataStripTest's existing builder is the precedent;
      the strip never inflates IDAT, so a tiny body with a large IHDR is an
      honest fixture).
-  2. Raise the value: application.properties:230 → 2500000 and the
+  2. Raise the value: application.properties:230 → 5000000 and the
      @ConfigProperty defaultValue at ImageCommandHandler.java:110 → the
      same (a missing key must not fall back to rejecting the default
-     output). 2,500,000 = 2.5 MP covers the measured 2,408,448 under the
-     decision-3 2.4 MP Krea ceiling with headroom.
+     output). 5,000,000 = 5 MP is the headroom rule (user decision
+     2026-08-10): 2x the measured default 2,408,448 px rounded to
+     5,000,000, so the default sits well below the ceiling (~2.1x
+     headroom); it is also the enforcement point of the user-declared
+     upper bound of ambition — 4096x4096-class requests are out of v1
+     scope (no upscaler in v1; "we are not a graphic studio, just a
+     simple chat bot on a home box").
   3. Make the catch speak: one `log.warn` in the InvalidPngException arm
      carrying the exception (structural message) — no other behavior of the
      arm changes (row, reply, no-refund all stay).
