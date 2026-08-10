@@ -1,19 +1,19 @@
 ---
 id: M1-813
 title: "Write IMAGE_GENERATE rows on queue-depth failures"
-status: pending
+status: done
 created: 2026-08-10
 last_updated: 2026-08-10
 flow: tick
 reproduction: >-
-  to-be-written: ImageCommandHandlerTest.queueDepthUnreachableWritesTheAuditRow —
+  ImageCommandHandlerTest.queueDepthUnreachableWritesTheAuditRow —
   sets client.queueDepthThrow = ComfyUIClient.UnreachableException, handles
   `/image a cat`, and asserts BOTH the D76 refund AND exactly one
   IMAGE_GENERATE row with details {"outcome":"failed"}. RED on main: the
   queueDepth() UnreachableException catch refunds and returns without
   calling writeAuditRow (ImageCommandHandler.java:188-190), while
   generate()'s unreachable catch writes the row (:278-284) — the audit
-  contract differs by which backend call fails (bench/livetest-10-08-26.md
+  contract differs by which backend call fails (docs/plan/live-e2e/live-test-2026-08-10.md
   E13, live-verified: no IMAGE_GENERATE row for the unreachable queue-read
   path).
 analysis_ref: docs/plan/m1/tick-analysis/livetest-image-defects.md
@@ -61,18 +61,30 @@ spec_refs:
 decision_refs:
   - D75
   - D76
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-10
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "4 files changed, 95 insertions(+), 11 deletions(-)"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-813-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check: >-
+  start 2026-08-10 pass — tick-lint reports 0 findings; the corrected
+  live-test references are carried into this worktree; cited production arms,
+  single writeAuditRow writer, existing refund/stopped-row tests, and analysis
+  pitfall P5 were verified in-tree; blocked_by is empty and no ambiguity
+  remains.
 ---
 
 # M1-813: Write IMAGE_GENERATE rows on queue-depth failures
 
 ## Context
 
-Live test 2026-08-10 (bench/livetest-10-08-26.md E13): with ComfyUI
+Live test 2026-08-10 (docs/plan/live-e2e/live-test-2026-08-10.md E13): with ComfyUI
 stopped, a fresh `/image` returned the correct localized backend-unreachable
 reply and refunded the attempt — but the audit table gained NO
 IMAGE_GENERATE row. The same failure class reached through `generate()`

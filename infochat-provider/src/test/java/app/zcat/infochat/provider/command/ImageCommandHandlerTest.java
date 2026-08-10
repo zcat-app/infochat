@@ -193,6 +193,83 @@ class ImageCommandHandlerTest {
     }
 
     @Test
+    void queueDepthUnreachableWritesTheAuditRow() {
+        gate.rateCapBucket = rateCapBucket = new RateCapBucket(clock,
+                RateCapBucket.Settings.defaults()
+                        .withImageUserCreditBucket(1, Duration.ofHours(1))
+                        .withImageGroupCreditBucket(1, Duration.ofHours(1))
+                        .withImageCooldownWindow(Duration.ofMillis(1)));
+        client.queueDepthThrow = new ComfyUIClient.UnreachableException("image backend unreachable");
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm("alice"), "/image a cat");
+
+        assertEquals(bundleLoader.get(BundleKeys.IMAGE_ERROR_BACKEND_UNREACHABLE), reply.text());
+        assertTrue(rateCapBucket.tryAcquireImageUserCredit(userId),
+                "an unreachable backend refunds the charged attempt (D76)");
+        List<RedactionHook.AuditRow> rows = auditWriter.rowsFor(AuditAction.IMAGE_GENERATE);
+        assertEquals(1, rows.size(), "the failed queue-read attempt writes exactly one audit row");
+        assertEquals("{\"outcome\":\"failed\"}", rows.get(0).detailsJson(),
+                "the failed row is content-free");
+    }
+
+    @Test
+    void queueDepthBreakerOpenWritesTheAuditRow() {
+        gate.rateCapBucket = rateCapBucket = new RateCapBucket(clock,
+                RateCapBucket.Settings.defaults()
+                        .withImageUserCreditBucket(1, Duration.ofHours(1))
+                        .withImageGroupCreditBucket(1, Duration.ofHours(1))
+                        .withImageCooldownWindow(Duration.ofMillis(1)));
+        client.queueDepthThrow = new ComfyUIClient.BreakerOpenException("breaker open");
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm("alice"), "/image a cat");
+
+        assertEquals(bundleLoader.get(BundleKeys.IMAGE_ERROR_BREAKER_OPEN), reply.text());
+        assertTrue(rateCapBucket.tryAcquireImageUserCredit(userId),
+                "an open breaker refunds the charged attempt (D76)");
+        List<RedactionHook.AuditRow> rows = auditWriter.rowsFor(AuditAction.IMAGE_GENERATE);
+        assertEquals(1, rows.size(), "the breaker-refused attempt writes exactly one audit row");
+        assertEquals("{\"outcome\":\"failed\"}", rows.get(0).detailsJson());
+    }
+
+    @Test
+    void queueDepthIoFailureWritesTheAuditRow() {
+        gate.rateCapBucket = rateCapBucket = new RateCapBucket(clock,
+                RateCapBucket.Settings.defaults()
+                        .withImageUserCreditBucket(1, Duration.ofHours(1))
+                        .withImageGroupCreditBucket(1, Duration.ofHours(1))
+                        .withImageCooldownWindow(Duration.ofMillis(1)));
+        client.queueDepthThrow = new IOException("queue read failed");
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm("alice"), "/image a cat");
+
+        assertEquals(bundleLoader.get(BundleKeys.IMAGE_ERROR_GENERATION_FAILED), reply.text());
+        assertTrue(rateCapBucket.tryAcquireImageUserCredit(userId),
+                "a queue-read I/O failure refunds the charged attempt (D76)");
+        List<RedactionHook.AuditRow> rows = auditWriter.rowsFor(AuditAction.IMAGE_GENERATE);
+        assertEquals(1, rows.size(), "the failed queue-read attempt writes exactly one audit row");
+        assertEquals("{\"outcome\":\"failed\"}", rows.get(0).detailsJson());
+    }
+
+    @Test
+    void queueOverBudgetWritesTheAuditRow() {
+        gate.rateCapBucket = rateCapBucket = new RateCapBucket(clock,
+                RateCapBucket.Settings.defaults()
+                        .withImageUserCreditBucket(1, Duration.ofHours(1))
+                        .withImageGroupCreditBucket(1, Duration.ofHours(1))
+                        .withImageCooldownWindow(Duration.ofMillis(1)));
+        client.queueDepthResult = gate.maxQueueDepth;
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm("alice"), "/image a cat");
+
+        assertEquals(bundleLoader.get(BundleKeys.IMAGE_ERROR_QUEUE_BUSY_NO_ETA), reply.text());
+        assertTrue(rateCapBucket.tryAcquireImageUserCredit(userId),
+                "a queue-over-budget refusal refunds the charged attempt (D76)");
+        List<RedactionHook.AuditRow> rows = auditWriter.rowsFor(AuditAction.IMAGE_GENERATE);
+        assertEquals(1, rows.size(), "the queue-refused attempt writes exactly one audit row");
+        assertEquals("{\"outcome\":\"failed\"}", rows.get(0).detailsJson());
+    }
+
+    @Test
     void adapterSendFailureDoesNotRefund() {
         gate.rateCapBucket = rateCapBucket = new RateCapBucket(clock,
                 RateCapBucket.Settings.defaults()

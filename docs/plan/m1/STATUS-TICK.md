@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 29 |
+| done | 30 |
 | deferred | 0 |
 | abandoned | 0 |
 | **total** | **34** |
@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-813 — Write IMAGE_GENERATE rows on queue-depth failures (complexity: low, risk: low)
 - M1-814 — Treat an absent image spool as empty in the sweeper (complexity: low, risk: low)
 - M1-815 — Strip internal config identifiers from LLM output (complexity: medium, risk: medium)
 - M1-816 — Image e2e release gate: configured pipeline proof (complexity: medium, risk: medium)
@@ -65,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-813 | Write IMAGE_GENERATE rows on queue-depth failures | 2026-08-10 | round 1 APPROVE |
 | M1-812 | ComfyUI ImageScale crop input on -r graphs | 2026-08-10 | round 1 APPROVE |
 | M1-811 | Align the image pixel ceiling with the default output | 2026-08-10 | round 2 APPROVE |
 | M1-810 | Run wizard image builds on the host network | 2026-08-10 | round 1 APPROVE-WITH-FIXES |
@@ -74,7 +74,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-798 | Setup-wizard /image step: picker, templates, ETA probe | 2026-08-10 | round 2 APPROVE |
 | M1-807 | ComfyUI image carve: VAE-Utils node + flag re-verify | 2026-08-09 | round 1 APPROVE |
 | M1-802 | ComfyUI client: server-built graph, bounded fetch, cancel | 2026-08-09 | round 2 APPROVE |
-| M1-806 | ComfyUI temp/ containment: tmpfs + janitor sweep | 2026-08-08 | round 1 APPROVE |
 
 ---
 
@@ -135,7 +134,7 @@ M1-811 (done)
   └── M1-817 (pending) ← runnable
 M1-812 (done)
   └── M1-816 (pending) [see above]
-M1-813 (pending) ← runnable
+M1-813 (done)
 M1-814 (pending) ← runnable
 M1-815 (pending) ← runnable
 ```

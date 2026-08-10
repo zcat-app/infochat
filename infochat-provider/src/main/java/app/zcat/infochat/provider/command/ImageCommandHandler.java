@@ -186,12 +186,15 @@ public class ImageCommandHandler implements CommandHandler {
                 queueDepth = comfyUIClient.queueDepth();
             } catch (ComfyUIClient.BreakerOpenException e) {
                 imageCreditGate.refund(actorId, groupId);
+                writeAuditRow(actorId, scopeId, "failed");
                 return reply(scope, bundleLoader.get(BundleKeys.IMAGE_ERROR_BREAKER_OPEN, language));
             } catch (ComfyUIClient.UnreachableException e) {
                 imageCreditGate.refund(actorId, groupId);
+                writeAuditRow(actorId, scopeId, "failed");
                 return reply(scope, bundleLoader.get(BundleKeys.IMAGE_ERROR_BACKEND_UNREACHABLE, language));
             } catch (IOException e) {
                 imageCreditGate.refund(actorId, groupId);
+                writeAuditRow(actorId, scopeId, "failed");
                 return reply(scope, bundleLoader.get(BundleKeys.IMAGE_ERROR_GENERATION_FAILED, language));
             } catch (InterruptedException e) {
                 imageCreditGate.refund(actorId, groupId);
@@ -202,6 +205,7 @@ public class ImageCommandHandler implements CommandHandler {
             }
             if (imageCreditGate.queueOverBudget(queueDepth)) {
                 imageCreditGate.refund(actorId, groupId);
+                writeAuditRow(actorId, scopeId, "failed");
                 return reply(scope, queueBusyBody(queueDepth, language));
             }
 
