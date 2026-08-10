@@ -128,6 +128,31 @@ class InboundRouterChatModeIT {
                 "chat turn fully complete (incl. post-delivery commit)");
     }
 
+    @Test
+    void configKeyTokenIsAbsentFromFinalizedChatReply() throws Exception {
+        // BOUNDARY SITING (M1-815 r1 review): the sanitizer's own tests
+        // cannot see a bypass between ChatAgent and the adapter, so the
+        // finalized body — what the user actually receives — is asserted.
+        seedVouchedUser("user-config-key");
+        testLlmProvider.setResponseText(
+                "The window is set by infochat.probation.duration in this deployment.");
+
+        adapter.deliverDm(CONTACT_PREFIX + "user-config-key", "tell me about the window");
+
+        DispatchAwaits.await(() -> !adapter.finalizedBodies().isEmpty(),
+                "chat turn's finalized terminal");
+        String replyBody = lastFinalizedBody();
+        assertFalse(replyBody.contains("infochat."),
+                "no dotted config token may reach the adapter; got: " + replyBody);
+        assertEquals("The window is set by   in this deployment.\n\n"
+                        + bundleLoader.get("reply.chat.provenance.general_knowledge"),
+                replyBody,
+                "the finalized body carries the sanitized prose (token replaced by a "
+                        + "single space) plus the provenance notice");
+        DispatchAwaits.await(() -> interruptibleDispatcher.inFlightTaskCount() == 0,
+                "chat turn fully complete (incl. post-delivery commit)");
+    }
+
     /**
      * BUNDLED TIMEOUT RAISE (M1-607): the committed
      * infochat.llm.chat.timeout-ms default must resolve above the in-code

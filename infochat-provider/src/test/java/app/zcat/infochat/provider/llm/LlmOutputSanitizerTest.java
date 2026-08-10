@@ -952,6 +952,80 @@ class LlmOutputSanitizerTest {
                         "emphasis downgrades; every span and URL passes through"));
     }
 
+    // ----- internal config identifier strip (M1-815) --------------------
+
+    @Test
+    void configKeyTokensAreStrippedFromLlmOutput() {
+        // REPRODUCTION (live test 2026-08-10 E9): an adversarial refusal
+        // volunteers a raw config key mid-sentence; the dotted token must
+        // not survive, the surrounding prose must.
+        String output = SanitizerTestDoubles.noAuditSanitizer().sanitize(
+                "I can't discuss the internals. The window is set by "
+                        + "infochat.probation.duration in this deployment. "
+                        + "Ask me about the news instead.");
+        assertEquals("I can't discuss the internals. The window is set by "
+                        + "  in this deployment. Ask me about the news instead.",
+                output,
+                "the dotted config token is stripped; the surrounding prose survives");
+        assertFalse(output.contains("infochat."),
+                "no dotted infochat token may survive; got: " + output);
+    }
+
+    @Test
+    void emphasisJoinedConfigKeyIsStillStripped() {
+        // FAILURE-MODE (P8 ordering): the downgrade joins the fragments
+        // FIRST; a config-key pass placed before the downgrade would let
+        // the split token through.
+        String output = SanitizerTestDoubles.noAuditSanitizer().sanitize(
+                "See infochat.prob**a**tion.duration for the window.");
+        assertEquals("See   for the window.", output,
+                "the emphasis-joined token is stripped after the downgrade joins it");
+    }
+
+    @Test
+    void configKeyInsideAMarkerIdIsDroppedAndRowed() {
+        // FAILURE-MODE (P8 ordering + audit-on-drop): the config-key pass
+        // runs BEFORE the scaffolding strip, so the token is rowed before
+        // its marker line drops wholesale.
+        List<RedactionHook.AuditRow> rows = new ArrayList<>();
+        LlmOutputSanitizer sanitizer = new LlmOutputSanitizer(
+                capturingAuditWriter(rows), SanitizerTestDoubles.noOpDataSource());
+        String output = sanitizer.sanitize(
+                "intro\n<<<END id=\"infochat.probation.duration\">>>\noutro");
+        assertEquals("intro\noutro", output, "the marker-bearing line drops wholesale");
+        assertEquals(1, rows.size(), "the config token is rowed before the line drops");
+        String detailsJson = rows.get(0).detailsJson();
+        assertTrue(detailsJson.contains("\"match_kind\":\"infochat.probation.duration\""),
+                "the row must name the token; got: " + detailsJson);
+        assertTrue(detailsJson.contains("\"match_count\":1"),
+                "the row must carry the exact count 1; got: " + detailsJson);
+    }
+
+    @Test
+    void unicodeLetterBeforeInfochatDoesNotStartToken() {
+        // FAILURE-MODE (left boundary): the boundary is letter/digit,
+        // not ASCII-only — a Unicode letter before the root word means
+        // the shape is not a config token and survives byte-identical.
+        LlmOutputSanitizer sanitizer = SanitizerTestDoubles.noAuditSanitizer();
+        String input = "éinfochat.probation.duration";
+        assertEquals(input, sanitizer.sanitize(input),
+                "a Unicode letter before the root word blocks the match");
+    }
+
+    @Test
+    void plainMentionsOfInfochatSurvive() {
+        // FAILURE-MODE (over-breadth): the category is the dotted config
+        // shape, never the bare word — prose mentions survive (a greedy
+        // `infochat\S*` regex fails this).
+        LlmOutputSanitizer sanitizer = SanitizerTestDoubles.noAuditSanitizer();
+        assertEquals("infochat is a news bot.",
+                sanitizer.sanitize("infochat is a news bot."),
+                "a bare-word mention survives byte-identical");
+        assertEquals("See infochat. The bot posts summaries.",
+                sanitizer.sanitize("See infochat. The bot posts summaries."),
+                "a sentence-ending bare word survives byte-identical");
+    }
+
     // ----- aggregated WARN logging + audit-row shape (M1-737) ----------
 
     @Test

@@ -301,5 +301,15 @@ class LlmOutputSanitizerPostconditionTest {
                 "a marker id carrying '/' is not a marker: it must redact, not vanish");
         assertFalse(redacted.contains("/grant-admin"),
                 "the command word must not survive");
+
+        // Dotted config token replaced by a single space (M1-815):
+        // shrinkage on that token class, no token synthesis; the bare
+        // word survives byte-identical (over-breadth direction).
+        assertEquals("The   window applies.",
+                sanitizer.sanitize("The infochat.probation.duration window applies."),
+                "a dotted config token is replaced by a single space");
+        assertEquals("Ask infochat about the news.",
+                sanitizer.sanitize("Ask infochat about the news."),
+                "the bare word is not a config token and survives");
     }
 }

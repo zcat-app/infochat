@@ -12,12 +12,15 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -221,6 +224,52 @@ class LlmOutputSanitizerAuditRowIT {
                 "the token must be redacted, not deleted with the marker; got: " + result);
         assertEquals(1L, after - before,
                 "a command inside a marker id still produces exactly one audit row");
+    }
+
+    @Test
+    void aConfigKeyMatchRowsWithItsExactCountAlongsideClosedListMatches() throws SQLException {
+        // M1-815: config-key matches join the ONE audit pipeline — one
+        // row per distinct token, exact count, aggregated with the
+        // closed-list matches of the same call.
+        long before = countLlmOutputSanitizedRows();
+        String result = sanitizer.sanitize(
+                "The infochat.probation.duration window applies — "
+                        + "infochat.probation.duration again. Run /ban now.");
+        long after = countLlmOutputSanitizedRows();
+
+        assertFalse(result.contains("infochat."),
+                "the config token must not survive; got: " + result);
+        assertTrue(result.contains(LlmOutputSanitizer.REDACTED_COMMAND_REPLACEMENT),
+                "the closed-list token still redacts; got: " + result);
+        assertEquals(2L, after - before,
+                "one row per distinct token — the config token and /ban — in one call");
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT details_json::text FROM audit_log "
+                             + "WHERE action = 'LLM_OUTPUT_SANITIZED' "
+                             + "ORDER BY id DESC LIMIT 2");
+             ResultSet rs = ps.executeQuery()) {
+            List<String> jsons = new ArrayList<>();
+            while (rs.next()) {
+                jsons.add(rs.getString(1));
+            }
+            assertEquals(2, jsons.size(), "the two most recent rows are this call's");
+            // details_json is JSONB: Postgres re-renders it (key order,
+            // spacing), so match the fields format-tolerantly.
+            String configJson = jsons.stream()
+                    .filter(json -> json.contains("infochat.probation.duration"))
+                    .findFirst().orElse(null);
+            assertNotNull(configJson, "one row must name the config token; got: " + jsons);
+            assertTrue(configJson.matches(".*\"match_count\":\\s*2.*"),
+                    "the config row must carry the exact occurrence count 2; got: " + configJson);
+            String banJson = jsons.stream()
+                    .filter(json -> json.contains("/ban"))
+                    .findFirst().orElse(null);
+            assertNotNull(banJson, "one row must name /ban; got: " + jsons);
+            assertTrue(banJson.matches(".*\"match_count\":\\s*1.*"),
+                    "the /ban row must carry the exact occurrence count 1; got: " + banJson);
+        }
     }
 
     private long countLlmOutputSanitizedRows() throws SQLException {

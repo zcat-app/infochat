@@ -718,9 +718,40 @@ never undelivered prose. And the walk is per-line: an opener on one
 line never pairs with a closer on a later line, so emphasis spanning a
 line boundary reaches the reader — cosmetic, accepted.
 
+**A further strip category: internal configuration identifiers.** An
+internal configuration identifier — the deployment's own `infochat`
+root followed by two or more dot-separated lowercase segments, each
+segment beginning with a letter and continuing in lowercase letters,
+digits or hyphens — is scaffolding rendering as content, and is
+stripped from LLM-authored output: each dotted token is replaced by a
+single space. The replacement inserts a separator — it can break a
+token apart but never build one — and a left boundary requires the
+character before the root word to be no letter or digit, so prose that
+merely contains the word is not rewritten. The match runs on the raw
+bytes in a single linear scan; the category is the dotted shape, never
+the bare word, so prose mentioning the product name survives
+byte-identical. The pass runs after the plain-text downgrade — so it
+sees a token the emphasis deletion joins out of fragments — and before
+the scaffolding strip, so a marker line whose id carries a token is
+still dropped wholesale with the token already joined to the call's
+aggregated matches. Matches join the same per-call aggregated WARN and
+`LLM_OUTPUT_SANITIZED` rows as the closed-list and scaffolding matches
+— one row per distinct token carrying the exact occurrence count;
+untrusted text must not choose whether the deployment records a
+token's presence. Two residuals are stated. On a closed-list match the
+canonical form is what gets returned, so NFKC can re-surface an
+identifier variant the raw-byte pass could not see — the same class as
+the ordering rule's existing NFKC residual, a cosmetic leak in a reply
+that also carried a redacted command. And a free-form model paraphrase
+of the scaffolding — describing the wrapper in the model's own words —
+is beyond any deterministic strip; accepted, because the wrapper's
+shape is not the secret, its per-call id is, and the defect this
+category closes is scaffolding rendering as content.
+
 **Pass ordering is a security property.** Every pass that DELETES
-characters — the link-flatten, the markdown downgrade, the scaffolding
-strip — runs BEFORE the closed-list strip, and none runs after it.
+characters — the link-flatten, the markdown downgrade, the
+config-identifier strip, the scaffolding strip — runs BEFORE the
+closed-list strip, and none runs after it.
 Deleting characters joins fragments (`/b**a**n` → `/ban`), so a pass
 placed downstream of the redaction could assemble a privileged token
 out of text the closed-list match never saw, and that token would ship

@@ -323,6 +323,25 @@ class HelpTopicCorpusTest {
                         + "not translatable prose. Answer was: " + csAnswer);
     }
 
+    @Test
+    void noTopicAnswerNamesARawConfigKey() throws Exception {
+        // REPRODUCTION (M1-815, analysis D-2): the D69 topic path bypasses
+        // the sanitizer by design, so the bundle text itself is the fix
+        // site — no topic answer may name a dotted config key.
+        Pattern configKeyToken = Pattern.compile("infochat\\.[a-z]");
+        for (String lang : List.of("en", "cs", "tr", "es", "ru")) {
+            Properties bundle = loadOwnKeys(lang);
+            for (HelpTopicCorpus.Topic topic : HelpTopicCorpus.CORPUS) {
+                String answer = bundle.getProperty(topic.answerBundleKey());
+                assertNotNull(answer,
+                        lang + " bundle must define " + topic.answerBundleKey());
+                assertFalse(configKeyToken.matcher(answer).find(),
+                        lang + " topic answer '" + topic.slug()
+                                + "' must not name a raw config key: " + answer);
+            }
+        }
+    }
+
     /**
      * Acceptance item 5 — every topic is user-tier by construction.
      * The pin is against the {@link HelpTier#BOT_ADMIN} surface, NOT

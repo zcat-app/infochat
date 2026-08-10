@@ -1,18 +1,20 @@
 ---
 id: M1-815
 title: "Strip internal config identifiers from LLM output"
-status: pending
+status: done
 created: 2026-08-10
-last_updated: 2026-08-10
+last_updated: 2026-08-11
 flow: tick
 reproduction: >-
-  to-be-written: LlmOutputSanitizerTest.configKeyTokensAreStrippedFromLlmOutput —
+  LlmOutputSanitizerTest.configKeyTokensAreStrippedFromLlmOutput (written
+  and run RED on main 2026-08-10) —
   feeds the E9-shaped adversarial refusal (text volunteering
-  "infochat.probation.duration" mid-sentence, bench/livetest-10-08-26.md
+  "infochat.probation.duration" mid-sentence, live test 2026-08-10
   E9) through the full sanitize() and asserts the dotted config token does
   not survive while the surrounding prose does. RED on main: no pass
   recognizes internal config identifiers (grep-verified: no such pass in
-  LlmOutputSanitizerCore). Companion RED at start:
+  LlmOutputSanitizerCore). Companion RED at start (written and run RED
+  2026-08-10):
   HelpTopicCorpusTest.noTopicAnswerNamesARawConfigKey — the en/cs probation
   answers carry the raw token today.
 analysis_ref: docs/plan/m1/tick-analysis/livetest-image-defects.md
@@ -83,11 +85,35 @@ spec_refs:
   - docs/spec/security.md §Prompt-injection defenses
 decision_refs:
   - D21
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-11
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS FAIL, SECURITY PASS, TEST-ADEQUACY FAIL, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "15 files changed, 262 insertions(+), 25 deletions(-)"
+    findings: "2 low rework items, 0 critical/high"
+    verdict_file: .scratch/tick-review-M1-815-r1.txt
+  - round: 2
+    date: 2026-08-11
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "16 files changed, 315 insertions(+), 28 deletions(-)"
+    findings: "0 rework items; both round-1 items dispositioned SATISFIED"
+    verdict_file: .scratch/tick-review-M1-815-r2.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  checked_at: 2026-08-10
+  result: >-
+    tick-lint 0 BLOCKER / 0 WARN. All file:line citations re-verified in-tree:
+    bundle lines en:875/cs:666/tr:760/es:890/ru:856, LlmOutputSanitizer.java
+    :246/:260-261/:285-338/:58-59, HelpTopicCorpusTest.java:299-324,
+    security.md:721-744, commands.md:1885-1890, HelpTopicCorpus.java:247,
+    AdapterRouterIT.java:219. Census grep re-run clean (exactly 5 hits, every
+    path has a row). Analysis P8-P12 all landed in Pitfalls. No replaces:, no
+    in-flight ticket (module collision impossible), blocked_by empty. No
+    ambiguity.
 ---
 
 # M1-815: Strip internal config identifiers from LLM output
@@ -258,3 +284,10 @@ Re-runnable enumeration:
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-815-sanitizer-internal-language-leak.md
 ```
+
+## Round 1 rework
+
+REWORK ITEMS (verbatim from `.scratch/tick-review-M1-815-r1.txt`):
+
+1. FINDING 1: Replace the ASCII-only left boundary at `LlmOutputSanitizerCore.java:876-877` with the documented letter/digit boundary and add the named Unicode-prefix assertion, evaluated by `LlmOutputSanitizerTest.unicodeLetterBeforeInfochatDoesNotStartToken`.
+2. FINDING 2: Add the final adapter-delivery assertion for a model reply containing the dotted config token, evaluated by `InboundRouterChatModeIT.configKeyTokenIsAbsentFromFinalizedChatReply`.

@@ -21,7 +21,7 @@ import java.util.regex.Pattern;
 
 /**
  * Sanitizer applied to LLM-authored output before it lands in an
- * outbound reply. Enforces four invariants from docs/spec/security.md
+ * outbound reply. Enforces five invariants from docs/spec/security.md
  * §LLM output sanitizer and docs/spec/commands.md §Surface conventions:
  *
  * <ol>
@@ -34,6 +34,9 @@ import java.util.regex.Pattern;
  *   <li><b>Markdown downgraded.</b> The emphasis, thematic breaks and
  *       list markers the D30 surface cannot render are downgraded to
  *       plain text; fences and verbatim spans survive.</li>
+ *   <li><b>Internal configuration identifiers.</b> Dotted
+ *       {@code infochat.*} config tokens are replaced by a single
+ *       space (see {@link #applyConfigKeyStripWithMatches}).</li>
  *   <li><b>Closed-list strip.</b> Every privileged-tier command token
  *       from {@link #CLOSED_LIST} is replaced with the literal
  *       {@value #REDACTED_COMMAND_REPLACEMENT}. The match runs on the
@@ -49,6 +52,7 @@ import java.util.regex.Pattern;
  * {@link #CLOSED_LIST_PATTERNS}, {@link #applyScaffoldingMarkerStrip},
  * {@link #applyScaffoldingMarkerStripWithMatches},
  * {@link #applyMarkdownLinkStrip}, {@link #applyPlainTextDowngrade},
+ * {@link #applyConfigKeyStripWithMatches},
  * {@link #applyClosedListStrip}, {@link #applyClosedListStripWithMatches},
  * {@link #canonicalizeForMatching}, {@link #aggregateMatchCounts},
  * {@link #breakLinkAdjacency}) is a behaviour-identical delegate kept so
@@ -62,11 +66,11 @@ import java.util.regex.Pattern;
  * distinct token per {@code sanitize()} call — the docs/spec/security.md
  * counted-never-throttled commitment. On this (outbound) surface the
  * caller is this bean: N occurrences of the same
- * closed-list token in one call land ONE structured WARN line and ONE
+ * matched token in one call land ONE structured WARN line and ONE
  * {@code audit_log} row with action {@code LLM_OUTPUT_SANITIZED} whose
  * {@code details_json.match_count} is exactly N; distinct tokens still
  * get one row each. The audit row's {@code details_json} carries the
- * matched token under {@code match_kind} (the closed-list entry, e.g.
+ * matched token under {@code match_kind} (a closed-list entry or config identifier, e.g.
  * {@code /ban}); the user-visible LLM output text is never copied into
  * the row. (The ingest-translation surface emits the same rows from its
  * own caller, {@code IngestTranslationWorker} — a surface that takes
@@ -158,6 +162,12 @@ public class LlmOutputSanitizer {
         return LlmOutputSanitizerCore.applyPlainTextDowngrade(input);
     }
 
+    /** Internal-config-identifier strip with matches — delegate of
+        {@link LlmOutputSanitizerCore#applyConfigKeyStripWithMatches(String)}. */
+    static LlmOutputSanitizerCore.ConfigKeyStripResult applyConfigKeyStripWithMatches(String input) {
+        return LlmOutputSanitizerCore.applyConfigKeyStripWithMatches(input);
+    }
+
     /**
      * The `](` adjacency break — delegate of
      * {@link LlmOutputSanitizerCore#breakLinkAdjacency(String)}; see
@@ -231,9 +241,10 @@ public class LlmOutputSanitizer {
     /**
      * Run every pass in order. The output is plain text, with prompt
      * scaffolding removed, markdown links flattened to {@code text (url)},
-     * remaining markdown downgraded, privileged commands replaced by
+     * remaining markdown downgraded, dotted internal config identifiers
+     * replaced by a single space, privileged commands replaced by
      * {@value #REDACTED_COMMAND_REPLACEMENT}. Every
-     * closed-list match is audit-logged; the {@code audit_log} emission
+     * match is audit-logged; the {@code audit_log} emission
      * aggregates per distinct token per call (one row carrying the
      * exact occurrence count) with action {@code LLM_OUTPUT_SANITIZED}.
      *
@@ -253,11 +264,14 @@ public class LlmOutputSanitizer {
         // so it also sees markers the emphasis deletion joined.
         String afterMarkdown = applyMarkdownLinkStrip(llmOutput);
         String afterDowngrade = applyPlainTextDowngrade(afterMarkdown);
+        LlmOutputSanitizerCore.ConfigKeyStripResult afterConfigKeys =
+                LlmOutputSanitizerCore.applyConfigKeyStripWithMatches(afterDowngrade);
         LlmOutputSanitizerCore.ScaffoldingStripResult afterScaffolding =
-                applyScaffoldingMarkerStripWithMatches(afterDowngrade);
+                applyScaffoldingMarkerStripWithMatches(afterConfigKeys.rewritten());
         LlmOutputSanitizerCore.ClosedListStripResult result =
                 LlmOutputSanitizerCore.applyClosedListStripWithMatches(afterScaffolding.rewritten());
-        List<String> matches = new ArrayList<>(afterScaffolding.matches());
+        List<String> matches = new ArrayList<>(afterConfigKeys.matches());
+        matches.addAll(afterScaffolding.matches());
         matches.addAll(result.matches());
         // One WARN per distinct token per call over the merged matches, so
         // the WARN stream stays 1:1 with the audit rows below.

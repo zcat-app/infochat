@@ -58,6 +58,9 @@ import java.util.regex.Pattern;
  *   <li><b>Markdown downgraded for the plain-text surface.</b> The
  *       {@linkplain #applyPlainTextDowngrade downgrade} removes emphasis,
  *       drops thematic breaks, rewrites list markers to {@code · }.</li>
+ *   <li><b>Internal configuration identifiers.</b> Dotted
+ *       {@code infochat.*} config tokens are replaced by a single
+ *       space (see {@link #applyConfigKeyStripWithMatches}).</li>
  *   <li><b>Closed-list strip.</b> Every privileged-tier command token
  *       from {@link #CLOSED_LIST} is replaced with the literal
  *       {@value #REDACTED_COMMAND_REPLACEMENT}. Replacement is
@@ -865,6 +868,40 @@ public final class LlmOutputSanitizerCore {
         int closerLength = closer[1] - closer[0];
         return (openerLength + closerLength) % 3 == 0
                 && openerLength % 3 != 0 && closerLength % 3 != 0;
+    }
+
+    /** Internal configuration identifier shape: the deployment's own
+        {@code infochat} root followed by two or more dot-separated
+        lowercase segments. Contract: docs/spec/security.md §LLM output sanitizer. */
+    private static final Pattern CONFIG_KEY_TOKEN = Pattern.compile(
+            "(?<![\\p{L}\\p{Nd}])infochat(?:\\.[a-z][a-z0-9-]*){2,}");
+
+    /** Carrier for the config-key strip: the rewritten text plus the
+        matched identifiers (one entry per occurrence, in input order). */
+    public record ConfigKeyStripResult(String rewritten, List<String> matches) {}
+
+    /** Replace every internal config identifier with a single space.
+        PURE: matches are returned for the caller's aggregated audit. */
+    public static ConfigKeyStripResult applyConfigKeyStripWithMatches(String input) {
+        // Cheap out: no "infochat" means no token, so no allocation.
+        if (input.indexOf("infochat") < 0) {
+            return new ConfigKeyStripResult(input, List.of());
+        }
+        Matcher matcher = CONFIG_KEY_TOKEN.matcher(input);
+        List<String> matches = new ArrayList<>();
+        StringBuilder rewritten = null;
+        while (matcher.find()) {
+            if (rewritten == null) {
+                rewritten = new StringBuilder(input.length());
+            }
+            matches.add(matcher.group());
+            matcher.appendReplacement(rewritten, " ");
+        }
+        if (rewritten == null) {
+            return new ConfigKeyStripResult(input, matches);
+        }
+        matcher.appendTail(rewritten);
+        return new ConfigKeyStripResult(rewritten.toString(), matches);
     }
 
     /**

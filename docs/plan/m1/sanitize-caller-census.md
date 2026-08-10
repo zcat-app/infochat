@@ -33,6 +33,10 @@ Header (re-derived at start, 2026-08-08):
   M1-790's diff as this note mandated), "" a possible return today
   (P8 — the empty-body follow-up must update the pin deliberately).
   - pin: `LlmOutputSanitizerPostconditionTest#deletionShapesMatchTheirDocumentedPostconditions`
+- Internal config identifier replaced by a single space (M1-815, live):
+  sanitize() may replace dotted config tokens with a single space —
+  shrinkage on that token class, no token synthesis.
+  - pin: `LlmOutputSanitizerPostconditionTest#deletionShapesMatchTheirDocumentedPostconditions`
 
 ## Call-site rows
 
