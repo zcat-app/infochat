@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 24 |
 | deferred | 0 |
 | abandoned | 0 |
-| **total** | **24** |
+| **total** | **27** |
 
 ---
 
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-808 — Run wizard download containers on the host network (complexity: low, risk: medium)
 
 ---
 
@@ -42,7 +42,8 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-809 — blocked_by: M1-808 (pending)
+- M1-810 — blocked_by: M1-809 (pending)
 
 ---
 
@@ -123,4 +124,7 @@ M1-804 (done)
 M1-806 (done)
 M1-807 (done)
   └── M1-798 (done)
+M1-808 (pending) ← runnable
+  └── M1-809 (pending)
+        └── M1-810 (pending)
 ```
