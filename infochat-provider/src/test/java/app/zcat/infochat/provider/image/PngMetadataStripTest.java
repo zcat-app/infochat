@@ -1,12 +1,20 @@
 package app.zcat.infochat.provider.image;
 
+import app.zcat.infochat.provider.testsupport.PngFixtures;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Properties;
 import java.util.zip.CRC32;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -46,6 +54,22 @@ class PngMetadataStripTest {
                 "surviving chunks are copied verbatim so their CRCs stay valid");
         assertTrue(containsChunkType(stripped, "IDAT"),
                 "payload chunks survive the strip");
+    }
+
+    @Test
+    void shippedCeilingAcceptsTheMeasuredDefaultOutput() throws IOException {
+        // REPRODUCTION (M1-811): the shipped ceiling must accept the
+        // pipeline's own default output 1792x1344 (bench/livetest-10-08-26.md
+        // E8/E12); value read from the MAIN properties via the filesystem.
+        long shippedCeiling = readMaxOutputPixelsFromMainProperties();
+        byte[] png = PngFixtures.minimalPng(1792, 1344);
+
+        byte[] stripped = PngMetadataStrip.strip(png, shippedCeiling);
+
+        assertEquals(1792, readInt(stripped, 16),
+                "the strip's output keeps the default output's IHDR width");
+        assertEquals(1344, readInt(stripped, 20),
+                "the strip's output keeps the default output's IHDR height");
     }
 
     @Test
@@ -99,6 +123,36 @@ class PngMetadataStripTest {
     }
 
     // --- PNG construction helpers ------------------------------------------
+
+    /** Reads the SHIPPED ceiling from the main application.properties via
+     * the filesystem (HelpTopicCorpusTest precedent — test-resources
+     * shadow the classpath name and carry no max-output-pixels key). */
+    private static long readMaxOutputPixelsFromMainProperties() throws IOException {
+        Path cwd = Path.of(System.getProperty("user.dir"));
+        Path current = cwd;
+        for (int i = 0; i < 10; i++) {
+            Path candidate = current.resolve(
+                    "infochat-provider/src/main/resources/application.properties");
+            if (Files.isRegularFile(candidate)) {
+                Properties props = new Properties();
+                try (InputStream stream = Files.newInputStream(candidate)) {
+                    props.load(new InputStreamReader(stream, StandardCharsets.UTF_8));
+                }
+                String value = props.getProperty("infochat.image.max-output-pixels");
+                if (value == null) {
+                    throw new AssertionError(
+                            "main application.properties carries no max-output-pixels key");
+                }
+                return Long.parseLong(value);
+            }
+            current = current.getParent();
+            if (current == null) {
+                break;
+            }
+        }
+        throw new AssertionError(
+                "main application.properties not found walking up from user.dir=" + cwd);
+    }
 
     /** Builds a minimal PNG: signature + IHDR + the given chunks. */
     private static byte[] png(int width, int height, byte[]... chunks) {

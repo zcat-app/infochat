@@ -40,6 +40,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.text.MessageFormat;
 import java.time.Instant;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -106,8 +107,9 @@ public class ImageCommandHandler implements CommandHandler {
     @ConfigProperty(name = "infochat.image.prompt-max-chars", defaultValue = "500")
     int promptMaxChars;
 
-    /** Server-side output-size ceiling bounding {@code --resolution}. */
-    @ConfigProperty(name = "infochat.image.max-output-pixels", defaultValue = "2000000")
+    /** Server-side output-size ceiling bounding the strip's IHDR check on
+     * every output (and the parser's {@code --resolution} check). */
+    @ConfigProperty(name = "infochat.image.max-output-pixels", defaultValue = "5000000")
     long maxOutputPixels;
 
     /** The per-model steady-state seconds the setup step seeds from the
@@ -313,6 +315,10 @@ public class ImageCommandHandler implements CommandHandler {
             try {
                 stripped = PngMetadataStrip.strip(png, maxOutputPixels);
             } catch (PngMetadataStrip.InvalidPngException e) {
+                // Loud, content-free: the message is structural-only
+                // (dimensions, offsets, bound — D75), so it is safe to log.
+                SafeLog.warn(log, Objects.requireNonNull(e.getMessage(),
+                        "ImageCommandHandler: InvalidPngException without a message"), e);
                 writeAuditRow(actorId, scopeId, outcome);
                 progressNotifier.complete(scope,
                         bundleLoader.get(BundleKeys.IMAGE_ERROR_GENERATION_FAILED, language));

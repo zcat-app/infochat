@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 6 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 28 |
+| done | 29 |
 | deferred | 0 |
 | abandoned | 0 |
 | **total** | **34** |
@@ -25,10 +25,11 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-811 — Align the image pixel ceiling with the default output (complexity: low, risk: low)
 - M1-813 — Write IMAGE_GENERATE rows on queue-depth failures (complexity: low, risk: low)
 - M1-814 — Treat an absent image spool as empty in the sweeper (complexity: low, risk: low)
 - M1-815 — Strip internal config identifiers from LLM output (complexity: medium, risk: medium)
+- M1-816 — Image e2e release gate: configured pipeline proof (complexity: medium, risk: medium)
+- M1-817 — Image resolution floor and limit-error wording (complexity: low, risk: low)
 
 ---
 
@@ -45,8 +46,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-816 — blocked_by: M1-811 (pending), M1-812 (done)
-- M1-817 — blocked_by: M1-811 (pending)
+_(none)_
 
 ---
 
@@ -66,6 +66,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-812 | ComfyUI ImageScale crop input on -r graphs | 2026-08-10 | round 1 APPROVE |
+| M1-811 | Align the image pixel ceiling with the default output | 2026-08-10 | round 2 APPROVE |
 | M1-810 | Run wizard image builds on the host network | 2026-08-10 | round 1 APPROVE-WITH-FIXES |
 | M1-809 | Wizard download preflight parity and fail-fast guidance | 2026-08-10 | round 2 APPROVE |
 | M1-808 | Run wizard download containers on the host network | 2026-08-10 | round 1 APPROVE |
@@ -74,7 +75,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-807 | ComfyUI image carve: VAE-Utils node + flag re-verify | 2026-08-09 | round 1 APPROVE |
 | M1-802 | ComfyUI client: server-built graph, bounded fetch, cancel | 2026-08-09 | round 2 APPROVE |
 | M1-806 | ComfyUI temp/ containment: tmpfs + janitor sweep | 2026-08-08 | round 1 APPROVE |
-| M1-805 | Confine ImageSpool writes to the tmpfs spool dir | 2026-08-08 | round 1 APPROVE-WITH-FIXES |
 
 ---
 
@@ -130,9 +130,9 @@ M1-807 (done)
 M1-808 (done)
   └── M1-809 (done)
         └── M1-810 (done)
-M1-811 (pending) ← runnable
-  ├── M1-816 (pending)
-  └── M1-817 (pending)
+M1-811 (done)
+  ├── M1-816 (pending) ← runnable
+  └── M1-817 (pending) ← runnable
 M1-812 (done)
   └── M1-816 (pending) [see above]
 M1-813 (pending) ← runnable

@@ -214,7 +214,7 @@ profile-driven in `application.properties`:
 | `infochat.image.cooldown` | `PT15S` | `PT30S` | per-user gap between attempts (DM and group) |
 | `infochat.image.max-queue-depth` | 3 | 3 | global backend depth at/above which the command refuses immediately |
 | `infochat.image.prompt-max-chars` | 500 | 300 | prompt length cap — rejected before any gate runs |
-| `infochat.image.max-output-pixels` | 2000000 | 2000000 | output pixel ceiling bounding `--resolution` |
+| `infochat.image.max-output-pixels` | 5000000 | 5000000 | output pixel ceiling — bounds the parser's `--resolution` check and the strip's IHDR check on every output |
 | `infochat.image.steady-state-seconds` | unset | unset | per-model steady-state seconds the setup wizard seeds from the container re-measurement; unset → position shown without an ETA |
 
 The cooldown is a 1-token bucket whose window IS the cooldown, reusing

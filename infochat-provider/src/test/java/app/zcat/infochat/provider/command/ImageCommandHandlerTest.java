@@ -29,6 +29,7 @@ import app.zcat.infochat.provider.messaging.OutboundDelivery;
 import app.zcat.infochat.provider.messaging.RateCapBucket;
 import app.zcat.infochat.provider.messaging.StageProgressNotifier;
 import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
+import app.zcat.infochat.provider.testsupport.PngFixtures;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
@@ -265,6 +266,32 @@ class ImageCommandHandlerTest {
                 "the echo carries the redaction marker; got: " + echo);
         assertTrue(auditWriter.actions().contains(AuditAction.LLM_OUTPUT_SANITIZED),
                 "the sanitize call writes its LLM_OUTPUT_SANITIZED audit row");
+    }
+
+    @Test
+    void overCeilingOutputFailsLoudlyAndContentFree() {
+        // FAILURE-MODE (M1-811 acceptance 4, analysis P2): an over-ceiling
+        // PNG is refused at the strip — generic terminal, one content-free
+        // failed row, no spool file; the WARN is review-grepped.
+        client.generateResult = PngFixtures.minimalPng(1500, 1500);
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm("alice"), "/image a red cat");
+
+        assertNull(reply, "the strip-arm terminal self-delivers on the placeholder");
+        assertEquals(bundleLoader.get(BundleKeys.IMAGE_ERROR_GENERATION_FAILED),
+                notifier.completedText(), "the terminal is the generic generation failure");
+        List<RedactionHook.AuditRow> rows = auditWriter.rowsFor(AuditAction.IMAGE_GENERATE);
+        assertEquals(1, rows.size(), "exactly one content-free row per rejected output");
+        assertTrue(rows.get(0).detailsJson().contains("\"outcome\":\"failed\""),
+                "the row records the failed outcome; got: " + rows.get(0).detailsJson());
+        assertFalse(rows.get(0).detailsJson().contains("a red cat"),
+                "never the prompt in details_json (D75)");
+        try (var entries = Files.list(tempDir)) {
+            assertEquals(0, entries.count(),
+                    "no spool file is created before the strip refusal");
+        } catch (IOException e) {
+            throw new AssertionError("spool dir unreadable", e);
+        }
     }
 
     @Test

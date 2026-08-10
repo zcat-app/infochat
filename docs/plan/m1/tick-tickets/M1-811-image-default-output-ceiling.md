@@ -1,21 +1,22 @@
 ---
 id: M1-811
 title: "Align the image pixel ceiling with the default output"
-status: pending
+status: done
 created: 2026-08-10
 last_updated: 2026-08-10
 flow: tick
 reproduction: >-
-  to-be-written: PngMetadataStripTest.shippedCeilingAcceptsTheMeasuredDefaultOutput —
+  PngMetadataStripTest.shippedCeilingAcceptsTheMeasuredDefaultOutput —
   reads infochat.image.max-output-pixels from the MAIN
   infochat-provider/src/main/resources/application.properties (filesystem
   path, the HelpTopicCorpusTest.readProbationDurationFromMainProperties
   precedent — test-resources shadow the classpath), builds a PNG whose IHDR
   is the measured default output 1792x1344 (2,408,448 px,
   bench/livetest-10-08-26.md E8/E12), runs PngMetadataStrip.strip at the
-  shipped value, and asserts the output survives with its IHDR intact. RED
-  on main: the shipped value is 2000000, so the strip throws
-  InvalidPngException on the deployment's own default output.
+  shipped value, and asserts the output survives with its IHDR intact. Run
+  RED at start: the shipped value is 2000000, so the strip threw
+  InvalidPngException on the deployment's own default output
+  (tick-test-M1-811-r0.log).
 analysis_ref: docs/plan/m1/tick-analysis/livetest-image-defects.md
 blocked_by: []
 files_scope:
@@ -57,11 +58,34 @@ test_plan:
 spec_refs:
   - docs/spec/commands.md §Content
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-10
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY WARN, SCOPE PASS"
+    diff_stats: "8 files changed, 168 insertions(+), 18 deletions(-)"
+    rework_items: 3
+    verdict_file: .scratch/tick-review-M1-811-r1.txt
+  - round: 2
+    date: 2026-08-10
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "8 files changed, 203 insertions(+), 21 deletions(-)"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-811-r2.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check: >-
+  start self-check passed 2026-08-10 — lint 0 BLOCKERs; citations verified
+  (application.properties:230, ImageCommandHandler.java:110-111/:314/:313-321/
+  :367-372, PngMetadataStrip.java:45-69 structural-only messages,
+  ImageCommandParser.java:112-116 division-form check,
+  ImageCommandHandlerTest.java:133 test-local stub value,
+  design doc :217 row, bench E8/E12 1792x1344=2,408,448 px); census 5/5
+  paths exist; analysis P1/P2/D-1 landed; blocked_by empty; test-resources
+  application.properties carries no max-output-pixels key (filesystem read
+  load-bearing)
 ---
 
 # M1-811: Align the image pixel ceiling with the default output
@@ -189,3 +213,48 @@ No pre-existing test is modified.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-811-image-default-output-ceiling.md
 ```
+
+## Round 1 rework
+
+REWORK ITEMS, verbatim from .scratch/tick-review-M1-811-r1.txt:
+
+1. Finding 1: rewrite the middle clause of the comment at
+   infochat-provider/src/main/resources/application.properties:222-224 to name
+   both surfaces the ceiling bounds (the strip's IHDR check on every output and
+   the parser's --resolution check), evaluated via
+   `grep -n 'pixel ceiling' infochat-provider/src/main/resources/application.properties`
+   printing a line containing both "strip" and "--resolution".
+2. Finding 2: replace the ternary at ImageCommandHandler.java:319-320 with a
+   direct `SafeLog.warn(log, e.getMessage(), e);`, dropping the `reason` local,
+   evaluated via
+   `grep -c 'invalid PNG output refused' infochat-provider/src/main/java/app/zcat/infochat/provider/command/ImageCommandHandler.java`
+   printing 0 with ImageCommandHandlerTest.overCeilingOutputFailsLoudlyAndContentFree
+   still green.
+3. Finding 3: delete the consumer parenthetical "(M1-811's ceiling reproduction,
+   M1-816's wiring test)" from the PngFixtures javadoc
+   (infochat-provider/src/test/java/app/zcat/infochat/provider/testsupport/PngFixtures.java:7-9),
+   evaluated via
+   `grep -c "wiring test" infochat-provider/src/test/java/app/zcat/infochat/provider/testsupport/PngFixtures.java`
+   printing 0 plus a test-compile of infochat-provider.
+
+## Review observations
+
+RECOMMENDED-NEW-TICKET from the round-2 review
+(.scratch/tick-review-M1-811-r2.txt), TOUCHED-BY-THIS-DIFF: no — recorded
+for the user's attention, no decision requested:
+
+- The strip's ceiling check can be bypassed by an IHDR whose pixel product
+  overflows long. PngMetadataStrip.walk computes `long pixels = width *
+  height` from two unsigned 32-bit IHDR reads (PngMetadataStrip.java:64-66);
+  each dimension can reach 2^32-1, so the product can exceed Long.MAX_VALUE
+  and wrap negative, and a negative product never satisfies `pixels >
+  maxPixels` (:67). A hostile or compromised backend (security.md §Trust
+  boundaries item 9) answers with a ~46-byte PNG whose IHDR declares e.g.
+  3037000500x3037000500; the strip copies the image through instead of
+  throwing InvalidPngException, while commands.md:634-638 promises image
+  decode is pixel-bounded before metadata stripping. Fix shape: the division
+  form the parser already uses for the same value
+  (ImageCommandParser.java:112-116). Blast radius bounded (fetch cap, spool
+  capacity, and adapter byte ceilings all bind on bytes; the Provider never
+  decodes pixels) — a gap in the promised bound, not an open DOS. Belongs to
+  the M1-801 strip-mechanics surface (this ticket's out_of_scope item 1).
