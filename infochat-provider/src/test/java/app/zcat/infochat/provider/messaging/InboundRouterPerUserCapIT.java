@@ -188,6 +188,42 @@ class InboundRouterPerUserCapIT {
                 "all of alice's turns must be terminal after the drain");
     }
 
+    /** M1-803 item 6 / round-1 FINDING 3 — the image case: at ceiling,
+     * {@code /image a cat} is rejected at intake like any other interruptible
+     * (the cap is classification-driven, before the D73 config gate). */
+    @Test
+    void imageRequestBeyondCapRejectedLikeAnyOtherInterruptible() throws Exception {
+        seedVouchedUser("alice");
+        String groupOne = insertApprovedGroup(GROUP_PREFIX + "one");
+
+        CountDownLatch atCap = new CountDownLatch(perUserCap);
+        CountDownLatch gate = new CountDownLatch(1);
+        testLlmProvider.setResponseText("held reply");
+        testLlmProvider.setOnGenerate(() -> {
+            atCap.countDown();
+            awaitLatch(gate);
+        });
+
+        adapter.deliverDm(CONTACT_PREFIX + "alice", "alice dm question");
+        adapter.deliverGroupMention(groupOne, CONTACT_PREFIX + "alice", "alice group-1 question");
+        assertTrue(atCap.await(15, TimeUnit.SECONDS),
+                "alice must be at cap before the /image request is driven");
+
+        adapter.deliverDm(CONTACT_PREFIX + "alice", "/image a cat");
+
+        String capReject = bundleLoader.get(BundleKeys.ERROR_CHAT_PER_USER_CAP);
+        ScopeRef dm = new ScopeRef.Dm(CONTACT_PREFIX + "alice");
+        assertTrue(adapter.sentMessages().stream()
+                        .filter(outbound -> outbound.scope().equals(dm))
+                        .anyMatch(outbound -> outbound.text().equals(capReject)),
+                "an over-cap /image request must be rejected at intake "
+                        + "with the fixed guidance in the scope it arrived in");
+
+        gate.countDown();
+        DispatchAwaits.await(() -> interruptibleDispatcher.inFlightTaskCount() == 0,
+                "held turns drained");
+    }
+
     /**
      * Acceptance 2 — a cap rejection consumes nothing, matching the
      * check-order discipline documented at SummaryCommandHandler's

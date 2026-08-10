@@ -53,6 +53,11 @@ public class ComfyUIClient {
     static final int BREAKER_FAILURE_THRESHOLD = 3;
     static final Duration BREAKER_COOLDOWN = Duration.ofSeconds(30);
 
+    /** One sampling-dim edge cap: a hostile --resolution ratio must not
+     * blow the latent past the budget class (the /16 floor on the small
+     * edge would otherwise inflate the pixel count without bound). */
+    static final long MAX_SAMPLING_EDGE = 4096;
+
     private final Optional<String> baseUrl;
     private final Duration callTimeout;
     private final Duration jobTimeout;
@@ -63,8 +68,10 @@ public class ComfyUIClient {
     private final @Nullable LoadedTemplate template;
 
     /** The validated workflow template: the graph plus the node keys the
-     * builder parameterizes (prompt slot, sampler seed). */
-    private record LoadedTemplate(ObjectNode graph, String promptNodeKey, String samplerNodeKey) {}
+     * builder parameterizes (prompt slot, sampler seed, per-job latent dims,
+     * per-job fit target). */
+    private record LoadedTemplate(ObjectNode graph, String promptNodeKey, String samplerNodeKey,
+                                  String latentNodeKey, String fitNodeKey) {}
 
     /** Seam constructor: hand-supplied config + {@code Clock} for
      * plain-JUnit tests (fixed clock, stub server). */
@@ -101,7 +108,7 @@ public class ComfyUIClient {
             Duration callTimeout,
             @ConfigProperty(name = "infochat.image.job-timeout", defaultValue = "PT3M")
             Duration jobTimeout,
-            @ConfigProperty(name = "infochat.image.poll-interval", defaultValue = "PT500MS")
+            @ConfigProperty(name = "infochat.image.poll-interval", defaultValue = "PT0.5S")
             Duration pollInterval,
             @ConfigProperty(name = "infochat.image.max-response-bytes", defaultValue = "16777216")
             long maxResponseBytes,
@@ -114,17 +121,63 @@ public class ComfyUIClient {
      * the placeholder replaced through the JSON serializer and a fresh
      * random seed — user text lands in exactly one string field (D77). */
     public String buildGraph(String prompt) {
+        return serialize(builtGraphBase(templateOrThrow(), prompt));
+    }
+
+    /** The graph for {@code prompt} at an exact per-job output size: latent
+     * dims = requested ratio at the baked budget (/16), fit node swapped to
+     * an exact-W/H ImageScale (2026-08-10 DECIDE-BEFORE resolution). */
+    public String buildGraph(String prompt, long targetWidth, long targetHeight) {
         LoadedTemplate loaded = templateOrThrow();
+        ObjectNode graph = builtGraphBase(loaded, prompt);
+        JsonNode latentInputs = graph.get(loaded.latentNodeKey()).path("inputs");
+        long[] sampling = samplingDimsFor(
+                latentInputs.path("width").asLong(), latentInputs.path("height").asLong(),
+                targetWidth, targetHeight);
+        ObjectNode latent = (ObjectNode) graph.get(loaded.latentNodeKey()).get("inputs");
+        latent.put("width", sampling[0]);
+        latent.put("height", sampling[1]);
+        ObjectNode fitNode = (ObjectNode) graph.get(loaded.fitNodeKey());
+        fitNode.put("class_type", "ImageScale");
+        ObjectNode fitInputs = (ObjectNode) fitNode.get("inputs");
+        fitInputs.remove("megapixels");
+        fitInputs.remove("resolution_steps");
+        fitInputs.put("width", targetWidth);
+        fitInputs.put("height", targetHeight);
+        return serialize(graph);
+    }
+
+    private static ObjectNode builtGraphBase(LoadedTemplate loaded, String prompt) {
         ObjectNode graph = loaded.graph().deepCopy();
         ObjectNode promptInputs = (ObjectNode) graph.get(loaded.promptNodeKey()).get("inputs");
         promptInputs.set("text", TextNode.valueOf(prompt));
         ObjectNode samplerInputs = (ObjectNode) graph.get(loaded.samplerNodeKey()).get("inputs");
         samplerInputs.put("seed", ThreadLocalRandom.current().nextLong(0, Long.MAX_VALUE));
+        return graph;
+    }
+
+    private static String serialize(ObjectNode graph) {
         try {
             return JSON.writeValueAsString(graph);
         } catch (IOException e) {
             throw new IllegalStateException("failed to serialize the workflow graph", e);
         }
+    }
+
+    /** Sampling dims for one target: the template's baked budget at the
+     * target's ratio, each dim rounded /16 — the unified model-agnostic
+     * converter rule (the flag never constrains the sampler). */
+    static long[] samplingDimsFor(long budgetWidth, long budgetHeight,
+                                  long targetWidth, long targetHeight) {
+        double budgetPixels = (double) budgetWidth * budgetHeight;
+        double ratio = (double) targetWidth / (double) targetHeight;
+        long width = roundToSixteen(Math.sqrt(budgetPixels * ratio));
+        long height = roundToSixteen(Math.sqrt(budgetPixels / ratio));
+        return new long[]{Math.min(width, MAX_SAMPLING_EDGE), Math.min(height, MAX_SAMPLING_EDGE)};
+    }
+
+    private static long roundToSixteen(double value) {
+        return Math.max(16, (Math.round(value) + 8) / 16 * 16);
     }
 
     /** The backend's queue depth (running + pending) — the queue-depth gate
@@ -138,7 +191,18 @@ public class ComfyUIClient {
      * entry (D75). Timeout and interrupt CANCEL the backend job; a failed
      * clear fails the generation (design doc §The backend client). */
     public byte[] generate(String prompt) throws IOException, InterruptedException {
-        String promptId = submit(buildGraph(prompt));
+        return runJob(buildGraph(prompt));
+    }
+
+    /** One full job at an exact per-job output size — the converter wiring
+     * of {@link #buildGraph(String, long, long)}. */
+    public byte[] generate(String prompt, long targetWidth, long targetHeight)
+            throws IOException, InterruptedException {
+        return runJob(buildGraph(prompt, targetWidth, targetHeight));
+    }
+
+    private byte[] runJob(String graphJson) throws IOException, InterruptedException {
+        String promptId = submit(graphJson);
         try {
             byte[] bytes = awaitAndFetch(promptId, clock.instant().plus(jobTimeout));
             clearHistory(promptId);
@@ -190,9 +254,10 @@ public class ComfyUIClient {
         } catch (ResponseException e) {
             // Carry the backend's error TYPE only — its message/details can
             // quote the graph, and the prompt never reaches a thrown message
-            // (P4).
+            // (P4). Typed as graph-rejected so the caller can apply the D76
+            // refund boundary: the backend refused BEFORE any job ran.
             String detail = e.errorType().isEmpty() ? "" : ": " + e.errorType();
-            throw new ResponseException(e.status(), "backend rejected the submitted graph" + detail);
+            throw new GraphRejectedException("backend rejected the submitted graph" + detail);
         }
         String promptId = response.path("prompt_id").asText("");
         if (promptId.isEmpty()) {
@@ -219,19 +284,52 @@ public class ComfyUIClient {
                             image.path("subfolder").asText());
                 }
                 if (!clock.instant().isBefore(deadline)) {
+                    boolean started = isJobRunning(promptId);
                     LOG.warn("image job {} timed out after {}; cancelling the backend job",
                             promptId, jobTimeout);
                     cancelBestEffort(promptId);
-                    throw new JobTimeoutException("image generation exceeded " + jobTimeout);
+                    throw new JobTimeoutException("image generation exceeded " + jobTimeout, started);
                 }
                 Thread.sleep(pollInterval.toMillis());
             }
         } catch (InterruptedException e) {
             // /stop's interrupt must reach the same cancellation path as the
-            // timeout (P9).
+            // timeout (P9). The started peek feeds the D76 refund boundary:
+            // a job cancelled before it ever ran refunds the attempt.
+            boolean started = isJobRunning(promptId);
             cancelBestEffort(promptId);
-            throw e;
+            throw new JobCancelledException("image generation cancelled by /stop", started);
         }
+    }
+
+    /** Whether the backend reports the job RUNNING — the D76 refund-boundary
+     * discriminator at timeout/cancel; an unreadable answer is conservatively
+     * "started", since D76 refunds only what is KNOWN never to have run. */
+    private boolean isJobRunning(String promptId) {
+        try {
+            JsonNode queue = sendJson("GET", "/queue", Optional.empty());
+            for (JsonNode job : queue.path("queue_running")) {
+                if (promptId.equals(promptIdOf(job))) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (IOException | RuntimeException e) {
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return true;
+        }
+    }
+
+    /** The job's prompt id in either verified {@code /queue} entry shape:
+     * the positional {@code [number, prompt_id, ...]} array of the pinned
+     * backend, or an object carrying {@code prompt_id}. */
+    private static String promptIdOf(JsonNode job) {
+        if (job.isArray() && job.size() > 1) {
+            return job.path(1).asText("");
+        }
+        return job.path("prompt_id").asText("");
     }
 
     private static @Nullable JsonNode firstOutputImage(JsonNode outputs) {
@@ -246,22 +344,37 @@ public class ComfyUIClient {
     }
 
     private void cancelBestEffort(String promptId) {
+        // Park an already-armed interrupt across the cancel calls and
+        // restore it after (the M1-763 park pattern): an armed flag makes
+        // the HTTP calls fail before they leave the process.
+        boolean interrupted = Thread.interrupted();
         try {
             cancel(promptId);
         } catch (IOException e) {
             SafeLog.warn(LOG, "image job " + promptId + " ended and the cancel call failed", e);
         } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+            interrupted = true;
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
     private void clearBestEffort(String promptId) {
+        // Same interrupt park as cancelBestEffort: the D75 history clear is
+        // owed even on a cancelled job, and an armed flag would drop it.
+        boolean interrupted = Thread.interrupted();
         try {
             clearHistory(promptId);
         } catch (IOException e) {
             SafeLog.warn(LOG, "image job " + promptId + " failed and the history clear failed too", e);
         } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+            interrupted = true;
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
@@ -303,7 +416,7 @@ public class ComfyUIClient {
      * failures advance the breaker (LlmCircuitBreakerRegistry semantics). */
     private byte[] sendBytes(HttpRequest request) throws IOException, InterruptedException {
         if (!breakerTryAcquire()) {
-            throw new UnreachableException("image backend breaker is open; not attempting the call");
+            throw new BreakerOpenException("image backend breaker is open; not attempting the call");
         }
         try {
             HttpResponse<byte[]> response = http.send(request, boundedBytes());
@@ -475,7 +588,9 @@ public class ComfyUIClient {
             throw new IllegalArgumentException(
                     "infochat.image.workflow-file must be a non-empty API-format graph object");
         }
-        return new LoadedTemplate(graph, validatePromptSlot(graph), validateSampler(graph));
+        String samplerKey = validateSampler(graph);
+        return new LoadedTemplate(graph, validatePromptSlot(graph), samplerKey,
+                validateLatentSlot(graph, samplerKey), validateFitSlot(graph));
     }
 
     /** The key of the node whose {@code inputs.text} carries the
@@ -523,6 +638,47 @@ public class ComfyUIClient {
         return sampler;
     }
 
+    /** The key of the latent node the KSampler's {@code latent_image} link
+     * targets — its baked numeric width/height ARE the sampling budget the
+     * converter derives (the template is the single source of truth). */
+    private static String validateLatentSlot(ObjectNode template, String samplerKey) {
+        JsonNode link = template.get(samplerKey).path("inputs").path("latent_image");
+        if (!link.isArray() || link.isEmpty() || !link.get(0).isTextual()) {
+            throw new IllegalArgumentException(
+                    "workflow template's KSampler must link a latent_image node");
+        }
+        String key = link.get(0).asText();
+        JsonNode inputs = template.path(key).path("inputs");
+        if (!inputs.path("width").isIntegralNumber() || !inputs.path("height").isIntegralNumber()) {
+            throw new IllegalArgumentException("workflow template's latent node must carry "
+                    + "numeric width/height — the converter's baked sampling budget");
+        }
+        return key;
+    }
+
+    /** The key of the single ImageScaleToTotalPixels node — the converter's
+     * per-job seam for exact --resolution targets (wizard step 4b always
+     * bakes exactly one). */
+    private static String validateFitSlot(ObjectNode template) {
+        String fit = null;
+        var fields = template.fields();
+        while (fields.hasNext()) {
+            var node = fields.next();
+            if ("ImageScaleToTotalPixels".equals(node.getValue().path("class_type").asText(""))) {
+                if (fit != null) {
+                    throw new IllegalArgumentException("workflow template must contain exactly one "
+                            + "ImageScaleToTotalPixels fit node, found more than one");
+                }
+                fit = node.getKey();
+            }
+        }
+        if (fit == null) {
+            throw new IllegalArgumentException("workflow template must contain exactly one "
+                    + "ImageScaleToTotalPixels fit node, found none");
+        }
+        return fit;
+    }
+
     private LoadedTemplate templateOrThrow() {
         LoadedTemplate loaded = template;
         if (loaded == null) {
@@ -560,9 +716,11 @@ public class ComfyUIClient {
         }
     }
 
-    /** Transport-class failure (connect, timeout, reset) — feeds the breaker. */
-    public static final class UnreachableException extends IOException {
-        UnreachableException(String message) {
+    /** Transport-class failure (connect, timeout, reset) — feeds the breaker.
+     * Non-final so {@link BreakerOpenException} can be discriminated while
+     * still satisfying {@code assertThrows(UnreachableException.class)}. */
+    public static class UnreachableException extends IOException {
+        public UnreachableException(String message) {
             super(message);
         }
 
@@ -571,9 +729,19 @@ public class ComfyUIClient {
         }
     }
 
-    /** The backend answered with a non-2xx status or a malformed/failed
-     * result — reachability evidence, never a breaker input. */
-    public static final class ResponseException extends IOException {
+    /** The breaker denied the call after consecutive transport failures —
+     * distinct from a fresh transport failure so the caller can answer the
+     * breaker-open failure mode without attempting the call. */
+    public static final class BreakerOpenException extends UnreachableException {
+        public BreakerOpenException(String message) {
+            super(message);
+        }
+    }
+
+    /** The backend answered non-2xx or malformed — reachability evidence,
+     * never a breaker input; non-final so {@link GraphRejectedException}
+     * stays assertable as {@code ResponseException} (D76 refund boundary). */
+    public static class ResponseException extends IOException {
         private final int status;
         private final String errorType;
 
@@ -600,6 +768,14 @@ public class ComfyUIClient {
         }
     }
 
+    /** The backend rejected the submitted graph BEFORE any job ran — the
+     * D76 refund boundary: the GPU never started. */
+    public static final class GraphRejectedException extends ResponseException {
+        public GraphRejectedException(String message) {
+            super(message);
+        }
+    }
+
     /** An endpoint-chosen body crossed the byte cap; the connection was cut
      * and the partial body discarded before any retention (P7). */
     public static final class BodyOverCapException extends IOException {
@@ -608,10 +784,34 @@ public class ComfyUIClient {
         }
     }
 
-    /** The job exceeded its deadline AFTER the cancel call was issued (P9). */
+    /** The job exceeded its deadline AFTER the cancel call was issued (P9).
+     * {@code jobStarted} carries the D76 refund boundary: a job that never
+     * left the queue refunds the attempt. */
     public static final class JobTimeoutException extends IOException {
-        JobTimeoutException(String message) {
+        private final boolean jobStarted;
+
+        public JobTimeoutException(String message, boolean jobStarted) {
             super(message);
+            this.jobStarted = jobStarted;
+        }
+
+        public boolean jobStarted() {
+            return jobStarted;
+        }
+    }
+
+    /** /stop's interrupt cancelled the job; {@code jobStarted} carries the
+     * same D76 refund boundary as {@link JobTimeoutException}. */
+    public static final class JobCancelledException extends IOException {
+        private final boolean jobStarted;
+
+        public JobCancelledException(String message, boolean jobStarted) {
+            super(message);
+            this.jobStarted = jobStarted;
+        }
+
+        public boolean jobStarted() {
+            return jobStarted;
         }
     }
 }

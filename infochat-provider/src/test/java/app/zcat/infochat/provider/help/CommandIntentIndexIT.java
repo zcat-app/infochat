@@ -244,13 +244,21 @@ class CommandIntentIndexIT {
      */
     private static final int EF_SEARCH = 40;
     private static final int FOREIGN_CROWD_SIZE = 200;
+    /** The crowd spans the whole gap below the target so the target keeps
+     * close graph neighbors under ANY HNSW level draw — an outlier beyond
+     * the cone loses its bridge edges to pruning and becomes unreachable. */
+    private static final double CROWD_MIN_ANGLE = 0.001;
+    private static final double CROWD_MAX_ANGLE = 0.29;
+    /** Inside the crowd's span: more than EF_SEARCH rows stay closer than
+     * the target (the trap), yet the target sits in the connected manifold. */
+    private static final double TARGET_ANGLE = 0.15;
     private static final double SIMILARITY_THRESHOLD = 0.60;
 
     /**
      * M1-660 acceptance item 4 — the retrieval proof, not a SQL-string
-     * assert. {@value #FOREIGN_CROWD_SIZE} rows of a second doc_kind are
-     * seeded strictly CLOSER to the query vector than the target command
-     * row, so a non-iterative HNSW probe's whole {@value #EF_SEARCH}-row
+     * assert. {@value #FOREIGN_CROWD_SIZE} rows of a second doc_kind span
+     * the gap below the target — more than {@value #EF_SEARCH} of them
+     * strictly CLOSER to the query — so a non-iterative HNSW probe's whole
      * candidate window fills with rows the {@code doc_kind} filter then
      * discards — under-recall to empty, exactly what production hits the
      * moment M1-649's topic corpus lands. With
@@ -261,7 +269,7 @@ class CommandIntentIndexIT {
      */
     @Test
     void commandRecallSurvivesForeignKindInterleaving() throws Exception {
-        seedDocRow(CROWDED_COMMAND, CommandIntentIndex.DOC_KIND, vectorAtAngle(0.30));
+        seedDocRow(CROWDED_COMMAND, CommandIntentIndex.DOC_KIND, vectorAtAngle(TARGET_ANGLE));
         seedForeignCrowd();
         reindexHnswGraph();
 
@@ -276,8 +284,9 @@ class CommandIntentIndexIT {
                         SIMILARITY_THRESHOLD);
                 assertEquals(Optional.of(CROWDED_COMMAND), match,
                         "a command probe must recall the nearest VISIBLE command-intent "
-                                + "row even when " + FOREIGN_CROWD_SIZE + " closer rows of "
-                                + "another doc_kind crowd the ef_search window — without "
+                                + "row even when a " + FOREIGN_CROWD_SIZE + "-row crowd of "
+                                + "another doc_kind outnumbers the ef_search window with "
+                                + "closer rows — without "
                                 + "iterative_scan the probe stops at " + EF_SEARCH
                                 + " candidates and silently under-recalls");
             } finally {
@@ -308,7 +317,7 @@ class CommandIntentIndexIT {
      */
     @Test
     void armingOutsideTransactionIsSilentNoOpAndRealPathRecovers() throws Exception {
-        seedDocRow(CROWDED_COMMAND, CommandIntentIndex.DOC_KIND, vectorAtAngle(0.30));
+        seedDocRow(CROWDED_COMMAND, CommandIntentIndex.DOC_KIND, vectorAtAngle(TARGET_ANGLE));
         seedForeignCrowd();
         reindexHnswGraph();
 
@@ -360,7 +369,8 @@ class CommandIntentIndexIT {
     /**
      * Rebuild the HNSW graph from the live heap before probing. Sibling
      * tests in this class churn {@code doc_embedding} (insert + delete
-     * of ~41 IDENTICAL stub vectors per builder run); HNSW deletes leave
+     * of the whole CATALOGUE as IDENTICAL stub vectors per builder run);
+     * HNSW deletes leave
      * dead graph nodes until VACUUM, and a fresh row inserted into that
      * degenerate duplicate-vector region can become unreachable from
      * the graph entry point — empirically, even an exhaustive iterative
@@ -376,6 +386,10 @@ class CommandIntentIndexIT {
     private void reindexHnswGraph() throws Exception {
         try (Connection conn = dataSource.getConnection();
              Statement stmt = conn.createStatement()) {
+            // HNSW level draws come from the backend RNG (pgvector seeds a
+            // fixed one in debug builds only): pin them so the graph cannot
+            // flip with the pooled backend's RNG history (catalog growth).
+            stmt.execute("SELECT setseed(0.5)");
             stmt.execute("REINDEX INDEX idx_doc_embedding_hnsw");
         }
     }
@@ -439,7 +453,8 @@ class CommandIntentIndexIT {
                 ps.setString(2, FOREIGN_KIND);
                 ps.setString(3, docId);
                 ps.setString(4, "crowd-hash");
-                ps.setString(5, toVectorLiteral(vectorAtAngle(0.001 + i * 0.0001)));
+                ps.setString(5, toVectorLiteral(vectorAtAngle(
+                        CROWD_MIN_ANGLE + i * (CROWD_MAX_ANGLE - CROWD_MIN_ANGLE) / (FOREIGN_CROWD_SIZE - 1))));
                 ps.setString(6, EMBEDDING_MODEL);
                 ps.addBatch();
             }

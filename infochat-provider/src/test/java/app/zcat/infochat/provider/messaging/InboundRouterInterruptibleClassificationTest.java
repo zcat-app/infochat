@@ -48,6 +48,8 @@ class InboundRouterInterruptibleClassificationTest {
                         "flagless /retry is offloaded to the worker seam"),
                 new Case("/summary", true,
                         "/summary is offloaded to the worker seam"),
+                new Case("/image -p a red bicycle", true,
+                        "/image joins the D35 class: per-user ceiling and /stop apply (M1-803)"),
                 new Case("what's new today?", true,
                         "non-slash chat body dispatches on the interruptible path"),
                 new Case("/frobnicate", false,

@@ -221,6 +221,7 @@ them to the marked region — doing so would red the build.
 /grant-admin
 /group-timezone
 /help
+/image
 /invite
 /lang
 /list-groups

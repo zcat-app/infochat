@@ -122,7 +122,14 @@ public class StageProgressNotifier implements ProgressNotifier {
 
     @Override
     public void publish(ScopeRef scope, ProgressStage stage) {
-        String text = bundleLoader.get(bundleKeyFor(stage), inboundContext.effectiveLanguage());
+        publishStageText(scope,
+                bundleLoader.get(bundleKeyFor(stage), inboundContext.effectiveLanguage()));
+    }
+
+    /** Publish a caller-resolved stage text (a command-specific stage key);
+     * messaging.md §Progress notifications' scalar-parameter rule binds the
+     * caller — deterministic scalars only; lifecycle is {@link #publish}'s. */
+    public void publishStageText(ScopeRef scope, String text) {
         MessagingAdapter adapter = resolveAdapter();
         if (!adapter.capabilities().supportsMessageEdit()) {
             // Spec messaging.md §Progress notifications: adapters without

@@ -2120,6 +2120,73 @@ public final class BundleKeys {
     /** Curated answer for the /forget erasure (what it purges + what it does not touch) topic. */
     public static final String TOPIC_FORGET_ERASURE_ANSWER = "topic.forget-erasure.answer";
 
+    // ----- /image (D73/D75/D76; commands.md §Content) ------------------------
+    // The config-gated image command: help lines, the eight-mode failure
+    // contract, parser rejects, the ETA progress strings and the echo reply.
+
+    /** {@code /image} short help line. */
+    public static final String HELP_CMD_IMAGE_SHORT = "help.cmd.image.short";
+
+    /** {@code /image} usage detail. */
+    public static final String HELP_CMD_IMAGE_USAGE = "help.cmd.image.usage";
+
+    /** {@code /image} examples. */
+    public static final String HELP_CMD_IMAGE_EXAMPLES = "help.cmd.image.examples";
+
+    /** Failure contract: transport-class failure reaching the backend. */
+    public static final String IMAGE_ERROR_BACKEND_UNREACHABLE = "image.error.backend_unreachable";
+
+    /** Failure contract: the backend breaker is open after consecutive failures. */
+    public static final String IMAGE_ERROR_BREAKER_OPEN = "image.error.breaker_open";
+
+    /** Failure contract: backend queue over budget; {@code {0}} = coarse backlog ETA seconds. */
+    public static final String IMAGE_ERROR_QUEUE_BUSY = "image.error.queue_busy";
+
+    /** Failure contract: backend queue over budget with no ETA constant configured. */
+    public static final String IMAGE_ERROR_QUEUE_BUSY_NO_ETA = "image.error.queue_busy_no_eta";
+
+    /** Failure contract: the caller's or the group's hourly image credit is exhausted. */
+    public static final String IMAGE_ERROR_CREDITS_EXHAUSTED = "image.error.credits_exhausted";
+
+    /** Failure contract: per-user cooldown not elapsed; {@code {0}} = whole seconds remaining. */
+    public static final String IMAGE_ERROR_COOLDOWN = "image.error.cooldown";
+
+    /** Failure contract: the job timed out after its backend cancellation. */
+    public static final String IMAGE_ERROR_TIMEOUT = "image.error.timeout";
+
+    /** Failure contract: the adapter cannot carry attachments (capability flag false). */
+    public static final String IMAGE_ERROR_NO_ATTACHMENT_SUPPORT = "image.error.no_attachment_support";
+
+    /** Failure contract: the generated image exceeds the adapter's attachment ceiling. */
+    public static final String IMAGE_ERROR_ATTACHMENT_OVER_LIMIT = "image.error.attachment_over_limit";
+
+    /** Residual backend-class failure (rejected graph, failed job, over-cap fetch). */
+    public static final String IMAGE_ERROR_GENERATION_FAILED = "image.error.generation_failed";
+
+    /** The image was generated but the adapter delivery permanently failed. */
+    public static final String IMAGE_ERROR_SEND_FAILED = "image.error.send_failed";
+
+    /** Parser reject: prompt over the profile-driven length cap; {@code {0}} = the cap. */
+    public static final String IMAGE_ERROR_PROMPT_TOO_LONG = "image.error.prompt_too_long";
+
+    /** Parser reject: a {@code --resolution} value that is not {@code WxH}. */
+    public static final String IMAGE_ERROR_BAD_RESOLUTION = "image.error.bad_resolution";
+
+    /** Parser reject: a resolution above the server-side pixel ceiling; {@code {0}} = the ceiling. */
+    public static final String IMAGE_ERROR_RESOLUTION_TOO_LARGE = "image.error.resolution_too_large";
+
+    /** Parser reject: no prompt text at all. */
+    public static final String IMAGE_ERROR_MISSING_PROMPT = "image.error.missing_prompt";
+
+    /** GENERATING stage with ETA; {@code {0}} = queue position, {@code {1}} = whole ETA seconds. */
+    public static final String IMAGE_PROGRESS_GENERATING_ETA = "image.progress.generating.eta";
+
+    /** GENERATING stage without an ETA constant configured; {@code {0}} = queue position. */
+    public static final String IMAGE_PROGRESS_GENERATING_NO_ETA = "image.progress.generating.no_eta";
+
+    /** Terminal echo reply; {@code {0}} = the sanitized English prompt actually used. */
+    public static final String IMAGE_REPLY_ECHO = "image.reply.echo";
+
     private BundleKeys() {
         throw new AssertionError("BundleKeys is a constant holder and must not be instantiated");
     }

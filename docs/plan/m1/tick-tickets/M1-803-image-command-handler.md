@@ -1,10 +1,94 @@
 ---
 id: M1-803
 title: "/image command handler: gates, translation, echo, audit"
-status: pending
+status: done
 created: 2026-08-08
-last_updated: 2026-08-08
+last_updated: 2026-08-10
 flow: tick
+reviews:
+  - round: 1
+    date: 2026-08-10
+    verdict: MANUAL
+    checks:
+      SPEC-TRUTHNESS-CHECK: FAIL
+      SECURITY-CHECK: FAIL
+      TEST-ADEQUACY-CHECK: FAIL
+      MAINTAINABILITY-CHECK: PASS
+      SCOPE-CHECK: PASS
+    diff_stats: "round-1 full diff: 28 files changed, 2466 insertions(+), 60 deletions(-)"
+  - round: 2
+    date: 2026-08-10
+    verdict: APPROVE
+    checks:
+      SPEC-TRUTHNESS-CHECK: PASS
+      SECURITY-CHECK: PASS
+      TEST-ADEQUACY-CHECK: PASS
+      MAINTAINABILITY-CHECK: PASS
+      SCOPE-CHECK: PASS
+    diff_stats: "round-2 fix hunks: 8 files changed, 487 insertions(+), 27 deletions(-); full diff: 30 files changed, 2933 insertions(+), 67 deletions(-)"
+    notes: >-
+      Post-refine round (round-1 MANUAL resolved by the user's escalate arm 1
+      call: wire the converter + settle the DECIDE-BEFORE). All five round-1
+      findings dispositioned SATISFIED with located passing probes; seven
+      candidate findings falsified-and-dropped (verdict:
+      .scratch/tick-review-M1-803-r2.txt). Full verify green
+      (.scratch/tick-test-M1-803-r3.log). Live probe (/image -r 512x512
+      against the M1-797 container) noted by the reviewer as outside the
+      gate's evidence set — remains a deploy-time check.
+  - round: 3
+    date: 2026-08-10
+    verdict: APPROVE
+    checks:
+      SPEC-TRUTHNESS-CHECK: PASS
+      SECURITY-CHECK: PASS
+      TEST-ADEQUACY-CHECK: PASS
+      MAINTAINABILITY-CHECK: PASS
+      SCOPE-CHECK: PASS
+    diff_stats: "round-3 verification full diff: 30 files changed, 2952 insertions(+), 67 deletions(-); code/test tree identical to the round-2 APPROVE'd tree (r2->r3 delta = the round-2 review record only)"
+    notes: >-
+      User-requested independent verification re-review (kimi reviewer)
+      of the FULL diff, saved alongside the round-2 verdict
+      (.scratch/tick-review-M1-803-r3.txt; mechanical report
+      .scratch/tick-mech-M1-803-r3.txt). 0 rework, 0 critical/high, 7
+      candidates falsified-and-dropped. One RECOMMENDED-NEW-TICKET
+      (TOUCHED-BY-THIS-DIFF: yes, no DECIDE-BEFORE) recorded under
+      "Review observations" — a regression-net hole, shipped code correct.
+clarity_check: >-
+  start 2026-08-10 pass — tick-lint 0 findings; blocked_by M1-800/801/802/805
+  all done. Citations verified: InboundRouter.java:1803 (unknown-command body),
+  :1044-1051 (per-user cap), :1190-1207 (isInterruptible), AuditAction.java:4-13,
+  RateCapBucket maps/Settings/withers/sweep (:150-196/:244-341/:534-542/:641-655),
+  commands.md:586-648 + marked index :206-248 (no /image line). Line-drift note:
+  security.md citations predate later merges — the D35 enumeration now sits at
+  :1909-1922 and the /image translator leg at :2190-2206; SETUP_GUIDE.md's
+  leg-by-leg section at :678-712 (ticket said :593). Census re-run clean (all
+  rows present; task-count "seven" mentions are the generative-task set, not
+  translator legs, and stay). Analysis pitfalls P2/P4/P6/P10/P11/P12/P13/P14/P19/P20
+  all landed; P16 discharged by recording the new gate values in the design notes
+  (commands.md:643-644 commits they live there). blocked_by seam tests traced:
+  ComfyUIClientTest/ImageSpoolTest/PngMetadataStripTest/OutboundDeliveryAttachmentTest
+  pin classes this ticket INVOKES, never modifies, except one additive exception
+  subtype on ComfyUIClient to tell breaker-open from unreachable (files_scope
+  deviation, surfaces at review). Design tension resolved in self-check: the
+  visible() config gate vs HelpCommandHandlerTest's unmodified CATALOGUE-iterating
+  detail test ⇒ the config field is Optional<String> where null (no-CDI test
+  construction) reads as configured; CDI always injects a non-null Optional
+  (empty when unset), so production gating is exact and no pre-existing test
+  changes. Refine 2026-08-10 (round-1 MANUAL, escalate arm 1, user decision):
+  the ticket ABSORBS the converter guardrail the 2026-08-09 design decisions
+  and the M1-798 relay assigned it (round-1 FINDING 1), plus round-1 FINDINGS
+  2-5 as rework items. The relayed DECIDE-BEFORE (reanalysis :307-310,
+  addendum decision 4) is RESOLVED by the user: (1) budget source — the
+  client derives the baked sampling budget from the template's latent node
+  (KSampler latent_image link) baked width/height at load; NO wizard key,
+  M1-798 unamended, no key/template drift. (2) target landing — exact W/H:
+  the serializer sets per-job latent dims (requested ratio at budget, /16)
+  and swaps the fit node ImageScaleToTotalPixels -> ImageScale(width,height)
+  for -r jobs; no-flag jobs keep the baked graph. (3) strategy — unified
+  model-agnostic: sample at budget at the requested ratio, lanczos exact fit;
+  recorded deviation from Final decision 3's "Mage samples directly at
+  target" (Mage lanczos-fits from the 1 MP budget instead — user-approved).
+  Resolution recorded in the design doc at addendum decision 4.
 reproduction: >-
   to-be-written: ImageCommandHandlerTest.unconfiguredBaseUrlYieldsTheUnknownCommandReply —
   the intended test invokes `/image -p foo` with `infochat.image.base-url`
@@ -55,6 +139,11 @@ acceptance:
   - "Content-free audit (D75; analysis P4): AuditAction.IMAGE_GENERATE (one enum constant, no migration — the V5-open-ended column, AuditAction.java:4-13) records actor, scope, outcome — never the prompt, never a hash — Verify: ImageCommandHandlerTest.auditRowIsContentFree; plus a review-time grep that no log statement on any success/error/timeout path carries the prompt."
   - "Failure contract (commands.md:637-643; analysis P20): all eight enumerated modes return localized text, never silence — backend unreachable · breaker open · queue over budget · credit exhausted · cooldown not elapsed · timeout (after cancelling) · adapter cannot carry attachments · attachment exceeds the platform limit; the new bundle keys land in EVERY shipped bundle (en, cs, tr, es, ru — D43), enforced by BundleLoaderTest.everyBundleKeysConstantHasNonEmptyOwnValueInEveryShippedBundle — Verify: ImageCommandHandlerTest.failureContractCoversAllEightModes plus that BundleLoaderTest method."
   - "Coarse ETA in progress + refusal messages (design addendum 2026-08-07): the GENERATING stage string and the queue-depth refusal interpolate an integer ETA computed as (queue position + 1) × the per-model steady-state constant from operator config (the key M1-798's setup step seeds from the container re-measurement; unset constant → position shown without an ETA, no lie) — Verify: ImageCommandHandlerTest.generatingStageShowsTheEtaFromQueueDepthAndConfigConstant (fixed values, no wall clock) and .queueRefusalCarriesTheBacklogEstimate."
+  - "Converter guardrail (round-1 FINDING 1; design Final decision 7, addendum decision 4 with the 2026-08-10 DECIDE-BEFORE resolution): --resolution IS the output contract — the submitted graph carries per-job dims: the latent node's width/height = the requested ratio scaled to the template's baked budget (derived at load via the KSampler latent_image link), rounded /16, and the fit node swapped ImageScaleToTotalPixels -> ImageScale with the exact target W/H; no-flag jobs keep the baked graph untouched. Verify: ImageCommandHandlerTest.resolutionReachesTheSubmittedGraphAsPerJobDims (stub backend's /prompt JSON carries the per-job latent + fit dims for -r 512x512) plus ComfyUIClientTest buildGraph cases (ratio at budget /16; exact fit dims; default graph unchanged)."
+  - "Round-1 FINDING 2 fix: /stop landing DURING SUBMIT (POST /prompt in flight) does NOT refund — an unreadable job state is conservatively started (design-notes refund table; D76 refunds only what is KNOWN never to have run). Verify: ImageCommandHandlerTest.stopDuringSubmitDoesNotRefund (generateThrow = InterruptedException -> stopped terminal + assertFalse(tryAcquireImageUserCredit))."
+  - "Round-1 FINDING 3 fix: the per-user-cap REJECT promised by item 6 gains its image case. Verify: InboundRouterPerUserCapIT.imageRequestBeyondCapRejectedLikeAnyOtherInterruptible (hold the sender's two turns, deliver /image a cat, assert ERROR_CHAT_PER_USER_CAP — the cap fires at intake before the D73 config gate)."
+  - "Round-1 FINDING 4 fix: the timeout-before-start refund arm gains its assertion. Verify: failureContractCoversAllEightModes mode 6 asserts assertTrue(tryAcquireImageUserCredit) after the timeout reply (deleting the refund call turns it red)."
+  - "Round-1 FINDING 5 fix: the queue-depth-read interrupted arm writes the content-free stopped row like its sibling arms. Verify: ImageCommandHandlerTest.stopDuringQueueDepthReadWritesStoppedAuditRow (queueDepthThrow = InterruptedException -> stopped terminal AND one IMAGE_GENERATE row with outcome stopped)."
   - "mvn verify from repo root is green."
 test_plan:
   adds:
@@ -63,6 +152,8 @@ test_plan:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/command/ImageCreditGateTest.java
   modifies:
     - the InboundRouter interruptible test class (the image case joining the D35 table — authorized by acceptance item 6)
+    - InboundRouterPerUserCapIT (the image cap-reject case — refine round 2, FINDING 3)
+    - ComfyUIClientTest (the converter's buildGraph cases — refine round 2, FINDING 1)
   preserves:
     - all tests currently green on main
 spec_refs:
@@ -152,6 +243,17 @@ Numbered consistently with the analysis document.
   6. AuditAction.IMAGE_GENERATE.
   7. The security.md D35-enumeration amendment (rule-text only, user
      approval, §12) and the Census disclosure-text updates.
+  8. (Refine round 2) Converter guardrail: extend the client's template
+     validation with the latent node (KSampler latent_image link, baked
+     numeric width/height = the sampling budget) and the fit node
+     (ImageScaleToTotalPixels); for -r jobs buildGraph sets per-job latent
+     dims (requested ratio at budget, /16) and swaps the fit node to
+     ImageScale(width,height); the handler passes the parsed resolution
+     through generate(). No-flag jobs keep the baked graph.
+  9. (Refine round 2) Round-1 FINDINGS 2-5: no refund on
+     interrupt-during-submit; the per-user-cap IT image case; the
+     timeout-before-start refund assertion; the stopped audit row on the
+     queue-depth-read interrupted arm.
 - **Controls to preserve (§10):** the probation gate order (step 5 before
   dispatch) is untouched; the step-1.5 transport bucket and per-group
   command/LLM buckets still fire first; the per-user concurrency check at
@@ -245,3 +347,18 @@ in any bundle reds it).
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-803-image-command-handler.md
 ```
+
+## Review observations
+
+Round-3 (verification re-review) RECOMMENDED-NEW-TICKET, driver-recorded
+per review.md §5 (TOUCHED-BY-THIS-DIFF: yes, no DECIDE-BEFORE — filing is
+the user's call): the "no refund once the GPU ran" boundary is untested on
+the timeout//stop arms for a job the backend already started — every test
+feeds JobTimeoutException/JobCancelledException with jobStarted=false
+(ImageCommandHandlerTest.java:574), so mutating the handler's
+`if (!e.jobStarted())` guard to an unconditional refund leaves the suite
+green while violating D76. The shipped code is correct; only the
+regression net has the hole. Suggested probe: generateThrow =
+JobTimeoutException("timed out", true) → assertFalse
+(rateCapBucket.tryAcquireImageUserCredit(userId)). Full text:
+.scratch/tick-review-M1-803-r3.txt.

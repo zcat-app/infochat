@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 23 |
+| done | 24 |
 | deferred | 0 |
 | abandoned | 0 |
 | **total** | **24** |
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-803 — /image command handler: gates, translation, echo, audit (complexity: high, risk: high)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -61,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-803 | /image command handler: gates, translation, echo, audit | 2026-08-10 | round 3 APPROVE |
 | M1-798 | Setup-wizard /image step: picker, templates, ETA probe | 2026-08-10 | round 2 APPROVE |
 | M1-807 | ComfyUI image carve: VAE-Utils node + flag re-verify | 2026-08-09 | round 1 APPROVE |
 | M1-802 | ComfyUI client: server-built graph, bounded fetch, cancel | 2026-08-09 | round 2 APPROVE |
@@ -70,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-801 | tmpfs spool, age sweeper, PNG strip, delivery path | 2026-08-08 | round 2 APPROVE |
 | M1-800 | SimpleX + Signal sendAttachment codecs and ceilings | 2026-08-08 | round 2 APPROVE |
 | M1-799 | Outbound attachment SPI: payload, flags, default method | 2026-08-08 | round 1 APPROVE-WITH-FIXES |
-| M1-797 | ComfyUI GPU compose overlay + ROCm image | 2026-08-08 | round 1 APPROVE |
 
 ---
 
@@ -112,13 +112,13 @@ M1-796 (done)
 M1-797 (done)
 M1-799 (done)
   ├── M1-800 (done)
-  │     └── M1-803 (pending) ← runnable
+  │     └── M1-803 (done)
   └── M1-801 (done)
-        ├── M1-803 (pending) [see above]
+        ├── M1-803 (done) [see above]
         └── M1-805 (done)
-              └── M1-803 (pending) [see above]
+              └── M1-803 (done) [see above]
 M1-802 (done)
-  └── M1-803 (pending) [see above]
+  └── M1-803 (done) [see above]
 M1-804 (done)
 M1-806 (done)
 M1-807 (done)

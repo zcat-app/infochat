@@ -1909,8 +1909,8 @@ share a cost profile share a bucket:
 - **Per-user interruptible concurrency** — not a rate
   bucket: a ceiling on one sender's CONCURRENT interruptible
   requests (the D35 interruptible class: chat replies, on-demand
-  `/summary`, `/retry` re-rolls except `--digest`; queued +
-  running) across all scopes, so group membership cannot let a
+  `/summary`, `/retry` re-rolls except `--digest`, `/image`;
+  queued + running) across all scopes, so group membership cannot let a
   single sender occupy every dispatch worker at one instant — the
   per-minute bucket bounds rate, this bounds share. `/retry
   --digest` is deliberately outside the cap (D61): D35 non-interruptible,

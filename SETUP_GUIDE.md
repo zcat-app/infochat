@@ -679,13 +679,18 @@ memorize; the per-task config it writes is documented in
 
 The switcher's disclosure keeps this short and points here. `translator` is
 easy to underestimate — it sounds like it only renders the bot's replies, but
-seven separate things reach it. Six depend on a chat or group having a
+eight separate things reach it. Seven depend on a chat or group having a
 non-English `/lang`:
 
 - **The bot's reply to you** — the reply text itself, which quotes and
   paraphrases what you said.
 - **Your search query** — on every chat turn this is your raw message,
   shortened but not stripped of anything.
+- **Your `/image` prompts** — if a chat or group's `/lang` is not English,
+  the prompt you type for `/image` is translated to English before the image
+  backend runs. The image backend itself is always local or operator-run;
+  this translation is the only path by which an `/image` prompt can leave
+  the deployment.
 - **Headlines of posts you saved**, each time `/saved` lists them.
 - **Headlines of posts a `/summary` returns** — which also reveals what you
   asked about.
@@ -696,7 +701,7 @@ non-English `/lang`:
   These are **not** capped, so the headline cap above is not the size of the
   exposure — don't size your decision from it.
 
-The seventh does **not** depend on your `/lang` at all:
+The eighth does **not** depend on your `/lang` at all:
 
 - **The full title and body of every post from a non-English source.** This is
   decided by the *source's* language, not yours, and runs on a timer for as

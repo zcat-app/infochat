@@ -41,6 +41,8 @@ class ComfyUIClientTest {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
+    /** The wizard's template shape (prod/scripts/4b-image.sh write_template):
+     * latent + KSampler + decode + lanczos fit + SaveImage. */
     private static final String TEMPLATE = """
             {
               "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "stub.safetensors"}},
@@ -52,7 +54,34 @@ class ComfyUIClientTest {
                     "sampler_name": "euler", "scheduler": "simple", "positive": ["4", 0], "negative": ["5", 0],
                     "latent_image": ["6", 0], "denoise": 1.0}},
               "8": {"class_type": "VAEDecode", "inputs": {"samples": ["7", 0], "vae": ["3", 0]}},
+              "9": {"class_type": "ImageScaleToTotalPixels", "inputs": {"image": ["8", 0],
+                    "upscale_method": "lanczos", "megapixels": 1.0, "resolution_steps": 1}},
+              "10": {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": "infochat"}}
+            }
+            """;
+
+    /** TEMPLATE minus the fit node — rejected at load since the converter
+     * could not honour an exact output size. */
+    private static final String TEMPLATE_WITHOUT_FIT = """
+            {
+              "4": {"class_type": "CLIPTextEncode", "inputs": {"text": "INFOCHAT_PROMPT_PLACEHOLDER"}},
+              "6": {"class_type": "EmptyFlux2LatentImage", "inputs": {"width": 1024, "height": 1024, "batch_size": 1}},
+              "7": {"class_type": "KSampler", "inputs": {"seed": 0, "latent_image": ["6", 0]}},
+              "8": {"class_type": "VAEDecode", "inputs": {"samples": ["7", 0]}},
               "9": {"class_type": "SaveImage", "inputs": {"images": ["8", 0], "filename_prefix": "infochat"}}
+            }
+            """;
+
+    /** TEMPLATE with the KSampler's latent_image link removed — rejected at
+     * load (the budget derivation needs the link). */
+    private static final String TEMPLATE_WITHOUT_LATENT_LINK = """
+            {
+              "4": {"class_type": "CLIPTextEncode", "inputs": {"text": "INFOCHAT_PROMPT_PLACEHOLDER"}},
+              "6": {"class_type": "EmptyFlux2LatentImage", "inputs": {"width": 1024, "height": 1024, "batch_size": 1}},
+              "7": {"class_type": "KSampler", "inputs": {"seed": 0}},
+              "9": {"class_type": "ImageScaleToTotalPixels", "inputs": {"image": ["8", 0],
+                    "upscale_method": "lanczos", "megapixels": 1.0, "resolution_steps": 1}},
+              "10": {"class_type": "SaveImage", "inputs": {"images": ["9", 0], "filename_prefix": "infochat"}}
             }
             """;
 
@@ -90,6 +119,75 @@ class ComfyUIClientTest {
         List<String> leftovers = new ArrayList<>();
         findStringValues(root, ComfyUIClient.PROMPT_PLACEHOLDER, "", leftovers);
         assertTrue(leftovers.isEmpty(), "no placeholder may remain in the built graph");
+    }
+
+    @Test
+    void buildGraphWithoutResolutionKeepsTheBakedGraph() throws Exception {
+        ComfyUIClient client = configuredClient(stubServer(), Duration.ofMinutes(1));
+
+        JsonNode graph = JSON.readTree(client.buildGraph("a prompt"));
+
+        assertEquals(1024, graph.path("6").path("inputs").path("width").asLong(),
+                "a no-flag job keeps the baked latent width");
+        assertEquals(1024, graph.path("6").path("inputs").path("height").asLong(),
+                "a no-flag job keeps the baked latent height");
+        assertEquals("ImageScaleToTotalPixels", graph.path("9").path("class_type").asText(),
+                "a no-flag job keeps the baked fit node");
+        assertEquals(1.0, graph.path("9").path("inputs").path("megapixels").asDouble(),
+                "a no-flag job keeps the baked fit target");
+    }
+
+    @Test
+    void buildGraphHonoursAnExactPerJobOutputSize() throws Exception {
+        ComfyUIClient client = configuredClient(stubServer(), Duration.ofMinutes(1));
+
+        JsonNode graph = JSON.readTree(client.buildGraph("a prompt", 512, 768));
+
+        // The ratio is steered at sampling: the 1024x1024 budget at 2:3, /16.
+        assertEquals(832, graph.path("6").path("inputs").path("width").asLong(),
+                "the latent carries the requested ratio at the baked budget");
+        assertEquals(1248, graph.path("6").path("inputs").path("height").asLong(),
+                "the latent carries the requested ratio at the baked budget");
+        // The resolution is steered at the fit stage: exact W/H.
+        assertEquals("ImageScale", graph.path("9").path("class_type").asText(),
+                "the fit node becomes an exact-W/H ImageScale");
+        assertEquals(512, graph.path("9").path("inputs").path("width").asLong());
+        assertEquals(768, graph.path("9").path("inputs").path("height").asLong());
+        assertEquals("lanczos", graph.path("9").path("inputs").path("upscale_method").asText(),
+                "the baked lanczos method survives the swap");
+        assertTrue(graph.path("9").path("inputs").path("megapixels").isMissingNode(),
+                "the megapixels scalar is gone after the swap");
+        assertTrue(graph.path("9").path("inputs").path("resolution_steps").isMissingNode(),
+                "the resolution_steps scalar is gone after the swap");
+    }
+
+    @Test
+    void samplingDimsHoldTheBudgetForSmallTargets() {
+        long[] dims = ComfyUIClient.samplingDimsFor(1024, 1024, 512, 512);
+        assertEquals(1024, dims[0], "a small target still samples at the budget —");
+        assertEquals(1024, dims[1], "the flag never constrains the sampler");
+    }
+
+    @Test
+    void samplingDimsCapAHostileRatio() {
+        long[] dims = ComfyUIClient.samplingDimsFor(1024, 1024, 2_000_000, 1);
+        assertTrue(dims[0] <= ComfyUIClient.MAX_SAMPLING_EDGE,
+                "a hostile ratio must not blow the latent width past the cap; got " + dims[0]);
+        assertTrue(dims[1] >= 16, "the small edge floors at 16; got " + dims[1]);
+        assertEquals(0, dims[0] % 16, "sampling dims stay /16");
+        assertEquals(0, dims[1] % 16, "sampling dims stay /16");
+    }
+
+    @Test
+    void templateWithoutAFitNodeIsRejectedAtLoad() throws Exception {
+        Path file = writeTemplate(TEMPLATE_WITHOUT_FIT);
+        assertThrows(IllegalArgumentException.class, () -> clientOver(file));
+    }
+
+    @Test
+    void templateWithoutALatentLinkIsRejectedAtLoad() throws Exception {
+        Path file = writeTemplate(TEMPLATE_WITHOUT_LATENT_LINK);
+        assertThrows(IllegalArgumentException.class, () -> clientOver(file));
     }
 
     @Test
@@ -202,7 +300,7 @@ class ComfyUIClientTest {
             calls.add(record(exchange));
             respondJson(exchange, 200, """
                     {"%s": {"prompt": [], "status": {"status_str": "success", "completed": true},
-                      "outputs": {"9": {"images": [
+                      "outputs": {"10": {"images": [
                         {"filename": "infochat_00001_.png", "subfolder": "", "type": "output"}]}}}}
                     """.formatted(promptId));
         });
@@ -370,9 +468,20 @@ class ComfyUIClientTest {
     }
 
     private Path writeTemplate() throws IOException {
+        return writeTemplate(TEMPLATE);
+    }
+
+    private Path writeTemplate(String content) throws IOException {
         Path file = tempDir.resolve("workflow-" + System.nanoTime() + ".json");
-        Files.writeString(file, TEMPLATE);
+        Files.writeString(file, content);
         return file;
+    }
+
+    private ComfyUIClient clientOver(Path templateFile) {
+        return new ComfyUIClient(
+                Optional.of("http://127.0.0.1:1"), templateFile,
+                Duration.ofSeconds(5), Duration.ofSeconds(5), Duration.ofMinutes(1),
+                Duration.ofMillis(10), 1024 * 1024, Clock.systemUTC());
     }
 
     private HttpServer stubServer() throws IOException {

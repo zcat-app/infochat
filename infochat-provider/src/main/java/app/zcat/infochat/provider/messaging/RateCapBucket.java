@@ -145,6 +145,30 @@ public class RateCapBucket {
     @ConfigProperty(name = "infochat.ratelimit.quarantine-refill-window", defaultValue = "PT1M")
     Duration quarantineRefillWindow;
 
+    // D76 /image per-user credit bucket (M1-803). Hourly GPU-time budget
+    // keyed on users.id, charged on attempt; the refund discipline is the
+    // command handler's — this class supplies the bucket mechanics.
+    @ConfigProperty(name = "infochat.ratelimit.image-user-credits-per-hour", defaultValue = "10")
+    int imageUserCreditCap;
+
+    @ConfigProperty(name = "infochat.ratelimit.image-user-credit-refill-window", defaultValue = "PT1H")
+    Duration imageUserCreditRefillWindow;
+
+    // D76 /image per-group credit bucket (M1-803). The gate is an AND:
+    // in group scope BOTH the per-user and this bucket must yield, and a
+    // refund returns both. Keyed on groups.id.
+    @ConfigProperty(name = "infochat.ratelimit.image-group-credits-per-hour", defaultValue = "30")
+    int imageGroupCreditCap;
+
+    @ConfigProperty(name = "infochat.ratelimit.image-group-credit-refill-window", defaultValue = "PT1H")
+    Duration imageGroupCreditRefillWindow;
+
+    // D76 /image per-user cooldown (M1-803), DM and group alike: a ONE-token
+    // bucket whose refill window IS the cooldown — the anchor is the charge
+    // time, never a rejected attempt (lazy refill advances only on a real add).
+    @ConfigProperty(name = "infochat.image.cooldown", defaultValue = "PT15S")
+    Duration imageCooldown;
+
     private Clock clock = Clock.systemUTC();
 
     private final ConcurrentHashMap<Key, Bucket> buckets = new ConcurrentHashMap<>();
@@ -179,6 +203,16 @@ public class RateCapBucket {
     // M1-705 dedicated per-admin quarantine bucket map, keyed on the
     // admin's users.id.
     private final ConcurrentHashMap<UUID, Bucket> quarantineBuckets = new ConcurrentHashMap<>();
+
+    // D76 /image credit maps (M1-803), keyed on users.id and groups.id
+    // respectively — one group id holds one entry in the group map, one
+    // user id one entry in the user map. Both share the eviction sweep.
+    private final ConcurrentHashMap<UUID, Bucket> imageUserCreditBuckets = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, Bucket> imageGroupCreditBuckets = new ConcurrentHashMap<>();
+
+    // D76 /image cooldown map (M1-803), keyed on users.id so the cooldown
+    // spans DM and group alike. One-token buckets (see the config field).
+    private final ConcurrentHashMap<UUID, Bucket> imageCooldownBuckets = new ConcurrentHashMap<>();
 
     // M1-229 shared stranger limiter, keyed by adapter name. ALL
     // unregistered inbound on one adapter (a RegisteredContactSet miss
@@ -227,6 +261,11 @@ public class RateCapBucket {
         this.addSourceRefillWindow = settings.addSourceRefillWindow();
         this.quarantineCap = settings.quarantineCap();
         this.quarantineRefillWindow = settings.quarantineRefillWindow();
+        this.imageUserCreditCap = settings.imageUserCreditCap();
+        this.imageUserCreditRefillWindow = settings.imageUserCreditRefillWindow();
+        this.imageGroupCreditCap = settings.imageGroupCreditCap();
+        this.imageGroupCreditRefillWindow = settings.imageGroupCreditRefillWindow();
+        this.imageCooldown = settings.imageCooldownWindow();
         // No Settings component for the key-space cap — mirror the
         // @ConfigProperty default for the no-CDI test path (the flood test
         // overrides this field directly with a small value).
@@ -255,7 +294,12 @@ public class RateCapBucket {
                            int addSourceCap,
                            Duration addSourceRefillWindow,
                            int quarantineCap,
-                           Duration quarantineRefillWindow) {
+                           Duration quarantineRefillWindow,
+                           int imageUserCreditCap,
+                           Duration imageUserCreditRefillWindow,
+                           int imageGroupCreditCap,
+                           Duration imageGroupCreditRefillWindow,
+                           Duration imageCooldownWindow) {
 
         /** The {@code @ConfigProperty} declared defaults, as one snapshot. */
         public static Settings defaults() {
@@ -265,7 +309,10 @@ public class RateCapBucket {
                     20, Duration.ofMinutes(15),
                     30, Duration.ofMinutes(1),
                     5, Duration.ofHours(1),
-                    100, Duration.ofMinutes(1));
+                    100, Duration.ofMinutes(1),
+                    10, Duration.ofHours(1),
+                    30, Duration.ofHours(1),
+                    Duration.ofSeconds(15));
         }
 
         public Settings withContactBucket(int inboundPerMinute, Duration refillWindow,
@@ -276,7 +323,10 @@ public class RateCapBucket {
                     groupCommandCap, groupCommandRefillWindow,
                     cheapCommandCap, cheapCommandRefillWindow,
                     addSourceCap, addSourceRefillWindow,
-                    quarantineCap, quarantineRefillWindow);
+                    quarantineCap, quarantineRefillWindow,
+                    imageUserCreditCap, imageUserCreditRefillWindow,
+                    imageGroupCreditCap, imageGroupCreditRefillWindow,
+                    imageCooldownWindow);
         }
 
         public Settings withGroupReplyBucket(int cap, Duration window) {
@@ -286,7 +336,10 @@ public class RateCapBucket {
                     groupCommandCap, groupCommandRefillWindow,
                     cheapCommandCap, cheapCommandRefillWindow,
                     addSourceCap, addSourceRefillWindow,
-                    quarantineCap, quarantineRefillWindow);
+                    quarantineCap, quarantineRefillWindow,
+                    imageUserCreditCap, imageUserCreditRefillWindow,
+                    imageGroupCreditCap, imageGroupCreditRefillWindow,
+                    imageCooldownWindow);
         }
 
         public Settings withGroupLlmBucket(int cap, Duration window) {
@@ -296,7 +349,10 @@ public class RateCapBucket {
                     groupCommandCap, groupCommandRefillWindow,
                     cheapCommandCap, cheapCommandRefillWindow,
                     addSourceCap, addSourceRefillWindow,
-                    quarantineCap, quarantineRefillWindow);
+                    quarantineCap, quarantineRefillWindow,
+                    imageUserCreditCap, imageUserCreditRefillWindow,
+                    imageGroupCreditCap, imageGroupCreditRefillWindow,
+                    imageCooldownWindow);
         }
 
         public Settings withGroupCommandBucket(int cap, Duration window) {
@@ -306,7 +362,10 @@ public class RateCapBucket {
                     cap, window,
                     cheapCommandCap, cheapCommandRefillWindow,
                     addSourceCap, addSourceRefillWindow,
-                    quarantineCap, quarantineRefillWindow);
+                    quarantineCap, quarantineRefillWindow,
+                    imageUserCreditCap, imageUserCreditRefillWindow,
+                    imageGroupCreditCap, imageGroupCreditRefillWindow,
+                    imageCooldownWindow);
         }
 
         public Settings withCheapCommandBucket(int cap, Duration window) {
@@ -316,7 +375,10 @@ public class RateCapBucket {
                     groupCommandCap, groupCommandRefillWindow,
                     cap, window,
                     addSourceCap, addSourceRefillWindow,
-                    quarantineCap, quarantineRefillWindow);
+                    quarantineCap, quarantineRefillWindow,
+                    imageUserCreditCap, imageUserCreditRefillWindow,
+                    imageGroupCreditCap, imageGroupCreditRefillWindow,
+                    imageCooldownWindow);
         }
 
         public Settings withAddSourceBucket(int cap, Duration window) {
@@ -326,7 +388,10 @@ public class RateCapBucket {
                     groupCommandCap, groupCommandRefillWindow,
                     cheapCommandCap, cheapCommandRefillWindow,
                     cap, window,
-                    quarantineCap, quarantineRefillWindow);
+                    quarantineCap, quarantineRefillWindow,
+                    imageUserCreditCap, imageUserCreditRefillWindow,
+                    imageGroupCreditCap, imageGroupCreditRefillWindow,
+                    imageCooldownWindow);
         }
 
         public Settings withQuarantineBucket(int cap, Duration window) {
@@ -336,7 +401,49 @@ public class RateCapBucket {
                     groupCommandCap, groupCommandRefillWindow,
                     cheapCommandCap, cheapCommandRefillWindow,
                     addSourceCap, addSourceRefillWindow,
-                    cap, window);
+                    cap, window,
+                    imageUserCreditCap, imageUserCreditRefillWindow,
+                    imageGroupCreditCap, imageGroupCreditRefillWindow,
+                    imageCooldownWindow);
+        }
+
+        public Settings withImageUserCreditBucket(int cap, Duration window) {
+            return new Settings(inboundPerMinute, refillWindow, evictionThreshold,
+                    groupReplyCap, groupReplyRefillWindow,
+                    groupLlmCap, groupLlmRefillWindow,
+                    groupCommandCap, groupCommandRefillWindow,
+                    cheapCommandCap, cheapCommandRefillWindow,
+                    addSourceCap, addSourceRefillWindow,
+                    quarantineCap, quarantineRefillWindow,
+                    cap, window,
+                    imageGroupCreditCap, imageGroupCreditRefillWindow,
+                    imageCooldownWindow);
+        }
+
+        public Settings withImageGroupCreditBucket(int cap, Duration window) {
+            return new Settings(inboundPerMinute, refillWindow, evictionThreshold,
+                    groupReplyCap, groupReplyRefillWindow,
+                    groupLlmCap, groupLlmRefillWindow,
+                    groupCommandCap, groupCommandRefillWindow,
+                    cheapCommandCap, cheapCommandRefillWindow,
+                    addSourceCap, addSourceRefillWindow,
+                    quarantineCap, quarantineRefillWindow,
+                    imageUserCreditCap, imageUserCreditRefillWindow,
+                    cap, window,
+                    imageCooldownWindow);
+        }
+
+        public Settings withImageCooldownWindow(Duration window) {
+            return new Settings(inboundPerMinute, refillWindow, evictionThreshold,
+                    groupReplyCap, groupReplyRefillWindow,
+                    groupLlmCap, groupLlmRefillWindow,
+                    groupCommandCap, groupCommandRefillWindow,
+                    cheapCommandCap, cheapCommandRefillWindow,
+                    addSourceCap, addSourceRefillWindow,
+                    quarantineCap, quarantineRefillWindow,
+                    imageUserCreditCap, imageUserCreditRefillWindow,
+                    imageGroupCreditCap, imageGroupCreditRefillWindow,
+                    window);
         }
     }
 
@@ -577,6 +684,59 @@ public class RateCapBucket {
         return tryAcquireFrom(quarantineBuckets, adminId, quarantineCap, quarantineRefillWindow);
     }
 
+    /** D76 /image per-user credit (M1-803): one GPU-time token off the
+     * caller's hourly budget, charged on attempt, keyed on {@code users.id}
+     * so DM and group draws share one budget (design §Credits, deliberate). */
+    public boolean tryAcquireImageUserCredit(UUID userId) {
+        return tryAcquireFrom(imageUserCreditBuckets, userId,
+                imageUserCreditCap, imageUserCreditRefillWindow);
+    }
+
+    /** D76 /image per-group credit (M1-803): the group half of the AND gate,
+     * keyed on {@code groups.id}; group scope draws BOTH halves, DM scope
+     * never consults this one. */
+    public boolean tryAcquireImageGroupCredit(UUID groupId) {
+        return tryAcquireFrom(imageGroupCreditBuckets, groupId,
+                imageGroupCreditCap, imageGroupCreditRefillWindow);
+    }
+
+    /** D76 /image per-user cooldown (M1-803), DM and group alike: a one-token
+     * bucket whose refill window IS the cooldown; the anchor is the charge
+     * time — a rejected attempt never extends the cooldown. */
+    public boolean tryAcquireImageCooldown(UUID userId) {
+        return tryAcquireFrom(imageCooldownBuckets, userId, 1, imageCooldown);
+    }
+
+    /** Seconds until the caller's image cooldown next admits an attempt — the
+     * honest {@code {N}s} for the cooldown reject, same from-bucket-state
+     * discipline as {@link #cheapCommandRetryAfterSeconds}. */
+    public long imageCooldownRetryAfterSeconds(UUID userId) {
+        return retryAfterSeconds(imageCooldownBuckets, userId, 1, imageCooldown);
+    }
+
+    /** Refund one /image per-user credit (D76): restores at most one token
+     * (capped); a no-op when no bucket was minted. Paired with
+     * {@link #refundImageGroupCredit} — a refund returns BOTH halves. */
+    public void refundImageUserCredit(UUID userId) {
+        refundOne(imageUserCreditBuckets, userId, imageUserCreditCap);
+    }
+
+    /** Refund one /image per-group credit (D76); see {@link #refundImageUserCredit}. */
+    public void refundImageGroupCredit(UUID groupId) {
+        refundOne(imageGroupCreditBuckets, groupId, imageGroupCreditCap);
+    }
+
+    /** The shared refund body — the {@code refundCheapCommand} shape. */
+    private <K> void refundOne(ConcurrentHashMap<K, Bucket> map, K key, int cap) {
+        Bucket bucket = map.get(key);
+        if (bucket == null) {
+            return;
+        }
+        synchronized (bucket) {
+            bucket.tokens = Math.min(cap, bucket.tokens + 1);
+        }
+    }
+
     /**
      * Retry-after computation shared by the friendly-reject accessors.
      * Mirrors the lazy-refill arithmetic of {@link #tryAcquireFrom}
@@ -625,9 +785,9 @@ public class RateCapBucket {
      * (docs/plan/m1/redteam/M1-044a-2026-05-21.md) and M1-044b's
      * Implementation notes §"Rate-cap eviction-predicate fix".</p>
      *
-     * <p>Sweeps the contact map, the group-reply map, the group-LLM
-     * map, and the group-command map with the same
-     * key-shape-independent predicate, but
+     * <p>Sweeps every bucket map except the per-adapter stranger limiter
+     * (bounded by the fixed adapter count, nothing to reclaim) with the
+     * same key-shape-independent predicate, and
      * each map's effective threshold is
      * {@code max(evictionThreshold, thatMapsRefillWindow)}: eviction
      * recreates a key with a FULL allotment, which is only equivalent
@@ -648,6 +808,9 @@ public class RateCapBucket {
         evictIdle(cheapCommandBuckets, now - effectiveEvictionMillis(cheapCommandRefillWindow));
         evictIdle(addSourceBuckets, now - effectiveEvictionMillis(addSourceRefillWindow));
         evictIdle(quarantineBuckets, now - effectiveEvictionMillis(quarantineRefillWindow));
+        evictIdle(imageUserCreditBuckets, now - effectiveEvictionMillis(imageUserCreditRefillWindow));
+        evictIdle(imageGroupCreditBuckets, now - effectiveEvictionMillis(imageGroupCreditRefillWindow));
+        evictIdle(imageCooldownBuckets, now - effectiveEvictionMillis(imageCooldown));
     }
 
     private long effectiveEvictionMillis(Duration mapRefillWindow) {

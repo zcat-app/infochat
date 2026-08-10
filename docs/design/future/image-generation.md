@@ -202,6 +202,56 @@ than silently queueing.
 "why is there a cooldown in groups but not DMs" is a support question worth
 avoiding. 10–20 s is 2–4× generation time, a sane ratio.
 
+### Shipped gate values (M1-803)
+
+The values `commands.md §Content` commits live here. All are
+profile-driven in `application.properties`:
+
+| Key | Default | pi | Bounds |
+|---|---|---|---|
+| `infochat.ratelimit.image-user-credits-per-hour` | 10 | 5 | per-user GPU-time tokens per hour |
+| `infochat.ratelimit.image-group-credits-per-hour` | 30 | 15 | per-group GPU-time tokens per hour |
+| `infochat.image.cooldown` | `PT15S` | `PT30S` | per-user gap between attempts (DM and group) |
+| `infochat.image.max-queue-depth` | 3 | 3 | global backend depth at/above which the command refuses immediately |
+| `infochat.image.prompt-max-chars` | 500 | 300 | prompt length cap — rejected before any gate runs |
+| `infochat.image.max-output-pixels` | 2000000 | 2000000 | output pixel ceiling bounding `--resolution` |
+| `infochat.image.steady-state-seconds` | unset | unset | per-model steady-state seconds the setup wizard seeds from the container re-measurement; unset → position shown without an ETA |
+
+The cooldown is a 1-token bucket whose window IS the cooldown, reusing
+the refill/sweep/fixed-clock mechanics; the two credit buckets and the
+cooldown bucket all enroll in the eviction sweep.
+
+**Refund boundary (charge on attempt; refund iff the GPU never ran):**
+
+| Terminal | Refund |
+|---|---|
+| backend unreachable / breaker open (at the queue read or submit) | yes |
+| backend rejected the graph before any job ran | yes |
+| queue over budget | yes |
+| timeout / `/stop` cancel, job KNOWN never started (`/queue` peek) | yes |
+| timeout / `/stop` cancel, job started or unreadable (conservative) | no |
+| transport failure after submit with no interrupt signal | no |
+| generated but the adapter send failed | no |
+| generated but over the platform attachment limit | no |
+
+**Reply wording.** Every reply is a `BundleKeys` constant, present in
+all five shipped bundles (en, cs, tr, es, ru), enforced by
+`BundleLoaderTest.everyBundleKeysConstantHasNonEmptyOwnValueInEveryShippedBundle`.
+The eight failure-contract modes map to `IMAGE_ERROR_BACKEND_UNREACHABLE`,
+`IMAGE_ERROR_BREAKER_OPEN`, `IMAGE_ERROR_QUEUE_BUSY` (+ the `_NO_ETA`
+variant when the steady-state constant is unset),
+`IMAGE_ERROR_CREDITS_EXHAUSTED`, `IMAGE_ERROR_COOLDOWN`,
+`IMAGE_ERROR_TIMEOUT`, `IMAGE_ERROR_NO_ATTACHMENT_SUPPORT`,
+`IMAGE_ERROR_ATTACHMENT_OVER_LIMIT`. Beyond the eight:
+`IMAGE_ERROR_GENERATION_FAILED` (post-start transport failure, invalid
+PNG, spool failure), `IMAGE_ERROR_SEND_FAILED` (post-GPU delivery
+failure — the spec's eight do not name it, the no-refund arm needs a
+voice), the parser's `IMAGE_ERROR_PROMPT_TOO_LONG` /
+`IMAGE_ERROR_BAD_RESOLUTION` / `IMAGE_ERROR_RESOLUTION_TOO_LARGE` /
+`IMAGE_ERROR_MISSING_PROMPT`, the progress pair
+`IMAGE_PROGRESS_GENERATING_ETA` / `IMAGE_PROGRESS_GENERATING_NO_ETA`,
+and the echo `IMAGE_REPLY_ECHO`.
+
 ## Do not run `/image` on the router thread
 
 `/summary` runs inline on the router thread today. `/image` blocking that thread
@@ -390,7 +440,7 @@ on base-url presence per decision 12):
 | `infochat.image.connect-timeout` | `PT5S` | transport connect timeout |
 | `infochat.image.call-timeout` | `PT30S` | per-HTTP-call timeout |
 | `infochat.image.job-timeout` | `PT3M` | whole-job deadline (queue wait + generation); on expiry the job is CANCELLED, never abandoned |
-| `infochat.image.poll-interval` | `PT500MS` | `/history` poll cadence |
+| `infochat.image.poll-interval` | `PT0.5S` | `/history` poll cadence |
 | `infochat.image.max-response-bytes` | `16777216` | byte cap for EVERY backend response body — 16 MiB leaves headroom over a 2048px PNG while bounding a hostile endpoint |
 
 **Breaker.** The client carries its own consecutive-transport-failure
@@ -711,7 +761,21 @@ Where this addendum contradicts earlier sections, this addendum wins.
    sampling resolution (candidate: the step writes it alongside
    base-url/workflow-file/ETA constant, keeping the handler model-agnostic),
    and whether the target lands as ImageScaleToTotalPixels megapixels or
-   exact W/H after the model upscale.
+   exact W/H after the model upscale. **Resolved 2026-08-10 (M1-803 round-1
+   MANUAL → user refine):** (1) the handler learns the budget from the
+   TEMPLATE ITSELF — the client's load-time validation captures the latent
+   node (the KSampler's latent_image link) and its baked numeric width/height
+   (budget = W×H); no wizard-written key, M1-798 unamended, no key/template
+   drift, existing deployments need no re-run. (2) The target lands as EXACT
+   W/H: for `-r` jobs the serializer sets per-job latent dims (requested
+   ratio at the budget, rounded /16) and swaps the fit node
+   ImageScaleToTotalPixels → ImageScale(width,height); no-flag jobs keep the
+   baked graph untouched. (3) The converter is ONE unified model-agnostic
+   rule — sample at budget at the requested ratio, lanczos exact fit.
+   Recorded deviation from Final decision 3: Mage samples at its 1 MP budget
+   for all targets rather than directly at the target (Mage targets over
+   1 MP are lanczos-upscaled from 1 MP — a quality nuance, user-approved to
+   keep the handler free of per-model strategy tables).
 5. **Stock nodes only — verified at the pinned commit (6f7cd7fc).**
    `UpscaleModelLoader` (comfy_extras/nodes_upscale_model.py) is
    spandrel-based and loads any single-image model spandrel 0.4.x supports

@@ -1170,8 +1170,9 @@ public class InboundRouter {
 
     /**
      * Is {@code normalized} in the D35 interruptible dispatch class —
-     * chat-mode (non-slash), user-issued {@code /summary}, or
-     * user-issued {@code /retry} WITHOUT {@code --digest}? Only these
+     * chat-mode (non-slash), user-issued {@code /summary},
+     * {@code /image}, or user-issued {@code /retry} WITHOUT
+     * {@code --digest}? Only these
      * are offloaded to the worker seam; a misclassification here is an
      * ordering bug (an offloaded mutating command would lose the
      * transport thread's arrival order), so the predicate must stay
@@ -1192,7 +1193,7 @@ public class InboundRouter {
             return true;
         }
         String commandName = commandNameOf(normalized);
-        if ("summary".equals(commandName)) {
+        if ("summary".equals(commandName) || "image".equals(commandName)) {
             return true;
         }
         if (!"retry".equals(commandName)) {

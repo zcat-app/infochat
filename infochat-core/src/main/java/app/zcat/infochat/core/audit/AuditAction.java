@@ -260,6 +260,10 @@ public enum AuditAction implements AuditVerb {
     DIGEST_RETRY,
     DIGEST_SLOT_MISSED,
     QUARANTINE_TTL_REJECT,
+    // IMAGE_GENERATE records one /image attempt (D75): actor, scope, outcome
+    // only — the prompt is message content, never logged/persisted/hashed;
+    // the outcome rides in details_json.
+    IMAGE_GENERATE,
     // Names the EVENT (the boot-time release-on-stage2-failure posture
     // warning), not the config VALUE: the observed
     // infochat.security.release-on-stage2-failure value rides in the row's

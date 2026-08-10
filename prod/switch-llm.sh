@@ -392,9 +392,9 @@ fi
 # blanket "privacy sacrificed" line — and never a NEGATIVE claim ("task X sends
 # nothing when Y") unless every leg of that task is gated on Y.
 #
-# translator earned the loud tier at M1-746 and carries SEVEN distinct legs
+# translator earned the loud tier at M1-746 and carries EIGHT distinct legs
 # (enumerated in docs/spec/security.md §Secrets handling, which is the
-# authority this text is kept in sync with). Printing all seven here buries
+# authority this text is kept in sync with). Printing all eight here buries
 # the decision in ~30 lines an operator skims, so the block states the two
 # facts that actually drive the choice and points at SETUP_GUIDE.md for the
 # breakdown. The two facts are chosen because they are the ones a reader

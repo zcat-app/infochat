@@ -10,6 +10,7 @@ import app.zcat.infochat.provider.group.GroupMembershipRepository;
 import app.zcat.infochat.provider.group.GroupRepository;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
@@ -161,6 +162,7 @@ public class HelpCommandHandler implements CommandHandler {
             new CommandHelp("forget", BundleKeys.HELP_CMD_FORGET_SHORT, BundleKeys.HELP_CMD_FORGET_USAGE, BundleKeys.HELP_CMD_FORGET_EXAMPLES, HelpTier.USER),
             new CommandHelp("stop", BundleKeys.HELP_CMD_STOP_SHORT, BundleKeys.HELP_CMD_STOP_USAGE, BundleKeys.HELP_CMD_STOP_EXAMPLES, HelpTier.USER),
             new CommandHelp("retry", BundleKeys.HELP_CMD_RETRY_SHORT, BundleKeys.HELP_CMD_RETRY_USAGE, BundleKeys.HELP_CMD_RETRY_EXAMPLES, HelpTier.USER),
+            new CommandHelp("image", BundleKeys.HELP_CMD_IMAGE_SHORT, BundleKeys.HELP_CMD_IMAGE_USAGE, BundleKeys.HELP_CMD_IMAGE_EXAMPLES, HelpTier.USER),
             new CommandHelp("group-timezone", BundleKeys.HELP_CMD_GROUP_TIMEZONE_SHORT, BundleKeys.HELP_CMD_GROUP_TIMEZONE_USAGE, BundleKeys.HELP_CMD_GROUP_TIMEZONE_EXAMPLES, HelpTier.GROUP_ADMIN),
             new CommandHelp("digest", BundleKeys.HELP_CMD_DIGEST_SHORT, BundleKeys.HELP_CMD_DIGEST_USAGE, BundleKeys.HELP_CMD_DIGEST_EXAMPLES, HelpTier.GROUP_ADMIN),
             new CommandHelp("grant-admin", BundleKeys.HELP_CMD_GRANT_ADMIN_SHORT, BundleKeys.HELP_CMD_GRANT_ADMIN_USAGE, BundleKeys.HELP_CMD_GRANT_ADMIN_EXAMPLES, HelpTier.BOT_ADMIN),
@@ -205,6 +207,13 @@ public class HelpCommandHandler implements CommandHandler {
 
     @Inject
     GroupMembershipRepository groupMembershipRepository;
+
+    // D73 runtime gating (M1-803): /image exists only with a configured
+    // infochat.image.base-url. CDI injects a non-null Optional; null arises
+    // only in no-CDI construction and reads as configured.
+    @Inject
+    @ConfigProperty(name = "infochat.image.base-url")
+    Optional<String> imageBaseUrl;
 
     @Override
     public String name() {
@@ -405,6 +414,11 @@ public class HelpCommandHandler implements CommandHandler {
      * collaborator), so it is safe to call from any caller.
      */
     public boolean visible(CommandHelp entry, CallerTier caller) {
+        if ("image".equals(entry.command()) && !imageConfigured()) {
+            // D73 runtime gating: with no infochat.image.base-url the
+            // command does not exist, so /help never lists it.
+            return false;
+        }
         if (caller.probation()) {
             return commandPermissions.allowedDuringProbation(entry.command());
         }
@@ -414,6 +428,13 @@ public class HelpCommandHandler implements CommandHandler {
             case GROUP_ADMIN -> caller.group() && (caller.groupAdmin() || caller.botAdmin());
             case USER_OR_GROUP_ADMIN -> !caller.group() || caller.groupAdmin() || caller.botAdmin();
         };
+    }
+
+    /** D73 gate input: the base-url is present. Null-tolerant because a
+     * plain-JUnit construction (no CDI) leaves the field null and must
+     * still see the full catalogue surface. */
+    private boolean imageConfigured() {
+        return imageBaseUrl == null || imageBaseUrl.isPresent();
     }
 
     /**
