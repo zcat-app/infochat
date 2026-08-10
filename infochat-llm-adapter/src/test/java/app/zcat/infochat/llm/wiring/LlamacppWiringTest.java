@@ -68,6 +68,9 @@ class LlamacppWiringTest {
             "https://huggingface.co/unsloth/gemma-4-E4B-it-qat-GGUF/resolve/main/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf";
     private static final String EMB_URL =
             "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.f16.gguf";
+    // A custom generative GGUF URL for the P10 semantics drive: the preflight must
+    // treat an HTTP-level HEAD refusal as reachability, not a network failure.
+    private static final String CUSTOM_GEN_URL = "https://models.example.test/my-custom-gen.gguf";
 
     // Pinned in lock-step with docker-compose.yml (mirrors GEN_SHA/EMB_SHA): the
     // image both llama.cpp services must run. server-b5350 predates the gemma4
@@ -346,6 +349,92 @@ class LlamacppWiringTest {
 
     @Test
     @EnabledOnOs(OS.LINUX)
+    void llamacppPreflightAbortsOnUnreachableHostBeforeAnyDownload(@TempDir Path tmp) throws Exception {
+        // M1-809 reproduction: the llamacpp branch used to start a multi-GB GGUF
+        // download with NO reachability preflight. A network-class probe failure
+        // (curl exit 6 = resolve) must abort with guidance BEFORE any docker invocation.
+        WizardRun run = runWizardCapture(
+                tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS, Map.of("FAKE_CURL_EXIT", "6"));
+
+        assertNotEquals(0, run.rc, "a resolve failure must abort the wizard, not proceed to download:\n" + run.output);
+        assertFalse(Files.exists(tmp.resolve("docker-argv.log")),
+                "no docker invocation may be recorded when the preflight aborts (the download must never start)");
+        assertTrue(Files.exists(tmp.resolve("curl-argv.log")),
+                "the preflight must actually run curl (the failing probe)");
+        assertTrue(run.output.contains("network path"),
+                "the abort must state the checked path is the host's own network path:\n" + run.output);
+        assertTrue(run.output.contains("proxy"),
+                "the abort must name an actionable cause class + proxy remedy:\n" + run.output);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void llamacppPreflightHeadChecksEveryGgufUrlBeforeDownload(@TempDir Path tmp) throws Exception {
+        // The preflight must HEAD every GGUF URL the branch will download — the
+        // generative always, the embeddings when llama.cpp-backed — before the
+        // first fetch; a HEAD-refusal exit (22) must not block (P10).
+        WizardRun run = runWizardCapture(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS,
+                Map.of("FAKE_DOCKER_PROBE_ABSENT", "1", "FAKE_CURL_EXIT", "22"));
+
+        assertEquals(0, run.rc, "a HEAD refusal must not abort the download:\n" + run.output);
+        assertTrue(run.output.contains("WARN"), "a HEAD refusal must print a warning:\n" + run.output);
+
+        String curlLog = Files.readString(tmp.resolve("curl-argv.log"));
+        assertTrue(curlLog.contains(GEN_URL) && curlLog.contains("-fsSLI"),
+                "the generative GGUF URL must be HEAD-checked (4b's -fsSLI shape):\n" + curlLog);
+        assertTrue(curlLog.contains(EMB_URL),
+                "the embeddings GGUF URL must be HEAD-checked when llamacpp-backed:\n" + curlLog);
+
+        String dockerLog = Files.readString(tmp.resolve("docker-argv.log"));
+        String download = downloadInvocationFromDockerArgv(dockerLog);
+        assertTrue(download.contains(GEN_URL),
+                "the download (gated by the preflight — see the abort test) must still be issued:\n" + dockerLog);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void ollamaEmbeddingsShapePreflightsOnlyTheGenerativeGguf(@TempDir Path tmp) throws Exception {
+        // The ollama-pull leg runs on the compose network (verified working), NOT
+        // the host path — a host-curl preflight of it would be the P1 false-pass
+        // shape. The ollama-embeddings drive must HEAD ONLY the generative URL.
+        WizardRun run = runWizardCapture(tmp, "llamacpp\n\nollama\n" + ACCEPT_TIMING_DEFAULTS,
+                Map.of("FAKE_DOCKER_PROBE_ABSENT", "1"));
+
+        assertEquals(0, run.rc, "the ollama-embeddings shape must still succeed:\n" + run.output);
+        List<String> heads = Files.readString(tmp.resolve("curl-argv.log")).lines().toList();
+        assertEquals(1, heads.size(), "exactly one preflight HEAD (the generative GGUF):\n" + heads);
+        assertTrue(heads.get(0).contains(GEN_URL), "the HEADed URL must be the generative GGUF:\n" + heads);
+        assertFalse(heads.get(0).contains(EMB_URL),
+                "the embeddings URL must NOT be HEADed for the ollama leg (false-pass shape):\n" + heads);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void preflightDistinguishesNetworkFailureFromHeadRefusal(@TempDir Path tmp) throws Exception {
+        // P10: the preflight verifies the NETWORK PATH, not the asset. An
+        // HTTP-level refusal (exit 22 — the server answered) proves reachability
+        // and must warn + continue; only exits 6/7/28 abort.
+        WizardRun refusal = runWizardCapture(tmp, "llamacpp\n" + CUSTOM_GEN_URL + "\n\n\n\n" + ACCEPT_TIMING_DEFAULTS,
+                Map.of("FAKE_DOCKER_PROBE_ABSENT", "1", "FAKE_CURL_EXIT", "22"));
+        assertEquals(0, refusal.rc, "a HEAD refusal must not abort a reachable custom URL:\n" + refusal.output);
+        assertTrue(refusal.output.contains("WARN"), "a HEAD refusal must print a warning:\n" + refusal.output);
+        String dockerAfterRefusal = Files.readString(tmp.resolve("docker-argv.log"));
+        assertTrue(downloadInvocationFromDockerArgv(dockerAfterRefusal).contains(CUSTOM_GEN_URL),
+                "the download must continue after a HEAD refusal:\n" + dockerAfterRefusal);
+
+        for (String exit : new String[] {"6", "7", "28"}) {
+            Files.deleteIfExists(tmp.resolve("docker-argv.log"));
+            Files.deleteIfExists(tmp.resolve("curl-argv.log"));
+            WizardRun run = runWizardCapture(
+                    tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS, Map.of("FAKE_CURL_EXIT", exit));
+            assertNotEquals(0, run.rc, "network-class exit " + exit + " must abort:\n" + run.output);
+            assertFalse(Files.exists(tmp.resolve("docker-argv.log")),
+                    "network-class exit " + exit + " must abort before any download:\n" + run.output);
+        }
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
     void switchingAwayFromRemoteToLlamacppClearsStaleRemoteApiKeys(@TempDir Path tmp) throws Exception {
         // Seed the runtime as a prior `remote` run left it: seven generative api-key
         // lines + an embeddings api-key in application.properties, and the
@@ -388,8 +477,15 @@ class LlamacppWiringTest {
 
     /** runWizard plus extra env for the drive (e.g. the probe-absent switch). */
     private Map<String, String> runWizard(Path tmp, String stdin, Map<String, String> extraEnv) throws Exception {
+        WizardRun run = runWizardCapture(tmp, stdin, extraEnv);
+        assertEquals(0, run.rc, "4-llm.sh must exit 0; output:\n" + run.output);
+        return parseProps(runtimeDir(tmp).resolve("application.properties"));
+    }
+
+    /** Drive the wizard without the exit-0 assertion, returning the raw outcome. */
+    private WizardRun runWizardCapture(Path tmp, String stdin, Map<String, String> extraEnv) throws Exception {
         Path repoRoot = repoRoot();
-        Path runtime = Files.createDirectories(tmp.resolve("runtime"));
+        Path runtime = Files.createDirectories(runtimeDir(tmp));
         // Seed the profile 1-profile.sh would have written (vps has a nomic embedder),
         // but honor a config a test pre-staged (e.g. a prior `remote` run's api-keys,
         // M1-530) — only write the bare profile when nothing is already seeded.
@@ -402,6 +498,9 @@ class LlamacppWiringTest {
         Path fakeDocker = bin.resolve("docker");
         Files.writeString(fakeDocker, fakeDockerScript());
         fakeDocker.toFile().setExecutable(true);
+        Path fakeCurl = bin.resolve("curl");
+        Files.writeString(fakeCurl, fakeCurlScript());
+        fakeCurl.toFile().setExecutable(true);
 
         ProcessBuilder pb = new ProcessBuilder("bash", repoRoot.resolve("prod/scripts/4-llm.sh").toString());
         pb.redirectErrorStream(true);
@@ -411,6 +510,9 @@ class LlamacppWiringTest {
         // The fake docker appends each invocation's argv here so the test can read
         // back the `-v <volume>:/models` argument fetch_gguf passes (M1-442).
         env.put("FAKE_DOCKER_ARGV", tmp.resolve("docker-argv.log").toString());
+        // The fake curl records its argv so the test can assert the preflight HEADs
+        // the GGUF URLs before any download (M1-809).
+        env.put("FAKE_CURL_ARGV", tmp.resolve("curl-argv.log").toString());
         env.putAll(extraEnv);
 
         Process p = pb.start();
@@ -418,9 +520,12 @@ class LlamacppWiringTest {
         p.getOutputStream().close();
         String output = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
         int rc = p.waitFor();
-        assertEquals(0, rc, "4-llm.sh must exit 0; output:\n" + output);
+        return new WizardRun(rc, output);
+    }
 
-        return parseProps(runtime.resolve("application.properties"));
+    /** The drive's runtime dir (application.properties / secrets.env live here). */
+    private Path runtimeDir(Path tmp) {
+        return tmp.resolve("runtime");
     }
 
     /**
@@ -453,6 +558,13 @@ class LlamacppWiringTest {
                 + "  exit 0\n"  // ls reports present (skip download); download/rm no-op
                 + "fi\n"
                 + "exit 0\n";
+    }
+
+    /** Minimal fake curl: record argv, exit FAKE_CURL_EXIT (default 0). No real egress (P9). */
+    private String fakeCurlScript() {
+        return "#!/usr/bin/env bash\n"
+                + "printf '%s\\n' \"$*\" >> \"$FAKE_CURL_ARGV\"\n"
+                + "exit \"${FAKE_CURL_EXIT:-0}\"\n";
     }
 
     /** The base-file compose block for a 2-space-indented service, header to the next service key. */
@@ -552,4 +664,7 @@ class LlamacppWiringTest {
         }
         throw new IllegalStateException("docker-compose.yml not found walking up from " + dir);
     }
+
+    /** The outcome of a wizard drive that does not assert the exit code itself. */
+    private record WizardRun(int rc, String output) {}
 }

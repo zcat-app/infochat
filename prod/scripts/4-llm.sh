@@ -229,7 +229,12 @@ fetch_gguf() {
     # reads it. The presence/checksum probes stay non-root (reads only). The
     # download runs in the host netns with name-only proxy-env forwarding:
     # reachability is proven on the host path, so the fetch uses it.
-    docker run --rm -u 0:0 --network host -e HTTP_PROXY -e HTTPS_PROXY -e ALL_PROXY -e NO_PROXY -v infochat-llamacpp-models:/models "$CURL_IMAGE" -fL -o "/models/$file" "$url"
+    if ! docker run --rm -u 0:0 --network host -e HTTP_PROXY -e HTTPS_PROXY -e ALL_PROXY -e NO_PROXY -v infochat-llamacpp-models:/models "$CURL_IMAGE" -fL -o "/models/$file" "$url"; then
+      echo "FAIL: download of $url failed over the host's own network path (the path the preflight checked)." >&2
+      echo "      Check host connectivity: VPN, proxy, or firewall. If you use a proxy, export" >&2
+      echo "      HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY (the download uses them) and re-run." >&2
+      exit 1
+    fi
   fi
   if [[ -n "$expected" ]]; then
     actual="$(docker run --rm -v infochat-llamacpp-models:/models --entrypoint sha256sum "$CURL_IMAGE" "/models/$file" | awk '{print $1}')"
@@ -240,6 +245,26 @@ fetch_gguf() {
       exit 1
     fi
     echo "GGUF checksum verified ($expected)"
+  fi
+}
+
+# Preflight one GGUF URL with a host HEAD before any download: the fetch runs
+# on the host's own network path (M1-808), so the host probe is same-path.
+# Network-class exits abort with guidance; an HTTP refusal (22) only warns (P10).
+preflight_gguf_url() {
+  local url="$1" rc
+  echo "+ HEAD $url"
+  if curl -fsSLI -o /dev/null --max-time 60 "$url"; then
+    return 0
+  else
+    rc=$?
+    if [[ "$rc" == 6 || "$rc" == 7 || "$rc" == 28 ]]; then
+      echo "FAIL: cannot reach $url over the host's own network path (the path the download uses)." >&2
+      echo "      Check host connectivity: VPN, proxy, or firewall. If you use a proxy, export" >&2
+      echo "      HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY (the download uses them) and re-run." >&2
+      exit 1
+    fi
+    echo "WARN: $url answered but refused the HEAD probe (curl exit $rc) — reachability confirmed; continuing." >&2
   fi
 }
 
@@ -404,6 +429,14 @@ case "$backend" in
         emb_sha="$LLAMACPP_EMB_GGUF_SHA"   # pinned: enforced, not skippable
         echo "using pinned embeddings GGUF: $emb_file"
       fi
+    fi
+
+    # Same-path preflight BEFORE the first fetch: the download runs on the
+    # host's own network path (M1-808), so the host probe is the check the
+    # download will fail. No new prompts — drives feed positional stdin.
+    preflight_gguf_url "$gen_url"
+    if [[ "$emb_backend" == "llamacpp" ]]; then
+      preflight_gguf_url "$emb_url"
     fi
 
     # --- Provision. Download GGUFs + mint the secrets.env filenames BEFORE

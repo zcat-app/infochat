@@ -69,3 +69,6 @@ docs/plan/m1/redteam-multi/**/inv-*.txt
 docs/plan/m1/redteam-multi/**/diff.patch
 docs/plan/m1/redteam-multi/**/porcelain-*.txt
 docs/plan/m1/redteam-multi/**/preflight.txt
+
+# Live-test working notes (user-directed sessions) — never part of a ticket diff.
+bench/

@@ -232,7 +232,12 @@ fetch_gguf() {
     # No-shell host-netns download: the fetch uses the path the host's own
     # network proves, with the host's proxy env forwarded name-only (unset
     # vars are silently omitted, set -u safe).
-    docker run --rm -u 0:0 --network host -e HTTP_PROXY -e HTTPS_PROXY -e ALL_PROXY -e NO_PROXY -v infochat-llamacpp-models:/models "$CURL_IMAGE" -fL -o "/models/$file" "$url"
+    if ! docker run --rm -u 0:0 --network host -e HTTP_PROXY -e HTTPS_PROXY -e ALL_PROXY -e NO_PROXY -v infochat-llamacpp-models:/models "$CURL_IMAGE" -fL -o "/models/$file" "$url"; then
+      echo "FAIL: download of $url failed over the host's own network path (the path the download uses)." >&2
+      echo "      Check host connectivity: VPN, proxy, or firewall. If you use a proxy, export" >&2
+      echo "      HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY (the download uses them) and re-run." >&2
+      exit 1
+    fi
   fi
   if [[ -n "$expected" ]]; then
     actual="$(docker run --rm -v infochat-llamacpp-models:/models --entrypoint sha256sum "$CURL_IMAGE" "/models/$file" | awk '{print $1}')"
@@ -273,7 +278,8 @@ ensure_gguf() {
         echo "FAIL: $file is a CUSTOM llama.cpp GGUF whose download URL was never persisted" >&2
         echo "      (bundle predates M1-571; 4-llm.sh stored only the filename). Fetch the" >&2
         echo "      GGUF manually into the 'infochat-llamacpp-models' Docker volume:" >&2
-        echo "        docker run --rm -u 0:0 -v infochat-llamacpp-models:/models \\" >&2
+        echo "        docker run --rm -u 0:0 --network host -e HTTP_PROXY -e HTTPS_PROXY -e ALL_PROXY -e NO_PROXY \\" >&2
+        echo "          -v infochat-llamacpp-models:/models \\" >&2
         echo "          $CURL_IMAGE -fL -o \"/models/$file\" \"<your-gguf-url>\"" >&2
         echo "      then EITHER return this host to fresh (recipe in the partial-state note" >&2
         echo "      below) and re-run restore.sh — the fetched model survives in its volume" >&2

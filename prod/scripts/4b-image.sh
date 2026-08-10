@@ -520,7 +520,9 @@ head_check() {
   local url="$1"
   echo "+ HEAD $url"
   if ! curl -fsSLI -o /dev/null --max-time 60 "$url"; then
-    echo "FAIL: preflight HEAD check failed for $url — aborting BEFORE any download." >&2
+    echo "FAIL: cannot reach $url over the host's own network path (the path the download uses) — aborting BEFORE any download." >&2
+    echo "      Check host connectivity: VPN, proxy, or firewall. If you use a proxy, export" >&2
+    echo "      HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY (the download uses them) and re-run." >&2
     exit 1
   fi
 }
@@ -581,7 +583,12 @@ fetch_asset() {
     fi
     echo "+ download $url -> $MODELS_HOST_DIR/$dest"
     mkdir -p "$MODELS_HOST_DIR/$(dirname "$dest")"
-    curl -fL --retry 3 -o "$MODELS_HOST_DIR/$dest" "$url"
+    if ! curl -fL --retry 3 -o "$MODELS_HOST_DIR/$dest" "$url"; then
+      echo "FAIL: download of $url failed over the host's own network path (the path the preflight checked)." >&2
+      echo "      Check host connectivity: VPN, proxy, or firewall. If you use a proxy, export" >&2
+      echo "      HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY (the download uses them) and re-run." >&2
+      exit 1
+    fi
     return 0
   fi
   if docker run --rm -v "$MODELS_VOLUME:/models" --entrypoint ls "$CURL_IMAGE" "/models/$dest" >/dev/null 2>&1; then
@@ -593,7 +600,12 @@ fetch_asset() {
   # fetch_gguf rationale); the read-only presence probe stays non-root. The
   # download runs in the host netns with name-only proxy-env forwarding: the
   # preflight proves the host path, so the fetch uses that same path.
-  docker run --rm -u 0:0 --network host -e HTTP_PROXY -e HTTPS_PROXY -e ALL_PROXY -e NO_PROXY -v "$MODELS_VOLUME:/models" "$CURL_IMAGE" -fL --retry 3 --create-dirs -o "/models/$dest" "$url"
+  if ! docker run --rm -u 0:0 --network host -e HTTP_PROXY -e HTTPS_PROXY -e ALL_PROXY -e NO_PROXY -v "$MODELS_VOLUME:/models" "$CURL_IMAGE" -fL --retry 3 --create-dirs -o "/models/$dest" "$url"; then
+    echo "FAIL: download of $url failed over the host's own network path (the path the preflight checked)." >&2
+    echo "      Check host connectivity: VPN, proxy, or firewall. If you use a proxy, export" >&2
+    echo "      HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY (the download uses them) and re-run." >&2
+    exit 1
+  fi
 }
 
 # Generate the per-model API-format workflow template the Provider's

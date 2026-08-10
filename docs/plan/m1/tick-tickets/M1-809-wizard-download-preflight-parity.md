@@ -1,7 +1,7 @@
 ---
 id: M1-809
 title: "Wizard download preflight parity and fail-fast guidance"
-status: pending
+status: done
 created: 2026-08-10
 last_updated: 2026-08-10
 flow: tick
@@ -11,8 +11,8 @@ reproduction: >-
   multi-GB GGUF download (4-llm.sh:410,424) with NO reachability preflight at
   all, and any network failure surfaces as a bare curl error mid-download
   (observed shape in the 4b twin: `curl: (6) Could not resolve host:
-  huggingface.co`, brief 2026-08-10). Intended test (to-be-written at start):
-  LlamacppWiringTest.llamacppPreflightAbortsOnUnreachableHostBeforeAnyDownload.
+  huggingface.co`, brief 2026-08-10). Reproduction test written at start and
+  run RED on main: LlamacppWiringTest.llamacppPreflightAbortsOnUnreachableHostBeforeAnyDownload.
 analysis_ref: docs/plan/m1/tick-analysis/wizard-download-container-network.md
 blocked_by: [M1-808]
 files_scope:
@@ -71,11 +71,40 @@ test_plan:
 spec_refs:
   - docs/design/07-deployment.md §7.7.2 First-run setup wizard
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-10
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS WARN, SECURITY PASS, TEST-ADEQUACY FAIL, MAINTAINABILITY PASS, SCOPE FAIL"
+    diff_stats: "7 files changed, 265 insertions(+), 21 deletions(-)"
+    findings: "4 rework items (0 critical/high): missing green full-suite log (recorded run RED in untouched infochat-provider + stale vs final tree); restore.sh message claims a preflight it never runs; exit-7 abort disjunct untested; untraced javadoc reflow + unused WizardRun.tmp component. 5 candidate findings falsified-and-dropped (stdin-shift, if-wrap exit semantics, bench/ notes provenance, fake-curl default-0 preservation, custom-URL reach widening)"
+    verdict_file: .scratch/tick-review-M1-809-r1.txt
+  - round: 2
+    date: 2026-08-10
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "7 files changed, 247 insertions(+), 21 deletions(-)"
+    findings: "0 rework items; 0 critical/high; all 4 round-1 REWORK items SATISFIED (green r2 full-suite log with LlamacppWiringTest 19/0/0 — r1 ComfyUIClientTest failure did not reproduce, flake per D3; restore.sh honest wording; exit-7 drive pins the abort disjunct; javadoc + WizardRun.tmp churn removed); 1 candidate finding falsified-and-dropped (per-script preflight-wording inconsistency — defeated by 4-llm.sh/4b-image.sh genuinely preflighting, restore.sh not)"
+    verdict_file: .scratch/tick-review-M1-809-r2.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check: >-
+  start 2026-08-10 — tick-lint 0 findings, 0 BLOCKERs. blocked_by M1-808 done
+  (HEAD). Census re-run clean (every grep-returned path has a row; pack.sh:249 is
+  a comment, not a site). Citations spot-checked: 4-llm.sh fetch_gguf calls at
+  :412/:426 (ticket says :410/:424 — pre-M1-808 numbering, cosmetic; the
+  reproduction probe `grep -n curl` is exact: :49 + comments only); 4b-image.sh
+  head_check :519-526/:523 exact; restore.sh printed recipe at :276-277
+  (ticket says :273-274 — the FAIL header line; the grep probes hit either);
+  ollama-pull rows approximate by the same drift. M1-808 seam tests traced:
+  oneShotDownloadContainersUseTheHostNetworkPath pins --network host / -e
+  proxies / -u 0:0 / -v via FAKE_DOCKER_PROBE_ABSENT — this diff never touches
+  a download invocation; fetchGgufWritesToTheVolumeComposeMounts unaffected
+  (fake curl defaults exit 0, preflight passes silently before the ls probe).
+  Pitfalls P1/P6/P9/P10 all landed (P2/P3/P4/P7/P8 preserved or consumed via
+  test_plan.preserves; P5/P11-P13 are M1-810's lane). No replaces:. No
+  ambiguity raised.
 escalation_reason:
 ---
 
@@ -216,3 +245,39 @@ failure guidance (re-runnable: `grep -rn 'fetch_gguf\|fetch_asset\|ollama pull' 
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-809-wizard-download-preflight-parity.md
 ```
+
+## Round 1 rework
+
+REWORK ITEMS (verbatim from .scratch/tick-review-M1-809-r1.txt):
+
+1. Finding 1: produce the missing green full-suite evidence — re-run
+   `mvn verify` from the repo root against the current tree, capture via the
+   .scratch → target pattern, and show the round-2 log ending BUILD SUCCESS
+   with mtime newer than every staged file and LlamacppWiringTest green
+   inside it; if ComfyUIClientTest.overCapResponseBodyIsRefusedBeforeAnyBytesAreRetained
+   fails a second time in a clean environment, record the §5 escalation
+   (regression, test name) instead of touching the test. Evaluated via the
+   round-2 log as named in EVALUATED-AS.
+2. Finding 2: in prod/scripts/restore.sh:236 replace "(the path the preflight
+   checked)" with "(the path the download uses)". Evaluated via
+   `grep -n "the path the preflight checked" prod/scripts/restore.sh` (no
+   output), `grep -n "the path the download uses" prod/scripts/restore.sh`
+   (one hit), and `bash -n prod/scripts/restore.sh` (exit 0).
+3. Finding 3: add "7" to the network-exit loop at LlamacppWiringTest.java:425
+   (`new String[] {"6", "7", "28"}`). Evaluated via
+   `grep -n '"6", "7", "28"' infochat-llm-adapter/src/test/java/app/zcat/infochat/llm/wiring/LlamacppWiringTest.java`
+   and `LlamacppWiringTest.preflightDistinguishesNetworkFailureFromHeadRefusal`
+   green in the round-2 run.
+4. Finding 4: restore the one-line javadoc at LlamacppWiringTest.java:570-572
+   and drop the unused `tmp` component from `WizardRun` (:671, constructor
+   call :523). Evaluated via the two greps and the module test-compile named
+   in EVALUATED-AS.
+
+## Review observations
+
+- Image spool sweeper logs a recurring `NoSuchFileException`
+  (`Image spool sweep failed: ... /dev/shm/infochat-image-spool`) on every
+  sweep cadence when the spool directory is absent, before any image request
+  (observed in bench/livetest-10-08-26.md). TOUCHED-BY-THIS-DIFF: no —
+  pre-existing sweeper behavior; this ticket only recorded the observation.
+  Filing a ticket is the user's call.
