@@ -374,8 +374,8 @@ public class EntityExtractorWorker {
      * object wrapper too costs nothing on the happy path and salvages a reply
      * that would otherwise D22-release without entities. The M1-613 spike
      * measured 0% wrapping on the live endpoint at the time
-     * (docs/plan/m1/spikes/M1-613-entity-hardening.md); this is insurance
-     * against non-determinism, not a fix for a currently-observed loss. To
+     * (M1-613); this is insurance against non-determinism, not a fix for a
+     * currently-observed loss. To
      * recover WITHOUT widening what counts as a valid reply, unwrap
      * conservatively: when the root is an object, prefer an
      * {@code entities}-keyed array; else unwrap only when EXACTLY ONE field is

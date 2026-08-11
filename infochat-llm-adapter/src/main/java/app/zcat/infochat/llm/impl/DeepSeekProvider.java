@@ -105,7 +105,7 @@ public class DeepSeekProvider extends OpenAiCompatibleProvider {
      * ~2063 completion tokens on real judge prompts and TRUNCATING a MALWARE
      * verdict at the parent's default 1024 cap (a measured fail-open). The floor
      * is set to ~2x that worst case so a reasoning-on call cannot truncate its
-     * verdict. See {@code docs/plan/m1/spikes/M1-610-judge-reasoning.md}. (M1-610.)
+     * verdict. (M1-610.)
      */
     static final int REASONING_MIN_MAX_TOKENS = 4000;
 

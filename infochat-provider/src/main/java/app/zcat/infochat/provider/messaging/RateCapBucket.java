@@ -781,9 +781,8 @@ public class RateCapBucket {
      * matched the eviction gate. A returning contact whose bucket was
      * evicted pays a one-time bucket-cold cost (a fresh full bucket
      * via {@code computeIfAbsent}), which is the same shape a process
-     * restart would produce. See the /redteam M1-044a DOS finding
-     * (docs/plan/m1/redteam/M1-044a-2026-05-21.md) and M1-044b's
-     * Implementation notes §"Rate-cap eviction-predicate fix".</p>
+     * restart would produce. See M1-044b's Implementation notes
+     * §"Rate-cap eviction-predicate fix".</p>
      *
      * <p>Sweeps every bucket map except the per-adapter stranger limiter
      * (bounded by the fixed adapter count, nothing to reclaim) with the

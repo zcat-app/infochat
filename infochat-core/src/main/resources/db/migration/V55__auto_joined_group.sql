@@ -1,7 +1,6 @@
 -- V55: auto_joined_group — durable join-tracking for the auto-accept surface,
 -- so the D47 total group-count caps can bound the bot's passive memberships
--- (M1-519; closes the residual MEDIUM DoS from the M1-515 round-2 redteam
--- re-audit, docs/plan/m1/redteam/M1-515-2026-06-29-recheck.md).
+-- (M1-519; closes the residual MEDIUM DoS from the M1-515 round-2 re-audit).
 --
 -- GroupInvitationHandler auto-accepts a group invitation from a registered,
 -- non-banned inviter by issuing /_join, but mints NO `groups` row — that row

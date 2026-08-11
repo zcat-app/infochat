@@ -685,7 +685,7 @@ directive is appended strictly after its `UNTRUSTED_CONTENT` close.
   (= 1 − cosine distance) the pre-fetch already emits and compares the
   BEST semantic match against `ChatAgent.CONFIDENT_SIMILARITY_CUTOFF`, a
   fixed code constant (`0.65`, calibrated by a prior measurement — see
-  `docs/plan/m1/spikes/M1-619-confidence-cutoff-calibration.md`). It is a
+  calibration spike). It is a
   code constant, not config, because
   it changes reply PROSE only — never the retrieved set (D19) — so it needs
   no per-deployment tuning knob, and a stable constant keeps the D19

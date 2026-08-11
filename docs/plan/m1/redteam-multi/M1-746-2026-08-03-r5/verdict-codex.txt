@@ -1,9 +1,0 @@
-RED-TEAM VERDICT: FINDINGS
-
-FINDINGS:
-  - CATEGORY: INJECTION
-    SEVERITY: low
-    PROMISE: "Every prompt that includes user-derived text is wrapped in a delimiter block whose marker contains a per-call random value."
-    GAP: The scope-declared /lang value is read as sourceLanguage in infochat-provider/src/main/java/app/zcat/infochat/provider/chat/tool/SemanticSearchTool.java:115 and interpolated directly into the translator instruction at infochat-provider/src/main/java/app/zcat/infochat/provider/chat/tool/QueryAnchorTranslator.java:211-218. The only random delimiter is placed in the static template at QueryAnchorTranslator.java:110-120; sourceLanguage is outside it, and the diff supplies no validation or fixed allowlist before the interpolation.
-    REPRO: An attacker sets their scope's declared language to a crafted value containing translator instructions, then invokes semanticSearch. The crafted value is inserted into the instruction-bearing portion of the ModelTask.TRANSLATOR prompt rather than the randomized untrusted-content block. A compliant or compromised model can follow it and return attacker-chosen nonblank, in-cap query text, which QueryAnchorTranslator accepts and SemanticSearchTool sends to both retrieval arms.
-    SUGGESTED-FIX-CLASS: input-sanitization

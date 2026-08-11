@@ -1,9 +1,0 @@
-RED-TEAM VERDICT: FINDINGS
-
-FINDINGS:
-  - CATEGORY: DOS
-    SEVERITY: low
-    PROMISE: "Per-group reply rate (D47) — a single bucket per groups row bounding total outbound replies (fixed or command) within a sliding window. Applies to ALL approval states."
-    GAP: InboundRouter.java:728 and InboundRouter.java:750 now invoke drainPendingConfirm before their fixed body-cap replies; InboundRouter.java:868 does the same before its probation reply. drainPendingConfirm at InboundRouter.java:1692 removes state and calls sendReply itself, with no second per-group reply-cap check or token consumption. Thus one group inbound admitted by the pre-rejection cap check can emit two outbound replies.
-    REPRO: In an approved group, obtain a pending confirmation in that scope (for example the probation-allowed /forget confirmation), then send an over-cap chat body or a probation-blocked command. The group reply bucket admits that inbound once, but the router sends both "Pending `forget` cancelled." and the rejection reply. Repeat the arm-and-reject sequence to spend one admitted inbound on two outbound adapter sends, exceeding the promised total-outbound bound.
-    SUGGESTED-FIX-CLASS: rate-limit

@@ -35,7 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>The SQL {@code expires_at > NOW()} invite-expiry gate is intentionally
  * NOT asserted here — it stays on the DB clock (intra-statement comparison)
- * per docs/plan/m1/now-clock-audit.md, so a pinned Java clock would not
+ * so a pinned Java clock would not
  * govern it. {@code InviteCodeConsumerTest.rejectedExpired} covers expiry
  * against the DB clock.
  */

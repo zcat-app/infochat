@@ -720,7 +720,7 @@ between this plan and ticket carving and decides whether the picker ships two
 options or three.
 
 **Design-time redteam: done 2026-08-07** (verdict:
-`docs/plan/m1/redteam/image-spec-promotion-2026-08-07.md` — 0 critical, 2
+the image-spec promotion audit — 0 critical, 2
 high, 3 medium, 2 low, all accepted and fixed in the spec the same day). The
 fixes, now part of the spec: the translation leg is enrolled in the
 `security.md` §Secrets handling enumeration and disclosed rather than

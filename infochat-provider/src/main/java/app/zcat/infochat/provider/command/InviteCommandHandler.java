@@ -200,7 +200,7 @@ public class InviteCommandHandler implements CommandHandler {
     // systemUTC() initializer keeps the field non-null for any hand-constructed
     // instance; CDI injection overrides it in the managed bean. The consume-time
     // expires_at > NOW() check in InviteCodeConsumer and the /invite list display
-    // filter intentionally stay on the DB clock — see docs/plan/m1/now-clock-audit.md.
+    // filter intentionally stay on the DB clock.
     // (M1-490, pattern from M1-444 ReEvaluationJob)
     @Inject
     Clock clock = Clock.systemUTC();

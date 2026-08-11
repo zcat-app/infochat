@@ -475,7 +475,7 @@ public class ChatAgent {
         // usage, M1-666/D69 topic answer). Whether ANY help block is
         // delivered is decided HERE from the caller's own inbound text,
         // NEVER from the model's tool elections: the r2 INJECTION
-        // regression (docs/plan/m1/redteam/M1-648-2026-07-19-r2.md) was
+        // regression was
         // an attacker-influenced model-elected helpLookup call appending
         // a privileged command's usage after sanitize. One embed
         // round-trip serves both probes (the same per-turn 768-vector);

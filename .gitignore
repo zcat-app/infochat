@@ -55,20 +55,19 @@ prod/runtime/
 # Sensitive by construction (see .migration/**/MIGRATION-README.md) — never commit.
 .migration/
 
-# Redteam-multi regenerable scratch (M1-684). Each /redteam-multi run's durable
-# audit record — verdict-*.txt, cross-examination.md, and any hand-written
-# disposition.md — stays tracked; the bulk below is fully reproducible from the
-# prompt template + diff (rendered prompts embed the whole diff + threat model),
-# so it is kept out of permanent history. The redteam-multi.sh script still
-# WRITES these into the run directory as working state — this only stops them
-# being committed. Single-auditor /redteam evidence (docs/plan/m1/redteam/*.md)
-# is one markdown file per audit and is unaffected.
-docs/plan/m1/redteam-multi/**/prompt-*.txt
-docs/plan/m1/redteam-multi/**/reply-*.txt
-docs/plan/m1/redteam-multi/**/inv-*.txt
-docs/plan/m1/redteam-multi/**/diff.patch
-docs/plan/m1/redteam-multi/**/porcelain-*.txt
-docs/plan/m1/redteam-multi/**/preflight.txt
+# Private planning, audit, spike, and live-test artifacts.
+docs/plan/audit/
+docs/plan/live-e2e/026-08-11-m1-784-817-report.md
+docs/plan/m1/drafts/
+docs/plan/m1/redteam/
+docs/plan/m1/redteam-multi/
+docs/plan/m1/tick-analysis/
+docs/plan/m1/flaws.md
+docs/plan/m1/now-clock-audit.md
+docs/plan/m1/sanitize-caller-census.md
+docs/plan/m1/scan-windows-fixture-census.md
+docs/plan/m1/scan-window-fixture-census.md
+docs/plan/m1/spikes/
 
 # Live-test working notes (user-directed sessions) — never part of a ticket diff.
 bench/

@@ -1,6 +1,0 @@
-RED-TEAM VERDICT: UNAVAILABLE
-
-AUDITOR: codex
-REASON: no verdict file written
-
-This auditor produced no verdict. Treat as NO DATA, never as "no findings".

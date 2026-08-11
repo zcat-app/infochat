@@ -149,7 +149,7 @@ public class InviteCodeConsumer {
     // non-null for hand-constructed instances (newLocalConsumer() in the eviction
     // tests, which never goes through CDI); injection overrides it in the managed
     // bean. The SQL expires_at > NOW() invite-expiry gate intentionally stays on
-    // the DB clock (intra-statement comparison) — see docs/plan/m1/now-clock-audit.md.
+    // the DB clock (intra-statement comparison).
     // (M1-447, pattern from M1-444 ReEvaluationJob)
     @Inject
     Clock clock = Clock.systemUTC();

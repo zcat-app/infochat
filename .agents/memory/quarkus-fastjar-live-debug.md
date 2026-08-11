@@ -24,5 +24,5 @@ Two live-debugging facts from the F-live-1/M1-543 diagnosis (2026-07-02):
    the provider boundary by the `AdapterRegistry` classloader pin (M1-543);
    any NEW MessagingAdapter callback setter must also be wired through
    `runWithApplicationClassLoader` (redteam out-of-model note in
-   docs/plan/m1/redteam/M1-543-2026-07-02.md). See [[simplex-live-frame-capture]],
+   the live audit). See [[simplex-live-frame-capture]],
    [[live-e2e-active-handoff]].

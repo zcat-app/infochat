@@ -12,8 +12,8 @@ import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.Test;
 
-/** Pins M1-810: the three repo image builds declare {@code network: host} under build:
- *  (docs/plan/m1/tick-analysis/wizard-download-container-network.md); a service-level
+/** Pins M1-810: the three repo image builds declare {@code network: host} under build;
+ *  a service-level
  *  {@code network_mode} — runtime host networking — is forbidden (docs/spec/security.md §Trust boundaries). */
 class BuildHostNetworkWiringTest {
 
@@ -37,8 +37,7 @@ class BuildHostNetworkWiringTest {
         String build = buildBlock(composeFile, service);
         assertTrue(Pattern.compile("(?m)^\\s+network:\\s*host\\s*$").matcher(build).find(),
                 composeFile + ": service '" + service + "' build: must declare 'network: host'"
-                        + " — default-bridge build containers die on DNS on the divergent host class"
-                        + " (docs/plan/m1/tick-analysis/wizard-download-container-network.md)");
+                        + " — default-bridge build containers die on DNS on the divergent host class");
     }
 
     private String buildBlock(String composeFile, String service) throws IOException {

@@ -72,7 +72,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * </ol>
  *
  * <p>Items 9–12 are the hostile-synthesis cases (the Group B traces in
- * {@code docs/plan/m1/tick-analysis/ingest-corrupts-post-body-text.md}):
+ * (M1-784):
  * the plain-text step decodes, deletes and reflows the body AFTER the
  * first regex scan has run, so each of them puts a payload into
  * {@code post.body} that the first scan provably could not see. They

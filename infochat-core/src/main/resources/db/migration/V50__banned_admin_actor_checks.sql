@@ -190,6 +190,5 @@ $$;
 -- 4. U-56 rider: drop the dead column scope_preferences.digest_enabled
 -- (V7:89). It has zero readers/writers — the live per-group digest flag
 -- is groups.digest_enabled (V44). Recorded in
--- docs/plan/m1/drafts/v4-deep-review-backlog.md as "bundle with the next
--- schema-touching ticket".
+-- as "bundle with the next schema-touching ticket".
 ALTER TABLE scope_preferences DROP COLUMN digest_enabled;

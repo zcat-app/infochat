@@ -505,7 +505,7 @@ a bare key would hand the head of every result set to any feed that simply
 omits its `<pubDate>`, which is the exact position `schema.md`'s ingest
 clamp exists to defend and strictly easier than the future-dating that
 clamp denies. Flagged as a high finding by the 2026-07-25 red-team; see
-`docs/plan/m1/redteam/M1-689-2026-07-25.md`. Dated rows are unaffected —
+the corresponding audit. Dated rows are unaffected —
 their `COALESCE` resolves to `published_at`, so their relative order is
 byte-identical. `NULLS LAST` was rejected: it makes date-less posts the
 first evicted under the cluster cap, which defeats the reachability this

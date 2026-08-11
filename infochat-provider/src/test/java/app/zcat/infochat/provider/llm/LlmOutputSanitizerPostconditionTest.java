@@ -5,9 +5,10 @@ import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.net.URISyntaxException;
+import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -22,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Census meta test for M1-792. The caller-postcondition census
- * (docs/plan/m1/sanitize-caller-census.md) records every call site of the
+ * (the test resource {@code sanitize-caller-census.md}) records every call site of the
  * shared sanitize() transform and the postcondition each caller assumes.
  * The roster is re-derived from the grep in the census header, NOT copied:
  * the header's hit count must equal the row count below, keeping the
@@ -46,8 +47,7 @@ class LlmOutputSanitizerPostconditionTest {
     @Test
     void everyBeanCallSitePostconditionIsPinned() throws IOException {
         Path census = locateCensus();
-        assertNotNull(census, "docs/plan/m1/sanitize-caller-census.md must be locatable "
-                + "from the test working dir");
+        assertNotNull(census, "sanitize-caller-census.md test resource must be available");
         List<String> lines = Files.readAllLines(census);
 
         List<String> siteRows = siteRows(lines);
@@ -159,7 +159,7 @@ class LlmOutputSanitizerPostconditionTest {
         }
         String className = parts[0];
         String method = parts[1];
-        Path repoRoot = census().getParent().getParent().getParent().getParent();
+        Path repoRoot = locateRepoRoot();
         for (String module : List.of("infochat-provider", "infochat-collector")) {
             Path testRoot = repoRoot.resolve(module).resolve("src").resolve("test");
             if (!Files.isDirectory(testRoot)) {
@@ -187,7 +187,7 @@ class LlmOutputSanitizerPostconditionTest {
 
     /** A follow-up ticket resolves when its file exists in tick-tickets/. */
     private static boolean ticketFiled(String id) {
-        Path ticketsDir = census().getParent().resolve("tick-tickets");
+        Path ticketsDir = locateRepoRoot().resolve("docs/plan/m1/tick-tickets");
         try (var files = Files.list(ticketsDir)) {
             return files.anyMatch(p -> p.getFileName().toString().startsWith(id + "-"));
         } catch (IOException e) {
@@ -195,27 +195,30 @@ class LlmOutputSanitizerPostconditionTest {
         }
     }
 
-    /**
-     * Resolve the census doc from the test working directory. Tests run
-     * from each module's directory (e.g. {@code infochat-provider/}), so
-     * the path is {@code ../docs/plan/m1/sanitize-caller-census.md}
-     * relative to module-run, but a repo-root run sees
-     * {@code docs/plan/m1/sanitize-caller-census.md} directly.
-     */
+    /** Resolve the census from the test classpath. */
     private static Path locateCensus() {
-        for (Path p : List.of(
-                Paths.get("docs/plan/m1/sanitize-caller-census.md"),
-                Paths.get("..", "docs", "plan", "m1", "sanitize-caller-census.md"),
-                Paths.get("../../docs/plan/m1/sanitize-caller-census.md"))) {
-            if (Files.exists(p)) {
-                return p.toAbsolutePath().normalize();
-            }
+        URL resource = LlmOutputSanitizerPostconditionTest.class
+                .getResource("/sanitize-caller-census.md");
+        if (resource == null) {
+            return null;
         }
-        return null;
+        try {
+            return Path.of(resource.toURI());
+        } catch (URISyntaxException e) {
+            return null;
+        }
     }
 
-    private static Path census() {
-        return locateCensus();
+    private static Path locateRepoRoot() {
+        Path current = Path.of("").toAbsolutePath().normalize();
+        while (current != null) {
+            if (Files.isRegularFile(current.resolve("pom.xml"))
+                    && Files.isDirectory(current.resolve("infochat-provider"))) {
+                return current;
+            }
+            current = current.getParent();
+        }
+        throw new IllegalStateException("repository root not found");
     }
 
     // ----- honest transform pins (census "shared contract" rows) --------

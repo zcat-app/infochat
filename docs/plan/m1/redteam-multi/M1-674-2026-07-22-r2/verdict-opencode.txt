@@ -1,6 +1,0 @@
-RED-TEAM VERDICT: UNAVAILABLE
-
-AUDITOR: opencode
-REASON: exit status 124
-
-This auditor produced no verdict. Treat as NO DATA, never as "no findings".

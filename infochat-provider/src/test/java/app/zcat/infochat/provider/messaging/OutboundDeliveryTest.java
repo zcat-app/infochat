@@ -385,7 +385,7 @@ class OutboundDeliveryTest {
     }
 
     // M1-794: the LLM-authored seam refuses bodies that sanitized to empty
-    // (P8, pinned by LlmOutputSanitizerPostconditionTest); the generic
+    // (P8); the generic
     // deliver() keeps shipping deliberately empty deterministic replies (P1).
 
     @Test

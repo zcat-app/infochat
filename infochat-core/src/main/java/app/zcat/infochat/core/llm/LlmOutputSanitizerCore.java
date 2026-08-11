@@ -209,8 +209,7 @@ public final class LlmOutputSanitizerCore {
      *       {@code /invite CREATE} DOES dispatch. Matching it
      *       case-sensitively left 8 of the closed list's entries evadable
      *       by changing one word's case — silently, since a non-match
-     *       emits no WARN and no audit row. (M1-676 red-team finding,
-     *       docs/plan/m1/redteam/M1-676-2026-07-23.md.)</li>
+     *       emits no WARN and no audit row.</li>
      *   <li><b>Flag (a later word starting with {@code --}) — not a
      *       regex at all; returns {@link #FLAG_ENTRY_TOKENIZED}.</b> A
      *       flag can appear at ANY position in the command's argument run:
@@ -227,8 +226,7 @@ public final class LlmOutputSanitizerCore {
      *       scan ({@link #redactFlagEntry}) is both linear and
      *       evasion-free, so flag entries are handled there and this
      *       method returns the {@link #FLAG_ENTRY_TOKENIZED} sentinel
-     *       instead of compiling a pattern. (M1-680 red-team rounds 1–2,
-     *       docs/plan/m1/redteam/M1-680-2026-07-23-r2.md.)</li>
+     *       instead of compiling a pattern.</li>
      * </ul>
      *
      * <p>ASCII-only folding is deliberate and sufficient: the pattern is
@@ -272,8 +270,6 @@ public final class LlmOutputSanitizerCore {
      * P command-words is O(input length), not the O(P × input length)
      * that {@link Matcher#find()} re-anchoring costs. A hostile
      * endpoint's in-cap reply therefore cannot pin a worker thread.
-     * (M1-680 red-team DOS finding,
-     * docs/plan/m1/redteam/M1-680-2026-07-23-r2.md.)
      *
      * <p><b>Why it mirrors the parser exactly.</b> The parser tokenizes
      * the body it is handed with {@code split("\\s+")}, so the separator
@@ -458,8 +454,7 @@ public final class LlmOutputSanitizerCore {
      * deliberately admits {@code (}, so replacing the token in
      * {@code /ban(url)} would otherwise emit {@code [redacted command](url)}
      * — link syntax the sanitizer built itself, after the last flatten had
-     * already run. (M1-676 red-team rounds 1–3,
-     * docs/plan/m1/redteam/M1-676-2026-07-23-r3.md.)
+     * already run.
      */
     private static String neutralizeResidualLinkSyntax(String text) {
         return breakLinkAdjacency(text);
@@ -955,8 +950,7 @@ public final class LlmOutputSanitizerCore {
      * {@value #REDACTED_COMMAND_REPLACEMENT} marker's own brackets from
      * being treated as link text; the post-replacement neutralization
      * below then covers the marker itself, which is created after both
-     * invocations have run. (M1-676 red-team rounds 1–3,
-     * docs/plan/m1/redteam/M1-676-2026-07-23-r3.md.)
+     * invocations have run.
      */
     public static ClosedListStripResult applyClosedListStripWithMatches(String input) {
         String current = applyMarkdownLinkStrip(canonicalizeForMatching(input));

@@ -19,7 +19,7 @@ reproduction: >-
 analysis_ref: docs/plan/m1/tick-analysis/llm-output-leaks-scaffolding-markdown.md
 blocked_by: []
 files_scope:
-  - docs/plan/m1/sanitize-caller-census.md
+  - infochat-provider/src/test/resources/sanitize-caller-census.md
   - infochat-provider/src/test/java/app/zcat/infochat/provider/llm/LlmOutputSanitizerPostconditionTest.java
 complexity: low
 risk: low
@@ -39,7 +39,7 @@ out_of_scope:
     RE-RUNNING the M1-779 round-1 falsification (handoff §3.1: done and
     recorded).
 acceptance:
-  - docs/plan/m1/sanitize-caller-census.md lands, grounded against docs/spec/security.md §LLM output sanitizer — verified by LlmOutputSanitizerPostconditionTest.everyBeanCallSitePostconditionIsPinned, which resolves each row (the 14-site roster re-derived at start by the grep in §Census) to a named pinning test or a filed follow-up — for each site the sanitize UNIT, what it assumes (line count / emptiness / leading bytes / token synthesis / shrinkage), whether its checks run before or after the call, and the pinning test, or an explicit "unpinned, follow-up M<N>-XXX" row.
+  - infochat-provider/src/test/resources/sanitize-caller-census.md lands, grounded against docs/spec/security.md §LLM output sanitizer — verified by LlmOutputSanitizerPostconditionTest.everyBeanCallSitePostconditionIsPinned, which resolves each row (the 14-site roster re-derived at start by the grep in §Census) to a named pinning test or a filed follow-up — for each site the sanitize UNIT, what it assumes (line count / emptiness / leading bytes / token synthesis / shrinkage), whether its checks run before or after the call, and the pinning test, or an explicit "unpinned, follow-up M<N>-XXX" row.
   - LlmOutputSanitizerPostconditionTest.everyBeanCallSitePostconditionIsPinned passes — REPRODUCTION. The test fails on any census row that has neither a pinning test nor a filed follow-up.
   - LlmOutputSanitizerPostconditionTest.sanitizeReturnsOriginalBytesOnNoClosedListMatch passes — honest pin of LlmOutputSanitizerCore.java:561-562 (caller's own bytes back on no match).
   - LlmOutputSanitizerPostconditionTest.sanitizeMayReturnTheCanonicalFormOnMatch passes — honest pin of LlmOutputSanitizerCore.java:567; documents the synthesis channel rather than hiding it, so a future deleting-pass ticket sees the contract it is joining.
@@ -112,7 +112,7 @@ test-level statement of the contract they rely on.
 - **Steps, in order:**
   1. Re-run the Census grep below; reconcile against the analysis's
      roster (13 bean + 1 collector).
-  2. Write `docs/plan/m1/sanitize-caller-census.md`: one row per call
+  2. Write `infochat-provider/src/test/resources/sanitize-caller-census.md`: one row per call
      site with unit / assumption / before-or-after / pinning test or
      follow-up.
   3. Add `LlmOutputSanitizerPostconditionTest` with the honest pins
@@ -156,5 +156,5 @@ ClusterBlockRenderer:183, DigestRenderer:610, DigestRenderer:881);
 DisplayHeadline:144, :311, :344, :736; TranslationPipeline:245;
 SavedCommandHandler:387, :516, :521; IngestTranslationWorker:775-777
 (collector, explicit composition). Every returned path gets a row in
-`docs/plan/m1/sanitize-caller-census.md` (fix-test / already-pinned /
+`infochat-provider/src/test/resources/sanitize-caller-census.md` (fix-test / already-pinned /
 defer: follow-up / out-of-scope: reason).

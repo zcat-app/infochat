@@ -1,9 +1,0 @@
-RED-TEAM VERDICT: FINDINGS
-
-FINDINGS:
-  - CATEGORY: DOS
-    SEVERITY: medium
-    PROMISE: "LLM-triggering operations (chat replies + on-demand `/summary` + `/retry` re-rolls) — its own bucket, capped lower, profile-driven"; the per-group LLM bucket is "the backstop for groups with many active members."
-    GAP: DigestRetryService.fallbackRerun() admits a fallback at infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestRetryService.java:250-252, but DigestWorker.executeSlot() independently re-checks the same system budget at infochat-provider/src/main/java/app/zcat/infochat/provider/digest/DigestWorker.java:231-234. If the budget reaches its ceiling between those checks, the worker degrades and returns RAN; fallbackRerun stamps the retry cooldown and returns SUCCESS at DigestRetryService.java:258-265. RetryCommandHandler refunds only the SYSTEM_BUDGET_REFUSED enum arm at infochat-provider/src/main/java/app/zcat/infochat/provider/command/RetryCommandHandler.java:573-585, so this no-LLM system-budget refusal instead retains both the per-user and D47 group draws and reports success.
-    REPRO: With a section-less prior digest and the system window one call below its ceiling, a group admin sends `/retry --digest`. Its fallback passes the first gate after the handler has acquired the per-user and group LLM tokens. Before executeSlot reaches its second gate, another admitted digest records enough calls to fill the system window. executeSlot sends only the degraded digest, yet the retry is reported as SUCCESS and its cooldown is stamped; the caller's token and the group-shared token remain consumed. Repeating this race lets a group admin consume the shared group retry capacity without any fallback provider call, denying recovery retries to the group's other authorized admins while the system budget drains.
-    SUGGESTED-FIX-CLASS: rate-limit

@@ -42,8 +42,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * the OPPOSITE of the verdict under the wall clock, so a gate still reading SQL
  * {@code NOW()} would fail the assertion. The consume-time
  * {@code expires_at > NOW()} check (InviteCodeConsumer) and the {@code /invite
- * list} display filter intentionally stay on the DB clock — see
- * {@code docs/plan/m1/now-clock-audit.md} — so they are not asserted here.
+ * list} display filter intentionally stay on the DB clock, so they are not
+ * asserted here.
  */
 @QuarkusTest
 class InviteExpiryClockIT {

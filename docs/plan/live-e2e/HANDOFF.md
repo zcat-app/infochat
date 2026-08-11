@@ -507,7 +507,7 @@ ONLY the allowlisted data-dir members so a *tampered* bundle's extra members
 (e.g. `etc/...`) are ignored. ~2-line fix (verified: `..` members are already
 blocked by GNU tar + `set -e`; the residual is plain system-path members;
 `tar -x <archive> <member>...` extracts only the named members). Out-of-model, so
-optional. Record: `docs/plan/m1/redteam/M1-567-2026-07-05.md`.
+optional. Record the result in the local audit output.
 
 **OUTSTANDING VALIDATION — M1-567 happy path is UNEXERCISED end-to-end.** M1-567
 is DONE per its acceptance and `mvn verify` is green, BUT the automated tests
@@ -709,7 +709,7 @@ CLEAN. Doc-only (no code), `mvn verify` inert per M1-379.
   native per-user membership signal on the 0.14.5 wire) and the
   never-fires membership dispatch removed — delivery-failure fallback,
   the SimpleX posture. Review APPROVE r1; pre-commit redteam CLEAN
-  (docs/plan/m1/redteam/M1-562-2026-07-04.md; 2 advisory out-of-model
+  (the local audit; 2 advisory out-of-model
   items → follow-up tickets below).
 - **Images rebuilt from main and the stack is LIVE on them** (all 5
   containers healthy, readiness UP, `adapter_connection_status` 1.0 for
@@ -943,7 +943,7 @@ in-branch redteam audit showed strip's unbalanced-fragment drop-through
 eats the marker's closing `]` (`[REFUSAL: TOOL_CALL: foo]` →
 `[REFUSAL: `), so two-sided anchoring leaks; prefix-only also catches
 an unterminated marker. Re-audit CLEAN
-(docs/plan/m1/redteam/M1-561-2026-07-04{,-reaudit}.md). Two advisory
+(the local audit and re-audit). Two advisory
 out-of-model residuals recorded there (mid-prose marker delivery —
 deliberate anchored-not-substring design; Unicode-lookalike prefix
 evasion) — no tickets unless the marker-suppression guarantee gets
@@ -1621,7 +1621,7 @@ was).
   members (+ `set -e` aborts); residual is plain system-path members. → drafted
   **M1-568** (pending, LOW): name only the allowlisted members on the extract
   (~2 lines). Not auto-filed (redteam advisory-only); record at
-  `docs/plan/m1/redteam/M1-567-2026-07-05.md`.
+  the local audit.
 - **Board:** 591 done / 1 pending (M1-568). Not pushed (user's call).
 
 ### 2026-07-04 late night, LATEST +1 (LLM backend latency comparison — user-requested; DeepSeek decision recorded)
@@ -1817,7 +1817,7 @@ was).
   scope keys; canonicalize if the boundary is ever redrawn; (2) the
   shape-gate WARN is per-frame and upstream of every rate cap — revisit
   log-rate bounding on the same redraw. No tickets filed — advisory
-  only; recorded in `docs/plan/m1/redteam/M1-565-2026-07-04.md`). Review
+  only; recorded in the local audit. Review
   APPROVE r1 (0 rework, all 6 checks PASS).
 - **Verify protocol held:** collector+provider paused for both verify
   runs (the stop was denied once by the auto-mode classifier reading the
@@ -2061,7 +2061,7 @@ was).
   green r2 → review r2 APPROVE (must-shrink convergent, files held 4)
   → **redteam re-audit CLEAN** → commit dc6fd425 → squash-merge
   5c998451. Audit records:
-  `docs/plan/m1/redteam/M1-561-2026-07-04{,-reaudit}.md`. Two advisory
+  the local audit and re-audit. Two advisory
   out-of-model residuals (mid-prose marker delivery = deliberate
   anchored-not-substring design; Unicode-lookalike prefix evasion) —
   parked unless marker-suppression becomes a spec commitment. Board:

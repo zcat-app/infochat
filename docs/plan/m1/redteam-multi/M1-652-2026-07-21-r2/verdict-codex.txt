@@ -1,9 +1,0 @@
-RED-TEAM VERDICT: FINDINGS
-
-FINDINGS:
-  - CATEGORY: INJECTION
-    SEVERITY: high
-    PROMISE: "Before any LLM-generated text is delivered to a user, the candidate output is passed through a deterministic outbound regex pass that strips or refuses output containing admin command strings ... The sanitizer applies to the full set of LLM-authored output surfaces: ... periodic group digests, /retry re-rolls ..."
-    GAP: DigestRetryService.java:157-195 reads persisted RenderedSection content and sends the missing sections through DigestDelivery without any sanitizer invocation; DigestDelivery.java:125-137 copies section.text() directly into OutboundMessage and hands it to the adapter. The new digest_section persistence path (DigestSectionRepository.java:96-113) stores the exact rendered bytes, but the diff supplies no proof that those LLM-authored bytes were sanitized before persistence or before either scheduled or replay delivery.
-    REPRO: An attacker places a prompt-injection payload in a feed post that induces per-cluster digest prose containing a privileged command such as /grant-admin or /ban. A partial category-delivery failure leaves that section unrecorded; when an administrator runs /retry --digest, replayMissing delivers the persisted malicious bytes directly to the group. Recipients see an admin-command string that the threat model requires the outbound sanitizer to strip or refuse.
-    SUGGESTED-FIX-CLASS: input-sanitization

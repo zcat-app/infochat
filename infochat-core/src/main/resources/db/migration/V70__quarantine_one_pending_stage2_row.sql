@@ -7,8 +7,7 @@
 -- UPDATE lock are removed — with no check there is no time-of-check to
 -- race). The race class that remains is over-reporting, never
 -- under-reporting: a concurrent duplicate Stage 2 evaluation of the
--- same post (redteam docs/plan/m1/redteam/M1-739-2026-08-01-r2.md,
--- out-of-model duplicate-verdict phantom insert) would otherwise
+-- same post (an out-of-model duplicate-verdict phantom insert) would otherwise
 -- double-list the post in the admin review queue. This partial unique
 -- index bounds that: the duplicate's INSERT fails with a unique
 -- violation instead of committing a second PENDING stage2 row.

@@ -31,8 +31,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code Clock.class}) enters the found-set. The found-set must be a SUBSET of
  * the in-source benign baseline below — every entry individually verified
  * benign by the M1-602 census
- * ({@code docs/plan/m1/scan-window-fixture-census.md}: parser inputs, expected
- * values, exact-key direct-call paths, floor-less scans, explicit {@code now}
+ * (the fixture review: parser inputs, expected values, exact-key direct-call
+ * paths, floor-less scans, explicit {@code now}
  * arguments, or deliberately-below-floor seeds with loud fixture guards). A
  * NEW unpinned absolute-instant fixture is not in the baseline and fails the
  * build; pinning or deleting a baseline file only shrinks the found-set, which
@@ -67,8 +67,8 @@ class ScanWindowFixtureGuardTest {
 
     /**
      * The 53 unpinned collector test sources the M1-602 census verified benign
-     * (docs/plan/m1/scan-window-fixture-census.md §(B)). Add an entry ONLY for
-     * a genuinely benign absolute instant — one that never feeds an unpinned
+     * (§(B)). Add an entry ONLY for a genuinely benign absolute instant — one
+     * that never feeds an unpinned
      * now-derived gate — and record the justification as a census row in the
      * same commit. If the seed gates worker pickup, pin the Clock instead.
      */
@@ -146,8 +146,8 @@ class ScanWindowFixtureGuardTest {
                         + "the instant relative to a pinned clock. Only if the instant is "
                         + "genuinely benign (parser input, expected value, exact-key "
                         + "direct-call path, explicit now argument, guarded below-floor seed) "
-                        + "add the class to BENIGN_BASELINE here AND record why in "
-                        + "docs/plan/m1/scan-window-fixture-census.md. Offenders: " + unexpected);
+                        + "add the class to BENIGN_BASELINE here AND record why. Offenders: "
+                        + unexpected);
     }
 
     private static Set<String> scanUnpinnedAbsoluteInstantSources(Path testRoot)

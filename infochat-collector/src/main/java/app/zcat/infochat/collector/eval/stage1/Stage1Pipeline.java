@@ -46,8 +46,7 @@ import java.util.regex.Matcher;
  *       producing decoded prompt-injection text in {@code post.body}
  *       that the regex never saw. The pre-decode closes that bypass
  *       by ensuring the regex sees the same decoded form OWASP would
- *       eventually emit. See {@code docs/plan/m1/redteam/M1-032-2026-05-16.md}
- *       Finding 1 for the documented attack vector.</li>
+ *       eventually emit. Finding 1 documents the attack vector.</li>
  *   <li><b>Unicode normalize unconditionally</b> — NFKC over the
  *       entire body; bidi-control strip (U+061C, U+200E/U+200F,
  *       U+202A..U+202E, U+2066..U+2069); zero-width strip
@@ -292,9 +291,8 @@ public class Stage1Pipeline {
     public Stage1Result process(UUID postId, String postUid, Instant postFetchedAt, @Nullable String rawBody) {
         String safeBody = rawBody == null ? "" : rawBody;
         // Step 1: HTML entity pre-decode. Closes the
-        // entity-bypass vector documented in
-        // docs/plan/m1/redteam/M1-032-2026-05-16.md Finding 1 by
-        // ensuring the regex set sees the same decoded form that
+        // entity-bypass vector documented by Finding 1 by ensuring the regex
+        // set sees the same decoded form that
         // OWASP would emit downstream.
         String entityDecoded = StringEscapeUtils.unescapeHtml4(safeBody);
         String normalized = unicodeNormalize(entityDecoded);

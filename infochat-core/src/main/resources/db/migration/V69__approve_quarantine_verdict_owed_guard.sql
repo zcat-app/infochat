@@ -40,8 +40,7 @@
 --     re-eval queue still owed its verdict -> refused (QUARANTINED
 --     disjunct). A guard keyed on stage2_done alone silently passes
 --     this class, and approve's stage2_failed clear below would
---     permanently drop it from re-evaluation unjudged (round-1 finding,
---     docs/plan/m1/redteam/M1-741-2026-08-01.md);
+--     permanently drop it from re-evaluation unjudged (round-1 finding);
 --   * fail-open released (release-on-stage2-failure=true): RAW,
 --     stage2_failed=TRUE — the operator's configured posture already
 --     released the content with redactions, and lifting them is the
