@@ -1,12 +1,15 @@
 ---
 id: M1-818
 title: "Surface absent embedding backend on readiness + verify"
-status: pending
+status: done
 created: 2026-08-11
 last_updated: 2026-08-11
 flow: tick
 reproduction: >-
-  to-be-written: HelpCorpusReadinessCheckTest#failedCorpusBuildSurfacesAsInformationalReadinessData
+  HelpCorpusReadinessCheckTest#failedCorpusBuildSurfacesAsInformationalReadinessData
+  (written and run RED at start — .scratch/tick-repro-M1-818-red.log:
+  the readiness surface did not exist, the test failed against the
+  absent HelpCorpusBuildState / HelpCorpusReadinessCheck classes)
   — after a help-corpus build failure the Provider readiness payload must carry
   the per-corpus degraded entry while the check stays UP; today it carries
   nothing (observed live, docs/plan/live-e2e/2026-08-11-m1-784-817-report.md
@@ -103,11 +106,51 @@ spec_refs:
 decision_refs:
   - D49
   - D54
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-11
+    verdict: APPROVE-WITH-FIXES
+    checks:
+      SPEC-TRUTHNESS-CHECK: PASS
+      SECURITY-CHECK: PASS
+      TEST-ADEQUACY-CHECK: PASS
+      MAINTAINABILITY-CHECK: WARN
+      SCOPE-CHECK: PASS
+    diff_stats: "16 files, 425 insertions(+), 42 deletions(-) (r1); fix delta comment-only (2 pointer prefixes)"
+    verdict_file: .scratch/tick-review-M1-818-r1.txt
+    test_log: target/tick-test-M1-818-r1.log (BUILD SUCCESS, full suite, 0 failures)
+    fixes_applied: >-
+      FIX ITEM 1 applied exactly: "(P6)" → "(M1-818 P6)" at
+      prod/scripts/8-verify.sh:117 and "(P2, P8)" → "(M1-818 P2, P8)" at
+      HelpCorpusReadinessCheckTest.java:45 — comment-only, zero executable
+      lines, no docs/spec, docs/design or root *.md touched. Probe outputs:
+      grep -nF '(P6)' prod/scripts/8-verify.sh → no match (exit 1);
+      grep -n 'M1-818 P6' prod/scripts/8-verify.sh → line 117;
+      grep -n 'M1-818 P2' HelpCorpusReadinessCheckTest.java → line 45;
+      ./mvnw -B -pl infochat-provider -am test-compile → BUILD SUCCESS
+      (.scratch/tick-fixes-compile-M1-818.log). Fixed-tree snapshot:
+      .scratch/tick-fixes-M1-818.tree (7fc0e169).
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  checked: 2026-08-11
+  result: pass
+  notes: >-
+    Every file:line citation spot-verified (both builders, the health
+    pair, both payload pins, 8-verify.sh, restore.sh, 4-llm.sh,
+    compose profiles, spec/design/SETUP_GUIDE sites). Census 1 exact:
+    3 constructor sites, no production calls. Census 2 disposed: the
+    grep also returns two same-phrase rows on unrelated surfaces
+    (01-architecture.md:511 last_seen_at, StatusCommandHandler.java:64
+    uptime — not corpus-failure signal sites, no edit), and its three
+    variant-wording rows (AdapterReadinessCheck.java:42-46,
+    SETUP_GUIDE.md:736, TopicCorpusBuilder.java:83-95) were verified
+    by direct read. Two claim drifts noted for execution, neither
+    changing scope: 8-verify.sh already defines RUNTIME_DIR (only
+    CONFIG_FILE is new); CommandIntentIndexIT already carries
+    embeddingBackendFailureAtStartupDoesNotAbort, so the new
+    failure-mode cases complement it with the holder assertions.
 ---
 
 # M1-818: Surface absent embedding backend on readiness + verify

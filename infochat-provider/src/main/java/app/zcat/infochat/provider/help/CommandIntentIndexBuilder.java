@@ -3,6 +3,7 @@ package app.zcat.infochat.provider.help;
 import app.zcat.infochat.llm.EmbeddingProvider;
 import app.zcat.infochat.llm.EmbeddingResult;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.health.HelpCorpusBuildState;
 import app.zcat.infochat.provider.messaging.CommandIntentSynonyms;
 import app.zcat.infochat.provider.messaging.HelpCommandHandler;
 import app.zcat.infochat.provider.messaging.HelpCommandHandler.CommandHelp;
@@ -80,9 +81,11 @@ import java.util.Map;
  * every deterministic command). Aborting Provider startup here would
  * convert a chat-tier convenience outage into a total outage of every
  * security control the Provider carries — exactly the blast-radius
- * escalation the spec forbids. The operator-visible signal is the
+ * escalation the spec forbids. The operator-visible signals are the
  * ERROR log line; helpLookup self-heals on the next restart once the
- * embedding backend is healthy.
+ * embedding backend is healthy. The outcome also rides the
+ * {@code help-corpora} readiness entry — availability,
+ * never backend liveness.
  */
 @ApplicationScoped
 public class CommandIntentIndexBuilder {
@@ -93,17 +96,20 @@ public class CommandIntentIndexBuilder {
     private final DocEmbeddingDao dao;
     private final EmbeddingProvider embeddingProvider;
     private final BundleLoader bundleLoader;
+    private final HelpCorpusBuildState buildState;
     private final String embeddingModel;
 
     @Inject
     public CommandIntentIndexBuilder(DocEmbeddingDao dao,
                                      EmbeddingProvider embeddingProvider,
                                      BundleLoader bundleLoader,
+                                     HelpCorpusBuildState buildState,
                                      @ConfigProperty(name = "infochat.embeddings.model")
                                      String embeddingModel) {
         this.dao = dao;
         this.embeddingProvider = embeddingProvider;
         this.bundleLoader = bundleLoader;
+        this.buildState = buildState;
         this.embeddingModel = embeddingModel;
     }
 
@@ -119,15 +125,16 @@ public class CommandIntentIndexBuilder {
      * on can be pinned at a smaller priority to fire first.
      *
      * <p>Failures from {@link #buildCorpus} are caught and logged at
-     * ERROR; Provider startup continues with an empty or stale corpus.
-     * See the class javadoc's failure-posture section for the
-     * threat-model rationale.
+     * ERROR, and reported as a degraded corpus entry; Provider startup
+     * continues with an empty or stale corpus. See the class javadoc's
+     * failure-posture section for the threat-model rationale.
      */
     void onStart(@Observes @Priority(150) StartupEvent event) {
         log.debug("building {} corpus", CommandIntentIndex.DOC_KIND);
         long t0 = System.nanoTime();
         try {
             buildCorpus(t0);
+            buildState.reportBuilt(CommandIntentIndex.DOC_KIND);
         } catch (RuntimeException e) {
             // Degrade, don't abort — see the class javadoc's failure-posture
             // section. The chat-time HelpLookupTool returns {"command":null}
@@ -141,6 +148,9 @@ public class CommandIntentIndexBuilder {
                             + "no match is found, so users are directed to /help rather than "
                             + "getting confidently-wrong suggestions. Cause: {}",
                     CommandIntentIndex.DOC_KIND, e.toString(), e);
+            // ERROR log first, report second — the log line is the signal
+            // the SETUP_GUIDE recovery row assumes.
+            buildState.reportFailed(CommandIntentIndex.DOC_KIND);
         }
     }
 

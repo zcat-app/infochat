@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.help;
 
 import app.zcat.infochat.llm.EmbeddingProvider;
 import app.zcat.infochat.llm.EmbeddingResult;
+import app.zcat.infochat.provider.health.HelpCorpusBuildState;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.annotation.Priority;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -89,7 +90,9 @@ import java.util.Map;
  * never a service-stop. The M1-666 delivery path (the only runtime
  * consumer of topic rows) returns no topic when the corpus is empty,
  * so the operator-visible effect is the chat assistant falling back
- * to its non-topic answer path; helpLookup self-heals on the next
+ * to its non-topic answer path, and the signals are the ERROR log line
+ * and a degraded {@code help-corpora} readiness entry (build outcome,
+ * never liveness); helpLookup self-heals on the next
  * restart once the embedding backend is healthy. Mirrors
  * {@code CommandIntentIndexBuilder}'s degrade-don't-abort catch
  * verbatim — same threat-model posture, same recovery shape.
@@ -102,15 +105,18 @@ public class TopicCorpusBuilder {
 
     private final DocEmbeddingDao dao;
     private final EmbeddingProvider embeddingProvider;
+    private final HelpCorpusBuildState buildState;
     private final String embeddingModel;
 
     @Inject
     public TopicCorpusBuilder(DocEmbeddingDao dao,
                               EmbeddingProvider embeddingProvider,
+                              HelpCorpusBuildState buildState,
                               @ConfigProperty(name = "infochat.embeddings.model")
                               String embeddingModel) {
         this.dao = dao;
         this.embeddingProvider = embeddingProvider;
+        this.buildState = buildState;
         this.embeddingModel = embeddingModel;
     }
 
@@ -128,15 +134,16 @@ public class TopicCorpusBuilder {
      * independently observable.
      *
      * <p>Failures from {@link #buildCorpus} are caught and logged at
-     * ERROR; Provider startup continues with an empty or stale topic
-     * corpus. See the class javadoc's failure-posture section for the
-     * threat-model rationale.
+     * ERROR, and reported as a degraded corpus entry; Provider startup
+     * continues with an empty or stale topic corpus. See the class
+     * javadoc's failure-posture section for the threat-model rationale.
      */
     void onStart(@Observes @Priority(151) StartupEvent event) {
         log.debug("building {} corpus", HelpTopicCorpus.DOC_KIND);
         long t0 = System.nanoTime();
         try {
             buildCorpus(t0);
+            buildState.reportBuilt(HelpTopicCorpus.DOC_KIND);
         } catch (RuntimeException e) {
             // Degrade, don't abort — same threat-model posture as
             // CommandIntentIndexBuilder.onStart. The M1-666 delivery
@@ -150,6 +157,9 @@ public class TopicCorpusBuilder {
                             + "startup continues; the chat path's friendly-degradation posture "
                             + "skips topic answers when no topic is matched. Cause: {}",
                     HelpTopicCorpus.DOC_KIND, e.toString(), e);
+            // ERROR log first, report second — mirrors the twin builder's
+            // ordering control.
+            buildState.reportFailed(HelpTopicCorpus.DOC_KIND);
         }
     }
 

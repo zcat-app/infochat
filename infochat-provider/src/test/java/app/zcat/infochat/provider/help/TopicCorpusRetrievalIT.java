@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.help;
 
 import app.zcat.infochat.llm.EmbeddingProvider;
 import app.zcat.infochat.llm.EmbeddingResult;
+import app.zcat.infochat.provider.health.HelpCorpusBuildState;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.runtime.StartupEvent;
 import io.quarkus.test.junit.QuarkusTest;
@@ -62,6 +63,7 @@ class TopicCorpusRetrievalIT {
     DocEmbeddingDao dao;
 
     private CountingEmbedder stubEmbedder;
+    private HelpCorpusBuildState buildState;
     private TopicCorpusBuilder builder;
 
     @BeforeEach
@@ -87,7 +89,8 @@ class TopicCorpusRetrievalIT {
         // CommandIntentIndexIT.reindexHnswGraph documents.
         deleteFixtures();
         stubEmbedder = new CountingEmbedder();
-        builder = new TopicCorpusBuilder(dao, stubEmbedder, EMBEDDING_MODEL);
+        buildState = new HelpCorpusBuildState();
+        builder = new TopicCorpusBuilder(dao, stubEmbedder, buildState, EMBEDDING_MODEL);
     }
 
     @AfterEach
@@ -412,6 +415,21 @@ class TopicCorpusRetrievalIT {
         return words;
     }
 
+    /** Failure mode: a throwing embedder fed through onStart degrades the
+     * holder for the topic corpus and never propagates — reaching these assertions IS
+     * the no-propagation proof (an escaped observer failure refuses the service start). */
+    @Test
+    void failedEmbeddingBackendReportsDegradedAndContinuesStartup() {
+        stubEmbedder.throwOnEmbed = true;
+
+        builder.onStart(new StartupEvent());
+
+        assertEquals(Boolean.FALSE, buildState.snapshot().get(HelpTopicCorpus.DOC_KIND),
+                "a failed build must degrade the holder for that corpus — the"
+                        + " readiness entry carries what the ERROR log line carries,"
+                        + " as a boolean, never the exception text");
+    }
+
     private void seedTopicRow(String slug, float[] embedding) throws Exception {
         seedTopicRowWithId(HelpTopicCorpus.DOC_ID_PREFIX + slug, slug, embedding);
     }
@@ -510,10 +528,16 @@ class TopicCorpusRetrievalIT {
 
     static class CountingEmbedder implements EmbeddingProvider {
         int embedCalls;
+        boolean throwOnEmbed;
 
         @Override
         public List<EmbeddingResult> embed(List<String> texts) {
             embedCalls++;
+            if (throwOnEmbed) {
+                // Mirrors CommandIntentIndexIT.CountingEmbedder: the local
+                // embedding backend is down at Provider boot.
+                throw new RuntimeException("embedding backend down");
+            }
             // Return one unit vector per input. pgvector's cosine
             // operator is undefined for a zero vector, so unit is the
             // safe canned shape (mirrors StubEmbeddingProvider and

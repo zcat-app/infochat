@@ -240,10 +240,15 @@ handling): startup continues, the corpus is empty on a cold start or
 stale on a warm restart, and free-text command suggestion and topic
 answers are unavailable while every deterministic surface — the fixed
 help listing, every command, every security control — is unaffected.
-The operator-visible signal is an ERROR log line; the corpora
-self-heal on the next startup with a healthy embedding backend. An
-absent embedding backend is a supported degraded mode, not a
-readiness failure.
+The operator-visible signals are an ERROR log line and an
+informational `help-corpora` readiness entry: one boolean per corpus
+recording the boot-time build outcome — a corpus built or
+content-hash-skipped on a warm restart reads true, a failed build
+reads false. The entry states corpus availability, never backend
+liveness, and the check stays UP regardless — readiness does not fail
+on a corpus build failure. The corpora self-heal on the next startup
+with a healthy embedding backend. An absent embedding backend is a
+supported degraded mode, not a readiness failure.
 
 **Bootstrap admin drift.** Per enabled adapter: if the configured
 bootstrap admin contact id for that adapter does not match an
@@ -389,10 +394,12 @@ service emits an explicit confirmation log line on startup
   degrade per `security.md` failure handling).
 - **Endpoint exposure** — the health endpoints are unauthenticated
   in v1, and the readiness payload names each enabled adapter with
-  its up/down state and reports DB connectivity: a topology
-  disclosure (which messaging transports the deployment runs,
-  whether its database is reachable) to any caller that can reach
-  the port. The shipped default binds the health port to loopback;
+  its up/down state, reports DB connectivity, and carries a
+  `help-corpora` entry with each help corpus's boot-time build
+  outcome: a topology disclosure (which messaging transports the
+  deployment runs, whether its database is reachable, whether each
+  help corpus built at startup) to any caller that can reach the
+  port. The shipped default binds the health port to loopback;
   probing from another host is an explicit operator action — widen
   the bind and firewall the port to the prober's address. The
   per-adapter names stay in the payload because they are the

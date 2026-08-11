@@ -3,6 +3,7 @@ package app.zcat.infochat.provider.help;
 import app.zcat.infochat.llm.EmbeddingProvider;
 import app.zcat.infochat.llm.EmbeddingResult;
 import app.zcat.infochat.provider.bundle.BundleLoader;
+import app.zcat.infochat.provider.health.HelpCorpusBuildState;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import io.quarkus.runtime.StartupEvent;
 import io.quarkus.test.junit.QuarkusTest;
@@ -65,6 +66,7 @@ class CommandIntentIndexIT {
     BundleLoader bundleLoader;
 
     private CountingEmbedder stubEmbedder;
+    private HelpCorpusBuildState buildState;
     private CommandIntentIndexBuilder builder;
 
     @BeforeEach
@@ -72,7 +74,8 @@ class CommandIntentIndexIT {
         deleteAllIntentRows();
         deleteForeignKindRows();
         stubEmbedder = new CountingEmbedder();
-        builder = new CommandIntentIndexBuilder(dao, stubEmbedder, bundleLoader, EMBEDDING_MODEL);
+        buildState = new HelpCorpusBuildState();
+        builder = new CommandIntentIndexBuilder(dao, stubEmbedder, bundleLoader, buildState, EMBEDDING_MODEL);
     }
 
     @AfterEach
@@ -162,7 +165,7 @@ class CommandIntentIndexIT {
         // stored row's embedding_model field now mismatches, so every
         // row is a delta regardless of content_hash.
         CommandIntentIndexBuilder rotatedBuilder =
-                new CommandIntentIndexBuilder(dao, stubEmbedder, bundleLoader, "nomic-embed-text-v2");
+                new CommandIntentIndexBuilder(dao, stubEmbedder, bundleLoader, buildState, "nomic-embed-text-v2");
         rotatedBuilder.onStart(new StartupEvent());
 
         assertTrue(stubEmbedder.embedCalls > callsAfterFirst,
@@ -229,6 +232,42 @@ class CommandIntentIndexIT {
                         + "start) or at its prior state (warm restart) — NOT abort "
                         + "Provider startup. helpLookup degrades to no-match at chat "
                         + "time per docs/spec/security.md §Failure handling.");
+    }
+
+    /** Failure mode: a throwing embedder fed through onStart degrades the
+     * holder for that corpus and never propagates — reaching these assertions IS the
+     * no-propagation proof (an escaped observer failure refuses the service start). */
+    @Test
+    void failedEmbeddingBackendReportsDegradedAndContinuesStartup() {
+        stubEmbedder.throwOnEmbed = true;
+
+        builder.onStart(new StartupEvent());
+
+        assertEquals(Boolean.FALSE, buildState.snapshot().get(CommandIntentIndex.DOC_KIND),
+                "a failed build must degrade the holder for that corpus — the"
+                        + " readiness entry carries what the ERROR log line carries,"
+                        + " as a boolean, never the exception text");
+    }
+
+    /** Warm-restart semantics: the entry states corpus availability, never
+     * backend liveness — a hash-matching corpus performs zero embedding calls, so a
+     * dead backend and a built entry legitimately coexist. */
+    @Test
+    void unchangedCorpusWarmRestartReportsBuiltDespiteDeadBackend() {
+        builder.onStart(new StartupEvent());
+        int callsAfterFirst = stubEmbedder.embedCalls;
+
+        stubEmbedder.throwOnEmbed = true;
+        builder.onStart(new StartupEvent());
+
+        assertEquals(callsAfterFirst, stubEmbedder.embedCalls,
+                "a warm restart performs ZERO embedding calls — the content-hash"
+                        + " skip short-circuits before the backend is touched");
+        assertEquals(Boolean.TRUE, buildState.snapshot().get(CommandIntentIndex.DOC_KIND),
+                "the content-hash-skipped build reports built even though the"
+                        + " injected embedder now throws when called — a mutation"
+                        + " reporting backend liveness instead of build outcome"
+                        + " fails here");
     }
 
     // ---------- M1-660: filter-inside-ANN read-path hardening ----------

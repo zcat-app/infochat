@@ -3,6 +3,8 @@ package app.zcat.infochat.provider.health;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import app.zcat.infochat.provider.help.CommandIntentIndex;
+import app.zcat.infochat.provider.help.HelpTopicCorpus;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.json.Json;
 import jakarta.json.JsonObject;
@@ -84,7 +86,7 @@ class ProviderReadinessEndpointIT {
     }
 
     @Test
-    void readinessAggregateCarriesExactlyTheMessagingAdaptersAndDatasourceChecks() throws Exception {
+    void readinessAggregateCarriesExactlyTheMessagingAdaptersDatasourceAndHelpCorporaChecks() throws Exception {
         // The unauthenticated /q/health/ready response aggregates EVERY
         // registered readiness check, not just the messaging-adapters one
         // whose data map ReadinessPayloadShapeTest pins. Pinning the exact
@@ -93,7 +95,9 @@ class ProviderReadinessEndpointIT {
         // quarkus-jdbc-postgresql contributes the Agroal datasource check)
         // grows an unauthenticated, network-reachable payload and must be
         // a deliberate, reviewed change (docs/design/07-deployment.md
-        // §7.12.1).
+        // §7.12.1). The help-corpora check is that deliberate widening — the
+        // M1-818 boot-time corpus-build-outcome surface, authorized by the
+        // ticket's acceptance item 5 per engineering-rules §8.
         int port = ConfigProvider.getConfig()
                 .getValue("quarkus.http.test-port", Integer.class);
         try (HttpClient client = HttpClient.newHttpClient()) {
@@ -110,11 +114,51 @@ class ProviderReadinessEndpointIT {
                     .map(check -> check.getString("name"))
                     .collect(Collectors.toSet());
             assertEquals(
-                    Set.of("messaging-adapters", "Database connections health check"),
+                    Set.of("messaging-adapters", "Database connections health check", "help-corpora"),
                     checkNames,
-                    "the readiness aggregate must carry exactly the adapter check"
-                            + " and the datasource check — any new check widens the"
-                            + " unauthenticated payload; body: " + response.body());
+                    "the readiness aggregate must carry exactly the adapter check,"
+                            + " the datasource check, and the help-corpora check —"
+                            + " any other check widens the unauthenticated payload;"
+                            + " body: " + response.body());
+        }
+    }
+
+    /** HTTP-boundary proof: after a %test boot the ready payload carries both corpora
+     * built (StubEmbeddingProvider, priorities 150/151); pinning at the endpoint also
+     * guards the boot-ordering rule (design 01-architecture.md §1.4.3). */
+    @Test
+    void readyPayloadCarriesHelpCorpusBuildOutcomesAfterBoot() throws Exception {
+        int port = ConfigProvider.getConfig()
+                .getValue("quarkus.http.test-port", Integer.class);
+        try (HttpClient client = HttpClient.newHttpClient()) {
+            HttpResponse<String> response = client.send(
+                    HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/q/health/ready"))
+                            .timeout(Duration.ofSeconds(10))
+                            .GET()
+                            .build(),
+                    HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(200, response.statusCode(),
+                    "readiness must be UP after a boot whose corpus builds"
+                            + " succeeded; body: " + response.body());
+            JsonObject root = Json.createReader(new StringReader(response.body())).readObject();
+            JsonObject helpCorpora = root.getJsonArray("checks").stream()
+                    .map(JsonValue::asJsonObject)
+                    .filter(check -> "help-corpora".equals(check.getString("name")))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError(
+                            "the help-corpora check must be part of the ready"
+                                    + " payload; body: " + response.body()));
+            assertEquals("UP", helpCorpora.getString("status"),
+                    "the help-corpora check stays UP — the corpus-build outcome"
+                            + " is informational; body: " + response.body());
+            JsonObject data = helpCorpora.getJsonObject("data");
+            assertTrue(data.getBoolean(CommandIntentIndex.DOC_KIND),
+                    "the %test boot built the command-intent corpus via"
+                            + " StubEmbeddingProvider; body: " + response.body());
+            assertTrue(data.getBoolean(HelpTopicCorpus.DOC_KIND),
+                    "the %test boot built the topic corpus via"
+                            + " StubEmbeddingProvider; body: " + response.body());
         }
     }
 

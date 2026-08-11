@@ -42,8 +42,9 @@ import org.eclipse.microprofile.health.Readiness;
  * scraping. The Micrometer per-adapter metrics lift named in the spec's
  * readiness rule ("Per-adapter connection state is exposed separately via
  * metrics") and the degraded-LLM-probe leg remain deferred to the
- * observability backlog; until then these data entries are the status
- * surface.</p>
+ * observability backlog; the boot-time leg of that signal now rides the
+ * separate {@link HelpCorpusReadinessCheck}. Until the periodic
+ * leg lands, these data entries are the adapter status surface.</p>
  */
 @Readiness
 @ApplicationScoped

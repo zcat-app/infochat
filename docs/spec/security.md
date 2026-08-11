@@ -61,8 +61,10 @@ notes. The spec-level commitments below cover all of them.
    to mutating authorization state, sources, subscriptions, or audit rows.
 6. **Health/management HTTP surface → network.** The health endpoints are
    unauthenticated in v1 and disclose operational topology: which messaging
-   adapters are enabled and up, and whether the DB is reachable. The
-   shipped default binds them to loopback; exposing them beyond the host
+   adapters are enabled and up, whether the DB is reachable, and each help
+   corpus's boot-time build outcome (booleans from a fixed vocabulary —
+   never exception text). The shipped default binds them to loopback;
+   exposing them beyond the host
    is an explicit operator action (widen the bind, firewall the port to
    the prober), never a default (`deployment.md` §Health and
    observability).
