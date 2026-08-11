@@ -232,6 +232,19 @@ startup-ordering note above). Then:
   one adapter down" without parsing readiness alone. Then
   starts the command router.
 
+**Embedding-backed help corpora.** At Provider startup the
+command-intent and help-topic embedding corpora are built (or
+content-hash-skipped when unchanged). An embedding-backend failure
+during that build degrades, never aborts (`security.md` §Failure
+handling): startup continues, the corpus is empty on a cold start or
+stale on a warm restart, and free-text command suggestion and topic
+answers are unavailable while every deterministic surface — the fixed
+help listing, every command, every security control — is unaffected.
+The operator-visible signal is an ERROR log line; the corpora
+self-heal on the next startup with a healthy embedding backend. An
+absent embedding backend is a supported degraded mode, not a
+readiness failure.
+
 **Bootstrap admin drift.** Per enabled adapter: if the configured
 bootstrap admin contact id for that adapter does not match an
 existing `is_admin = true` row at `(adapter, contact_id)`,
