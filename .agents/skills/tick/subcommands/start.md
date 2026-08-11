@@ -88,7 +88,10 @@ main red).
   comments only for business logic, a non-obvious decision, or a trap —
   brief, current-truth, javadoc included; detail and history are cited
   by one stable pointer (spec-section anchor, decision ID, ticket ID,
-  or `docs/plan/...` path — engineering-rules §11), never retold.
+  or `docs/plan/...` path — engineering-rules §11), never retold. A
+  ticket ID is a frozen-premise pointer: in code comments only for
+  business weight or to resolve a ticket-internal reference — pure
+  provenance stays in the commit message.
   Collect suggested renames (methods, variables, parameters, fields,
   classes) — they land in the commit body under `Renames:`. Before the
   verify, self-check the comment cap: `git diff $(git merge-base main HEAD)

@@ -22,6 +22,15 @@ the tick start/review subcommands, and CLAUDE.md.
 - Clean-code-done-wrong is explicitly called out as the failure mode to
   avoid: no overnaming (stories as identifiers), no mechanical stripping
   of comments that guard a real trap.
+- Pointer-form ranking (2026-08-11, mid-M1-818, user direction): a
+  spec/design anchor points at maintained current truth, a decision ID
+  at a still-binding choice, but a TICKET ID at a frozen premise —
+  later work can falsify the ticket's assumptions without notice, and
+  the anchor then silently misleads. Ticket IDs in code comments only
+  for business weight (an §8 authorization) or to resolve a dangling
+  ticket-internal reference (a bare pitfall number is unresolvable);
+  pure provenance belongs in the commit message (the M1-NNN: prefix
+  makes git-blame → ticket immutable). Folded into §11 the same day.
 
 Rationale the user gave: rationale-in-comments is fragile — any later
 edit can falsify the comment's premise, and a stale comment is a

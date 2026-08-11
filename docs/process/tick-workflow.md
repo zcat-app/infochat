@@ -57,7 +57,10 @@ lens, and findings must survive falsification before they are reported.
    code, stated briefly and as current truth — history and detail move
    to the ticket, the analysis, or the decisions log and are cited by
    one stable pointer (spec-section anchor, decision ID, ticket ID, or
-   `docs/plan/...` path — engineering-rules §11). New rationale is
+   `docs/plan/...` path — engineering-rules §11; a ticket ID is the
+   weakest form, a frozen premise — in code comments only for business
+   weight or to resolve a ticket-internal reference, never as pure
+   provenance). New rationale is
    capped at 3 lines per call site.
 
 ## Surfaces
@@ -257,7 +260,10 @@ flip against a new degrade rule, no shared file — reached main red.)
   decision, or a trap — brief, current-truth, javadoc included, with
   detail and history cited by one stable pointer (spec-section anchor,
   decision ID, ticket ID, or `docs/plan/...` path — engineering-rules
-  §11), never retold; and records suggested renames of methods,
+  §11; a ticket ID is a frozen-premise pointer, so in code comments it
+  carries business weight or resolves a ticket-internal reference —
+  pure provenance stays in the commit message), never retold; and
+  records suggested renames of methods,
   variables, parameters, fields, and classes in the commit body under a
   `Renames:` trailer. Renames of identifiers NOT already in the diff are
   out of scope (suggest, don't move).

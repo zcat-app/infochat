@@ -119,7 +119,11 @@ downgrade to WARN or PASS.
   decision, or a trap, briefly and as current truth; javadoc states the
   contract and cites detail with one stable pointer (spec-section
   anchor, decision ID, ticket ID, or `docs/plan/...` path) rather than
-  retelling history (engineering-rules §11). Surviving old ones must not
+  retelling history (engineering-rules §11). A ticket ID is the weakest
+  pointer form — a frozen premise later work can falsify without notice
+  — so in code comments it must carry business weight (an §8
+  authorization) or resolve an otherwise-dangling ticket-internal
+  reference; a bare provenance tag is a FAIL. Surviving old ones must not
   state the obvious or restate the code. Removed comments are fine.
 - Structure: the diff must not contort the code to avoid touching a file
   (the old budget-gaming smell) and must not introduce obscure inner
