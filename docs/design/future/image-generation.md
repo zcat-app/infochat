@@ -152,6 +152,18 @@ is deleted anyway, so a stored prompt would have nothing to correlate against.
    and the privacy claim is false in practice.
 6. Pixels on tmpfs, deleted on completion, swept by age.
 
+**The release gate.** Mocked graph-shape tests alone do not approve image
+delivery: a stub accepts any graph shape and a unit fixture never meets the
+shipped config values, so backend-schema and config-mismatch defects escape a
+green suite by construction. Before an `/image`-enabled release, the
+configured pipeline is proven against the deployment's own backend by
+`prod/live-probe-image-e2e.sh` (baked graph accepted under the configured
+pixel ceiling, `-r` converter graphs accepted at exact dimensions, the
+crop-less shape refused, canary hygiene) and by the shipped-ceiling wiring
+test `ImageCommandHandlerTest.defaultOutputAtTheShippedCeilingDeliversEndToEnd`
+(default output through strip → spool → delivery at the ceiling read from the
+shipped properties).
+
 Credit and rate-limit state is content-free by construction — counters keyed by
 contact id, no payload.
 

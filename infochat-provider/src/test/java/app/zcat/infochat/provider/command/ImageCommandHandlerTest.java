@@ -40,6 +40,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.lang.reflect.Field;
 import java.net.InetSocketAddress;
@@ -58,6 +59,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -395,6 +397,30 @@ class ImageCommandHandlerTest {
                     "no spool file is created before the strip refusal");
         } catch (IOException e) {
             throw new AssertionError("spool dir unreadable", e);
+        }
+    }
+
+    @Test
+    void defaultOutputAtTheShippedCeilingDeliversEndToEnd() throws Exception {
+        // REPRODUCTION (M1-816, analysis P14): the measured default output
+        // 1792x1344 must deliver end-to-end at the SHIPPED ceiling — the
+        // pre-M1-811 2_000_000 value refuses the pipeline's own default.
+        handler.maxOutputPixels = readMaxOutputPixelsFromMainProperties();
+        client.generateResult = PngFixtures.minimalPng(1792, 1344);
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm("alice"), "/image a canary cat");
+
+        assertNull(reply, "the delivered terminal self-delivers on the placeholder");
+        assertEquals(1, adapter.attachmentSends.get(),
+                "the stripped output is spooled and delivered through the real OutboundDelivery");
+        List<RedactionHook.AuditRow> rows = auditWriter.rowsFor(AuditAction.IMAGE_GENERATE);
+        assertEquals(1, rows.size(), "exactly one IMAGE_GENERATE row per delivered output");
+        assertEquals("{\"outcome\":\"delivered\"}", rows.get(0).detailsJson());
+        assertTrue(notifier.completedText().contains("a canary cat"),
+                "the sanitized echo completes the placeholder; got: " + notifier.completedText());
+        try (var entries = Files.list(tempDir)) {
+            assertEquals(0, entries.count(),
+                    "the spool file is reclaimed once delivery completes");
         }
     }
 
@@ -769,6 +795,34 @@ class ImageCommandHandlerTest {
                 return List.of(adapter);
             }
         };
+    }
+
+    /** Reads the SHIPPED ceiling from the main application.properties via
+     * the filesystem (PngMetadataStripTest precedent — test-resources
+     * shadow the classpath name and carry no max-output-pixels key). */
+    private static long readMaxOutputPixelsFromMainProperties() throws IOException {
+        Path current = Path.of(System.getProperty("user.dir"));
+        for (int i = 0; i < 10; i++) {
+            Path candidate = current.resolve(
+                    "infochat-provider/src/main/resources/application.properties");
+            if (Files.isRegularFile(candidate)) {
+                Properties props = new Properties();
+                try (InputStream stream = Files.newInputStream(candidate)) {
+                    props.load(new InputStreamReader(stream, StandardCharsets.UTF_8));
+                }
+                String value = props.getProperty("infochat.image.max-output-pixels");
+                if (value == null) {
+                    throw new AssertionError(
+                            "main application.properties carries no max-output-pixels key");
+                }
+                return Long.parseLong(value);
+            }
+            current = current.getParent();
+            if (current == null) {
+                break;
+            }
+        }
+        throw new AssertionError("main application.properties not found walking up from user.dir");
     }
 
     /** A minimal valid PNG (1×1) that survives {@code PngMetadataStrip}. */

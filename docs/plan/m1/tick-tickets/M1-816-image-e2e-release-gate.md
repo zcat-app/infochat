@@ -1,12 +1,12 @@
 ---
 id: M1-816
 title: "Image e2e release gate: configured pipeline proof"
-status: pending
+status: done
 created: 2026-08-10
-last_updated: 2026-08-10
+last_updated: 2026-08-11
 flow: tick
 reproduction: >-
-  probe (to-be-written): prod/live-probe-image-e2e.sh — submits the
+  probe: prod/live-probe-image-e2e.sh — submits the
   CONFIGURED runtime template's default graph and -r graphs (600x600,
   1600x900) to the deployment's own ComfyUI and asserts backend acceptance,
   exact output dimensions, and that the default output passes the
@@ -16,10 +16,11 @@ reproduction: >-
   2,000,000 ceiling and every -r graph was rejected by the backend
   ("ImageScale 9: Required input is missing: crop"), both discovered in
   live test AFTER round-3 APPROVE, because the stub-server tests validate
-  graph shape only. In-suite companion, to-be-written:
+  graph shape only. In-suite companion:
   ImageCommandHandlerTest.defaultOutputAtTheShippedCeilingDeliversEndToEnd —
-  RED on pre-M1-811 main (the shipped ceiling refuses the measured default
-  dimensions through strip → spool → delivery).
+  run RED with the pre-M1-811 2_000_000 ceiling (the strip refuses the
+  measured default dimensions, zero attachments delivered) and GREEN at the
+  shipped ceiling read from application.properties.
 analysis_ref: docs/plan/m1/tick-analysis/livetest-image-defects.md
 blocked_by: [M1-811, M1-812]
 files_scope:
@@ -65,11 +66,30 @@ spec_refs:
   - docs/spec/verification.md §Test layers
 decision_refs:
   - D75
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-11
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "5 files changed, 337 insertions(+), 14 deletions(-)"
+    findings: "0 rework items, 0 critical/high; 4 candidate findings falsified and dropped"
+    verdict_file: .scratch/tick-review-M1-816-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  checked: 2026-08-11
+  result: >-
+    Citations spot-checked against the post-M1-815 tree: substance holds
+    (the 2_000_000L stub line drifted :133 to :134 and the 1x1 validPng
+    now sits at :775 — lines added by M1-811..815). PngFixtures.minimalPng
+    and PngMetadataStripTest's filesystem property reader exist as named;
+    shipped ceiling is 5000000. prod/runtime/ is gitignored and
+    wizard-authored on the deployment host, so the probe's ceiling read
+    resolves runtime-override then shipped properties (Quarkus source
+    order) and prints the source. blocked_by tests traced: M1-811's strip
+    test + overCeilingOutputFailsLoudlyAndContentFree and M1-812's crop
+    pin all survive an additive-only diff. No blocking question.
 ---
 
 # M1-816: Image e2e release gate: configured pipeline proof
