@@ -128,7 +128,11 @@ Every adapter implements:
 - **Send attachment (optional).** Provider hands the adapter a
   `(scope, file path, MIME type, display filename)` tuple; the adapter
   transmits the file as a native file/image message on transports that
-  support one (decision D74). The payload is a **file path**, not
+  support one (decision D74). On SimpleX the recipient's client
+  receives the file as an XFTP file invitation and decides itself when
+  to download — a delivered attachment appearing as an item the
+  recipient must accept is the transport's normal behaviour, not a
+  delivery defect. The payload is a **file path**, not
   bytes: signal-cli attaches by path and SimpleX file transfer
   completes asynchronously past `send()`'s return, so the file MUST
   remain readable by the adapter for the whole transmit, and the
