@@ -466,4 +466,5 @@ single-host rolling-restart caveat are in the [Setup Guide](SETUP_GUIDE.md) and
 
 - **[User Guide](USER_GUIDE.md)** — what your users can do with the bot.
 - **[Setup Guide](SETUP_GUIDE.md)** — installation and configuration.
+- **Host-level reconfiguration** — which tool changes the hardware profile, which re-routes the LLM (`prod/switch-llm.sh`), and which pulls models, is the *Which tool for which change* section of the [Setup Guide](SETUP_GUIDE.md).
 - **[Technical map (docs/SPEC.md)](docs/SPEC.md)** — architecture and design.

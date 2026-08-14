@@ -1,9 +1,9 @@
 ---
 id: M1-828
 title: "Document post-setup tool boundaries (profile vs switch-llm vs wizard)"
-status: pending
+status: done
 created: 2026-08-13
-last_updated: 2026-08-13
+last_updated: 2026-08-15
 flow: tick
 reproduction: >-
   Probe (wizard usage text and guides are not mvn-covered):
@@ -59,11 +59,26 @@ decision_refs:
   - D27
   - D54
   - D56
-reviews: []
-overrides: []
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: APPROVE
+    checks:
+      SPEC-TRUTHNESS-CHECK: PASS
+      SECURITY-CHECK: PASS
+      TEST-ADEQUACY-CHECK: NOT-APPLICABLE (docs/echo/header-comment-only diff; pitfalls gated by the ticket's grep probes + DocumentedConfigKeyParityTest, green in the round log)
+      MAINTAINABILITY-CHECK: PASS
+      SCOPE-CHECK: PASS
+    diff_stats: "6 files, 30 insertions(+), 3 deletions(-) (r1)"
+    verdict_file: .scratch/tick-review-M1-828-r1.txt
+    test_log: .scratch/tick-test-M1-828-r1.log (BUILD SUCCESS, full suite)
+overrides:
+  - "2026-08-15 MERGE-VERIFY-SKIP: driver-directed. main advanced (M1-830 b4e9ccfa) after r1's green verify; merge.md's staleness recovery requires a full re-verify of the rebased branch, and the driver explicitly chose to skip it (user decision, 2026-08-15). Rebase conflict set was exactly STATUS-TICK.md (deterministic regen); no non-docs/plan diff change. Merge proceeded on the r1 attestation + this recorded deviation."
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  - "2026-08-14 start: spot-checked every file:line citation; substance verified. One line-number imprecision: vector(768) is V11__post_embedding.sql:65, not :124 (:124 is the 768-dim nomic seed row) — same fact, same file; the boundary section cites the mechanism, not the line, so no ticket edit needed."
+  - "2026-08-14 start: five concurrent agent sessions observed (M1-823 in-progress, M1-820 verify running in /tmp/infochat-M1-820); the M1-823 session's docs/plan edits (its ticket + STATUS-TICK.md) appeared mirrored in this worktree. No overlap with this ticket's files: M1-823 edits prod/scripts/4-llm.sh preflight (~:254-269) + a Java test; this ticket edits 4-llm.sh usage() (:76-82) only — disjoint regions, separate worktrees, clean merge expected."
 ---
 
 # M1-828: Document post-setup tool boundaries (profile vs switch-llm vs wizard)

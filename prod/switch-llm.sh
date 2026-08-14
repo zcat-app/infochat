@@ -19,6 +19,8 @@
 # It NEVER touches infochat.embeddings.*: embeddings are locked to the 768-dim
 # nomic embedder (allow-model-change=false); changing them corrupts pgvector
 # retrieval and is rejected at Collector startup.
+# It also NEVER pulls or installs models — model downloads are prod/scripts/
+# 4-llm.sh's job; this tool only rewrites the routing config.
 #
 # Secret handling mirrors 4-llm.sh verbatim (dotenv_escape / set_secret /
 # INFOCHAT_LLM_API_KEY reuse) rather than inventing new conventions: the API key

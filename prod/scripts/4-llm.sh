@@ -78,6 +78,7 @@ usage() {
   echo "  Provision the chosen LLM backend (${VALID_BACKENDS// /|}, default"
   echo "  ${DEFAULT_BACKEND}) and write infochat.llm.* + infochat.embeddings.* into"
   echo "  the runtime application.properties."
+  echo "  Post-setup LLM re-routes (no re-provisioning) use prod/switch-llm.sh."
   echo "  --defaults  take ${DEFAULT_BACKEND} for the active profile, no prompts."
 }
 

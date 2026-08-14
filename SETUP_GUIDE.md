@@ -714,6 +714,25 @@ hand-pinning `infochat.llm.translator.base-url` as described above — the
 switcher itself cannot leave one task behind, and it deletes the pin on every
 run that proceeds, so re-apply it after any switch.
 
+### Which tool for which change
+
+After setup, the change you want decides the tool — they are **not**
+interchangeable:
+
+| You want to… | Run this | What it does, and what it does **not** do |
+|---|---|---|
+| Change the hardware profile (`laptop`/`vps`/`pi`/`remote-llm`) | `./prod/scripts/1-profile.sh` | Writes `quarkus.profile` only. Does **not** re-route the LLM: every routing key (`infochat.llm.default.base-url`, the per-task model lines, `infochat.embeddings.base-url`, …) lives in the runtime `application.properties`, which Quarkus reads at config ordinal **260** — above the image-baked `%profile` defaults (250). Only keys the runtime file does **not** carry still follow the baked profile defaults. |
+| Re-route the generative LLM to a different backend after setup | `./prod/switch-llm.sh` | Rewrites the shared `infochat.llm.default.base-url` / api-key and the per-task model lines (D56). Does **not** pull or install models — that is `4-llm.sh`'s job. |
+| Pull or install local models, or (re-)provision a backend | `./prod/scripts/4-llm.sh` | The provisioning verb; re-running it re-provisions rather than re-routes. Also the only path to a custom embeddings model (see below). |
+| Enable, switch, or disable `/image` | `./prod/scripts/4b-image.sh` | Provisions the image backend; writes the `infochat.image.*` keys. |
+
+**Embeddings are locked for the deployment's life.** They are frozen on a
+local 768-dim nomic-class embedder (`infochat.embeddings.allow-model-change=false`;
+the Collector refuses a dimension/model mismatch at startup), so no tool —
+profile, switch-llm, or 4b-image — can change them. The one guarded exception:
+`4-llm.sh` can install a custom embeddings model, which must produce
+768-dimensional vectors.
+
 ---
 
 ## Troubleshooting

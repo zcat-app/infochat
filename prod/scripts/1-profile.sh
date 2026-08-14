@@ -15,6 +15,8 @@ usage() {
   echo "  Prompt for the hardware profile (${VALID_PROFILES// /|}, default"
   echo "  ${DEFAULT_PROFILE}) and write quarkus.profile into the runtime"
   echo "  application.properties."
+  echo "  Changing the profile does NOT re-route the LLM — post-setup LLM"
+  echo "  re-routes use prod/switch-llm.sh."
   echo "  --defaults  take ${DEFAULT_PROFILE} without prompting (non-interactive)."
 }
 
