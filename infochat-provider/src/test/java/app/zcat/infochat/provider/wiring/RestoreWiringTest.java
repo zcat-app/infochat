@@ -5,11 +5,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.zip.CRC32;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
@@ -30,7 +32,9 @@ import org.junit.jupiter.api.io.TempDir;
  * (M1-580, the two cases driving past the gates to the DB step) PLUS the single-owner
  * Provider-start consent gate (M1-582, the two cases driving past the DB step to
  * bring-up) PLUS the M1-584 data-dir boundary refusals (a system-prefix or colon
- * value refused in the DATA_DIR validation loop, before any mount is built).</b>
+ * value refused in the DATA_DIR validation loop, before any mount is built) PLUS the
+ * M1-819 post-pg_restore Flyway-history gate (restored flyway_schema_history checksums vs
+ * the checkout's migrations; drift fails loud BEFORE model rehydration/image build).</b>
  * The gate cases fail before the identity extraction, so they never mutate the host or
  * exercise Docker for real — the fake {@code docker} only has to satisfy
  * {@code command -v docker} and the one {@code docker volume ls} probe the fresh-volume gate
@@ -63,9 +67,11 @@ class RestoreWiringTest {
     // sort: the ollama re-pull loop dedups model names with `sort -u`; the
     // new-format-ollama case (M1-603) is the first to reach that loop under
     // this restricted PATH.
+    // awk: the M1-819 Flyway-history gate recomputes each checkout migration's
+    // checksum with a dependency-free awk CRC32 (flyway_checksum).
     private static final String[] REAL_TOOLS =
             {"bash", "dirname", "mktemp", "tar", "gzip", "grep", "tail", "rm",
-             "mkdir", "cp", "chmod", "tee", "sed", "cat", "sort"};
+             "mkdir", "cp", "chmod", "tee", "sed", "cat", "sort", "awk"};
     private static final String[] TOOL_DIRS = {"/usr/bin", "/bin", "/usr/local/bin"};
 
     // The gates need only `command -v docker` to resolve and
@@ -82,10 +88,9 @@ class RestoreWiringTest {
     // set (mount SHAPE; write-confinement stays host-validated per M1-569). No other
     // docker verb is reached before a gate fails.
     //
-    // The `compose` branch (M1-580) parametrizes the two DB probes the error-gate cases
-    // reach: the pg_restore exec replays FAKE_PG_RESTORE_STDERR_FILE to stderr and exits
-    // FAKE_PG_RESTORE_EXIT (default 0), and the `\dt` table probe (`-tAqc`) reports a
-    // table only when FAKE_DB_TABLES=present, so the backstop is steerable per case.
+    // The `compose` branch (M1-580) parametrizes the DB probes: pg_restore
+    // (FAKE_PG_RESTORE_EXIT/_STDERR_FILE), the `\dt` backstop (FAKE_DB_TABLES), and the M1-819
+    // flyway-history probe (`flyway_schema_history` in argv; FAKE_FLYWAY_HISTORY_FILE/_EXIT).
     // Every invocation's argv is appended to FAKE_DOCKER_ARGV_LOG so tests can assert
     // which docker steps ran (e.g. that no image build/bring-up followed a failed gate).
     // Each recognized in-container exec (role-reconstruct psql, pg_restore, table probe)
@@ -127,6 +132,10 @@ class RestoreWiringTest {
             + "    *ON_ERROR_STOP=1*)\n"
             + "      echo \"FAKE-DOCKER: exec role-reconstruct psql (infochat_admin, ON_ERROR_STOP)\"\n"
             + "      exit 0 ;;\n"
+            + "    *flyway_schema_history*)\n"
+            + "      echo \"FAKE-DOCKER: exec flyway-history probe psql (M1-819 gate)\"\n"
+            + "      [[ -n \"${FAKE_FLYWAY_HISTORY_FILE:-}\" ]] && printf '%s\\n' \"$(<\"$FAKE_FLYWAY_HISTORY_FILE\")\"\n"
+            + "      exit \"${FAKE_FLYWAY_HISTORY_EXIT:-0}\" ;;\n"
             + "    *-tAqc*)\n"
             + "      echo \"FAKE-DOCKER: exec table-presence probe psql\"\n"
             + "      [[ \"${FAKE_DB_TABLES:-absent}\" == present ]] && echo \"public|flyway_schema_history|table|infochat\"\n"
@@ -598,6 +607,139 @@ class RestoreWiringTest {
                 "the consented new-format restore must complete end to end:\n" + r.output);
     }
 
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void restoredHistoryChecksumMismatchFailsLoudAfterPgRestore(@TempDir Path tmp) throws Exception {
+        // M1-819 reproduction: comment-only edits to applied migrations (live 2026-08-11) left
+        // the dump's history checksums diverging from the checkout; the gate must fail loud right
+        // after pg_restore — version, BOTH recovery options, partial note — before model/build/start.
+        Path historyFixture = tmp.resolve("flyway-history.txt");
+        long drifted = flywayChecksum(migrationFile("V50__banned_admin_actor_checks.sql")) + 1;
+        Files.writeString(historyFixture,
+                "50|V50__banned_admin_actor_checks.sql|" + drifted + "|t\n");
+        Path bundle = buildSandboxedBundle(tmp);
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false, Map.of(
+                "FAKE_DB_TABLES", "present",
+                "FAKE_FLYWAY_HISTORY_FILE", historyFixture.toString()));
+
+        assertNotEquals(0, r.exitCode,
+                "a checksum drift between dump history and checkout must fail the restore:\n"
+                        + r.output);
+        assertTrue(r.output.contains("V50"),
+                "the failure must name the drifted migration version:\n" + r.output);
+        assertTrue(r.output.contains("source host's revision"),
+                "the failure must offer recovery option (a) — a matching-revision checkout:\n"
+                        + r.output);
+        assertTrue(r.output.contains("UPDATE flyway_schema_history SET checksum"),
+                "the failure must offer recovery option (b) — the printed flyway-repair UPDATE:\n"
+                        + r.output);
+        assertTrue(r.output.contains("PARTIAL RESTORE"),
+                "the gate fails post-mutation, so the M1-581 partial-state note must print:\n"
+                        + r.output);
+        String argvLog = Files.readString(tmp.resolve("docker-argv.log"));
+        int pgRestoreIdx = argvLog.indexOf("pg_restore -h 127.0.0.1");
+        assertTrue(pgRestoreIdx >= 0, "pg_restore must have run before the gate:\n" + argvLog);
+        String afterPgRestore = argvLog.substring(pgRestoreIdx);
+        assertFalse(afterPgRestore.contains("build") || afterPgRestore.contains("up -d"),
+                "neither model rehydration, image build, nor any app start may follow the "
+                        + "failed gate:\n" + afterPgRestore);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void failedHistoryRowsAndNonSqlRowsAreIgnored(@TempDir Path tmp) throws Exception {
+        // M1-819 P3: only rows that can bite are validated. The success=false row names a script
+        // ABSENT from the checkout — skipped by the success filter BEFORE any file lookup (else it
+        // would trip the newer-bundle message); the non-SQL row has no V*.sql file to match.
+        Path historyFixture = tmp.resolve("flyway-history.txt");
+        Files.writeString(historyFixture,
+                "999|V999__failed_apply_that_never_landed.sql|12345|f\n"
+                + "|<< Flyway Baseline >>||t\n"
+                + "50|V50__banned_admin_actor_checks.sql|"
+                + flywayChecksum(migrationFile("V50__banned_admin_actor_checks.sql")) + "|t\n");
+        Path bundle = buildBringUpBundle(tmp);
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false, Map.of(
+                "FAKE_DB_TABLES", "present",
+                "FAKE_FLYWAY_HISTORY_FILE", historyFixture.toString()), "--source-stopped");
+
+        assertEquals(0, r.exitCode,
+                "failed and non-SQL history rows must not trip the gate:\n" + r.output);
+        assertTrue(r.output.contains("Flyway history matches this checkout"),
+                "the gate must confirm the validated history:\n" + r.output);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void appliedVersionAbsentFromCheckoutGetsNewerBundleMessage(@TempDir Path tmp) throws Exception {
+        // M1-819 P3: an applied version with NO matching checkout file is a different defect
+        // class than checksum drift — a newer bundle into an older checkout — with its own message.
+        Path historyFixture = tmp.resolve("flyway-history.txt");
+        Files.writeString(historyFixture, "999|V999__not_shipped_here.sql|42|t\n");
+        Path bundle = buildSandboxedBundle(tmp);
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false, Map.of(
+                "FAKE_DB_TABLES", "present",
+                "FAKE_FLYWAY_HISTORY_FILE", historyFixture.toString()));
+
+        assertNotEquals(0, r.exitCode,
+                "an applied migration absent from the checkout must fail the restore:\n"
+                        + r.output);
+        assertTrue(r.output.contains("V999") && r.output.contains("NEWER"),
+                "the failure must name the version and the newer-bundle diagnosis:\n" + r.output);
+        assertFalse(r.output.contains("checksum drift"),
+                "the newer-bundle case must NOT use the checksum-drift wording:\n" + r.output);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void historyProbeFailureAbortsWithPartialStateNote(@TempDir Path tmp) throws Exception {
+        // M1-819 P10: the probe runs under set -euo pipefail with the ERR trap armed — a gate
+        // that cannot READ the history must not silently pass it: the failed SELECT aborts through
+        // the normal failure path, and the single-print flag yields exactly one partial-state note.
+        Path bundle = buildSandboxedBundle(tmp);
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false, Map.of(
+                "FAKE_DB_TABLES", "present",
+                "FAKE_FLYWAY_HISTORY_EXIT", "1"));
+
+        assertNotEquals(0, r.exitCode,
+                "a failed history probe must abort the restore:\n" + r.output);
+        int first = r.output.indexOf("PARTIAL RESTORE");
+        assertTrue(first >= 0,
+                "the post-mutation abort must print the partial-state note:\n" + r.output);
+        assertEquals(-1, r.output.indexOf("PARTIAL RESTORE", first + 1),
+                "the partial-state note must print exactly once:\n" + r.output);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void matchingHistoryPassesGateAndRestoreContinues(@TempDir Path tmp) throws Exception {
+        // M1-819 healthy path: a history whose checksums match the checkout's
+        // recomputed values passes the gate, and the run proceeds to model/build
+        // steps — the argv log proves the gate did not stop the restore.
+        Path historyFixture = tmp.resolve("flyway-history.txt");
+        Files.writeString(historyFixture,
+                "50|V50__banned_admin_actor_checks.sql|"
+                + flywayChecksum(migrationFile("V50__banned_admin_actor_checks.sql")) + "|t\n"
+                + "55|V55__auto_joined_group.sql|"
+                + flywayChecksum(migrationFile("V55__auto_joined_group.sql")) + "|t\n");
+        Path bundle = buildBringUpBundle(tmp);
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false, Map.of(
+                "FAKE_DB_TABLES", "present",
+                "FAKE_FLYWAY_HISTORY_FILE", historyFixture.toString()), "--source-stopped");
+
+        assertEquals(0, r.exitCode,
+                "a matching history must pass the gate and complete the restore:\n" + r.output);
+        assertTrue(r.output.contains("Flyway history matches this checkout (2 applied SQL"),
+                "the confirmation must name the checked count:\n" + r.output);
+        String argvLog = Files.readString(tmp.resolve("docker-argv.log"));
+        assertTrue(argvLog.contains("build"),
+                "the model/build steps must be reached after the gate passes:\n" + argvLog);
+    }
+
     // --- helpers ----------------------------------------------------------------
 
     /** Drive the real restore.sh under a controlled PATH; return exit code + combined output. */
@@ -863,6 +1005,33 @@ class RestoreWiringTest {
             }
         }
         throw new IllegalStateException("required host tool not found on standard paths: " + name);
+    }
+
+    /** One checkout migration file under infochat-core's migration dir. */
+    private Path migrationFile(String name) {
+        return repoRoot().resolve("infochat-core/src/main/resources/db/migration").resolve(name);
+    }
+
+    /** A migration's checksum per PINNED flyway-core (12.0.0 ChecksumCalculator): CRC32 over each
+     *  line's UTF-8 bytes concatenated WITHOUT terminators, leading UTF-8 BOM stripped, signed int —
+     *  ground truth for the fake history rows; RestoreFlywayChecksumIT pins it against a real DB. */
+    private static long flywayChecksum(Path file) throws IOException {
+        byte[] bytes = Files.readAllBytes(file);
+        int start = 0;
+        if (bytes.length >= 3 && (bytes[0] & 0xFF) == 0xEF && (bytes[1] & 0xFF) == 0xBB
+                && (bytes[2] & 0xFF) == 0xBF) {
+            start = 3;
+        }
+        CRC32 crc = new CRC32();
+        for (int i = start; i < bytes.length; i++) {
+            int b = bytes[i] & 0xFF;
+            if (b == '\n' || b == '\r') {
+                continue;
+            }
+            crc.update(b);
+        }
+        long value = crc.getValue();
+        return value >= (1L << 31) ? value - (1L << 32) : value;
     }
 
     /** Walk up from the module CWD to the repo root (the dir with docker-compose.yml). */

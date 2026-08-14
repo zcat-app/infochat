@@ -607,6 +607,111 @@ fi
 echo "  DB restored (schema present)."
 PLACED+=("database contents (pg_restore complete)")
 
+# ── Flyway history gate (M1-819): dump-vs-checkout migration drift ──────
+# The dump's history checksums were computed against the source host's migration
+# files; any difference here (even comments) crash-loops the Collector at boot.
+
+# Flyway's checksum recomputed without Flyway — CRC32 over each line's bytes
+# concatenated WITHOUT line terminators, a leading UTF-8 BOM dropped, printed
+# as a signed int; pinned to the pinned flyway-core by RestoreFlywayChecksumIT.
+flyway_checksum() {
+  LC_ALL=C awk '
+    function xor(a, b,   r, p) {
+      r = 0; p = 1
+      while (a > 0 || b > 0) {
+        if (a % 2 != b % 2) r += p
+        a = int(a / 2); b = int(b / 2); p *= 2
+      }
+      return r
+    }
+    BEGIN {
+      for (i = 0; i < 256; i++) {
+        c = i
+        for (j = 0; j < 8; j++) c = (c % 2 == 1) ? xor(int(c / 2), 3988292384) : int(c / 2)
+        table[i] = c
+      }
+      for (i = 1; i < 256; i++) ord[sprintf("%c", i)] = i
+      crc = 4294967295
+    }
+    NR == 1 && index($0, "\357\273\277") == 1 { $0 = substr($0, 4) }
+    {
+      line = $0
+      gsub(/\r/, "", line)
+      n = length(line)
+      for (i = 1; i <= n; i++) {
+        crc = xor(table[xor(crc % 256, ord[substr(line, i, 1)])], int(crc / 256))
+      }
+    }
+    END {
+      crc = xor(crc, 4294967295)
+      if (crc >= 2147483648) crc -= 4294967296
+      printf "%d\n", crc
+    }
+  ' "$1"
+}
+
+echo "+ validate restored Flyway history against this checkout's migrations"
+MIGRATION_DIR="$REPO_ROOT/infochat-core/src/main/resources/db/migration"
+# No `|| true` on this probe: a gate that cannot read the history cannot pass it —
+# a failed SELECT aborts through the normal ERR/EXIT path. The redirect target keeps
+# the failing exit OUTSIDE a command substitution (its inherited ERR trap double-prints).
+HISTORY_FILE="$STAGING/flyway-history.psv"
+docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" exec -T postgres \
+  sh -c 'PGPASSWORD="$INFOCHAT_DB_PASSWORD" psql -h 127.0.0.1 -U infochat -d infochat -tAqc "SELECT version, script, checksum, success FROM flyway_schema_history ORDER BY installed_rank"' > "$HISTORY_FILE"
+drifted_msgs=()
+drifted_fixes=()
+absent_msgs=()
+checked=0
+# Only rows that can bite: failed rows are re-applied by Flyway, baseline and
+# non-SQL rows have no file to match; an applied version ABSENT from this
+# checkout is a newer-bundle defect, distinct from checksum drift.
+while IFS='|' read -r version script checksum success; do
+  [[ "$success" == t ]] || continue
+  [[ "$script" =~ ^V.*\.sql$ ]] || continue
+  checked=$((checked + 1))
+  if [[ ! -f "$MIGRATION_DIR/$script" ]]; then
+    absent_msgs+=("V$version ($script)")
+    continue
+  fi
+  actual="$(flyway_checksum "$MIGRATION_DIR/$script")"
+  if [[ "$actual" != "$checksum" ]]; then
+    drifted_msgs+=("V$version ($script): dump history=$checksum checkout=$actual")
+    drifted_fixes+=("UPDATE flyway_schema_history SET checksum = $actual WHERE version = '$version';")
+  fi
+done < "$HISTORY_FILE"
+if [[ "${#absent_msgs[@]}" -gt 0 ]]; then
+  echo "FAIL: the restored Flyway history lists applied migrations this checkout does" >&2
+  echo "      not ship — the bundle comes from a NEWER revision than this checkout:" >&2
+  for row in "${absent_msgs[@]}"; do
+    echo "        $row" >&2
+  done
+  echo "      A newer bundle cannot be restored onto an older checkout; re-run from a" >&2
+  echo "      checkout at the source host's revision. Aborted before model rehydration" >&2
+  echo "      and image build." >&2
+  exit 1
+fi
+if [[ "${#drifted_msgs[@]}" -gt 0 ]]; then
+  echo "FAIL: Flyway checksum drift between the restored history and this checkout —" >&2
+  echo "      the dump applied migration files whose content differs from this tree:" >&2
+  for row in "${drifted_msgs[@]}"; do
+    echo "        $row" >&2
+  done
+  echo "      Recovery options:" >&2
+  echo "        (a) Re-run the restore from a checkout at the source host's revision —" >&2
+  echo "            dump and migrations then match by construction (preferred)." >&2
+  echo "        (b) Deliberate repair: if you CONFIRM this checkout's migration content" >&2
+  echo "            is what the restored DB should run against, apply the flyway-repair" >&2
+  echo "            equivalent to the restored DB, then re-run bring-up:" >&2
+  for fix in "${drifted_fixes[@]}"; do
+    echo "              $fix" >&2
+  done
+  echo "            A mismatch can also mean a genuine semantic change — option (b)" >&2
+  echo "            blesses this checkout's content; use it only when the edit is known" >&2
+  echo "            to be cosmetic." >&2
+  exit 1
+fi
+echo "  Flyway history matches this checkout ($checked applied SQL migration(s) checked)."
+
 # ── re-provision models from the RESTORED backend config ────────────────
 # Idempotent, and WITHOUT re-running the interactive 4-llm.sh (which would
 # re-prompt and rewrite the config restore just laid down). The backend is read

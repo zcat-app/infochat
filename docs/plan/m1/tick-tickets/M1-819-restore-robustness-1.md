@@ -1,9 +1,9 @@
 ---
 id: M1-819
 title: restore.sh pre-validates restored Flyway history vs checkout
-status: pending
+status: done
 created: 2026-08-13
-last_updated: 2026-08-13
+last_updated: 2026-08-15
 flow: tick
 reproduction: >-
   RestoreWiringTest#restoredHistoryChecksumMismatchFailsLoudAfterPgRestore
@@ -83,11 +83,34 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "7 files changed, 456 insertions(+), 24 deletions(-)"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-819-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  checked_on: 2026-08-14
+  citations_hold: true
+  repro_probe_reruns_clean: true
+  root_cause_assumption_verified: >-
+    git show a60315c3 touched four applied migrations — V50, V55, V69, V70
+    (the live session observed the V50/V55 crash; V69/V70 were edited too).
+  p1_normalization_verified_from_pinned_jar: >-
+    flyway-core 12.0.0 ChecksumCalculator bytecode: CRC32 over each line's
+    UTF-8 bytes concatenated WITHOUT line terminators (BufferedReader.readLine
+    strips \r, \n, \r\n), leading U+FEFF BOM stripped, value cast to signed
+    int. RestoreFlywayChecksumIT remains the behavioral oracle.
+  preserves_traced: >-
+    Existing drive-past-DB cases see an empty fake history (no
+    FAKE_FLYWAY_HISTORY set) -> zero applied rows -> gate passes quiet;
+    behavior unchanged. Host awk is mawk 1.3.4 -> CRC32 in pure POSIX awk.
+  open_questions: []
 escalation_reason:
 ---
 

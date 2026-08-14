@@ -1282,6 +1282,24 @@ prints this exact recipe on any post-mutation failure. `prod/setup.sh
 still refuses, and it falls through into the interactive setup wizard. Fix the
 underlying cause, then re-run `restore.sh` with the bundle.
 
+**Flyway-history validation against the checkout.** After the schema-presence
+backstop and BEFORE model rehydration, `restore.sh` validates the dump's
+applied-migration history against this checkout: it reads
+`flyway_schema_history` (version, script, checksum of every successful SQL
+migration) from the restored database and recomputes each checksum from the
+checkout's migration files with a dependency-free reimplementation of Flyway's
+checksum (CRC32 over the file content, line terminators excluded). Any drift —
+the dump applied migration files whose content this checkout no longer carries,
+even comment-only edits — fails the restore loud, naming every drifted version
+and printing both recovery options: re-run from a checkout at the source host's
+revision, or deliberately apply the printed `flyway_schema_history` checksum
+UPDATE (flyway-repair equivalent) as an operator act. An applied version with
+no matching checkout file is the distinct newer-bundle-into-older-checkout
+case and says so. Without this gate the first drift detector is the Collector's
+Flyway validate at boot — a crash loop minutes and a model download later. The
+gate never repairs anything itself: a mismatch can mean a genuine semantic
+change, which auto-repair would silently bless.
+
 **Same-absolute-path constraint (v1).** The identity tar is stored relative to
 `/`, so the clone reconstructs each data-dir at its original absolute path.
 Relocating to a *different* absolute path (rewriting the `data-dir` config) is a
