@@ -30,8 +30,9 @@ MIN_FREE_DISK_GB=15
 usage() {
   echo "Usage: 0-doctor.sh [--defaults] [-h|--help]"
   echo "  Preflight: Linux host, Docker daemon, Docker Compose v2, free TCP ports"
-  echo "  ($REQUIRED_PORTS), and at least ${MIN_FREE_DISK_GB} GB free disk. Reports"
-  echo "  every unmet check at once, each with its remedy."
+  echo "  ($REQUIRED_PORTS), at least ${MIN_FREE_DISK_GB} GB free disk, and linger"
+  echo "  enabled on rootless Docker hosts. Reports every unmet check at once,"
+  echo "  each with its remedy."
   echo "  --defaults  accepted no-op (doctor has no prompts; lets the orchestrator"
   echo "              pass --defaults uniformly to every step)."
 }
@@ -82,6 +83,30 @@ if ! docker compose version >/dev/null 2>&1; then
     -> remedy: install the Compose v2 plugin
        (e.g. sudo apt-get install docker-compose-plugin); the legacy v1
        'docker-compose' (hyphen) form is insufficient."
+fi
+
+echo "+ check: rootless Docker survives logout (linger)"
+# Rootless dockerd rides the user session: logout stops user@<uid>.service and
+# SIGKILLs daemon and containers unless linger is enabled. Rootful daemons are
+# system services and survive logout, so the check is rootless-only (§7.7.2).
+if [[ "$docker_reachable" -eq 1 ]] \
+  && docker info --format '{{.SecurityOptions}}' 2>/dev/null | grep -q rootless; then
+  if ! have loginctl; then
+    record_failure "rootless Docker detected, but the linger check could not be verified:
+    'loginctl' is not on PATH, so linger state was NOT confirmed (and is NOT
+    assumed enabled).
+    -> remedy: install systemd (which provides loginctl, e.g. sudo apt-get
+       install systemd) and re-run on a systemd host."
+  else
+    linger_value="$(loginctl show-user "${USER:-$(id -un)}" -p Linger 2>/dev/null || true)"
+    if [[ "$linger_value" != "Linger=yes" ]]; then
+      record_failure "rootless Docker with linger disabled: on logout the user session
+    (user@<uid>.service) stops and SIGKILLs rootless dockerd, taking every
+    container down with it (loginctl reports: ${linger_value:-no answer}).
+    -> remedy: loginctl enable-linger \$USER (usually needs no sudo; otherwise
+       sudo loginctl enable-linger \$USER), then log out and back in."
+    fi
+  fi
 fi
 
 echo "+ check: required tools present ($REQUIRED_TOOLS)"

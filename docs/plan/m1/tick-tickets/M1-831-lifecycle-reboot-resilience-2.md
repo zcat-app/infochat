@@ -1,9 +1,9 @@
 ---
 id: M1-831
 title: "Doctor fails rootless Docker hosts without linger"
-status: pending
+status: done
 created: 2026-08-13
-last_updated: 2026-08-13
+last_updated: 2026-08-15
 flow: tick
 reproduction: >-
   Probe (RED on main): `grep -n 'loginctl' prod/scripts/0-doctor.sh` prints
@@ -13,8 +13,8 @@ reproduction: >-
   rootless dockerd SIGKILLed → every container down; setup-hurdles.md item
   H, 2026-08-12, both digest windows missed and unrecoverable). Test:
   DoctorWiringTest.rootlessDockerWithoutLingerFailsWithEnableLingerRemedy
-  (to-be-written — `start` adds the method and runs it RED on main before
-  any fix code, workflow §0).
+  (added at start 2026-08-15 and run RED on main before any fix code,
+  workflow §0).
 analysis_ref: docs/plan/m1/tick-analysis/lifecycle-reboot-resilience.md
 blocked_by: []
 files_scope:
@@ -38,7 +38,7 @@ out_of_scope:
   - docs/spec/** — no spec promise changes (spec-first analysis: compose
     and wizard internals live in design notes).
 acceptance:
-  - "REPRODUCTION, now passing: DoctorWiringTest.rootlessDockerWithoutLingerFailsWithEnableLingerRemedy (to-be-written at start) — controlled-PATH drive (existing harness, DoctorWiringTest.java:161-194) with a fake docker reporting rootless and a fake loginctl reporting Linger=no: asserts non-zero exit, a failure entry naming linger AND the `loginctl enable-linger` remedy, and the absence of the all-passed line (FAILURE-MODE: a doctor that reports nothing on this host class fails the test — that silence is exactly the 2026-08-12 incident's enabler)."
+  - "REPRODUCTION, now passing: DoctorWiringTest.rootlessDockerWithoutLingerFailsWithEnableLingerRemedy (added at start 2026-08-15) — controlled-PATH drive (existing harness, DoctorWiringTest.java:161-194) with a fake docker reporting rootless and a fake loginctl reporting Linger=no: asserts non-zero exit, a failure entry naming linger AND the `loginctl enable-linger` remedy, and the absence of the all-passed line (FAILURE-MODE: a doctor that reports nothing on this host class fails the test — that silence is exactly the 2026-08-12 incident's enabler)."
   - "FAILURE-MODE, never-silently-pass (analysis P3; M1-439's load-bearing rule, in-repo precedent 0-doctor.sh:96-104): DoctorWiringTest.rootlessDockerWithoutLoginctlReportsCheckUnverifiable — rootless daemon, loginctl absent from the controlled PATH: asserts a failure entry reporting the linger check UNVERIFIABLE (not a pass, not a skip) with its own remedy (install loginctl / a systemd host), and non-zero exit."
   - "No false positive on rootful hosts (analysis P3 — the VPS scenario of docs/spec/deployment.md §Deployment scenarios runs system dockerd, which survives logout): DoctorWiringTest.rootfulDockerSkipsTheLingerCheck — non-rootless daemon, Linger=no: asserts the all-passed line and exit 0 with NO linger entry."
   - "Aggregate contract preserved (M1-439): DoctorWiringTest.lingerFailureAggregatesWithOtherFailuresInOneReport — rootless + Linger=no + port 5432 busy: ONE run reports BOTH failures, each with its remedy. The three pre-existing DoctorWiringTest drives stay green UNMODIFIED (§8: no pre-existing assertion moves; the new fakes are additive only — analysis P8)."
@@ -65,11 +65,28 @@ test_plan:
 spec_refs:
   - docs/design/07-deployment.md §7.7.2 First-run setup wizard
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "5 files changed, 144 insertions(+), 16 deletions(-)"
+    findings: "0 rework items; 0 critical/high; 5 candidate findings falsified-and-dropped (SIGPIPE silent-skip on the rootless probe, USER-unset/fake-loginctl arg independence, rootful SecurityOptions substring false-positive, FAKE_DOCKER SecurityOptions branch vs the pre-existing disk check, §8 fake-edit authorization); 1 RECOMMENDED-NEW-TICKET recorded under Review observations (stale port list in the step-0 design row, TOUCHED-BY-THIS-DIFF: no)"
+    verdict_file: .scratch/tick-review-M1-831-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  checked: 2026-08-15
+  notes: >-
+    Citations spot-checked (0-doctor.sh:35-36/:96-104/:59-136,
+    DoctorWiringTest.java:161-194, 07-deployment.md:792); reproduction probe
+    re-run RED. A1 pinned on the live rootless daemon: SecurityOptions carries
+    name=rootless (DockerRootDir is $HOME/.local/share/docker, NOT /run/user,
+    so SecurityOptions is the probe shape). A2 pinned: loginctl show-user
+    <user> -p Linger prints Linger=yes; the user-less form prints NOTHING
+    with rc=0, so the check must pass the username explicitly. Analysis P3/P7/P8
+    all landed; blocked_by empty, no sibling tests on this seam.
 ---
 
 # M1-831: Doctor fails rootless Docker hosts without linger
@@ -184,3 +201,23 @@ only, so no §8 authorization is needed.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-831-lifecycle-reboot-resilience-2.md
 ```
+
+## Review observations
+
+Recorded from the round-1 review (2026-08-15, APPROVE); no decision
+requested — filing a ticket is the user's call.
+
+- RECOMMENDED-NEW-TICKET: the step-0 table row this diff edited
+  (docs/design/07-deployment.md:792) claims doctor checks "TCP ports 5432 /
+  8080 / 8081 (and 11434 for Ollama) free", but prod/scripts/0-doctor.sh:15
+  sets REQUIRED_PORTS="5432" only, with a deliberate rationale comment
+  (0-doctor.sh:11-15: the app services publish no host ports). WHAT: the
+  design row overstates doctor's port coverage. WRONG: an operator reading
+  the row believes a host with 8080 occupied fails preflight; running
+  0-doctor.sh on such a host prints "doctor: all preflight checks passed."
+  and exits 0. EXPECTED: either the row names only the port doctor actually
+  probes (5432 — the script's comment argues the others are never
+  host-published, so the row is the stale side) or the script actually
+  probes the listed ports; which side moves is a small design decision.
+  TOUCHED-BY-THIS-DIFF: no — the ports enumeration is byte-identical before
+  and after this diff; only the linger clause was added to the row.

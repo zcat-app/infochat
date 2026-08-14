@@ -49,6 +49,14 @@ class DoctorWiringTest {
             + "case \"$1\" in\n"
             + "  info)\n"
             + "    [[ \"${FAKE_DAEMON:-up}\" == down ]] && exit 1\n"
+            + "    if [[ \"$2\" == \"--format\" && \"$3\" == \"{{.SecurityOptions}}\" ]]; then\n"
+            + "      if [[ \"${FAKE_ROOTLESS:-no}\" == yes ]]; then\n"
+            + "        echo \"[name=seccomp,profile=builtin name=rootless name=cgroupns]\"\n"
+            + "      else\n"
+            + "        echo \"[name=seccomp,profile=builtin name=cgroupns]\"\n"
+            + "      fi\n"
+            + "      exit 0\n"
+            + "    fi\n"
             + "    [[ \"$2\" == \"--format\" ]] && echo \"/var/lib/docker\"\n"
             + "    exit 0 ;;\n"
             + "  compose)\n"
@@ -66,6 +74,10 @@ class DoctorWiringTest {
             "#!/usr/bin/env bash\n"
             + "echo \"Filesystem 1024-blocks Used Available Capacity Mounted on\"\n"
             + "echo \"fakefs 999999999 0 ${FAKE_DISK_KB:-100000000} 1% /\"\n";
+
+    private static final String FAKE_LOGINCTL =
+            "#!/usr/bin/env bash\n"
+            + "echo \"Linger=${FAKE_LINGER:-yes}\"\n";
 
     private static final String FAKE_NOOP = "#!/usr/bin/env bash\nexit 0\n";
 
@@ -144,6 +156,81 @@ class DoctorWiringTest {
                 "an unverifiable port check must not be reported as all-passed:\n" + r.output);
     }
 
+    // --- rootless linger: logout kills a rootless daemon whose user session does
+    //     not linger (the 2026-08-12 total outage; M1-831)
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void rootlessDockerWithoutLingerFailsWithEnableLingerRemedy(@TempDir Path tmp) throws Exception {
+        Scenario rootlessNoLinger = new Scenario();
+        rootlessNoLinger.rootless = true;
+        rootlessNoLinger.linger = "no";
+
+        RunResult r = runDoctor(tmp, rootlessNoLinger);
+
+        assertNotEquals(0, r.exitCode, "a rootless host with linger disabled must fail the doctor:\n" + r.output);
+        assertTrue(r.output.contains("linger"),
+                "the failure entry must name linger:\n" + r.output);
+        assertTrue(r.output.contains("loginctl enable-linger"),
+                "the failure entry must carry the enable-linger remedy:\n" + r.output);
+        assertTrue(r.output.contains("logout") && r.output.contains("rootless"),
+                "the failure must name the mechanism — logout kills rootless dockerd:\n" + r.output);
+        assertFalse(r.output.contains("doctor: all preflight checks passed."),
+                "a linger-disabled rootless host must not be reported all-passed:\n" + r.output);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void rootlessDockerWithoutLoginctlReportsCheckUnverifiable(@TempDir Path tmp) throws Exception {
+        Scenario rootlessNoLoginctl = new Scenario();
+        rootlessNoLoginctl.rootless = true;
+        rootlessNoLoginctl.loginctlPresent = false;
+
+        RunResult r = runDoctor(tmp, rootlessNoLoginctl);
+
+        assertNotEquals(0, r.exitCode, "an unverifiable linger check must not yield a clean pass:\n" + r.output);
+        assertTrue(r.output.contains("linger") && r.output.contains("could not be verified"),
+                "with loginctl absent the linger check must be reported UNVERIFIABLE, never silently passed:\n" + r.output);
+        assertTrue(r.output.contains("systemd"),
+                "the unverifiable entry must carry its own remedy (install loginctl / a systemd host):\n" + r.output);
+        assertFalse(r.output.contains("doctor: all preflight checks passed."),
+                "an unverifiable linger check must not be reported as all-passed:\n" + r.output);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void rootfulDockerSkipsTheLingerCheck(@TempDir Path tmp) throws Exception {
+        Scenario rootfulNoLinger = new Scenario();
+        rootfulNoLinger.linger = "no"; // rootful (the default): system dockerd survives logout
+
+        RunResult r = runDoctor(tmp, rootfulNoLinger);
+
+        assertEquals(0, r.exitCode, "a rootful host must not be failed by the linger check:\n" + r.output);
+        assertTrue(r.output.contains("doctor: all preflight checks passed."),
+                "a rootful host must pass with the success line:\n" + r.output);
+        assertFalse(r.output.contains("FAIL:"),
+                "a rootful host must carry no linger failure entry:\n" + r.output);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void lingerFailureAggregatesWithOtherFailuresInOneReport(@TempDir Path tmp) throws Exception {
+        Scenario broken = new Scenario();
+        broken.rootless = true;
+        broken.linger = "no";
+        broken.portBusy = true;
+
+        RunResult r = runDoctor(tmp, broken);
+
+        assertNotEquals(0, r.exitCode, "any failed check must make the doctor exit non-zero:\n" + r.output);
+        assertTrue(r.output.contains("loginctl enable-linger"),
+                "the linger failure must be reported:\n" + r.output);
+        assertTrue(r.output.contains("TCP port 5432 is already in use"),
+                "the busy-port failure must be reported alongside, not replaced by, the linger failure:\n" + r.output);
+        assertFalse(r.output.contains("doctor: all preflight checks passed."),
+                "a run with failures must not print the success line:\n" + r.output);
+    }
+
     // --- helpers ----------------------------------------------------------------
 
     /** Knobs steering one doctor run; defaults describe an all-good host. */
@@ -154,6 +241,9 @@ class DoctorWiringTest {
         boolean portBusy = false;
         boolean dfPresent = true;
         long diskKb = 100_000_000L; // ~95 GB, comfortably above the 15 GB floor
+        boolean rootless = false;
+        boolean loginctlPresent = true;
+        String linger = "yes";
     }
 
     private record RunResult(int exitCode, String output) {}
@@ -175,6 +265,9 @@ class DoctorWiringTest {
         if (s.dfPresent) {
             writeFake(bin.resolve("df"), FAKE_DF);
         }
+        if (s.loginctlPresent) {
+            writeFake(bin.resolve("loginctl"), FAKE_LOGINCTL);
+        }
 
         ProcessBuilder pb = new ProcessBuilder(
                 bin.resolve("bash").toString(), repoRoot.resolve("prod/scripts/0-doctor.sh").toString());
@@ -185,6 +278,8 @@ class DoctorWiringTest {
         env.put("FAKE_COMPOSE", s.composeV2 ? "v2" : "absent");
         env.put("FAKE_PORT_BUSY", s.portBusy ? "yes" : "no");
         env.put("FAKE_DISK_KB", Long.toString(s.diskKb));
+        env.put("FAKE_ROOTLESS", s.rootless ? "yes" : "no");
+        env.put("FAKE_LINGER", s.linger);
 
         Process p = pb.start();
         p.getOutputStream().close();
