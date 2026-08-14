@@ -435,6 +435,48 @@ class LlamacppWiringTest {
 
     @Test
     @EnabledOnOs(OS.LINUX)
+    void preflightFailsHardOnMalformedUrl(@TempDir Path tmp) throws Exception {
+        // M1-823 reproduction: a malformed URL (curl exit 3) never went on the
+        // wire, so neither the 6/7/28 abort nor the 22 warn applies — it must
+        // hard-fail with the malformed/path cause class before any download.
+        WizardRun run = runWizardCapture(
+                tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS, Map.of("FAKE_CURL_EXIT", "3"));
+
+        assertNotEquals(0, run.rc,
+                "a malformed URL must abort the wizard, not continue to download:\n" + run.output);
+        assertFalse(Files.exists(tmp.resolve("docker-argv.log")),
+                "no docker invocation may be recorded when the preflight aborts (the download must never start)");
+        assertTrue(Files.exists(tmp.resolve("curl-argv.log")),
+                "the preflight must actually run curl (the failing probe)");
+        assertTrue(run.output.contains("malformed"),
+                "the abort must name the malformed-URL cause class:\n" + run.output);
+        assertTrue(run.output.contains("file path"),
+                "the abort must name the looks-like-a-path cause class:\n" + run.output);
+        assertTrue(run.output.contains("press Enter for the pinned default"),
+                "the abort must give today's remedy (full https:// URL or the pinned default):\n" + run.output);
+        assertFalse(run.output.contains("staging"),
+                "the abort must not advertise M1-824's not-yet-existing staging flow:\n" + run.output);
+        assertFalse(run.output.contains("reachability confirmed"),
+                "a probe that reached nothing must not claim reachability:\n" + run.output);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void hostlessSchemeValidUrlAbortsLikeALocalPath(@TempDir Path tmp) throws Exception {
+        // P1 failure-mode drive: the classification keys on the exit class
+        // (rc == 3), never on string-matching the operator's input — a
+        // scheme-valid but hostless URL must abort identically to a local path.
+        WizardRun run = runWizardCapture(
+                tmp, "llamacpp\nhttps://\n\n\n\n" + ACCEPT_TIMING_DEFAULTS, Map.of("FAKE_CURL_EXIT", "3"));
+
+        assertNotEquals(0, run.rc,
+                "a hostless scheme-valid URL must abort like a malformed one:\n" + run.output);
+        assertFalse(Files.exists(tmp.resolve("docker-argv.log")),
+                "no docker invocation may be recorded when the preflight aborts:\n" + run.output);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
     void switchingAwayFromRemoteToLlamacppClearsStaleRemoteApiKeys(@TempDir Path tmp) throws Exception {
         // Seed the runtime as a prior `remote` run left it: seven generative api-key
         // lines + an embeddings api-key in application.properties, and the

@@ -1,9 +1,9 @@
 ---
 id: M1-823
 title: "Hard-fail malformed GGUF URLs in the download preflight"
-status: pending
+status: done
 created: 2026-08-13
-last_updated: 2026-08-13
+last_updated: 2026-08-15
 flow: tick
 reproduction: >-
   Probe (RED on main): `sed -n '254,269p' prod/scripts/4-llm.sh` — the
@@ -14,8 +14,8 @@ reproduction: >-
   nothing. Live-observed 2026-08-11 (.scratch/setup-hurdles.md items 4-5): a
   pasted full local path produced WARN "reachability confirmed", then the
   download died "URL rejected: No host part in the URL". Test:
-  LlamacppWiringTest.preflightFailsHardOnMalformedUrl (to-be-written —
-  `start` writes it and runs it RED on main before any fix code, workflow §0).
+  LlamacppWiringTest.preflightFailsHardOnMalformedUrl (written by `start`,
+  run RED on main before any fix code, workflow §0).
 analysis_ref: docs/plan/m1/tick-analysis/llm-wizard-robustness.md
 blocked_by: []
 files_scope:
@@ -64,6 +64,21 @@ test_plan:
 spec_refs:
   - docs/design/07-deployment.md §7.7.2 First-run setup wizard
 decision_refs: []
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY FAIL, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "3 files changed, 48 insertions(+), 5 deletions(-)"
+    findings: "1 rework item (0 critical/high): exit-3 message honesty underpinned — preflightFailsHardOnMalformedUrl pins only 'malformed' present / 'reachability confirmed' absent; the cause-class, today's-remedy, and no-staging-claim greps promised by acceptance item 4 / P2 are missing. 2 candidate findings falsified-and-dropped (bare P1 pointer follows the file's convention; operator-URL echo is operator's own input, pre-existing pattern)"
+    verdict_file: .scratch/tick-review-M1-823-r1.txt
+  - round: 2
+    date: 2026-08-15
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "fix hunks 3 files changed, 32 insertions(+), 9 deletions(-) (rework item + bookkeeping); full diff 4 files, 79 insertions(+), 13 deletions(-)"
+    findings: "0 rework items (0 critical/high). Round-1 item 1 dispositioned SATISFIED (three assertions at LlamacppWiringTest.java:453-458, literals matching 4-llm.sh:270-271 verbatim; passing leg via the round-2 log of record, failing leg by construction + vacuity falsification). 3 candidate findings falsified-and-dropped (remedy-phrase vacuity — read -p not shown on piped stdin; operator-URL echo info-leak — operator's own input, trusted per threat model, pre-existing pattern; $url injection — double-quoted echo only, never re-parsed). Round re-run by the driver at user request; verdict unchanged from the first run."
+    verdict_file: .scratch/tick-review-M1-823-r2.txt
 ---
 
 # M1-823: Hard-fail malformed GGUF URLs in the download preflight
@@ -176,3 +191,14 @@ Class: wizard download preflights classifying curl exits (re-runnable:
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-823-llm-wizard-robustness-1.md
 ```
+
+## Round 1 rework
+
+REWORK ITEMS:
+1. Finding 1: add the three missing output assertions (cause class, today's
+   remedy, no staging claim) to
+   LlamacppWiringTest.preflightFailsHardOnMalformedUrl
+   (LlamacppWiringTest.java:438-455), evaluated via
+   `mvn -pl infochat-llm-adapter test -Dtest=LlamacppWiringTest#preflightFailsHardOnMalformedUrl`
+   passing on the fixed code and failing on the named staging-advertising /
+   remedy-dropping mutation of prod/scripts/4-llm.sh:270-271.

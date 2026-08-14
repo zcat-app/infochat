@@ -251,7 +251,8 @@ fetch_gguf() {
 
 # Preflight one GGUF URL with a host HEAD before any download: the fetch runs
 # on the host's own network path (M1-808), so the host probe is same-path.
-# Network-class exits abort with guidance; an HTTP refusal (22) only warns (P10).
+# Network-class exits abort with guidance; a malformed URL (3) hard-fails; an
+# HTTP refusal (22) only warns (P10).
 preflight_gguf_url() {
   local url="$1" rc
   echo "+ HEAD $url"
@@ -263,6 +264,12 @@ preflight_gguf_url() {
       echo "FAIL: cannot reach $url over the host's own network path (the path the download uses)." >&2
       echo "      Check host connectivity: VPN, proxy, or firewall. If you use a proxy, export" >&2
       echo "      HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY (the download uses them) and re-run." >&2
+      exit 1
+    fi
+    if [[ "$rc" == 3 ]]; then
+      echo "FAIL: $url is a malformed URL — the probe never reached the network (curl exit 3)." >&2
+      echo "      This looks like a file path was pasted instead of a full download URL." >&2
+      echo "      Paste the full https:// download URL, or press Enter for the pinned default." >&2
       exit 1
     fi
     echo "WARN: $url answered but refused the HEAD probe (curl exit $rc) — reachability confirmed; continuing." >&2
