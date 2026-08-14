@@ -443,6 +443,51 @@ features into a per-mode pairing (generalizes I1 revisit condition (b)).
 **Verdict: `needs-analysis`** — direction evidence-backed as of 2026-08-09;
 the gates are the mini-E2E measurement + the memory-canonicity design.
 
+**Update 2026-08-14 — user direction: scheduled, default confirmed.** The
+switch ships with default **ON (pivot — today's behaviour)**; direct mode
+stays restricted to models that cleared the in-language bar (today:
+gemma-4-26b-a4b only — qwen3.6-35b-a3b failed L0 hygiene in every cell).
+Scheduled after the M1-819..843 batch, paired with §I1 (streaming): the pair
+turns the translation conflict into a per-mode pairing, as recorded above.
+Gates unchanged: the mini-E2E grounded measurement, `chat_memory`
+canonicity, the D29/D58 + `REPLY_LANGUAGE_DIRECTIVE` spec amendment.
+
+### D6. Per-model image-prompt translation skip
+**What:** a flag on the `/image` prompt-translation leg (user proposal,
+2026-08-14). Today a non-English `/image` prompt is translated to English by
+`ModelTask.TRANSLATOR` before graph submission (D73's translation rule;
+commands.md §Image commands; security.md's translator-role note for image
+prompts). Live observation from the 2026-08 instance-migration test round:
+**Krea 2 handles multilingual prompts directly; Mage-Flow and Z-Image do
+not.** Flag ON (default, today's behaviour): translate first — stays
+mandatory for Mage-Flow/Z-Image. Flag OFF (per-model, Krea only): the
+native-language prompt reaches the text encoder unmodified, skipping one
+translator round-trip on the user-perceived path.
+
+**Why:** the same shape as §D5's direct mode, one pipeline over — a
+capability-gated skip of a translation leg, allowed only for models shown to
+handle the input language. Skipping also removes translation drift on
+low-resource-language prompts and shrinks the D77 qualified exposure (the
+translator leg may route remote under the remote-LLM profile).
+
+**Prerequisites / tensions:**
+
+- **Measurement gate, mirroring D5's bar-clearing rule.** Today's evidence
+  is live-use observation, not a campaign: a small per-language
+  prompt-holding measurement for Krea (does the output reflect the
+  native prompt as faithfully as the translated-English one?) gates the
+  skip. Mage-Flow/Z-Image keep the leg regardless, per the same observation.
+- **Spec amendment to D73** naming the per-model exception, and a D75-shape
+  decision on the echoed-prompt record: D75 makes the durable record the
+  echoed ENGLISH prompt, which does not exist in skip mode — decide what the
+  echo shows (native prompt, or native + machine back-reference).
+- Interacts with §B2's per-model workflow templates: the flag is a property
+  of the model/pipeline, not a user toggle — operator-level, decided like
+  the other per-model settings baked by the wizard.
+
+**Verdict: `needs-analysis`** — user direction recorded 2026-08-14;
+scheduled alongside §I1/§D5 after the M1-819..843 batch.
+
 ---
 
 ## E. Smaller polish (data mostly exists)
@@ -933,6 +978,22 @@ translation conflict as mode-dependent: a switchable translation pipeline
 (**§D5**) whose direct mode skips display translation — removing this entry's
 deciding hurdle for direct-mode scopes and making streaming composable per
 mode. Verdict unchanged: `parked`, pending the remaining gates.
+
+**Update 2026-08-14 — user direction: scheduled, paired with §D5.** After the
+M1-819..843 batch (prod-migration hurdles + SimpleX CLI v7.0.0 upgrade) the
+user wants I1 introduced WITH its enable flag (off = today's behaviour),
+paired with the §D5 translation switch (default ON/pivot). The composition
+logic is the one already recorded above: direct-mode scopes generate in the
+scope language, so there is no display-translation swap and a streamed prefix
+survives; on the Strix Halo box gemma's slower-than-DeepSeek generation is
+hidden by the live reveal, which is exactly the UX gap streaming exists to
+close. The open gates are unchanged: the §D5 mini-E2E (grounded direct chat +
+in-language tool loop), `chat_memory` canonicity, the pre-sanitize display
+policy decision (hurdle 2), and the streaming LLM SPI. The v7.0.0 upgrade in
+flight (M1-838..840) is neutral to this entry — the live-message command
+grammar is unchanged in v7.0.0 (verified above). Verdict stays `parked` until
+the batch lands and the gates run; this note only records the scheduling
+intent.
 
 ---
 
