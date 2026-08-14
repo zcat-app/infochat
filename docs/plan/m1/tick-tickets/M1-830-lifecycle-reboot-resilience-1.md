@@ -1,21 +1,21 @@
 ---
 id: M1-830
 title: "Port prod restart-policy drift into docker-compose.yml"
-status: pending
+status: done
 created: 2026-08-13
-last_updated: 2026-08-13
+last_updated: 2026-08-15
 flow: tick
 reproduction: >-
   Probe (RED on main; compose artifacts have no mvn coverage today):
-  `grep -c 'restart: unless-stopped' docker-compose.yml` prints 2 — only
+  `grep -c '^    restart: unless-stopped' docker-compose.yml` prints 2 — only
   llamacpp (:296) and llamacpp-embeddings (:362) carry the policy; postgres,
   infochat-collector, infochat-provider and ollama carry none, so after an OS
   reboot or a rootless-dockerd bounce the deployment silently comes back
   half-alive (LLM backends up, database + apps dead; setup-hurdles.md item
   13 / item H, host-proven 2026-08-12). Test:
   RestartPolicyWiringTest.everyLongRunningServiceRestartsUnlessStopped
-  (to-be-written — `start` writes the class and runs it RED on main before
-  any fix code, workflow §0).
+  (written at start, ran RED on main before any fix code: postgres failed
+  first — workflow §0).
 analysis_ref: docs/plan/m1/tick-analysis/lifecycle-reboot-resilience.md
 blocked_by: []
 files_scope:
@@ -37,9 +37,9 @@ out_of_scope:
   - docs/** — design-note and guide text lands in M1-831 (one row) and
     M1-833.
 acceptance:
-  - "REPRODUCTION, now passing: RestartPolicyWiringTest.everyLongRunningServiceRestartsUnlessStopped (to-be-written at start; new, infochat-provider wiring package; service-block assertion pattern of BuildHostNetworkWiringTest.java:55-65) — asserts each of postgres, infochat-collector, infochat-provider, ollama, llamacpp, llamacpp-embeddings in docker-compose.yml AND comfyui in docker-compose.comfyui.yml declares `restart: unless-stopped` inside its service block (FAILURE-MODE: deleting the key from any one of the seven services fails the test — the half-alive regression cannot ride a future compose edit)."
+  - "REPRODUCTION, now passing: RestartPolicyWiringTest.everyLongRunningServiceRestartsUnlessStopped (new, infochat-provider wiring package; service-block assertion pattern of BuildHostNetworkWiringTest.java:55-65) — asserts each of postgres, infochat-collector, infochat-provider, ollama, llamacpp, llamacpp-embeddings in docker-compose.yml AND comfyui in docker-compose.comfyui.yml declares `restart: unless-stopped` inside its service block (FAILURE-MODE: deleting the key from any one of the seven services fails the test — the half-alive regression cannot ride a future compose edit)."
   - "FAILURE-MODE negative (analysis P2): the same test asserts NO service in any docker-compose*.yml declares `restart: always` — `always` would resurrect containers after a deliberate operator `docker compose stop` / stack.sh stop, defeating the shutdown verb M1-832 ships."
-  - "Port fidelity (analysis P1): the diff is the prod checkout's verified drift — `restart: unless-stopped` after the `profiles:` line of infochat-collector and infochat-provider, after `profiles: [dev, ollama]` on ollama, and on postgres WITH its 3-line comment, all ported verbatim from /home/infochat/infochat-prod/docker-compose.yml (:46-49, :100, :175, :277). Probes: `grep -c 'restart: unless-stopped' docker-compose.yml` prints 6; `grep -n 'loginctl enable-linger' docker-compose.yml` hits the ported postgres comment."
+  - "Port fidelity (analysis P1): the diff is the prod checkout's verified drift — `restart: unless-stopped` after the `profiles:` line of infochat-collector and infochat-provider, after `profiles: [dev, ollama]` on ollama, and on postgres WITH its 3-line comment, all ported verbatim from /home/infochat/infochat-prod/docker-compose.yml (:46-49, :100, :175, :277). Probes: `grep -c '^    restart: unless-stopped' docker-compose.yml` prints 6 (indented-key form — a plain grep would count the header comment's mention); `grep -n 'loginctl enable-linger' docker-compose.yml` hits the ported postgres comment."
   - "Header-comment truthfulness (analysis P1, engineering-rules §11 — the one deliberate deviation from verbatim): the M1-512 header parenthetical at docker-compose.yml:22-23 no longer singles out the llama services, since every service now carries the policy. Probe: `grep -n 'the llama services carry' docker-compose.yml` prints nothing."
   - "Live render: `docker compose -f docker-compose.yml config` exits 0 and the rendered model shows `restart: unless-stopped` (or the normalized `RestartPolicy: unless-stopped` form) under all six base services — proves the host's compose accepts the file rather than rejecting or silently dropping the key."
   - "mvn verify from repo root is green (BuildHostNetworkWiringTest, LlamacppWiringTest and all other compose-reading tests stay green — the port changes no key they pin)."
@@ -58,7 +58,13 @@ spec_refs:
   - docs/design/07-deployment.md §7.8.7 Host resource hardening (swap, container caps, build isolation)
   - docs/spec/deployment.md §Deployment scenarios
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY WARN, SCOPE PASS"
+    diff_stats: "4 files changed, 87 insertions(+), 15 deletions(-)"
+    verdict_file: .scratch/tick-review-M1-830-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []

@@ -19,7 +19,7 @@
 # `docker compose up` — no swarm needed. These are BLAST-RADIUS caps, not
 # tuning: each ceiling sits ABOVE steady state with headroom so normal
 # operation never reaches it; a genuine runaway hits its own container's limit
-# and is OOM-killed-and-restarted (the llama services carry
+# and is OOM-killed-and-restarted (every long-running service carries
 # restart: unless-stopped) instead of thrashing the whole host. Root cause of
 # the 2026-06-28 resource-exhaustion incident was an un-capped overshoot on a
 # zero-swap host (07-deployment.md §7.8.7).
@@ -43,6 +43,10 @@
 services:
   postgres:
     image: pgvector/pgvector:pg16
+    # Survive dockerd restarts (rootless dockerd rides the user session —
+    # with loginctl enable-linger it stays up across logouts, but a daemon
+    # bounce must not strand the stack; llamacpp precedent below).
+    restart: unless-stopped
     environment:
       # Bootstrap superuser for the image's own initdb. Nothing connects as this
       # role after init (apps use infochat_collector/infochat_provider; Flyway
@@ -93,6 +97,7 @@ services:
   # credentials, and the only-Collector-migrates startup ordering.
   infochat-collector:
     profiles: [prod]
+    restart: unless-stopped
     build:
       context: .
       dockerfile: infochat-collector/src/main/docker/Dockerfile.jvm
@@ -167,6 +172,7 @@ services:
 
   infochat-provider:
     profiles: [prod]
+    restart: unless-stopped
     build:
       context: .
       dockerfile: infochat-provider/src/main/docker/Dockerfile.jvm
@@ -268,6 +274,7 @@ services:
   # only. Images are pinned to explicit tags (M1-004 precedent).
   ollama:
     profiles: [dev, ollama]
+    restart: unless-stopped
     image: ollama/ollama:0.30.8
     ports:
       # Loopback only (postgres precedent above): in the `dev` shape the host's
