@@ -10,8 +10,8 @@
 
 | Status | Count |
 |---|---|
-| pending | 15 |
-| in-progress | 0 |
+| pending | 14 |
+| in-progress | 1 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 52 |
@@ -31,7 +31,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-842 — Outbound preview generation + SPI preview field (complexity: high, risk: medium)
 - M1-844 — Measure grounded in-language chat with the tool loop (complexity: high, risk: medium)
 - M1-847 — Add a streaming generate shape to the LlmProvider SPI (complexity: high, risk: medium)
-- M1-850 — Measure Krea native-prompt holding vs the translation leg (complexity: high, risk: medium)
 
 ---
 
@@ -39,8 +38,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 | ID | Title | Status | Last review |
 |---|---|---|---|
-
-_(none)_
+| M1-850 | Measure Krea native-prompt holding vs the translation leg | in-progress | (none) |
 
 ---
 
@@ -55,7 +53,7 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-846 — blocked_by: M1-845 (pending)
 - M1-848 — blocked_by: M1-845 (pending)
 - M1-849 — blocked_by: M1-846 (pending), M1-847 (pending), M1-848 (pending)
-- M1-851 — blocked_by: M1-850 (pending)
+- M1-851 — blocked_by: M1-850 (in-progress)
 
 ---
 
@@ -182,6 +180,6 @@ M1-844 (pending) ← runnable
               └── M1-849 (pending) [see above]
 M1-847 (pending) ← runnable
   └── M1-849 (pending) [see above]
-M1-850 (pending) ← runnable
+M1-850 (in-progress)
   └── M1-851 (pending)
 ```

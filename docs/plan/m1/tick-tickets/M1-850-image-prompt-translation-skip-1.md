@@ -1,9 +1,9 @@
 ---
 id: M1-850
 title: "Measure Krea native-prompt holding vs the translation leg"
-status: pending
+status: in-progress
 created: 2026-08-14
-last_updated: 2026-08-14
+last_updated: 2026-08-15
 flow: tick
 reproduction: >-
   Probe: `grep -rni 'prompt-holding\|prompt holding\|krea'
@@ -90,7 +90,25 @@ reviews: []
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-15
+  result: >-
+    One blocking ambiguity resolved by the user before start: acceptance
+    item 1's git-log probe (thresholds commit predates every results
+    commit) is unsatisfiable on main under /tick merge's squash
+    (one ticket = one commit). User chose the early-commit arm: the
+    pre-registration (thresholds + protocol + fixtures, zero results)
+    lands as its own commit directly on main BEFORE any arm runs; the
+    ticket's squash-merge then lands the completed record, so the probe
+    holds on main permanently. All citations spot-checked true
+    (image-generation.md:301-310, future-features.md §D6,
+    lang-quality.md:24-26/:139-141, 4b-image.sh:106-107,
+    LanguageRegistry.java:73-78, translator-slot.md:69-71); census
+    probe re-runs clean; analysis P6-measurement/P7/P12 all landed;
+    campaign surface verified executable on this box (both Krea tiers'
+    assets on disk, ComfyUI container live, deployment translator
+    routing = deepseek-v4-flash, deployed QueryAnchorTranslator
+    byte-identical to this tree's).
 escalation_reason:
 ---
 
