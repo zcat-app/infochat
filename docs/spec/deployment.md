@@ -53,6 +53,10 @@ test-scoped: in production it does nothing, and under test the in-JVM
 Provider boot applies the migration set itself (the advisory lock
 keeps any concurrent apply correct).
 
+After a migration version has shipped on `main`, its file content is
+immutable, including comments; corrections are made in a new migration
+version.
+
 ## Operator inputs
 
 An operator must provide:

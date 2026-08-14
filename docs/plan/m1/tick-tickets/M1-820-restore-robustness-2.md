@@ -1,17 +1,16 @@
 ---
 id: M1-820
 title: Lint that applied Flyway migrations are content-immutable
-status: pending
+status: done
 created: 2026-08-13
-last_updated: 2026-08-13
+last_updated: 2026-08-15
 flow: tick
 reproduction: >-
-  scripts/lint-migration-immutability.py --self-test (to-be-written —
-  child of a 2+ decomposition, analysis
-  docs/plan/m1/tick-analysis/restore-robustness.md; the script does not
-  exist: ls scripts/ shows lint-ticket.py, lint-partitioned-test-inserts.py,
-  lint-config-keys.py, tick-lint.py and no migration lint). Observed wrong
-  behavior: commit a60315c3 ("process: remove private planning artifacts")
+  scripts/lint-migration-immutability.py --self-test. Before start, the
+  script did not exist: ls scripts/ showed lint-ticket.py,
+  lint-partitioned-test-inserts.py, lint-config-keys.py, tick-lint.py and no
+  migration lint; running this command exited 2 with Python's "can't open
+  file" error. Observed wrong behavior: commit a60315c3 ("process: remove private planning artifacts")
   edited comments inside the already-applied V50/V55 migration files and no
   gate fired; every database that applied them earlier now fails Flyway
   validation against this checkout (live incident 2026-08-11,
@@ -74,7 +73,19 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: APPROVE
+    checks:
+      SPEC-TRUTHNESS-CHECK: PASS
+      SECURITY-CHECK: PASS
+      TEST-ADEQUACY-CHECK: PASS
+      MAINTAINABILITY-CHECK: PASS
+      SCOPE-CHECK: PASS
+    diff_stats: "5 files, 220 insertions(+), 14 deletions(-) (r1)"
+    verdict_file: .scratch/tick-review-M1-820-r1.txt
+    test_log: .scratch/tick-test-M1-820-r1.log (BUILD SUCCESS, full suite, 0 failures)
 overrides: []
 aborted_attempts: []
 reopens: []

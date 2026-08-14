@@ -14,6 +14,9 @@ applied by Flyway on Collector + Provider startup. Both services share one
 schema; they differ only in DB role (decision D34, see `docs/spec/security.md`
 §DB roles and `docs/design/04-security.md` for the full grant matrix).
 
+Migration files are immutable after their version ships on `main`, including
+comments; corrections use a new migration version.
+
 Roles referenced below:
 
 - `infochat_collector` — ingest writer. Writes ingest-owned tables; `INSERT`-only
