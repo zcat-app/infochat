@@ -350,7 +350,9 @@ offered **remote** or **none** only.
 
 **The model picker (local).** If you choose **local**, you pick one of three
 models, each in two tiers. The wizard prints the measured per-image latency and
-the disk footprint **before** you commit to a multi-GB download:
+the disk footprint **before** you commit to a multi-GB download. The picker
+leads with the decision table; the full sourcing detail (latency footnotes,
+disk arithmetic) is behind `--verbose`.
 
 | Model | Setting | Latency (container-measured) | Disk, recommended bf16 | Disk, smaller tier |
 |---|---|---|---|---|
@@ -811,7 +813,7 @@ Three things to know before you do:
 | `prod/scripts/2-secrets.sh` | Generate the DB-role passwords | `--defaults` (no-op — no prompts) |
 | `prod/scripts/3-postgres.sh` | Start Postgres and wait until healthy | `--defaults` (no-op — no prompts) |
 | `prod/scripts/4-llm.sh` | Provision the LLM backend; write the LLM + embeddings config | `--defaults` (takes the profile's default backend) |
-| `prod/scripts/4b-image.sh` | Optional: provision the `/image` backend (local ROCm ComfyUI or a remote box); write `infochat.image.*` | `--defaults` (takes `none` — does not enable); `--dry-run` (print the profile gate + model picker and exit) |
+| `prod/scripts/4b-image.sh` | Optional: provision the `/image` backend (local ROCm ComfyUI or a remote box); write `infochat.image.*` | `--defaults` (takes `none` — does not enable); `--dry-run` (print the profile gate + model picker and exit); `--verbose` (also print the picker's full detail) |
 | `prod/scripts/5-bootstrap.sh` | Seed `bootstrap-sources.json` and wire the asset (price) commands | `--defaults` (uses the bundled defaults) |
 | `prod/scripts/6-adapter.sh` | Configure the messaging adapter(s); capture the bootstrap-admin credential (SimpleX claim-token / Signal contact id) | `--defaults` (takes `simplex` and the default dirs; still prompts for the values a human must supply) |
 | `prod/scripts/6b-simplex-provision.sh` | Provision the SimpleX bot identity (profile + address + auto-accept) and **re-print the bot's contact link**. A no-op when SimpleX isn't enabled. Run it to recover the link, which the wizard prints only during step 7 and never saves. | _(no `--defaults`)_ |

@@ -1,13 +1,13 @@
 ---
 id: M1-829
 title: "Split 4b-image.sh picker into decision view + --verbose detail"
-status: pending
+status: done
 created: 2026-08-13
-last_updated: 2026-08-13
+last_updated: 2026-08-15
 flow: tick
 reproduction: >-
   ImageWizardStepTest.pickerLeadsWithDecisionTableNotAuditDetail
-  (to-be-written) — drives `prod/scripts/4b-image.sh --dry-run` against a
+  — drives `prod/scripts/4b-image.sh --dry-run` against a
   temp INFOCHAT_RUNTIME_DIR carrying quarkus.profile=laptop (the
   LlamacppWiringTest harness pattern) and asserts the six-row decision
   table leads, with the disk-arithmetic formulas and latency-footnote
@@ -65,7 +65,21 @@ spec_refs:
 decision_refs:
   - D73
   - D77
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY FAIL, MAINTAINABILITY WARN, SCOPE PASS"
+    diff_stats: "5 files changed, 412 insertions(+), 42 deletions(-)"
+    rework_items: 1
+    verdict_file: .scratch/tick-review-M1-829-r1.txt
+  - round: 2
+    date: 2026-08-15
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "3 files changed, 38 insertions(+), 9 deletions(-) (round-2 fix hunks; full diff 5 files, 440 insertions(+), 41 deletions(-))"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-829-r2.txt
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -185,3 +199,16 @@ pre-existing test is modified.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-829-operator-ux-2.md
 ```
+
+## Round 1 rework
+
+REWORK ITEMS (verbatim from `.scratch/tick-review-M1-829-r1.txt`):
+
+1. Finding 1: add a ROCm device-node capability assumption
+   (Assumptions.assumeTrue on /dev/kfd + /dev/dri) as the first statement of
+   ImageWizardStepTest.kreaLicenceDisclosureSurvivesCompaction and
+   ImageWizardStepTest.verboseIsOutputSupersetDefaultFlowUnchanged, evaluated
+   via `grep -n "assumeTrue" infochat-llm-adapter/src/test/java/app/zcat/infochat/llm/wiring/ImageWizardStepTest.java`
+   hitting both methods plus the round-2 log showing
+   "Tests run: 6, Failures: 0, Errors: 0, Skipped: 0" for
+   ImageWizardStepTest on the reference host.

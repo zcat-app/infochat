@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 27 |
+| pending | 26 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 40 |
+| done | 41 |
 | deferred | 0 |
 | abandoned | 0 |
 | **total** | **67** |
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-821 — restore.sh failure paths print verify steps + exact commands (complexity: low, risk: low)
 - M1-824 — Stage operator-local GGUF files into the model volume (complexity: medium, risk: medium)
 - M1-826 — Probe GPU capability and own the llamacpp overlay decision (complexity: medium, risk: medium)
-- M1-829 — Split 4b-image.sh picker into decision view + --verbose detail (complexity: low, risk: low)
 - M1-831 — Doctor fails rootless Docker hosts without linger (complexity: medium, risk: low)
 - M1-832 — Full-stack lifecycle verb prod/scripts/stack.sh (complexity: medium, risk: low)
 - M1-834 — Admin-notify on LLM circuit-breaker open transitions (complexity: medium, risk: medium)
@@ -87,6 +86,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-830 | Port prod restart-policy drift into docker-compose.yml | 2026-08-15 | round 1 APPROVE |
+| M1-829 | Split 4b-image.sh picker into decision view + --verbose detail | 2026-08-15 | round 2 APPROVE |
 | M1-828 | Document post-setup tool boundaries (profile vs switch-llm vs wizard) | 2026-08-15 | round 1 APPROVE |
 | M1-823 | Hard-fail malformed GGUF URLs in the download preflight | 2026-08-15 | round 2 APPROVE |
 | M1-820 | Lint that applied Flyway migrations are content-immutable | 2026-08-15 | round 1 APPROVE |
@@ -95,7 +95,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-817 | Image resolution floor and limit-error wording | 2026-08-11 | round 2 APPROVE |
 | M1-816 | Image e2e release gate: configured pipeline proof | 2026-08-11 | round 1 APPROVE |
 | M1-815 | Strip internal config identifiers from LLM output | 2026-08-11 | round 2 APPROVE |
-| M1-814 | Treat an absent image spool as empty in the sweeper | 2026-08-10 | round 1 APPROVE-WITH-FIXES |
 
 ---
 
@@ -170,7 +169,7 @@ M1-823 (done)
 M1-826 (pending) ← runnable
   └── M1-827 (pending)
 M1-828 (done)
-M1-829 (pending) ← runnable
+M1-829 (done)
 M1-830 (done)
   └── M1-833 (pending)
 M1-831 (pending) ← runnable

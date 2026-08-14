@@ -188,22 +188,26 @@ declare -A MODEL_FIT_MP=(
 )
 
 usage() {
-  echo "Usage: 4b-image.sh [--defaults] [--dry-run] [-h|--help]"
+  echo "Usage: 4b-image.sh [--defaults] [--dry-run] [--verbose] [-h|--help]"
   echo "  Optionally provision the /image generation backend (D73/D77) and write"
   echo "  infochat.image.* into the runtime application.properties."
   echo "  --defaults  take '$DEFAULT_MODE' (do not enable /image) without prompting —"
   echo "              the feature is optional and local install is a multi-GB download."
   echo "  --dry-run   print the profile gate and the curated model picker, then exit"
   echo "              without downloading or writing anything."
+  echo "  --verbose   also print the picker's full detail (spike sourcing, latency"
+  echo "              footnotes, disk arithmetic, hardware scope)."
 }
 
 defaults=0
 dryrun=0
+verbose=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;
     --defaults) defaults=1 ;;
     --dry-run) dryrun=1 ;;
+    --verbose) verbose=1 ;;
     *) usage >&2; exit 2 ;;
   esac
   shift
@@ -257,33 +261,45 @@ case "$profile" in
 esac
 
 print_picker() {
-  echo "Curated models — three models x two tiers, hardcoded (never a raw repo"
-  echo "listing). Latency: container-measured steady state (2026-08-09 spike,"
-  echo "M1-797 protocol). Disk: measured checkpoint + encoder + VAE footprint,"
-  echo "printed BEFORE you commit."
+  echo "Curated models — three models x two tiers, hardcoded; latency + disk measured, pre-commit."
   echo
   printf '  %-4s %-50s %-16s %-14s %s\n' "#" "Model" "Setting" "Latency" "Disk"
   local i=1 opt
   for opt in $MODEL_OPTIONS; do
-    printf '  %-4s %-50s %-16s %-14s %s\n' "$i)" "${MODEL_LABEL[$opt]}" "${MODEL_SETTING_DISPLAY[$opt]}" "${MODEL_LATENCY_S[$opt]} s" "${MODEL_DISK_DISPLAY[$opt]}"
+    # The Z-Image steady-state marker rides inline in the row (M1-798 item 3).
+    local latency="${MODEL_LATENCY_S[$opt]} s"
+    if [[ "$opt" == zimage_* ]]; then
+      latency="$latency (steady state)"
+    fi
+    printf '  %-4s %-50s %-16s %-14s %s\n' "$i)" "${MODEL_LABEL[$opt]}" "${MODEL_SETTING_DISPLAY[$opt]}" "$latency" "${MODEL_DISK_DISPLAY[$opt]}"
     i=$(( i + 1 ))
   done
   echo
-  echo "Z-Image's 22.37 s is the steady state — a first run takes ~28.6 s while"
-  echo "kernels autotune (the probe warm-up absorbs that). Krea's number is the"
-  echo "0.6 MP sampling budget; its decode stage delivers 1792x1344 (~2.4 MP)."
+  if [[ "$verbose" -eq 1 ]]; then
+    echo "Curated models — three models x two tiers, hardcoded (never a raw repo"
+    echo "listing). Latency: container-measured steady state (2026-08-09 spike,"
+    echo "M1-797 protocol). Disk: measured checkpoint + encoder + VAE footprint,"
+    echo "printed BEFORE you commit."
+    echo
+    echo "Z-Image's 22.37 s is the steady state — a first run takes ~28.6 s while"
+    echo "kernels autotune (the probe warm-up absorbs that). Krea's number is the"
+    echo "0.6 MP sampling budget; its decode stage delivers 1792x1344 (~2.4 MP)."
+    echo
+    echo "Per-model disk (bf16 tier): Mage-Flow 7.7 + 8.3 (qwen3vl_4b) + 0.33 = ~16.5 GB;"
+    echo "Z-Image 12 + 7.5 (qwen_3_4b) + 0.32 = ~20 GB; Krea 2 25 + 8.3 (qwen3vl_4b)"
+    echo "+ 0.24 (stock VAE) + 0.51 (krea2RealVae) + 0.51 (Wan2.1 2x VAE) = ~34.5 GB."
+    echo "Smaller-footprint tier: ~13 / ~11.5 / ~20 GB — same speed on this hardware"
+    echo "(quantization buys no speed on gfx1151), slight quality cost. The qwen3vl_4b"
+    echo "encoder is shared between Mage-Flow and Krea 2 (identical blob) — installing"
+    echo "both downloads it once."
+    echo
+    echo "Hardware scope: the LOCAL container path is ROCm-only and validated on"
+    echo "Strix Halo (gfx1151) alone — other ROCm GPUs are unverified and NVIDIA is"
+    echo "not covered by the overlay."
+  fi
+  echo "Hardware scope: LOCAL is ROCm-only, validated on Strix Halo (gfx1151) alone — NVIDIA not covered."
   echo
-  echo "Per-model disk (bf16 tier): Mage-Flow 7.7 + 8.3 (qwen3vl_4b) + 0.33 = ~16.5 GB;"
-  echo "Z-Image 12 + 7.5 (qwen_3_4b) + 0.32 = ~20 GB; Krea 2 25 + 8.3 (qwen3vl_4b)"
-  echo "+ 0.24 (stock VAE) + 0.51 (krea2RealVae) + 0.51 (Wan2.1 2x VAE) = ~34.5 GB."
-  echo "Smaller-footprint tier: ~13 / ~11.5 / ~20 GB — same speed on this hardware"
-  echo "(quantization buys no speed on gfx1151), slight quality cost. The qwen3vl_4b"
-  echo "encoder is shared between Mage-Flow and Krea 2 (identical blob) — installing"
-  echo "both downloads it once."
-  echo
-  echo "Hardware scope: the LOCAL container path is ROCm-only and validated on"
-  echo "Strix Halo (gfx1151) alone — other ROCm GPUs are unverified and NVIDIA is"
-  echo "not covered by the overlay."
+  echo "Detail (spike sourcing, latency footnotes, disk arithmetic): run with --verbose."
 }
 
 print_gate() {
@@ -503,14 +519,10 @@ choose_krea_decode() {
 print_krea_asset_licences() {
   echo
   echo "COMMUNITY ASSET LICENCES (Krea downloads these two VAE files):"
-  echo "  - krea2RealVae_v10.safetensors (artsyww/KREA2REALVAE): community asset,"
-  echo "    licence UNDECLARED on the HuggingFace card."
-  echo "  - Wan2.1_VAE_upscale2x_imageonly_real_v1.safetensors"
-  echo "    (spacepxl/Wan2.1-VAE-upscale2x): community asset; the HF card declares"
-  echo "    Apache-2.0 (it was UNDECLARED at the 2026-08-09 spike — verify the card"
-  echo "    before redistributing)."
-  echo "  The ComfyUI-VAE-Utils node that runs the decode stage is MIT and already"
-  echo "  baked into the ComfyUI image."
+  echo "  - krea2RealVae_v10.safetensors (artsyww/KREA2REALVAE) — licence UNDECLARED on the HF card."
+  echo "  - Wan2.1_VAE_upscale2x_imageonly_real_v1.safetensors (spacepxl/Wan2.1-VAE-upscale2x) —"
+  echo "    card declares Apache-2.0 (was UNDECLARED at the spike; verify before redistributing)."
+  echo "  The ComfyUI-VAE-Utils decode node is MIT, baked into the ComfyUI image."
 }
 
 # Preflight one URL with a HEAD request (analysis P22: HEAD-check every asset
