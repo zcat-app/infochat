@@ -1699,7 +1699,11 @@ rules:
   Threshold and cooldown are `infochat.llm.breaker.*` properties;
   the shipped defaults (threshold 3, cooldown 30s) apply to all
   profiles. State is in-memory only — a restart resets to CLOSED
-  and the first call re-probes. Fail-fast changes WHEN a doomed
+  and the first call re-probes. The CLOSED→OPEN trip and each
+  failed-probe re-open raise a throttled admin notification under
+  the error class `llm-breaker-open`, keyed per transport SPI and
+  endpoint and naming both; denied acquisitions and the recovery
+  close raise none. Fail-fast changes WHEN a doomed
   call fails, never WHERE it goes or how the task degrades: the
   short-circuit surfaces as the same failure the consumer already
   handles.

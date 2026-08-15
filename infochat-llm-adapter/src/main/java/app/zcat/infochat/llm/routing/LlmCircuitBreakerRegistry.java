@@ -2,6 +2,7 @@ package app.zcat.infochat.llm.routing;
 
 import app.zcat.infochat.llm.ModelTask;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Event;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.Config;
 import org.jboss.logging.Logger;
@@ -13,6 +14,7 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 
 /**
  * Per-endpoint circuit breaker state for every LLM-transport SPI call
@@ -70,6 +72,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * IS reachable and counts as reachable evidence. Breaker state is
  * in-memory only; a restart resets to CLOSED and the first call
  * re-probes.
+ * <p>The CLOSED→OPEN trip and a failed probe's HALF_OPEN→OPEN re-open fire
+ * {@link LlmCircuitBreakerOpenedEvent} through the sink, outside the breaker
+ * monitor; denied acquisitions and the close emit nothing.
  *
  * <h2>Time</h2>
  * <p>The cooldown / HALF-OPEN decision reads the injected {@link Clock}
@@ -120,6 +125,7 @@ public class LlmCircuitBreakerRegistry {
     private final Duration cooldown;
     private final Clock clock;
     private final LlmRouter.ConfigReader config;
+    private final Consumer<LlmCircuitBreakerOpenedEvent> sink;
     private final ConcurrentHashMap<BreakerKey, EndpointBreaker> breakersByKey =
         new ConcurrentHashMap<>();
 
@@ -127,32 +133,43 @@ public class LlmCircuitBreakerRegistry {
      * Seam constructor: hand-supplied sizing + {@link Clock} +
      * config reader, for plain-JUnit tests (fixed clock, map-backed
      * config) and for test doubles that subclass — the same two-ctor
-     * shape as {@link LlmRouter}.
+     * shape as {@link LlmRouter}. Delegates with a no-op sink: no
+     * event emission.
      */
     public LlmCircuitBreakerRegistry(int failureThreshold, long cooldownMs,
                                      Clock clock, LlmRouter.ConfigReader config) {
+        this(failureThreshold, cooldownMs, clock, config, event -> { });
+    }
+
+    /** The seam constructor plus the sink the registry fires open transitions to. */
+    public LlmCircuitBreakerRegistry(int failureThreshold, long cooldownMs,
+                                     Clock clock, LlmRouter.ConfigReader config,
+                                     Consumer<LlmCircuitBreakerOpenedEvent> sink) {
         this.failureThreshold = failureThreshold;
         this.cooldown = Duration.ofMillis(cooldownMs);
         this.clock = clock;
         this.config = config;
+        this.sink = sink;
     }
 
     /**
      * CDI constructor. The {@link Clock} resolves against the app-wide
      * UTC producer ({@code ThrottledAdminNotifier.systemUtcClock()});
      * every container that instantiates this bean has it on classpath
-     * (infochat-core depends on this module, and both services depend on
-     * core).
+     * (both services depend on infochat-core, where the producer lives,
+     * and on this module). The opened-event sink is the container's event bus.
      */
     @Inject
-    public LlmCircuitBreakerRegistry(Config mpConfig, Clock clock) {
+    public LlmCircuitBreakerRegistry(Config mpConfig, Clock clock,
+                                     Event<LlmCircuitBreakerOpenedEvent> breakerOpenedEvent) {
         this(
             mpConfig.getOptionalValue(CONFIG_KEY_FAILURE_THRESHOLD, Integer.class)
                 .orElse(DEFAULT_FAILURE_THRESHOLD),
             mpConfig.getOptionalValue(CONFIG_KEY_COOLDOWN_MS, Long.class)
                 .orElse(DEFAULT_COOLDOWN_MS),
             clock,
-            key -> mpConfig.getOptionalValue(key, String.class));
+            key -> mpConfig.getOptionalValue(key, String.class),
+            breakerOpenedEvent::fire);
     }
 
     /**
@@ -254,10 +271,6 @@ public class LlmCircuitBreakerRegistry {
         }
     }
 
-    private void recordUnreachable(BreakerKey key) {
-        breakerFor(key).recordUnreachable(clock.instant());
-    }
-
     private void releaseProbe(BreakerKey key) {
         // get() rather than breakerFor(): a key with no breaker entry has
         // no probe to return — the same reason recordReachable does not
@@ -307,6 +320,9 @@ public class LlmCircuitBreakerRegistry {
      * SPIs still needs two breakers.
      */
     private enum TransportKind { LLM, EMBEDDINGS }
+
+    /** What an {@link EndpointBreaker#recordUnreachable} call changed. */
+    private enum OpenedTransition { NONE, TRIPPED, REOPENED }
 
     /**
      * One breaker's identity. {@code endpoint} is the resolved base-url;
@@ -427,7 +443,7 @@ public class LlmCircuitBreakerRegistry {
             probeOwner = null;
         }
 
-        synchronized void recordUnreachable(Instant now) {
+        synchronized OpenedTransition recordUnreachable(Instant now) {
             switch (state) {
                 case CLOSED -> {
                     consecutiveUnreachableFailures++;
@@ -437,6 +453,7 @@ public class LlmCircuitBreakerRegistry {
                         LOG.warnf("LLM circuit breaker OPEN for %s after %d consecutive "
                                 + "transport failures; short-circuiting calls for %d ms",
                             label, consecutiveUnreachableFailures, cooldown.toMillis());
+                        return OpenedTransition.TRIPPED;
                     }
                 }
                 case HALF_OPEN -> {
@@ -447,6 +464,7 @@ public class LlmCircuitBreakerRegistry {
                     LOG.warnf("LLM circuit breaker re-OPENED for %s (probe failed); "
                             + "short-circuiting calls for %d ms",
                         label, cooldown.toMillis());
+                    return OpenedTransition.REOPENED;
                 }
                 case OPEN -> {
                     // An in-flight straggler failing after the trip: the
@@ -455,6 +473,15 @@ public class LlmCircuitBreakerRegistry {
                     // indefinitely, so leave it.
                 }
             }
+            return OpenedTransition.NONE;
+        }
+    }
+
+    private void recordUnreachable(BreakerKey key) {
+        OpenedTransition transition = breakerFor(key).recordUnreachable(clock.instant());
+        if (transition != OpenedTransition.NONE) {
+            sink.accept(new LlmCircuitBreakerOpenedEvent(
+                key.kind().name(), key.endpoint(), transition == OpenedTransition.REOPENED));
         }
     }
 }

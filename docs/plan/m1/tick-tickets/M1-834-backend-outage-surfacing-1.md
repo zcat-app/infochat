@@ -1,14 +1,14 @@
 ---
 id: M1-834
 title: "Admin-notify on LLM circuit-breaker open transitions"
-status: pending
+status: done
 created: 2026-08-13
-last_updated: 2026-08-13
+last_updated: 2026-08-15
 flow: tick
 reproduction: >-
   LlmCircuitBreakerRegistryTest.openedTransitionEmitsExactlyOneEventPerTripOrReopen
-  (to-be-written — the event type and sink seam do not exist yet; `start`
-  writes it and runs it RED before any fix code) — tripping an endpoint's
+  (written and run RED at start — compile-failure RED against the absent
+  event type and 5-arg sink seam, .scratch/tick-red-M1-834.log) — tripping an endpoint's
   breaker OPEN and re-opening it on a failed cooldown probe must each raise
   one operator-visible notification event while denied acquisitions raise
   none; today the only emissions are LOG.warnf lines inside the breaker
@@ -88,11 +88,38 @@ spec_refs:
 decision_refs:
   - D22
   - D56
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS WARN (rule-text OK, user-approval record for exact wording missing — record next round), SECURITY PASS, TEST-ADEQUACY FAIL, MAINTAINABILITY FAIL, SCOPE PASS"
+    diff_stats: "13 files, +413/-22"
+    rework_items: 2
+    verdict_file: .scratch/tick-review-M1-834-r1.txt
+  - round: 2
+    date: 2026-08-15
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS (approved wording recorded, .scratch/tick-spec-approval-M1-834.md), SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS; rework items 1+2 SATISFIED"
+    diff_stats: "13 files, +475/-23 (fix hunks 5 files, +71/-10)"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-834-r2.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  lint: "tick-lint: 0 findings, 0 BLOCKERs (after copying the gitignored analysis doc into the worktree)"
+  self_check: >-
+    PASS. Census re-run clean: grep returns exactly the enumerated sites,
+    none new; the prose count "18 sites / 17 direct" undercounts the same
+    complete enumeration by 2 (it lists 19 `new` + 1 subclass = 20) —
+    non-blocking, the preserve-set is identical either way. Citations
+    spot-checked green: registry :437/:447 WARN lines, :144-145 stale
+    javadoc claim, ThrottledAdminNotifier :39-46/:132-139/:245-279/:372,
+    PerSourceUnknownTracker :56/:179/:185-190 (actual path eval/reeval/),
+    LlmHttpSupport.redactUserInfo :382, provider application.properties
+    :443-459 breaker block, security.md :1684 breaker paragraph. Analysis
+    P1-P8 all landed in Pitfalls. blocked_by empty: no cross-ticket tests
+    to trace. No replaces:.
 ---
 
 # M1-834: Admin-notify on LLM circuit-breaker open transitions
@@ -260,3 +287,30 @@ python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-834-backend-outage-sur
 
 The lint gate is the mechanical half of readiness; `start` refuses on a
 BLOCKER. Full check table: `docs/process/tick-workflow.md` §1.
+
+## Round 1 rework
+
+1. Finding 1: extend BreakerOpenedNotificationIT with a container-wiring
+   probe — inject the real LlmCircuitBreakerRegistry bean, trip the %test
+   embeddings endpoint (3x recordUnreachableForEmbeddings), assert
+   ThrottledAdminNotifier.getState("llm-breaker-open:EMBEDDINGS:" +
+   endpoint) returns a row with errorClass llm-breaker-open — evaluated via
+   the method failing under the no-op-sink mutation at
+   LlmCircuitBreakerRegistry.java:172 and passing in round 2's
+   `mvn verify` (full BreakerOpenedNotificationIT green).
+2. Finding 2: delete "; M1-834" from LlmCircuitBreakerOpenedEvent.java:5 —
+   evaluated via `grep -n 'M1-834' infochat-llm-adapter/src/main/java/\
+app/zcat/infochat/llm/routing/LlmCircuitBreakerOpenedEvent.java` returning
+   nothing.
+
+## Review observations
+
+- Round 1 RECOMMENDED-NEW-TICKET (recorded, no decision requested; verbatim
+  from the verdict): the breaker's own WARN label logs the raw configured
+  endpoint, so a base-url carrying `user:pass@` puts the credential into
+  provider and collector logs at WARN on every trip and re-open.
+  `BreakerKey.label()` interpolates the unredacted base-url
+  (LlmCircuitBreakerRegistry.java:333-336), used by both WARN lines
+  (:453-455, :464-466). Pre-dates this diff; declared out of scope (§1) with
+  a commit-message follow-up note. Fix shape: redact via
+  `LlmHttpSupport.redactUserInfo` (M1-401 convention).

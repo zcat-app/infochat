@@ -18,6 +18,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -408,6 +409,83 @@ class LlmCircuitBreakerRegistryTest {
         assertFalse(registry.tryAcquireForTask(ModelTask.CHAT_AGENT),
                 "a caller that never held the probe must not free it — the "
                         + "outstanding probe stays the only one in flight");
+    }
+
+    // --- open-transition event emission ---
+
+    @Test
+    void openedTransitionEmitsExactlyOneEventPerTripOrReopen() {
+        List<LlmCircuitBreakerOpenedEvent> events = new ArrayList<>();
+        registry = new LlmCircuitBreakerRegistry(THRESHOLD, COOLDOWN_MS, clock,
+                LlmRouter.ConfigReader.fromMap(Map.of(
+                        LlmCircuitBreakerRegistry.CONFIG_KEY_EMBEDDINGS_BASE_URL,
+                        EMBED_ENDPOINT)),
+                events::add);
+        for (int i = 0; i < THRESHOLD; i++) {
+            registry.recordUnreachableForEmbeddings();
+        }
+        assertEquals(1, events.size(), "the CLOSED→OPEN trip emits exactly one event");
+        assertEquals("EMBEDDINGS", events.get(0).transportKind());
+        assertEquals(EMBED_ENDPOINT, events.get(0).endpoint());
+        assertFalse(events.get(0).probeReopen());
+
+        clock.advance(Duration.ofMillis(COOLDOWN_MS / 2));
+        for (int i = 0; i < 5; i++) {
+            assertFalse(registry.tryAcquireForEmbeddings());
+        }
+        assertEquals(1, events.size(), "denied acquisitions inside the cooldown emit nothing");
+
+        clock.advance(Duration.ofMillis(COOLDOWN_MS / 2));
+        assertTrue(registry.tryAcquireForEmbeddings(), "cooldown elapsed: the probe is admitted");
+        registry.recordUnreachableForEmbeddings();
+        assertEquals(2, events.size());
+        assertEquals("EMBEDDINGS", events.get(1).transportKind());
+        assertEquals(EMBED_ENDPOINT, events.get(1).endpoint());
+        assertTrue(events.get(1).probeReopen(), "the failed probe re-open is flagged");
+    }
+
+    @Test
+    void deniedCallsDuringOpenEmitNoEvent() {
+        List<LlmCircuitBreakerOpenedEvent> events = new ArrayList<>();
+        registry = new LlmCircuitBreakerRegistry(THRESHOLD, COOLDOWN_MS, clock,
+                LlmRouter.ConfigReader.fromMap(Map.of(
+                        LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL, DEFAULT_ENDPOINT)),
+                events::add);
+        for (int i = 0; i < THRESHOLD; i++) {
+            registry.recordUnreachableForTask(ModelTask.CHAT_AGENT);
+        }
+        assertEquals(1, events.size());
+        clock.advance(Duration.ofMillis(COOLDOWN_MS / 2));
+        for (int i = 0; i < 10; i++) {
+            assertFalse(registry.tryAcquireForTask(ModelTask.CHAT_AGENT));
+        }
+        assertEquals(1, events.size(),
+                "denied acquisitions are not endpoint observations and emit nothing");
+    }
+
+    @Test
+    void recoveryAndHealthyCallsEmitNoEvent() {
+        List<LlmCircuitBreakerOpenedEvent> events = new ArrayList<>();
+        registry = new LlmCircuitBreakerRegistry(THRESHOLD, COOLDOWN_MS, clock,
+                LlmRouter.ConfigReader.fromMap(Map.of(
+                        LlmCircuitBreakerRegistry.CONFIG_KEY_EMBEDDINGS_BASE_URL,
+                        EMBED_ENDPOINT)),
+                events::add);
+        assertTrue(registry.tryAcquireForEmbeddings());
+        registry.recordReachableForEmbeddings();
+        assertEquals(0, events.size(), "healthy steady-state calls emit nothing");
+        for (int i = 0; i < THRESHOLD; i++) {
+            registry.recordUnreachableForEmbeddings();
+        }
+        assertEquals(1, events.size());
+        clock.advance(Duration.ofMillis(COOLDOWN_MS));
+        assertTrue(registry.tryAcquireForEmbeddings());
+        registry.recordReachableForEmbeddings();
+        assertTrue(registry.tryAcquireForEmbeddings());
+        registry.recordReachableForEmbeddings();
+        assertEquals(1, events.size(),
+                "recovery emits nothing — a mutation that fires on close or on "
+                        + "every acquire fails here");
     }
 
     // --- helpers ---

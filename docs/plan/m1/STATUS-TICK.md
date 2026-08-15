@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 21 |
+| pending | 20 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 46 |
+| done | 47 |
 | deferred | 0 |
 | abandoned | 0 |
 | **total** | **67** |
@@ -29,7 +29,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-825 — Disclose the no-refetch status of locally-staged GGUFs (complexity: low, risk: low)
 - M1-827 — Fail loud when the GPU container would see no device (complexity: medium, risk: medium)
 - M1-833 — Document reboot resilience in guides and design notes (complexity: low, risk: low)
-- M1-834 — Admin-notify on LLM circuit-breaker open transitions (complexity: medium, risk: medium)
 - M1-835 — Truthful boot signal for unresolvable LLM endpoints (complexity: medium, risk: medium)
 - M1-836 — /asset-enable admin command to reset a failed asset pair (complexity: medium, risk: medium)
 - M1-838 — Bundle simplex-chat v7.0.0; re-verify launch surface (complexity: medium, risk: high)
@@ -80,6 +79,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-834 | Admin-notify on LLM circuit-breaker open transitions | 2026-08-15 | round 2 APPROVE |
 | M1-832 | Full-stack lifecycle verb prod/scripts/stack.sh | 2026-08-15 | round 1 APPROVE |
 | M1-831 | Doctor fails rootless Docker hosts without linger | 2026-08-15 | round 1 APPROVE |
 | M1-830 | Port prod restart-policy drift into docker-compose.yml | 2026-08-15 | round 1 APPROVE |
@@ -89,7 +89,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-824 | Stage operator-local GGUF files into the model volume | 2026-08-15 | round 2 APPROVE |
 | M1-823 | Hard-fail malformed GGUF URLs in the download preflight | 2026-08-15 | round 2 APPROVE |
 | M1-821 | restore.sh failure paths print verify steps + exact commands | 2026-08-15 | round 2 APPROVE |
-| M1-820 | Lint that applied Flyway migrations are content-immutable | 2026-08-15 | round 1 APPROVE |
 
 ---
 
@@ -171,7 +170,7 @@ M1-831 (done)
   └── M1-833 (pending) [see above]
 M1-832 (done)
   └── M1-833 (pending) [see above]
-M1-834 (pending) ← runnable
+M1-834 (done)
 M1-835 (pending) ← runnable
 M1-836 (pending) ← runnable
 M1-838 (pending) ← runnable
