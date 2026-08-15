@@ -1,7 +1,7 @@
 ---
 id: M1-850
 title: "Measure Krea native-prompt holding vs the translation leg"
-status: in-progress
+status: done
 created: 2026-08-14
 last_updated: 2026-08-15
 flow: tick
@@ -86,7 +86,21 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS FAIL, SECURITY PASS, TEST-ADEQUACY NOT-APPLICABLE, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "3 files changed, 125 insertions(+), 12 deletions(-)"
+    findings: "1 rework item (0 critical/high): the record's status line claims §1-§10 are the pre-registered revision verbatim, but this diff added a 'Scoring resolution as executed' bullet to §6 — move the bullet into the results addenda or name the §6 exception in the status line. 4 candidate findings falsified-and-dropped (bullet self-discloses as-executed; en row not a test pair; earlier r1 build failure environmental; krea_small cs PASS follows the locked statistic)"
+    verdict_file: .scratch/tick-review-M1-850-r1.txt
+  - round: 2
+    date: 2026-08-15
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY NOT-APPLICABLE, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "fix hunks 3 files changed, 29 insertions(+), 7 deletions(-) (rework item + bookkeeping); full diff 3 files, 148 insertions(+), 13 deletions(-)"
+    findings: "round-1 item 1 SATISFIED — 'Scoring resolution as executed' moved unchanged from §6 into §11 (probe: heading line 185, bullet line 194); §1-§10 restored to the pre-registered revision, the status line's verbatim claim now holds"
+    verdict_file: .scratch/tick-review-M1-850-r2.txt
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -230,3 +244,17 @@ the user is told with the record in hand.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-850-image-prompt-translation-skip-1.md
 ```
+
+## Round 1 rework
+
+REWORK ITEMS:
+1. FINDING 1: In docs/measurement/image-prompt-holding.md, either move the
+   "Scoring resolution as executed" bullet out of §6 (lines 138-142) into
+   the results addenda (§11/§12), or amend the status line (lines 9-11) to
+   name §6 as the one section the results revision touched — so the record
+   no longer claims §1-§10 are verbatim the pre-registered revision when
+   they are not. Evaluated via:
+   `grep -n 'as executed' docs/measurement/image-prompt-holding.md` lands
+   below the "## 11. Results" heading, OR
+   `sed -n '9,11p' docs/measurement/image-prompt-holding.md` names the §6
+   exception instead of the bare "verbatim" claim.

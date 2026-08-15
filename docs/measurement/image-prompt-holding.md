@@ -135,11 +135,6 @@ failing verification is VOIDED, not scored; corrections are recorded here.
   averaged into them.
 - A scene whose native arm collapses stays in its cell as a hard defect —
   never dropped, never averaged away.
-- Scoring resolution as executed: the primary pass scored full PNGs for two
-  of its six scorer slices and 900-1000 px JPEG renders for the rest; the
-  reviewer round scored 1000 px JPEG renders throughout. Element and hygiene
-  judgments are legible at that scale (the sign text included); disagreements
-  between the passes went to the adjudication pass regardless of resolution.
 
 ## 7. Run context (commit pin — the measured-surfaces-are-moving rule,
 translator-slot.md:69-71)
@@ -195,6 +190,12 @@ Arm-B prompts are the production leg's own outputs, generated after the
 pre-registration commit; the leg reproduced byte-identically on every call
 (the verification pass and the arm-B pass agree on all 16 translations,
 including the S1.tr drift noted in §5).
+
+Scoring resolution as executed: the primary pass scored full PNGs for two
+of its six scorer slices and 900-1000 px JPEG renders for the rest; the
+reviewer round scored 1000 px JPEG renders throughout. Element and hygiene
+judgments are legible at that scale (the sign text included); disagreements
+between the passes went to the adjudication pass regardless of resolution.
 
 ### 11.1 Per-cell element totals and hygiene columns
 
