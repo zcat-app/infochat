@@ -145,7 +145,8 @@ its citation deficit below. No-bleed (G7, title-exempt per amendment): zero
 prose-bleed defects both arms.
 
 Tie test (one-sided sign, locked table): the tie HOLDS in every gemma cell
-(largest discordancy D=4, cs X-arm L=3 — below the D=4 reject bound of 4/4;
+(largest discordancy D=4 on tr X-arm with L=1; the largest loss count is
+cs X-arm L=3 at D=3 — every cell sits below the D<5 never-reject bound;
 n=16 per cell, power caveat logged: at D≤4 the test is weak, so "tie holds"
 means "no demonstrated inferiority", not "proven equality").
 
@@ -198,6 +199,17 @@ as its defect row). The incumbent calls tools in 10/35 expected scenarios
 grammar, delivered as user-visible text (G1-HARD + G6 defect, stays in its
 cell). L0: gemma tool-loop CLEAN except tr (that collapse); incumbent one
 G5 (ru t05: URL outside the scenario's permitted set).
+
+Harness divergence disclosure: the snapshot dispatcher approximates
+semanticSearch with lexical token overlap (cosine→lexical, campaign
+decision logged) and does NOT model the production query-anchor
+translation (M1-746, D58: in a declared non-English scope every
+semanticSearch query — pre-fetch and model-initiated — is translated to
+the English corpus anchor before the retrieval arms). The model-issued
+non-English-query zero-result misses recorded above are therefore a
+property of the stand-in, not production behavior; the searchPosts tags
+path (English controlled vocabulary, no translation) genuinely misses as
+observed and stands.
 
 ### A/B verdict — context translation (per language)
 
