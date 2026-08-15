@@ -6,8 +6,9 @@ the evidence gate behind the per-model translation-skip flag direction
 (docs/plan/future-features.md §D6) under D5's bar-clearing rule: measured, or
 the leg stays.
 
-**Status: PRE-REGISTERED — thresholds and protocol locked before any arm
-runs. No results in this revision.**
+**Status: FINAL — arms rendered, blind-scored, reviewer round and
+adjudication complete. Thresholds and protocol (§1-§10) are the pre-registered
+revision verbatim; they landed on main before any arm ran.**
 
 ## 1. The bar (pre-registered, locked before any arm runs)
 
@@ -134,6 +135,11 @@ failing verification is VOIDED, not scored; corrections are recorded here.
   averaged into them.
 - A scene whose native arm collapses stays in its cell as a hard defect —
   never dropped, never averaged away.
+- Scoring resolution as executed: the primary pass scored full PNGs for two
+  of its six scorer slices and 900-1000 px JPEG renders for the rest; the
+  reviewer round scored 1000 px JPEG renders throughout. Element and hygiene
+  judgments are legible at that scale (the sign text included); disagreements
+  between the passes went to the adjudication pass regardless of resolution.
 
 ## 7. Run context (commit pin — the measured-surfaces-are-moving rule,
 translator-slot.md:69-71)
@@ -180,3 +186,94 @@ encoder blob yet degraded hard on cs/tr, so this campaign measures per
 - Per-scene results do not generalize beyond the scene set's difficulty
   range (four mid-complexity element scenes); text-heavy or typographic
   prompts are covered only by S3's single sign element.
+
+## 11. Results
+
+Rendered 2026-08-15 against the §7 pin: 144 cell images (160 cell entries;
+the 16 en arm-B entries reuse arm A by construction), zero render failures.
+Arm-B prompts are the production leg's own outputs, generated after the
+pre-registration commit; the leg reproduced byte-identically on every call
+(the verification pass and the arm-B pass agree on all 16 translations,
+including the S1.tr drift noted in §5).
+
+### 11.1 Per-cell element totals and hygiene columns
+
+40 = 8 images x 5 elements. Hygiene columns beside the headline, never
+averaged.
+
+| tier | lang | arm A | arm B | A collapse | A gibberish |
+|---|---|---|---|---|---|
+| krea_bf16 | cs | 34/40 | 40/40 | 0 | 0 |
+| krea_bf16 | es | 40/40 | 40/40 | 0 | 0 |
+| krea_bf16 | ru | 37/40 | 40/40 | 0 | 0 |
+| krea_bf16 | tr | 35/40 | 38/40 | 0 | 0 |
+| krea_small | cs | 35/40 | 39/40 | 0 | 0 |
+| krea_small | es | 40/40 | 40/40 | 0 | 0 |
+| krea_small | ru | 37/40 | 40/40 | 0 | 0 |
+| krea_small | tr | 34/40 | 38/40 | 0 | 0 |
+| both | en | 40/40 | (=A) | 0 | 0 |
+
+No cell in either arm recorded a hard hygiene defect: every S3 sign rendered
+legibly as 'CAFE LUNA' in both arms, and no image collapsed its scene subject.
+
+### 11.2 The bar-clearing matrix (per (tier, language))
+
+Tie = one-sided exact binomial on discordant scene-element pairs, alpha=0.05
+(§1); a pair with any hard hygiene defect FAILs regardless (none occurred).
+
+| tier | lang | discordant pairs | against A | p | tie | hygiene | verdict |
+|---|---|---|---|---|---|---|---|
+| krea_bf16 | cs | 6 | 6 | 0.0156 | REJECTED | clean | **FAIL** |
+| krea_bf16 | es | 0 | 0 | 1.0 | ok | clean | PASS |
+| krea_bf16 | ru | 3 | 3 | 0.125 | ok | clean | PASS |
+| krea_bf16 | tr | 3 | 3 | 0.125 | ok | clean | PASS |
+| krea_small | cs | 6 | 5 | 0.1094 | ok | clean | PASS |
+| krea_small | es | 0 | 0 | 1.0 | ok | clean | PASS |
+| krea_small | ru | 3 | 3 | 0.125 | ok | clean | PASS |
+| krea_small | tr | 4 | 4 | 0.0625 | ok | clean | PASS |
+
+en is the reference arm (arm B = arm A by construction), not a test pair.
+
+### 11.3 The one FAIL, in detail
+
+krea_bf16 cs: six discordant element pairs, all six against the native arm —
+S2 seed 2002 "exactly three bottles" (native renders four; translated renders
+three), S3 seeds 3001 and 3002 "door below the sign" and "two chairs outside"
+(native renders the sign on the side wall with the door beside it and stools;
+translated renders the layout correctly), S4 seed 4002 "yellow frisbee"
+(native renders a chartreuse disc; translated a yellow one). The same scene
+set at krea_small cs discorded 6 pairs but 5 against A / 1 against B — one
+discordance direction short of the bar. The cs native-prompt holding is
+therefore tier-split: the fp8-scaled-encoder tier holds (barely), the bf16
+tier does not clear the pre-registered bar.
+
+### 11.4 Translator-leg latency (deployment box, round-trip the skip saves)
+
+16 arm-B calls: min 888 ms, median 1006 ms, max 1299 ms (the 16 fixture-
+verification calls, same shape: min 820, median 1052, max 1255 ms). One
+remote round-trip per non-en /image prompt, ~1 s.
+
+### 11.5 Scoring-pass agreement
+
+Primary and reviewer passes agreed on 135 of 144 images; 9 disagreements went
+to adjudication: three copper/bronze teapots the reviewer passed as silver
+(primary upheld), one neon-yellow frisbee the reviewer failed (overruled —
+neon yellow is within yellow), four "third chair inside the cafe" readings
+settled by rule (the element counts outside chairs; indoor seating is
+neutral), and one gibberish-text flag on window lettering settled by rule
+(the hygiene class covers the sign only; the sign read 'CAFE LUNA').
+Adjudications are recorded in the harness decision log.
+
+## 12. What the numbers do not settle (results addenda)
+
+- The krea_bf16 cs FAIL rests on six discordant pairs at n=40 — the bar's
+  small-sample edge, exactly the sensitivity the pre-registration chose. A
+  re-run with different seeds could flip it either way; the bar says what it
+  says, and the wizard table seeds no krea_bf16 cs row from this record.
+- The shared miss patterns (stools-for-chairs, side-mounted signs) appear in
+  BOTH arms of several cells — Krea's rendering priors for the S3 scene, not
+  a language effect; they cancel in the paired design and surface only in the
+  element totals.
+- Arm B scored 40/40 in cs and ru at both tiers: the production translation
+  leg remains a strong baseline — skipping it trades a ~1 s round-trip for
+  measured holding that is, in two of eight test pairs, not there.
