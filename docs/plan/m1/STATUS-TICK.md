@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 7 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 64 |
+| done | 65 |
 | deferred | 0 |
 | abandoned | 0 |
 | **total** | **71** |
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-844 — Measure grounded in-language chat with the tool loop (complexity: high, risk: medium)
+- M1-845 — Spec: switchable translation pipeline (pivot vs direct) (complexity: medium, risk: high)
 - M1-854 — Recalibrate image preview to real generator output (complexity: medium, risk: medium)
 - M1-855 — SimpleX v7 completion contract on the live bot path (complexity: high, risk: medium)
 
@@ -44,7 +44,6 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-845 — blocked_by: M1-844 (pending)
 - M1-846 — blocked_by: M1-845 (pending)
 - M1-848 — blocked_by: M1-845 (pending)
 - M1-849 — blocked_by: M1-846 (pending), M1-847 (done), M1-848 (pending), M1-853 (done)
@@ -66,6 +65,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-844 | Measure grounded in-language chat with the tool loop | 2026-08-16 | round 2 APPROVE |
 | M1-853 | Land the observed streaming usage opt-in request shape | 2026-08-15 | round 1 APPROVE |
 | M1-852 | Observe streaming usage opt-in across the LLM fleet | 2026-08-15 | round 1 APPROVE |
 | M1-851 | Per-model image-prompt translation skip: flag + amendment | 2026-08-15 | round 1 APPROVE |
@@ -75,7 +75,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-842 | Outbound preview generation + SPI preview field | 2026-08-15 | round 1 APPROVE-WITH-FIXES |
 | M1-841 | Probe SimpleX image-type composed-message surface | 2026-08-15 | round 1 APPROVE |
 | M1-840 | Re-verify SimpleX XFTP attachment surface on CLI v7.0.0 | 2026-08-15 | round 1 APPROVE |
-| M1-839 | Re-verify SimpleX text/group wire forms on CLI v7.0.0 | 2026-08-15 | round 1 APPROVE-WITH-FIXES |
 
 ---
 
@@ -166,8 +165,8 @@ M1-838 (done)
 M1-841 (done)
   └── M1-842 (done)
         └── M1-843 (done)
-M1-844 (pending) ← runnable
-  └── M1-845 (pending)
+M1-844 (done)
+  └── M1-845 (pending) ← runnable
         ├── M1-846 (pending)
         │     └── M1-849 (pending)
         └── M1-848 (pending)

@@ -1,9 +1,9 @@
 ---
 id: M1-844
 title: "Measure grounded in-language chat with the tool loop"
-status: pending
+status: done
 created: 2026-08-14
-last_updated: 2026-08-14
+last_updated: 2026-08-16
 flow: tick
 reproduction: >-
   Probe: grep -n 'Parametric-only' docs/measurement/lang-quality.md
@@ -86,11 +86,43 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS FAIL, SECURITY PASS, TEST-ADEQUACY NOT-APPLICABLE, MAINTAINABILITY FAIL, SCOPE PASS"
+    diff_stats: "3 files, +288/-14"
+    rework_items: 4
+    verdict_file: .scratch/tick-review-M1-844-r1.txt
+  - round: 2
+    date: 2026-08-15
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY NOT-APPLICABLE, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "3 files, +354/-15 (round-2 fix hunks: docs/measurement/direct-chat-e2e.md only); rework items 4/4 SATISFIED"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-844-r2.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check: >-
+  start 2026-08-15 — lint BLOCKER (analysis_ref unresolvable in the
+  worktree) resolved: docs/plan/m1/tick-analysis/ is gitignored by design,
+  the file copied into the worktree per the M1-835 precedent. Reproduction
+  probes re-run clean (lang-quality.md:156 exact text; "grounded" grep
+  single hit). Citations spot-checked: lang-quality.md:14-17/:50/:84-90/
+  :122-125/:139-141/:156, future-features.md:386-453, live-text-streaming.
+  md:157-160, translator-slot.md:69-71, D29/D58 all verified. Analysis
+  pitfalls P7/P15/P18/P20 all present. blocked_by empty — no test
+  enumeration owed. P20 refined by user decision: the pin must postdate
+  only landed batch tickets touching the measured surfaces (start-time
+  census in the P20 entry — none of the ten pending touch them); pin
+  244fcf66. Arms: the two named candidates only — user declined adding
+  qwen3.6-35b-a3b (its exclusion is already decided on the conjunctive
+  bar; its collapse class is amplified, not rescued, by English context).
+  Branch-commit shape: the record lands as two commits on the branch
+  (thresholds lock before any arm runs, then results) per acceptance item
+  1; the squash merge preserves the lang-quality single-commit-on-main
+  posture with the lock asserted in the record header.
 escalation_reason:
 ---
 
@@ -141,8 +173,13 @@ Numbered per the analysis document; this ticket carries P7, P15, P18, P20.
   over-strictness lesson, lang-quality.md:139-141), fixtures not
   retranslations where idiom matters, and the incumbent's refusal misfires
   re-checked under grounded conditions.
-- P20: soft sequencing — the run starts after the M1-819..843 batch lands;
-  the pinned commit must be the post-batch tree, not a mid-batch one.
+- P20: soft sequencing — refined at start (user decision 2026-08-15): the
+  pinned commit must postdate every landed batch ticket that touches the
+  measured surfaces (chat prompt builders, tool instructions, directives,
+  chat tool loop). Census at start: M1-822/827/835/836/838/839/840/841/842/
+  843 files_scope reviewed — none touch the measured surfaces (restore, GPU,
+  simplex, image work); the still-pending remainder is pin-neutral. Pin:
+  244fcf66.
 
 ## Approach
 
@@ -158,7 +195,7 @@ Numbered per the analysis document; this ticket carries P7, P15, P18, P20.
      protocol; record corrections.
   2. Write and LOCK the thresholds (acceptance item 1) before any arm runs.
   3. Render prompts through the real prompt builders against the pinned
-     post-batch commit (P18, P20) — no idealized prompts.
+     commit (P18, P20) — no idealized prompts.
   4. Run the arms: gemma-4-26b-a4b (the parametric bar-clearer) and the
      incumbent DeepSeek-V4-Flash (reference) minimum; grounded leg with
      English context AND with translated context (the A/B); tool-loop leg.
@@ -193,7 +230,9 @@ by its named grep probe — and mvn verify is green.
   every (arm × language) the registry could cite.
 - P18 → items 1 (thresholds predate results), 7 (voided fixtures named), 8
   (commit pin), 9 (refusal re-check) — the record's own gates.
-- P20 → item 8's pin — the recorded commit is post-batch.
+- P20 → item 8's pin — the recorded commit postdates every landed batch
+  ticket touching the measured surfaces (start-time census in the P20
+  entry).
 - failure mode → items 3 and 6: a protocol-collapse scenario stays in its
   cell as a defect (never dropped), and an L0 defect forces FAIL regardless
   of a judgement tie — the campaign's zero-defect bar applied, not
@@ -217,3 +256,28 @@ wording review.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-844-streaming-translation-switch-1.md
 ```
+
+## Round 1 rework
+
+1. Finding 1: report the tool-loop leg's per-language judgement pass rates
+   and discordant (D, L) counts in docs/measurement/direct-chat-e2e.md:163-180
+   and make every matrix TOOL-LOOP cell (:222-226) follow from that reported
+   data — verified via grep -n -i 'tool-loop'
+   docs/measurement/direct-chat-e2e.md showing the tie-test data, with each
+   PASS in the matrix's TOOL-LOOP column tracing to a reported, non-rejected
+   sign test.
+2. Finding 2: reconcile the tool-loop table's /7 denominators
+   (docs/measurement/direct-chat-e2e.md:167-169) with the locked n=8 — either
+   correct the denominators or add one sentence explaining the eighth
+   scenario — verified via grep -nE '/7|/8'
+   docs/measurement/direct-chat-e2e.md showing agreement with the lock or the
+   explanatory line.
+3. Finding 3: add the steady-state tok/s rate per arm to the latency table
+   (docs/measurement/direct-chat-e2e.md:199-203) — verified via grep -n
+   'tok/s' docs/measurement/direct-chat-e2e.md returning the new column or
+   rate line.
+4. Finding 4: reword the record header (docs/measurement/direct-chat-e2e.md:3-5)
+   to a past-tense lock assertion naming commit d03f5d38 — verified via grep
+   -n 'no result has been measured yet' docs/measurement/direct-chat-e2e.md
+   returning nothing and grep -n 'd03f5d38'
+   docs/measurement/direct-chat-e2e.md showing the reworded header.
