@@ -8,6 +8,8 @@ import org.junit.jupiter.api.Test;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -70,12 +72,42 @@ class LiveSimpleXHarnessFrameTest {
         // Live-corrected 2026-07-03 (4b-3 run): ComposedMessage.mentions maps
         // display name -> the sender-local NUMERIC groupMemberId; simplex-chat
         // translates it to the wire memberId the bot byte-compares (D51). The
-        // original {memberId} object value is rejected by v6.5.4.1 with
+        // original {memberId} object value is rejected with
         // "bad chat command: Failed reading: empty".
         JsonNode mentionValue = composed.path("mentions").path("Admin-Reno");
         assertTrue(mentionValue.isIntegralNumber(),
                 "mention value must be the numeric local groupMemberId, got: " + mentionValue);
         assertEquals(3L, mentionValue.asLong());
+        // Live-corrected 2026-08-15 (M1-839): getCIMentions drops a
+        // mentions{} map without formatted text naming the member — the
+        // {"mention":"<name>"} segment is REQUIRED, else mention-less.
+        JsonNode segments = composed.path("msgContent").path("formattedText");
+        StringBuilder reconstructed = new StringBuilder();
+        boolean mentionSegmentFound = false;
+        for (JsonNode segment : segments) {
+            reconstructed.append(segment.path("text").asText());
+            JsonNode mentioned = segment.path("format").path("mention");
+            if (!mentioned.isMissingNode()) {
+                mentionSegmentFound = true;
+                assertEquals("Admin-Reno", mentioned.asText(),
+                        "the mention segment names the mentioned member");
+                assertEquals("@Admin-Reno", segment.path("text").asText());
+            }
+        }
+        assertTrue(mentionSegmentFound, "formattedText carries the @-mention segment");
+        assertEquals("@Admin-Reno /help", reconstructed.toString(),
+                "formattedText segments reconstruct the message text exactly (the codec span guard)");
+    }
+
+    @Test
+    void mentionEnvelopeWithoutMentionSpanIsRejected() {
+        // A mention the message text does not carry would be an "invisible
+        // mention" — simplex rejects those at send; the harness refuses to
+        // compose one instead of sending a mention-less message silently.
+        assertThrows(IllegalArgumentException.class,
+                () -> LiveSimpleXClient.encodeMentionSendCommand(
+                        "live-user-4", "5", "plain text without the span",
+                        new LiveSimpleXClient.GroupMember(3, "Admin-Reno")));
     }
 
     @Test
@@ -83,7 +115,7 @@ class LiveSimpleXHarnessFrameTest {
         String production = SimpleXMessageCodec.encodeSendCommand(
                 "c1", new ScopeRef.Group("5"), "hello group");
         String mention = LiveSimpleXClient.encodeMentionSendCommand(
-                "c1", "5", "hello group",
+                "c1", "5", "@Admin-Reno hello group",
                 new LiveSimpleXClient.GroupMember(3, "Admin-Reno"));
 
         JsonNode productionRoot = MAPPER.readTree(production);
@@ -97,13 +129,22 @@ class LiveSimpleXHarnessFrameTest {
         assertTrue(mentionCmd.startsWith(prefix));
 
         // The harness composed message is the production composed message plus
-        // EXACTLY the mentions{} object — no other divergence from the one
-        // wire-shape source of truth (D-live-9).
+        // EXACTLY the mentions{} object and the formattedText the mention
+        // requires — no other divergence from the one wire-shape source of
+        // truth (D-live-9).
         JsonNode productionComposed = MAPPER.readTree(productionCmd.substring(prefix.length())).get(0);
         JsonNode mentionComposed = MAPPER.readTree(mentionCmd.substring(prefix.length())).get(0);
-        assertEquals(productionComposed.get("msgContent"), mentionComposed.get("msgContent"));
+        assertEquals(productionComposed.get("msgContent").get("type"),
+                mentionComposed.get("msgContent").get("type"));
+        assertEquals(productionComposed.get("msgContent").get("text").asText(),
+                mentionComposed.get("msgContent").get("text").asText().replace("@Admin-Reno ", ""),
+                "same body text once the mention span is stripped");
         assertEquals(1, productionComposed.size(), "production composed message carries msgContent only");
         assertEquals(2, mentionComposed.size(), "harness adds exactly the mentions object");
         assertTrue(mentionComposed.has("mentions"));
+        assertTrue(mentionComposed.path("msgContent").has("formattedText"),
+                "harness msgContent carries the mention formattedText");
+        assertFalse(productionComposed.path("msgContent").has("formattedText"),
+                "production plain sends carry no formattedText");
     }
 }

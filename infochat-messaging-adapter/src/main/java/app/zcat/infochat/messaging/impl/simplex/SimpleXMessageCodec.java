@@ -26,7 +26,9 @@ import java.util.regex.Pattern;
 
 /**
  * JSON codec for the simplex-chat WebSocket bot API. Pure functions; no I/O,
- * no state. The simplex-chat envelope shape (verbatim from
+ * no state. Wire shapes live-pinned per-capture (inline provenance notes);
+ * v7.0.0 re-verification + the drifted-encode fix: M1-839.
+ * The simplex-chat envelope shape (verbatim from
  * {@code docs/design/06-messaging.md} §6.4.5) is JSON wrapping a SimpleX
  * command string:
  *
@@ -168,7 +170,7 @@ final class SimpleXMessageCodec {
         String target = targetSelector(scope);
         String cmd = "/_update item " + target + " " + chatItemId
                 + " live=" + (live ? "on" : "off")
-                + " json " + textContent(text);
+                + " json " + updatedMessageContent(text);
         return envelope(corrId, cmd);
     }
 
@@ -257,9 +259,9 @@ final class SimpleXMessageCodec {
      * with {@code chatCmdError commandError "Failed reading: empty"}
      * (live-confirmed, M1-510). v1 sends one message per command, so the array
      * carries exactly one element; outbound chunking (§6.3.4) still emits one
-     * {@code /_send} per chunk. The {@code /_update item} edit path keeps the
-     * single-object {@link #textContent} form — an edit targets exactly one
-     * existing item, so there is no composed-message list.
+     * {@code /_send} per chunk. The {@code /_update item} edit path uses the
+     * single-object {@link #updatedMessageContent} form — an edit targets
+     * exactly one existing item, so there is no composed-message list.
      */
     private static String composedMessageArray(String text) {
         ArrayNode payload = MAPPER.createArrayNode();
@@ -267,9 +269,12 @@ final class SimpleXMessageCodec {
         return payload.toString();
     }
 
-    /** Single-object composed message for the {@code /_update item} edit path. */
-    private static String textContent(String text) {
-        return composedMessage(text).toString();
+    /** The {@code /_update item} edit payload: the single-object {@code UpdatedMessage}
+     * — {@code msgContent} plus a REQUIRED empty {@code mentions} map (M1-839). */
+    private static String updatedMessageContent(String text) {
+        ObjectNode payload = composedMessage(text);
+        payload.putObject("mentions");
+        return payload.toString();
     }
 
     /** The {@code /_send} attachment payload: a one-element array whose composed message carries {@code filePath} plus a file-typed msgContent (the array form the text path documents). */

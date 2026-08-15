@@ -65,6 +65,23 @@ class SimpleXMessageCodecTest {
     }
 
     @Test
+    void encodeEditCommandCarriesMentionsKey() throws Exception {
+        // M1-839: the /_update UpdatedMessage json REQUIRES a mentions key —
+        // a msgContent-only payload is rejected "Failed reading: empty" on
+        // both pinned binaries (before/after frames in the ticket record).
+        String updateFrame = SimpleXMessageCodec.encodeUpdateCommand(
+                "corr-u", "9", new ScopeRef.Dm("contact-abc"), "Partial");
+        String updateCmd = MAPPER.readTree(updateFrame).get("cmd").asText();
+        assertTrue(updateCmd.endsWith(" json {\"msgContent\":{\"type\":\"text\",\"text\":\"Partial\"},\"mentions\":{}}"),
+                "the edit payload must be an UpdatedMessage with an empty mentions map: " + updateCmd);
+        String finalizeFrame = SimpleXMessageCodec.encodeFinalizeCommand(
+                "corr-f", "9", new ScopeRef.Dm("contact-abc"), "Done");
+        String finalizeCmd = MAPPER.readTree(finalizeFrame).get("cmd").asText();
+        assertTrue(finalizeCmd.endsWith(" json {\"msgContent\":{\"type\":\"text\",\"text\":\"Done\"},\"mentions\":{}}"),
+                "the finalize payload carries the same mentions map: " + finalizeCmd);
+    }
+
+    @Test
     void decode_directMessageYieldsInbound() {
         // An inbound direct-message newChatItem yields an Inbound carrying the
         // (contact_id, scope, body) tuple per acceptance item 7.
@@ -1211,12 +1228,10 @@ class SimpleXMessageCodecTest {
     @Test
     void encodeUpdateCommandEmitsSingleMsgContentObject() throws Exception {
         // Acceptance item 7: /_update item edits exactly ONE existing item, so
-        // its content stays a single {"msgContent":…} OBJECT, not the /_send
-        // array. NOTE: the array form is the live-confirmed fix for /_send; the
-        // /_update single-object form was NOT live-re-verified in this pass
-        // (live-editing would mutate a real message). It follows from the array
-        // existing only because a send composes multiple messages while an edit
-        // targets one (design §6.4.5).
+        // its content is a single UpdatedMessage OBJECT — msgContent plus the
+        // required empty mentions map — not the /_send array (an edit targets
+        // one item; a send composes several). Live-proven against the bundled
+        // v7.0.0 and a v6.5.4.1 control (M1-839 ticket record).
         String frame = SimpleXMessageCodec.encodeUpdateCommand(
                 "corr-2", "chat-item-9", new ScopeRef.Dm("5"), "Partial");
         String cmd = MAPPER.readTree(frame).get("cmd").asText();

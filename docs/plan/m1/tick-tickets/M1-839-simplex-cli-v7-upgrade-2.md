@@ -1,23 +1,31 @@
 ---
 id: M1-839
 title: "Re-verify SimpleX text/group wire forms on CLI v7.0.0"
-status: pending
+status: done
 created: 2026-08-14
-last_updated: 2026-08-14
+last_updated: 2026-08-15
+clarity_check: >-
+  2026-08-15 start pre-flight: lint green (tick-analysis/ is gitignored —
+  local-only in the primary; copied into this worktree, ignored path so no
+  diff impact); census grep re-runs clean; analysis P5/P9/P10/P11 all
+  landed; M1-838's added test (BundledSimplexCliPinTest, provider/config)
+  is off this ticket's seam, preserved trivially; design :665-691/:694-729/
+  :795-811 citations are stale by M1-838's +33-line surface-review insert —
+  content anchors verified at :765-800 (§6.4.4 field locations), :805+
+  (invitation flow), :917 (§6.2 array form); M1-838 tag-diff record read,
+  zero shape changes on this ticket's surfaces, no probe-order flags; host
+  probe binary confirmed v7.0.0.11. No blocking ambiguity.
 flow: tick
 reproduction: >-
-  to-be-written: SimpleXMessageCodecV7WireTest.v7CapturedDirectDmDecodesToInbound
+  SimpleXMessageCodecV7WireTest.v7CapturedDirectDmDecodesToInbound
   (infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/)
   — feeds the codec a direct-DM `newChatItems` frame freshly captured from the
   bundled v7.0.0 binary and asserts it decodes to Inbound with sender id,
-  body, and `meta.itemId` intact; the test cannot exist today because no
-  v7.0.0-captured frame exists in the tree (every SimpleXMessageCodecTest
-  fixture was captured from v6.5.4.1, M1-510), and the capture requires the
-  M1-838-upgraded binary. The codec's behavior on v7.0.0 frames is currently
-  UNVERIFIED — a green suite proves only that 2026-06 v6.5.4.1 captures still
-  parse (analysis P5). `start` converts the marker — capture the frame, write
-  the test, run it RED against any proven drift — before any fix code
-  (workflow §0).
+  body, and `meta.itemId` intact. Converted from the to-be-written marker at
+  start (2026-08-15): the frame was captured (loopback probe pair against the
+  M1-838-refreshed v7.0.0.11 host binary), the test written, and run — GREEN,
+  i.e. no decode drift on the direct-DM surface (the drifted surface proved
+  to be outbound /_update; see the evidence record).
 analysis_ref: docs/plan/m1/tick-analysis/simplex-cli-v7-upgrade.md
 blocked_by: [M1-838]
 files_scope:
@@ -64,6 +72,19 @@ decision_refs:
   - D51
   - D52
   - D74
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: APPROVE-WITH-FIXES
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY WARN (1 low, stale never-live-verified comment on encodeUpdateCommandEmitsSingleMsgContentObject), SCOPE PASS"
+    diff_stats: "8 files, +1216/-59"
+    fix_items: 1
+    verdict_file: .scratch/tick-review-M1-839-r1.txt
+    fix_probes: >-
+      1. grep -n "NOT live-re-verified" SimpleXMessageCodecTest.java → no hits
+      (exit 1); every changed line comment-only (diff-over-tree grep exit 1);
+      ./mvnw -B -pl infochat-messaging-adapter -am test-compile BUILD SUCCESS;
+      fixed tree .scratch/tick-fixes-M1-839.tree = 2c01651b4485f79feaed037f8e93c727a37b3558
 ---
 
 # M1-839: Re-verify SimpleX text/group wire forms on CLI v7.0.0
@@ -192,3 +213,136 @@ capture batch and lands as a SimpleXMessageCodecV7WireTest fixture.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-839-simplex-cli-v7-upgrade-2.md
 ```
+
+## Evidence record (2026-08-15, implementation)
+
+All probes ran on this deployment host against the M1-838-refreshed host
+binary (`prod/runtime/simplex-clients/bin/simplex-chat`, `--version` ->
+`SimpleX Chat v7.0.0.11`); capture logs under `/tmp/opencode/m1-839/`
+(throwaway, never committed). D37: fixture bodies are probe canaries
+("v7 probe ..."); the address fixture's two link values are same-grammar
+synthetic substitutions (SimpleXAddressQueryTest pattern); no real user
+traffic was captured, and both throwaway probe data-dirs were deleted.
+
+### Capture method
+
+Throwaway loopback probe pair (design 6.4.4 pattern): two fresh
+simplex-chat subprocesses (bot `--create-bot-display-name v7probe-bot` on
+15100, user `--user-display-name v7probe-user` on 15101; both bind
+127.0.0.1 only), user connects via the bot's `/ad`-created short link over
+the public SMP relays, bot accepts the contact request, then the scripted
+scenario drives every enumerated surface. Raw frames logged per side;
+provenance recorded per fixture in SimpleXMessageCodecV7WireTest.
+
+### Per-surface dispositions (acceptance item 2)
+
+Every disposition cites a v7.0.0-captured fixture, never a v6.5.4.1 capture:
+
+- direct DM `newChatItems` — captured; decodes Inbound (chatInfo.type,
+  contact.localDisplayName, meta.itemId, contactId) — UNCHANGED.
+- group message with `mentions{}` envelope — captured (see the send-form
+  note below): `chatItem.mentions` values are `{memberId, memberRef}`
+  objects (memberRef additive, ignored by the codec);
+  `chatInfo.groupInfo.membership.memberId` byte-equals the mention's
+  memberId — D51 anchor UNCHANGED; formattedText carries the mention span
+  and reconstructs the text exactly (span guard holds).
+- send-ack `newChatItems` with corrId — captured; SendAck with
+  `chatItems[0].chatItem.meta.itemId` — UNCHANGED.
+- `receivedGroupInvitation` + `/_join` response pair — captured;
+  ReceivedGroupInvitation (groupId, invitedBy.byContactId, type contact) +
+  userAcceptedGroupSent corrId response + async userJoinedGroup (both
+  Ignored) — UNCHANGED.
+- `userContactLink` (`/show_address`) — captured (short link present);
+  response shape identical to the v6.5.4.1 fixture — UNCHANGED.
+- `chatItemUpdated` live-edit finalize — captured (both the corrId ack on
+  the editor's connection and the recipient-side async echo); body path
+  `resp.chatItem.chatItem.content.msgContent.text` — UNCHANGED; codec
+  Ignores the type as before.
+- FAILURE-MODE `chatCmdError` — captured (corrId response to a bare-object
+  `/_send` payload): errorType.type enum tag, free-form message never
+  surfaced, fails closed PERMANENT — UNCHANGED.
+
+### Drift found and fixed (acceptance item 5 path)
+
+- `/_update` payload requires a `mentions` key. The production codec's
+  `{"msgContent":...}`-only edit payload is rejected
+  `chatCmdError commandError "Failed reading: empty"` on v7.0.0.11.
+  Control run against a v6.5.4.1 binary (extracted from the still-tagged
+  pre-M1-838 prod image): REJECTED IDENTICALLY — i.e. this is a latent
+  defect on every pinned version, not v6->v7 drift; the pre-ticket design
+  itself recorded the update form as "inferred ... not live-reverified".
+  Fix: `updatedMessageContent` (encode-side, `mentions:{}` always — the
+  bot never mentions); failing-first test
+  `SimpleXMessageCodecTest.encodeEditCommandCarriesMentionsKey` run RED,
+  then GREEN. Design section 6.2 "Update encoding" re-anchored.
+- Harness mention envelope was mention-silent. `getCIMentions`
+  (identical in both tags) silently DROPS the whole mentions{} map when the
+  message carries no formattedText naming the member —
+  `LiveSimpleXClient.encodeMentionSendCommand` (numeric mentions, no
+  formattedText) has therefore never delivered a real mention. Fixed to
+  the captured working form (formattedText segments +
+  `{"mention":"<name>"}` format + numeric id); pins updated in
+  `LiveSimpleXHarnessFrameTest` (numeric-value pin retained; adds the
+  formattedText pin and the invisible-mention rejection). No production
+  surface involved (the bot never mentions); live scenario s07's mention
+  steps become non-vacuous on the next live run.
+
+### Live re-run (acceptance item 4) — 2026-08-15, test instance
+
+Executed against the ISOLATED live-test deployment
+(`/home/infochat/infochat-test`, compose project `infochat-test`), NOT
+prod (prod containers untouched throughout; the user approved the test
+instance as the target). The test stack ran CONCURRENTLY with prod via a
+ports override (`docker-compose.ports.yml`, host 15432/11435; service
+traffic stays on the compose network, so only the loopback operator
+publishes moved). The instance was merged to current main, and BOTH app
+images were rebuilt from THIS ticket's worktree (code under test incl.
+the codec fix). Bot DB pre-migrated v6->v7 offline via the image's
+v7.0.0.11 binary one-shot (simplex-chat's own `.bak` copies landed beside
+the DBs; NOTE: my tar backup attempts failed on a host uid/chown quirk —
+the `.bench` 20260729 archive holds this bot's July identity as the
+disaster fallback; no issue arose). Bot profile renamed infochat-bot ->
+Admin-Reno for the ITs' BOT_DISPLAY_NAME fixture. LiveAdmin/LiveUser
+client identities provisioned fresh (contacts 10/11); admin via the
+re-armed claim token; registration flows driven per scenario.
+
+Per-scenario results (all with `-Dinfochat.live.simplex=true`):
+
+- LiveSimpleXRoundTripIT: PASS (admin /help round-trip; ~0.7 s).
+- s04 uninvited-dm-rejected: PASS (2.8 s; fixed D44 rejection delivered).
+- s03 invite-mint-consume: PASS (3.6 s; --open confirm-gate + D44
+  register).
+- s07 group-pending-approve-autopromote: PASS, 5/5 steps (4.0 s; mention
+  steps 311/317 ms) — the corrected D51 mention envelope (formattedText +
+  numeric id) is live-proven on v7: pending reply, /list-groups,
+  /approve-group, real group reply, auto-promote + group-admin command.
+  The invitation->/_join pair also live-proven (the provider's D47 gate
+  accepted the bot's join through the v7 frames).
+- s11 zcash-snapshot: PASS (2.8 s).
+- s12 chat-mode: PASS (96.3 s; real DeepSeek chat round-trips over v7
+  wire).
+- s15 full-happy-path: steps 1-4 PASS (invite mint/consume, /help,
+  /zcash real price data); step 5 (/summary) did not match the scenario's
+  fixed "No posts to summarize yet" expectation — HOST-FIXTURE mismatch,
+  not a v7 regression: this instance preserves a 3.8k-post data-plane
+  corpus whose ready_at the collector re-stamped in-window on boot, so
+  /summary -w 24h produces a REAL digest. A manual drive from the
+  live-user client confirmed the full digest body delivers over the v7
+  wire (~380 s, LLM-bound).
+- s10 summary-and-group-digest: NOT RUN — needs prod/live-seed.sh +
+  follows + an approved-group fixture + a config-aimed digest window
+  (D-live-8); its summary surface is evidenced by the s15 manual run and
+  its group surface by s07. Deferred with this disposition ("as host
+  fixtures allow").
+
+Adapter metrics after the runs: `adapter_outbound_total{outcome="ok"} 16`
+DM sends, no update-counter series — the production /_update edit path was
+not exercised by these flows (the digest delivered via plain sends); the
+edit-path v7 evidence is the loopback capture (c7/c8 accepted + the
+peer's chatItemUpdated finalize frame, committed as fixtures) plus the
+RED->GREEN encode test. No suite change forced anything into
+`mvn verify` (skipped-on-CI gate shape unchanged).
+
+Post-run state: test stack stopped (containers/volumes preserved — parked
+as found); bot profile left as Admin-Reno for future live runs; prod
+untouched.

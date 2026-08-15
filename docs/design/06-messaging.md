@@ -806,14 +806,15 @@
                                                                                                                                                                                                                                                         
   The decoder is pure (no I/O) and unit-tested with recorded JSON fixtures.
 
-  #### Live v6.5.4.1 field locations
+  #### Live v7.0.0 field locations
 
-  The decoded field paths below are confirmed against frames captured from a
-  live simplex-chat **v6.5.4.1** deployment (a throwaway loopback
-  `ws://127.0.0.1:5225` probe). Earlier hand-rolled fixtures encoded different
-  field names and silently dropped 100% of real inbound: the v6.5.4→v7.0.0
-  tag diff found no change to any of these paths (M1-838), and M1-839
-  re-captures them from the v7.0.0 binary.
+  The decoded field paths below are confirmed against frames captured from the
+  bundled simplex-chat **v7.0.0** binary (a throwaway loopback
+  `ws://127.0.0.1` probe pair, M1-839 re-capture 2026-08-15; committed as
+  `SimpleXMessageCodecV7WireTest` fixtures). Earlier hand-rolled fixtures
+  encoded different field names and silently dropped 100% of real inbound:
+  the original capture was live v6.5.4.1 (M1-510), and every path below is
+  identical across both binaries.
 
   - **chat-type discriminator** is `chatInfo.type` (`"direct"` / `"group"`),
     **not** `chatInfo.chatType`. A real `newChatItems` event with
@@ -841,7 +842,8 @@
 
   A `receivedGroupInvitation` async event (the bot was added to a group but has
   not yet joined — `membership.memberStatus == "invited"`) decodes to a
-  `ReceivedGroupInvitation` carrying two fields from the live v6.5.4.1 frame:
+  `ReceivedGroupInvitation` carrying two fields from the live v7.0.0 frame
+  (M1-839 re-capture; identical on v6.5.4.1, M1-515):
 
   - **group id** is `resp.groupInfo.groupId` (the same numeric id echoed into
     `/_join`), queue-address-validated at decode like every other group id.
@@ -863,7 +865,8 @@
   closes a prior redteam's vector 3 — the gate cannot be bypassed to make the
   bot join arbitrary groups.
 
-  `/_join #<groupId>` is live-confirmed against v6.5.4.1: it returns a
+  `/_join #<groupId>` is live-confirmed against v6.5.4.1 (M1-515) and
+  re-confirmed on the bundled v7.0.0 (M1-839 capture): it returns a
   `userAcceptedGroupSent` command response (`memberStatus "accepted"`) followed
   by an async `userJoinedGroup` (`memberStatus "connected"`), so the bot's
   membership transitions invited→connected. The join is issued fire-and-forget
@@ -938,9 +941,10 @@
   - DM: /_send @<contact> text=<base64-encoded text>                                                                                                                                                                                                    
   - Group: /_send #<group> text=<base64-encoded text>                              
 
-  #### Send content shape (live v6.5.4.1)
+  #### Send content shape (live v7.0.0)
 
-  The actual v6.5.4.1 bot-API `/_send` form (live-confirmed, superseding the
+  The actual bot-API `/_send` form (live-confirmed on v6.5.4.1, M1-510, and
+  re-captured from the bundled v7.0.0, M1-839; superseding the
   `text=<base64>` sketch above) takes the message content as a JSON **array** of
   composed messages:
 
@@ -951,23 +955,32 @@
   required. The array exists because a single send may compose multiple
   messages — v1 sends exactly one, so the array carries one element, and
   outbound chunking (§6.3.4) still emits one `/_send` per chunk. By contrast the
-  `/_update item` edit (below) keeps a single `{"msgContent": …}` **object**: an
-  edit targets exactly one existing item, so there is no composed-message list.
-  (The `/_update` single-object form is inferred from this asymmetry, not
-  live-re-verified — live-editing would mutate a real message.)
+  `/_update item` edit (below) takes a single `{"msgContent": …, "mentions": {}}`
+  **object**: an edit targets exactly one existing item, so there is no
+  composed-message list — and its `mentions` key is REQUIRED (live-proven on
+  both binaries, M1-839; see Update encoding below).
 
   #### Update encoding
 
   `update(handle, text)` and `finalize(handle, text)` both serialize to the SimpleX
   `APIUpdateChatItem` command:
 
-      /_update item <chatRef> <chatItemId> live=<on|off> json {"msgContent": {"type": "text", "text": "<text>"}}
+      /_update item <chatRef> <chatItemId> live=<on|off> json {"msgContent": {"type": "text", "text": "<text>"}, "mentions": {}}
 
   - `update` uses `live=on` so the recipient client renders the message with its
     live-update affordance.
   - `finalize` uses `live=off` so the message presents as a normal completed message.
   - The `chatItemId` is captured from each `APISendMessages` response and stored
     inside `SimplexMessageHandle`; callers never see it.
+  - The `mentions` key is **required**, not optional: a
+    `{"msgContent": …}`-only payload is rejected
+    `chatCmdError commandError "Failed reading: empty"`. Live-proven 2026-08-15
+    (M1-839) against both the bundled v7.0.0 and a v6.5.4.1 control binary —
+    the requirement is identical on both, so the codec's pre-M1-839
+    mentions-less payload was a latent defect on every pinned version (the
+    earlier design recorded the form as inferred, not live-verified; the edit
+    path could never have succeeded over the wire). The bot never sends
+    mentions, so the map is always empty.
 
   #### Update failure handling
 

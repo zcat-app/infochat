@@ -351,22 +351,30 @@ public final class LiveSimpleXClient implements AutoCloseable {
         return text.isTextual() ? Optional.of(text.asText()) : Optional.empty();
     }
 
-    /**
-     * Compose a group send carrying a D51 structured mention: the production
-     * codec's group-scope {@code /_send #<id> json [...]} form, plus a
-     * {@code mentions{}} map of display name → the sender-local NUMERIC
-     * {@code groupMemberId} (simplex-chat resolves it to the wire memberId the
-     * bot byte-compares). Live-corrected 2026-07-03 on the 4b-3 run: the
-     * original best-guess {@code {memberId}} object value is rejected by
-     * v6.5.4.1 ("bad chat command: Failed reading: empty"); the numeric form
-     * was probe-confirmed via raw {@code /_send} on the real CLI. Pinned by
-     * {@code LiveSimpleXHarnessFrameTest}.
-     */
+    /** Group send with a D51 structured mention: the production
+     * {@code /_send #<id> json [...]} form + numeric {@code mentions{}} + the
+     * formattedText mention segment (M1-839; without it mentions drop). */
     static String encodeMentionSendCommand(String corrId, String groupId, String text,
                                            GroupMember botMember) {
+        String span = "@" + botMember.displayName();
+        int at = text.indexOf(span);
+        if (at < 0) {
+            throw new IllegalArgumentException(
+                    "mention text must contain the bot's @<displayName> span: " + span);
+        }
+        ArrayNode formattedText = MAPPER.createArrayNode();
+        formattedText.add(textSegment(text.substring(0, at)));
+        ObjectNode mentionFormat = MAPPER.createObjectNode();
+        mentionFormat.put("mention", botMember.displayName());
+        ObjectNode mentionSegment = MAPPER.createObjectNode();
+        mentionSegment.set("format", mentionFormat);
+        mentionSegment.put("text", span);
+        formattedText.add(mentionSegment);
+        formattedText.add(textSegment(text.substring(at + span.length())));
         ObjectNode msgContent = MAPPER.createObjectNode();
         msgContent.put("type", "text");
         msgContent.put("text", text);
+        msgContent.set("formattedText", formattedText);
         ObjectNode mentions = MAPPER.createObjectNode();
         mentions.put(botMember.displayName(), botMember.groupMemberId());
         ObjectNode composed = MAPPER.createObjectNode();
@@ -378,6 +386,13 @@ public final class LiveSimpleXClient implements AutoCloseable {
         root.put("corrId", corrId);
         root.put("cmd", "/_send #" + groupId + " json " + payload);
         return root.toString();
+    }
+
+    private static ObjectNode textSegment(String text) {
+        ObjectNode segment = MAPPER.createObjectNode();
+        segment.putNull("format");
+        segment.put("text", text);
+        return segment;
     }
 
     /** Single listener for the single connection: assemble fragments, route complete frames. */
