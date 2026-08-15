@@ -250,6 +250,34 @@ fetch_gguf() {
   fi
 }
 
+# Stage an operator-local GGUF into the model volume instead of downloading it
+# (the GGUF prompts classify an absolute path answer). The probe/SHA block
+# duplicates fetch_gguf's inline (restore.sh twin sync, M1-808). $1 path, $2 filename, $3 expected-sha256 ("" to skip).
+stage_gguf() {
+  local path="$1" file="$2" expected="$3" dir actual
+  dir="$(dirname "$path")"
+  if docker run --rm -v infochat-llamacpp-models:/models --entrypoint ls "$CURL_IMAGE" "/models/$file" >/dev/null 2>&1; then
+    echo "skip GGUF staging ($file already present)"
+  else
+    echo "+ cp $path -> volume infochat-llamacpp-models/$file"
+    # argv-only, -u 0:0, read-only /stage mount: the fetch_gguf download posture.
+    if ! docker run --rm -u 0:0 -v infochat-llamacpp-models:/models -v "$dir":/stage:ro --entrypoint cp "$CURL_IMAGE" "/stage/$file" "/models/$file"; then
+      echo "FAIL: staging of $path into the model volume failed." >&2
+      exit 1
+    fi
+  fi
+  if [[ -n "$expected" ]]; then
+    actual="$(docker run --rm -v infochat-llamacpp-models:/models --entrypoint sha256sum "$CURL_IMAGE" "/models/$file" | awk '{print $1}')"
+    expected="$(printf '%s' "$expected" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$actual" != "$expected" ]]; then
+      echo "FAIL: GGUF checksum mismatch (expected $expected, got $actual); removing $file." >&2
+      docker run --rm -u 0:0 -v infochat-llamacpp-models:/models --entrypoint rm "$CURL_IMAGE" -f "/models/$file"
+      exit 1
+    fi
+    echo "GGUF checksum verified ($expected)"
+  fi
+}
+
 # Preflight one GGUF URL with a host HEAD before any download: the fetch runs
 # on the host's own network path (M1-808), so the host probe is same-path.
 # Network-class exits abort with guidance; a malformed URL (3) hard-fails; an
@@ -271,6 +299,7 @@ preflight_gguf_url() {
       echo "FAIL: $url is a malformed URL — the probe never reached the network (curl exit 3)." >&2
       echo "      This looks like a file path was pasted instead of a full download URL." >&2
       echo "      Paste the full https:// download URL, or press Enter for the pinned default." >&2
+      echo "      Or enter an absolute path to a local GGUF file to use it directly." >&2
       exit 1
     fi
     echo "WARN: $url answered but refused the HEAD probe (curl exit $rc) — reachability confirmed; continuing." >&2
@@ -391,12 +420,22 @@ case "$backend" in
     # compose service pins LLAMA_ARG_REASONING=off, so a reasoning-tuned GGUF
     # runs but never thinks — and the timeout/token recommendations assume that.
     echo "Note: thinking/reasoning is disabled on the llama.cpp server — a reasoning-tuned model will run but will not 'think', and the timeout/token recommendations below assume that."
-    read -rp "Generative GGUF — paste a full download URL, or press Enter for the pinned default ($LLAMACPP_GEN_GGUF_FILE): " gen_override
+    read -rp "Generative GGUF — paste a full download URL or an absolute local path, or press Enter for the pinned default ($LLAMACPP_GEN_GGUF_FILE): " gen_override
     if [[ -n "$gen_override" ]]; then
-      gen_url="$gen_override"
-      gen_file="$(gguf_basename "$gen_override")"
-      # Custom override keeps the optional-SHA prompt (operator-trusted TLS fetch).
-      read -rp "Generative GGUF SHA-256 (blank to skip integrity check): " gen_sha
+      if [[ "$gen_override" == http://* || "$gen_override" == https://* ]]; then
+        gen_url="$gen_override"
+        gen_file="$(gguf_basename "$gen_override")"
+        # Custom override keeps the optional-SHA prompt (operator-trusted TLS fetch).
+        read -rp "Generative GGUF SHA-256 (blank to skip integrity check): " gen_sha
+      elif [[ "$gen_override" == /* && -f "$gen_override" && -r "$gen_override" ]]; then
+        gen_url=""   # empty URL marks the staged source (preflight/fetch key on it)
+        gen_file="$(basename "$gen_override")"
+        read -rp "Generative GGUF SHA-256 (blank to skip integrity check): " gen_sha
+      else
+        echo "FAIL: '$gen_override' is neither a full download URL nor an absolute path to an existing file." >&2
+        echo "      Use a full http(s):// URL, or an ABSOLUTE path to a local GGUF file (relative paths are not accepted)." >&2
+        exit 1
+      fi
     else
       gen_url="$LLAMACPP_GEN_GGUF_URL"
       gen_file="$LLAMACPP_GEN_GGUF_FILE"
@@ -418,8 +457,14 @@ case "$backend" in
       # override is gated on an explicit operator confirmation — the real backstop
       # is EmbeddingMetadataStartupGuard, which refuses Collector startup on a
       # (model,dimension) mismatch (allow-model-change=false). Acceptance item 7.
-      read -rp "Embeddings GGUF — paste a full download URL, or press Enter for the pinned default ($LLAMACPP_EMB_GGUF_FILE, 768-dim): " emb_override
+      read -rp "Embeddings GGUF — paste a full download URL or an absolute local path, or press Enter for the pinned default ($LLAMACPP_EMB_GGUF_FILE, 768-dim): " emb_override
       if [[ -n "$emb_override" ]]; then
+        if ! [[ "$emb_override" == http://* || "$emb_override" == https://* ]] \
+           && ! [[ "$emb_override" == /* && -f "$emb_override" && -r "$emb_override" ]]; then
+          echo "FAIL: '$emb_override' is neither a full download URL nor an absolute path to an existing file." >&2
+          echo "      Use a full http(s):// URL, or an ABSOLUTE path to a local GGUF file (relative paths are not accepted)." >&2
+          exit 1
+        fi
         echo "WARNING: a custom embeddings model MUST produce ${EMBEDDINGS_DIMENSION}-dimensional vectors" >&2
         echo "         (infochat.embeddings.dimension=$EMBEDDINGS_DIMENSION, allow-model-change=false)." >&2
         echo "         A different dimension is rejected at Collector startup and cannot" >&2
@@ -429,8 +474,13 @@ case "$backend" in
           echo "FAIL: embeddings override not confirmed ${EMBEDDINGS_DIMENSION}-dim; aborting." >&2
           exit 1
         fi
-        emb_url="$emb_override"
-        emb_file="$(gguf_basename "$emb_override")"
+        if [[ "$emb_override" == http://* || "$emb_override" == https://* ]]; then
+          emb_url="$emb_override"
+          emb_file="$(gguf_basename "$emb_override")"
+        else
+          emb_url=""   # staged source — the empty-URL marker from the generative prompt
+          emb_file="$(basename "$emb_override")"
+        fi
         read -rp "Embeddings GGUF SHA-256 (blank to skip integrity check): " emb_sha
       else
         emb_url="$LLAMACPP_EMB_GGUF_URL"
@@ -443,22 +493,31 @@ case "$backend" in
     # Same-path preflight BEFORE the first fetch: the download runs on the
     # host's own network path (M1-808), so the host probe is the check the
     # download will fail. No new prompts — drives feed positional stdin.
-    preflight_gguf_url "$gen_url"
-    if [[ "$emb_backend" == "llamacpp" ]]; then
+    # A staged source (empty gen_url/emb_url) has no network path to probe.
+    if [[ -n "$gen_url" ]]; then
+      preflight_gguf_url "$gen_url"
+    fi
+    if [[ "$emb_backend" == "llamacpp" && -n "$emb_url" ]]; then
       preflight_gguf_url "$emb_url"
     fi
 
     # --- Provision. Download GGUFs + mint the secrets.env filenames BEFORE
     # compose up, so the --env-file interpolation of INFOCHAT_LLAMACPP_*_GGUF
     # (the LLAMA_ARG_MODEL paths) resolves at container start (M1-389). ---
-    fetch_gguf "$gen_url" "$gen_file" "$gen_sha"
+    if [[ -n "$gen_url" ]]; then
+      fetch_gguf "$gen_url" "$gen_file" "$gen_sha"
+    else
+      stage_gguf "$gen_override" "$gen_file" "$gen_sha"
+    fi
     set_secret INFOCHAT_LLAMACPP_GGUF "$gen_file"
     # Persist the URL + SHA too (not just the filename) so restore.sh can re-fetch a
     # CUSTOM generative GGUF on a fresh host: the model volume is not in the pack.sh
     # bundle, and a custom model has no pinned constant to recover from (M1-571). For
     # the pinned default these mirror restore.sh's own constants (a harmless duplicate
     # its pinned recovery path ignores); for a custom override they are the ONLY
-    # recovery source. $gen_sha may be empty (operator skipped the custom SHA prompt).
+    # recovery source; a STAGED file persists an empty URL (a host path is not
+    # re-fetchable elsewhere). $gen_sha may be empty (operator skipped the custom SHA
+    # prompt).
     set_secret INFOCHAT_LLAMACPP_GGUF_URL "$gen_url"
     set_secret INFOCHAT_LLAMACPP_GGUF_SHA "$gen_sha"
     # GPU overlay decision: probe Vulkan render nodes, INFOCHAT_LLAMACPP_GPU=on|off
@@ -484,7 +543,11 @@ case "$backend" in
     docker compose "${LLAMACPP_COMPOSE_FILES[@]}" --env-file "$SECRETS_FILE" --profile prod --profile llamacpp up -d llamacpp
 
     if [[ "$emb_backend" == "llamacpp" ]]; then
-      fetch_gguf "$emb_url" "$emb_file" "$emb_sha"
+      if [[ -n "$emb_url" ]]; then
+        fetch_gguf "$emb_url" "$emb_file" "$emb_sha"
+      else
+        stage_gguf "$emb_override" "$emb_file" "$emb_sha"
+      fi
       set_secret INFOCHAT_LLAMACPP_EMBED_GGUF "$emb_file"
       # Persist the embedder's URL + SHA too (M1-571), same rationale as the generative
       # GGUF above — so a CUSTOM llama.cpp embedder is recoverable on restore. Written

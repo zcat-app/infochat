@@ -1,9 +1,9 @@
 ---
 id: M1-824
 title: "Stage operator-local GGUF files into the model volume"
-status: pending
+status: done
 created: 2026-08-13
-last_updated: 2026-08-13
+last_updated: 2026-08-15
 flow: tick
 reproduction: >-
   Probe (RED on main): `grep -n 'entrypoint cp\|/stage' prod/scripts/4-llm.sh`
@@ -17,9 +17,27 @@ reproduction: >-
   preflight, so the session workaround was a root-container pre-stage +
   re-run. Test:
   LlamacppWiringTest.localGgufPathIsStagedIntoTheVolumeWithoutDownload
-  (to-be-written — `start` writes it and runs it RED on main before any fix
-  code, workflow §0).
+  (written by `start`, run RED on main before any fix code, workflow §0).
 analysis_ref: docs/plan/m1/tick-analysis/llm-wizard-robustness.md
+clarity_check: >-
+  2026-08-15 (start): (1) every file:line citation in Root cause / Approach is
+  systematically stale by the 7-8 lines M1-823's merge inserted into 4-llm.sh
+  — the named elements are all present and correct (gen prompt :385→:393, emb
+  prompt :412→:420, preflight calls :437-440→:445-448, fetch calls
+  :445/:459→:453/:467, presence probe :221→:222, SHA block :239-248→:240-249,
+  restore.sh ensure_gguf :260-294 verified; the census grep re-runs with every
+  entry-point site rowed). (2) The exit-3 pointer must avoid the substring
+  "staging": M1-823's preflightFailsHardOnMalformedUrl pins
+  assertFalse(output.contains("staging")) and item 7 keeps every M1-823
+  assertion unchanged — the pointer is phrased as "absolute path to a local
+  GGUF file" instead. (3) Approach step-2 ASSUMPTION verified live:
+  curlimages/curl:8.11.1 (pulled on this host) runs `--entrypoint cp` — BusyBox
+  v1.37.0 multi-call binary ships cp. (4) M1-823's added tests traced under
+  the planned change: preflightFailsHardOnMalformedUrl (pinned default +
+  FAKE_CURL_EXIT=3 → URL flow), hostlessSchemeValidUrlAbortsLikeALocalPath
+  ("https://" matches https?:// → URL flow), and the M1-809 preflight suite
+  all stay green; the pre-authorized additive assertion is the only edit to
+  that test.
 blocked_by: [M1-823]
 files_scope:
   - prod/scripts/4-llm.sh
@@ -84,6 +102,21 @@ spec_refs:
   - docs/design/07-deployment.md §7.7.2 First-run setup wizard
   - docs/spec/deployment.md §Operator inputs
 decision_refs: []
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS FAIL, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "5 files changed, 254 insertions(+), 24 deletions(-) (3 implementation files + ticket/board bookkeeping)"
+    findings: "1 rework item (0 critical/high): staged filename derived via URL helper gguf_basename, which truncates at the first '#' or '?' — a valid local file with either character in its name passes the prompt check then aborts mid-wizard on the truncated /stage path; fix = plain basename in the path branches at 4-llm.sh:431/:476 + a hermetic '#' drive. 4 candidate findings falsified-and-dropped (emb empty-URL pinned by mechanism; blank-SHA pinned by the reproduction drive; host-path stdout echo is the operator's own terminal; root-dir read-only mount is trusted-operator, no adversary surface)."
+    verdict_file: .scratch/tick-review-M1-824-r1.txt
+  - round: 2
+    date: 2026-08-15
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "full: 5 files changed, 302 insertions(+), 25 deletions(-); r2 fix hunks: 4 files, +50/−3 (test +26, 4-llm.sh +5/−3, ticket +20, board +2) — growth within the named rework item"
+    findings: "0 rework items (0 critical/high); round-1 item 1 SATISFIED (stagedGgufPathWithHashInNameKeepsFullBasename pins the full-basename cp argv + secrets; both path branches on plain basename, URL branches keep gguf_basename). 3 candidates falsified-and-dropped (emb truncation; URL stripping lost; drive coupled to embeddings fetch). 1 RECOMMENDED-NEW-TICKET recorded under Review observations: embeddings prompt's staged path has no '#' regression pin (TOUCHED-BY-THIS-DIFF: yes, no DECIDE-BEFORE)."
+    verdict_file: .scratch/tick-review-M1-824-r2.txt
 ---
 
 # M1-824: Stage operator-local GGUF files into the model volume
@@ -233,3 +266,27 @@ Class: operator free-text GGUF source entry points (re-runnable:
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-824-llm-wizard-robustness-2.md
 ```
+
+## Review observations
+
+- From round 2 (verdict: APPROVE): the embeddings prompt's staged path has no
+  '#' (or '?') regression pin — the emb path sub-branch (4-llm.sh:479-482)
+  uses plain basename today, but no drive feeds a '#' name to the EMBEDDINGS
+  prompt, so reverting :481 to gguf_basename leaves `mvn verify` green
+  (enforced by inspection alone). Candidate follow-up ticket: a drive
+  answering the embeddings prompt with a local embed#2.gguf (confirm 'yes')
+  asserting the cp argv carries /stage/embed#2.gguf -> /models/embed#2.gguf
+  and INFOCHAT_LLAMACPP_EMBED_GGUF="embed#2.gguf". TOUCHED-BY-THIS-DIFF: yes;
+  filing is the user's call.
+
+## Round 1 rework
+
+REWORK ITEMS:
+1. Finding 1: in prod/scripts/4-llm.sh use plain `basename` (not the
+   URL-stripping gguf_basename) for the staged-path branches at :431 and
+   :476 so a local GGUF whose name contains '#' or '?' stages under its full
+   basename instead of aborting with "FAIL: staging of <path> into the model
+   volume failed." — verified by the new
+   LlamacppWiringTest.stagedGgufPathWithHashInNameKeepsFullBasename (or
+   equivalent) asserting the cp argv carries /stage/model#2.gguf ->
+   /models/model#2.gguf and INFOCHAT_LLAMACPP_GGUF="model#2.gguf".

@@ -85,6 +85,9 @@ class LlamacppWiringTest {
     // mount; must resolve to the same real Docker volume regardless of compose
     // project name (M1-442).
     private static final String MODEL_VOLUME = "infochat-llamacpp-models";
+    // The pinned one-shot image (lock-step with 4-llm.sh) that runs every volume
+    // container — probe, download, and the M1-824 stage copy.
+    private static final String CURL_IMAGE = "curlimages/curl:8.11.1";
 
     private static final String LLAMACPP_URL = "http://llamacpp:8080/v1";
     private static final String LLAMACPP_EMBED_URL = "http://llamacpp-embeddings:8080/v1";
@@ -291,6 +294,179 @@ class LlamacppWiringTest {
 
     @Test
     @EnabledOnOs(OS.LINUX)
+    void localGgufPathIsStagedIntoTheVolumeWithoutDownload(@TempDir Path tmp) throws Exception {
+        // M1-824 reproduction: a local path at the generative prompt is staged by an
+        // argv-only cp from a read-only /stage mount — never preflighted, never
+        // downloaded (RED on main: the path flowed to preflight + download instead).
+        Path local = tmp.resolve("operator-local-model.gguf");
+        Files.writeString(local, "fake gguf bytes");
+        String localPath = local.toAbsolutePath().toString();
+        runWizard(tmp, "llamacpp\n" + localPath + "\n" + "\n\n\n" + ACCEPT_TIMING_DEFAULTS,
+                Map.of("FAKE_DOCKER_PROBE_ABSENT", "1"));
+
+        String curlLog = Files.readString(tmp.resolve("curl-argv.log"));
+        assertFalse(curlLog.contains(localPath),
+                "no preflight or fetch may touch the local path (staged sources bypass the URL preflight):\n" + curlLog);
+
+        String dockerLog = Files.readString(tmp.resolve("docker-argv.log"));
+        String cp = dockerLog.lines()
+                .filter(l -> l.contains("--entrypoint cp"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError(
+                        "the staged source must be copied by an argv-only cp container:\n" + dockerLog));
+        assertTrue(containsToken(cp, "-u 0:0"),
+                "the cp must keep the root-write flag (a fresh volume is root-owned):\n" + cp);
+        assertTrue(cp.contains("-v " + MODEL_VOLUME + ":/models"),
+                "the cp must write into the pinned model volume:\n" + cp);
+        assertTrue(cp.contains("-v " + local.getParent().toAbsolutePath() + ":/stage:ro"),
+                "the operator's directory must be mounted READ-ONLY at /stage:\n" + cp);
+        assertTrue(cp.contains(CURL_IMAGE),
+                "the cp must run in the pinned one-shot image:\n" + cp);
+        assertTrue(cp.endsWith("/models/" + local.getFileName()),
+                "the cp target must be the basename in the model volume:\n" + cp);
+        assertFalse(cp.contains("--entrypoint sh") || cp.contains("bash"),
+                "the cp must stay argv-only — no shell:\n" + cp);
+
+        Map<String, String> props = parseProps(tmp.resolve("runtime/application.properties"));
+        for (String task : List.of("security", "tagger", "entity", "classifier", "summarizer", "chat", "translator")) {
+            assertEquals(local.getFileName().toString(), props.get("infochat.llm." + task + ".model"),
+                    "task " + task + " must use the staged GGUF's basename as the model");
+        }
+
+        String secrets = Files.readString(tmp.resolve("runtime/secrets.env"));
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_GGUF=\"" + local.getFileName() + "\""),
+                "the staged GGUF filename must be minted:\n" + secrets);
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_GGUF_URL=\"\""),
+                "the staged flow must persist an EMPTY URL (a host path is not re-fetchable):\n" + secrets);
+        assertFalse(secrets.contains(localPath),
+                "the host path must NEVER be persisted into secrets.env:\n" + secrets);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void stagedGgufSkipsWhenAlreadyInTheVolume(@TempDir Path tmp) throws Exception {
+        // P5 control parity: skip-if-present applies to staged files — a PRESENT
+        // volume probe records no cp and no download and prints the skip line
+        // (the item-6 session workaround is now the first-class flow).
+        Path local = tmp.resolve("operator-local-model.gguf");
+        Files.writeString(local, "fake gguf bytes");
+        WizardRun run = runWizardCapture(tmp,
+                "llamacpp\n" + local.toAbsolutePath() + "\n" + "\n\n\n" + ACCEPT_TIMING_DEFAULTS, Map.of());
+
+        assertEquals(0, run.rc, "a staged source already in the volume must succeed:\n" + run.output);
+        assertTrue(run.output.contains("skip GGUF staging"),
+                "the skip line must print for a present staged file:\n" + run.output);
+        String dockerLog = Files.readString(tmp.resolve("docker-argv.log"));
+        assertFalse(dockerLog.contains("--entrypoint cp"),
+                "no cp may run when the staged file is already present:\n" + dockerLog);
+        assertFalse(dockerLog.lines().anyMatch(l -> l.contains("-fL")),
+                "no download may run when the staged file is already present:\n" + dockerLog);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void stagedGgufShaMismatchFailsAndRemoves(@TempDir Path tmp) throws Exception {
+        // P5 FAILURE-MODE: a non-empty SHA on a staged file is enforced by the same
+        // sha256sum probe container as downloads; a mismatch removes the file and
+        // fails the wizard (the fake docker answers all-zeros for unknown basenames).
+        Path local = tmp.resolve("operator-local-model.gguf");
+        Files.writeString(local, "fake gguf bytes");
+        String wrongSha = "f".repeat(64);
+        WizardRun run = runWizardCapture(tmp,
+                "llamacpp\n" + local.toAbsolutePath() + "\n" + wrongSha + "\n\n\n" + ACCEPT_TIMING_DEFAULTS,
+                Map.of("FAKE_DOCKER_PROBE_ABSENT", "1"));
+
+        assertNotEquals(0, run.rc, "a staged-file SHA mismatch must fail the wizard:\n" + run.output);
+        assertTrue(run.output.contains("checksum mismatch"),
+                "the failure must name the checksum mismatch:\n" + run.output);
+        String dockerLog = Files.readString(tmp.resolve("docker-argv.log"));
+        assertTrue(dockerLog.contains("--entrypoint rm"),
+                "the mismatched staged file must be removed from the volume:\n" + dockerLog);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void nonUrlNonFileAnswerFailsAtThePrompt(@TempDir Path tmp) throws Exception {
+        // Evidence item 4 FAILURE-MODE: a non-URL answer that is not an existing
+        // readable absolute file aborts AT THE PROMPT — before any curl or docker
+        // (RED on main: the answer rode the URL flow and the preflight curl ran).
+        for (String answer : new String[] {"foo.gguf", tmp.resolve("does-not-exist.gguf").toString()}) {
+            Files.deleteIfExists(tmp.resolve("docker-argv.log"));
+            Files.deleteIfExists(tmp.resolve("curl-argv.log"));
+            WizardRun run = runWizardCapture(tmp,
+                    "llamacpp\n" + answer + "\n\n\n" + ACCEPT_TIMING_DEFAULTS, Map.of());
+
+            assertNotEquals(0, run.rc, "'" + answer + "' must abort the wizard at the prompt:\n" + run.output);
+            assertFalse(Files.exists(tmp.resolve("curl-argv.log")),
+                    "no curl may run when the answer is rejected at the prompt (" + answer + ")");
+            assertFalse(Files.exists(tmp.resolve("docker-argv.log")),
+                    "no docker may run when the answer is rejected at the prompt (" + answer + ")");
+            assertTrue(run.output.contains(answer),
+                    "the failure must name the rejected answer (" + answer + "):\n" + run.output);
+            assertTrue(run.output.contains("download URL"),
+                    "the failure must name the download-URL form (" + answer + "):\n" + run.output);
+            assertTrue(run.output.contains("absolute path"),
+                    "the failure must state that local paths must be absolute (" + answer + "):\n" + run.output);
+        }
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void stagedEmbeddingsGgufKeepsTheDimensionGate(@TempDir Path tmp) throws Exception {
+        // P5: the 768-dim confirmation gate fires for a staged embeddings file
+        // exactly as for a URL override, BEFORE any staging.
+        Path emb = tmp.resolve("operator-local-embed.gguf");
+        Files.writeString(emb, "fake gguf bytes");
+        String embPath = emb.toAbsolutePath().toString();
+
+        WizardRun declined = runWizardCapture(tmp,
+                "llamacpp\n\n\n" + embPath + "\nno\n", Map.of());
+        assertNotEquals(0, declined.rc, "an unconfirmed staged embeddings override must abort:\n" + declined.output);
+        assertFalse(Files.exists(tmp.resolve("docker-argv.log")),
+                "the gate must fire BEFORE any staging (no docker invocation):\n" + declined.output);
+
+        WizardRun accepted = runWizardCapture(tmp,
+                "llamacpp\n\n\n" + embPath + "\nyes\n\n" + ACCEPT_TIMING_DEFAULTS,
+                Map.of("FAKE_DOCKER_PROBE_ABSENT", "1"));
+        assertEquals(0, accepted.rc, "a confirmed staged embeddings override must stage:\n" + accepted.output);
+        String dockerLog = Files.readString(tmp.resolve("docker-argv.log"));
+        assertTrue(dockerLog.lines()
+                        .anyMatch(l -> l.contains("--entrypoint cp") && l.endsWith("/models/" + emb.getFileName())),
+                "the embeddings file must be staged into the volume:\n" + dockerLog);
+        Map<String, String> props = parseProps(tmp.resolve("runtime/application.properties"));
+        assertEquals(emb.getFileName().toString(), props.get("infochat.embeddings.model"),
+                "the staged embeddings basename must drive the embeddings model");
+        assertEquals("768", props.get("infochat.embeddings.dimension"));
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void stagedGgufPathWithHashInNameKeepsFullBasename(@TempDir Path tmp) throws Exception {
+        // A '#' in a local filename is data, not a URL fragment: the staged branch
+        // must derive the filename with plain basename (the URL helper gguf_basename
+        // truncates at the first '#' or '?' and the truncated cp would fail).
+        Path local = tmp.resolve("model#2.gguf");
+        Files.writeString(local, "fake gguf bytes");
+        runWizard(tmp, "llamacpp\n" + local.toAbsolutePath() + "\n" + "\n\n\n" + ACCEPT_TIMING_DEFAULTS,
+                Map.of("FAKE_DOCKER_PROBE_ABSENT", "1"));
+
+        String dockerLog = Files.readString(tmp.resolve("docker-argv.log"));
+        String cp = dockerLog.lines()
+                .filter(l -> l.contains("--entrypoint cp"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("no cp invocation recorded:\n" + dockerLog));
+        assertTrue(cp.contains("/stage/model#2.gguf"),
+                "the cp source must carry the full basename (no fragment stripping):\n" + cp);
+        assertTrue(cp.endsWith("/models/model#2.gguf"),
+                "the cp target must carry the full basename:\n" + cp);
+
+        String secrets = Files.readString(tmp.resolve("runtime/secrets.env"));
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_GGUF=\"model#2.gguf\""),
+                "secrets.env must mint the full basename:\n" + secrets);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
     void ollamaEmbeddingsShapePointsAtOllamaNomicEndpoint(@TempDir Path tmp) throws Exception {
         // stdin: backend=llamacpp, generative=pinned (Enter), embeddings=ollama,
         // timing defaults (4× Enter).
@@ -454,6 +630,8 @@ class LlamacppWiringTest {
                 "the abort must name the looks-like-a-path cause class:\n" + run.output);
         assertTrue(run.output.contains("press Enter for the pinned default"),
                 "the abort must give today's remedy (full https:// URL or the pinned default):\n" + run.output);
+        assertTrue(run.output.contains("absolute path to a local GGUF file"),
+                "the abort must point at the local-file form the wizard accepts (M1-824):\n" + run.output);
         assertFalse(run.output.contains("staging"),
                 "the abort must not advertise M1-824's not-yet-existing staging flow:\n" + run.output);
         assertFalse(run.output.contains("reachability confirmed"),
