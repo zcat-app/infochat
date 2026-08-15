@@ -846,7 +846,7 @@ public final class SimpleXAdapter implements MessagingAdapter {
     }
 
     /**
-     * Send an attachment as a native file message (D74, design §6.2.4): the spool PATH crosses (never bytes, never a copy), an unreadable path fails classified PERMANENT, and the call blocks past the ack on the XFTP completion event. One rate-limiter token (§6.3.6).
+     * Send an attachment as a native file/image message (D74, design §6.2.4): the spool PATH crosses (never bytes, never a copy), an unreadable path fails classified PERMANENT, and the call blocks past the ack on the XFTP completion event. One rate-limiter token (§6.3.6).
      */
     @Override
     public void sendAttachment(OutboundAttachment attachment) throws MessagingException {
@@ -855,7 +855,8 @@ public final class SimpleXAdapter implements MessagingAdapter {
         String corrId = nextCorrId();
         String envelope = SimpleXMessageCodec.encodeSendFileCommand(
                 corrId, attachment.scope(), attachment.filePath(),
-                attachment.mimeType(), attachment.displayFileName());
+                attachment.mimeType(), attachment.displayFileName(),
+                attachment.imagePreview());
         outboundRate.acquire();
         String chatItemId = ws.sendCommand(corrId, envelope, ACK_TIMEOUT);
         ws.awaitFileCompletion(chatItemId, FILE_COMPLETION_TIMEOUT);

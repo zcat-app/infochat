@@ -146,7 +146,8 @@ public final class LiveSimpleXClient implements AutoCloseable {
                            String displayFileName) throws MessagingException {
         String corrId = nextCorrId();
         return sendCommand(corrId, SimpleXMessageCodec.encodeSendFileCommand(
-                corrId, new ScopeRef.Dm(contactId), filePath, mimeType, displayFileName));
+                corrId, new ScopeRef.Dm(contactId), filePath, mimeType, displayFileName,
+                null));
     }
 
     /** Send a plain (mention-free) group message via the production codec's group encoding. */

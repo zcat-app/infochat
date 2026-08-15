@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import app.zcat.infochat.messaging.FailureCategory;
@@ -239,9 +240,55 @@ class SimpleXAdapterAttachmentTest {
         }
     }
 
+    @Test
+    void sendAttachmentPutsTheImageFormOnTheWire() throws Exception {
+        // Boundary pin (design §6.2.4): the preview must reach the TRANSMITTED
+        // frame — a null pass-through in the adapter would keep every other
+        // test green.
+        Path spoolFile = Files.writeString(spoolDir.resolve("img.png"), "payload-bytes");
+        try (FakeSimpleXProcess fake = new FakeSimpleXProcess()) {
+            fake.start();
+            SimpleXAdapter adapter = SimpleXTestHarness.newAdapter(fake, dataDir);
+            adapter.rebuildWebSocket();
+            try {
+                fake.awaitClient(WAIT);
+                AtomicReference<String> captured = new AtomicReference<>();
+                Thread acker = Thread.ofVirtual().start(() -> {
+                    try {
+                        String envelope = fake.awaitFrame(WAIT);
+                        captured.set(envelope);
+                        String corrId = MAPPER.readTree(envelope).get("corrId").asText();
+                        fake.sendFrame(SimpleXTestHarness.ackFrame(corrId, 1));
+                        fake.sendFrame(fileCompletionFrame("item-1"));
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+                adapter.sendAttachment(attachment(spoolFile));
+                acker.join(WAIT.toMillis());
+
+                String cmd = MAPPER.readTree(captured.get()).get("cmd").asText();
+                JsonNode msgContent = MAPPER
+                        .readTree(cmd.substring(cmd.indexOf(" json ") + 6)).get(0)
+                        .get("msgContent");
+                assertEquals("image", msgContent.get("type").asText(),
+                        "the adapter passes the preview through: the transmitted"
+                                + " frame carries the image type");
+                assertEquals("data:image/png;base64,aGVsbG8=",
+                        msgContent.get("image").asText(),
+                        "the fixture preview reaches the wire beside the file path");
+            } finally {
+                adapter.close();
+            }
+        }
+    }
+
     private static OutboundAttachment attachment(Path path) {
+        // Populated preview (acceptance item 4): the honest fixture value —
+        // the production caller passes the generated preview for images.
         return new OutboundAttachment(new ScopeRef.Dm("contact-abc"),
-                path.toString(), "image/png", path.getFileName().toString(), "corr-att", null);
+                path.toString(), "image/png", path.getFileName().toString(), "corr-att",
+                "data:image/png;base64,aGVsbG8=");
     }
 
     private static String fileCompletionFrame(String chatItemId) {

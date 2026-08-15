@@ -260,15 +260,16 @@ class SimpleXMessageCodecTest {
 
     @Test
     void encodeSendFileCommandEmitsTheFileForm() throws Exception {
-        // The file send rides the same id-addressed /_send verb as text, one composed
-        // message whose filePath names the spool file (verified against the bundled
-        // simplex-chat v6.5.4.1; docs/design/06-messaging.md §6.2.4).
+        // The file form is what NON-image attachments and preview-less images
+        // send (docs/design/06-messaging.md §6.2.4): the same id-addressed
+        // /_send verb, one composed message: filePath + file-typed msgContent.
         String frame = SimpleXMessageCodec.encodeSendFileCommand(
                 "corr-file-1",
                 new ScopeRef.Dm("contact-abc"),
-                "/var/spool/infochat/out/img-123.png",
-                "image/png",
-                "img-123.png");
+                "/var/spool/infochat/out/img-123.pdf",
+                "application/pdf",
+                "img-123.pdf",
+                null);
         JsonNode root = MAPPER.readTree(frame);
         assertEquals("corr-file-1", root.get("corrId").asText(),
                 "corrId is the adapter-chosen pairing key");
@@ -276,23 +277,110 @@ class SimpleXMessageCodecTest {
         assertTrue(cmd.startsWith("/_send @contact-abc json "),
                 "DM file send addresses the contact with @<id>: " + cmd);
         JsonNode composed = MAPPER.readTree(cmd.substring(cmd.indexOf(" json ") + 6)).get(0);
-        assertEquals("/var/spool/infochat/out/img-123.png",
+        assertEquals("/var/spool/infochat/out/img-123.pdf",
                 composed.get("filePath").asText(),
                 "the file-send form carries the spool file path");
         assertEquals("file", composed.get("msgContent").get("type").asText(),
-                "msgContent is the file type");
+                "a non-image MIME keeps the file type");
         assertEquals("", composed.get("msgContent").get("text").asText(),
                 "the attachment carries no text body");
 
-        String groupFrame = SimpleXMessageCodec.encodeSendFileCommand(
+        // An image MIME WITHOUT a preview also keeps the file form — the
+        // image branch is keyed on (image MIME AND preview present).
+        String nullPreviewFrame = SimpleXMessageCodec.encodeSendFileCommand(
                 "corr-file-2",
+                new ScopeRef.Dm("contact-abc"),
+                "/var/spool/infochat/out/img-123.png",
+                "image/png",
+                "img-123.png",
+                null);
+        String nullPreviewCmd = MAPPER.readTree(nullPreviewFrame).get("cmd").asText();
+        JsonNode nullPreviewComposed =
+                MAPPER.readTree(nullPreviewCmd.substring(nullPreviewCmd.indexOf(" json ") + 6)).get(0);
+        assertEquals("/var/spool/infochat/out/img-123.png",
+                nullPreviewComposed.get("filePath").asText(),
+                "the preview-less image send still carries the spool file path");
+        assertEquals("file", nullPreviewComposed.get("msgContent").get("type").asText(),
+                "an image MIME with a null preview keeps the file type");
+        assertEquals("", nullPreviewComposed.get("msgContent").get("text").asText(),
+                "the preview-less image send carries no text body");
+
+        String groupFrame = SimpleXMessageCodec.encodeSendFileCommand(
+                "corr-file-3",
                 new ScopeRef.Group("group-1"),
                 "/var/spool/infochat/out/img-123.png",
                 "image/png",
-                "img-123.png");
+                "img-123.png",
+                null);
         String groupCmd = MAPPER.readTree(groupFrame).get("cmd").asText();
         assertTrue(groupCmd.startsWith("/_send #group-1 json "),
                 "group file send addresses the group with #<id>: " + groupCmd);
+    }
+
+    @Test
+    void encodeSendFileCommandEmitsTheImageForm() throws Exception {
+        // The M1-841-verified image form (docs/design/06-messaging.md §6.2.4):
+        // an image MIME WITH a preview sends an image-typed msgContent with the
+        // preview member beside the unchanged filePath, in DM and group scope.
+        String preview = "data:image/png;base64,aGVsbG8=";
+        String frame = SimpleXMessageCodec.encodeSendFileCommand(
+                "corr-img-1",
+                new ScopeRef.Dm("contact-abc"),
+                "/var/spool/infochat/out/img-123.png",
+                "image/png",
+                "img-123.png",
+                preview);
+        JsonNode root = MAPPER.readTree(frame);
+        assertEquals("corr-img-1", root.get("corrId").asText(),
+                "corrId is the adapter-chosen pairing key");
+        String cmd = root.get("cmd").asText();
+        assertTrue(cmd.startsWith("/_send @contact-abc json "),
+                "DM image send addresses the contact with @<id>: " + cmd);
+        JsonNode composed = MAPPER.readTree(cmd.substring(cmd.indexOf(" json ") + 6)).get(0);
+        assertEquals("/var/spool/infochat/out/img-123.png",
+                composed.get("filePath").asText(),
+                "the full-resolution file still rides the filePath upload");
+        JsonNode msgContent = composed.get("msgContent");
+        assertEquals("image", msgContent.get("type").asText(),
+                "an image MIME with a preview emits the image type");
+        assertEquals(preview, msgContent.get("image").asText(),
+                "the inline preview rides the image member");
+        assertEquals("", msgContent.get("text").asText(),
+                "the image send carries no caption body");
+
+        String groupFrame = SimpleXMessageCodec.encodeSendFileCommand(
+                "corr-img-2",
+                new ScopeRef.Group("group-1"),
+                "/var/spool/infochat/out/img-123.png",
+                "image/png",
+                "img-123.png",
+                preview);
+        String groupCmd = MAPPER.readTree(groupFrame).get("cmd").asText();
+        assertTrue(groupCmd.startsWith("/_send #group-1 json "),
+                "group image send addresses the group with #<id>: " + groupCmd);
+    }
+
+    @Test
+    void encodeSendFileCommandKeepsFileFormForNonImageMimeWithPreview() throws Exception {
+        // A preview must never leak onto a non-image wire form: the branch
+        // is keyed on the image MIME, not on preview presence alone.
+        String frame = SimpleXMessageCodec.encodeSendFileCommand(
+                "corr-file-4",
+                new ScopeRef.Dm("contact-abc"),
+                "/var/spool/infochat/out/doc-1.pdf",
+                "application/pdf",
+                "doc-1.pdf",
+                "data:image/png;base64,aGVsbG8=");
+        String cmd = MAPPER.readTree(frame).get("cmd").asText();
+        JsonNode msgContent = MAPPER
+                .readTree(cmd.substring(cmd.indexOf(" json ") + 6)).get(0)
+                .get("msgContent");
+        assertEquals("file", msgContent.get("type").asText(),
+                "a non-image MIME keeps the file type even with a preview present");
+        assertEquals("", msgContent.get("text").asText(),
+                "the file form carries no text body");
+        assertFalse(msgContent.has("image"),
+                "the preview never reaches a non-image wire form");
     }
 
     @Test
@@ -303,11 +391,11 @@ class SimpleXMessageCodecTest {
         assertEquals(FailureCategory.PERMANENT, assertThrows(MessagingException.class,
                 () -> SimpleXMessageCodec.encodeSendFileCommand(
                         "corr-1", new ScopeRef.Dm("abc /_send @victim json {}"),
-                        "/tmp/f.png", "image/png", "f.png")).category());
+                        "/tmp/f.png", "image/png", "f.png", null)).category());
         assertEquals(FailureCategory.PERMANENT, assertThrows(MessagingException.class,
                 () -> SimpleXMessageCodec.encodeSendFileCommand(
                         "corr-1", new ScopeRef.Group("group\n/_send @v json {}"),
-                        "/tmp/f.png", "image/png", "f.png")).category());
+                        "/tmp/f.png", "image/png", "f.png", null)).category());
     }
 
     // --- M1-118: queue-address character-set validation (Finding 2, INJECTION) ---

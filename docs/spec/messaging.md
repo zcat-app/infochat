@@ -132,7 +132,11 @@ Every adapter implements:
   receives the file as an XFTP file invitation and decides itself when
   to download — a delivered attachment appearing as an item the
   recipient must accept is the transport's normal behaviour, not a
-  delivery defect. The payload is a **file path**, not
+  delivery defect. On SimpleX, an image attachment is sent as an image
+  message carrying a small inline preview; the full-resolution file
+  behind it still arrives as an XFTP file invitation the recipient's
+  client accepts itself. Non-image attachments, and images without a
+  preview, are sent as plain file messages. The payload is a **file path**, not
   bytes: signal-cli attaches by path and SimpleX file transfer
   completes asynchronously past `send()`'s return, so the file MUST
   remain readable by the adapter for the whole transmit, and the

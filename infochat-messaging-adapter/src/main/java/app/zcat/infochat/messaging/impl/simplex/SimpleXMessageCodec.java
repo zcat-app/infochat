@@ -126,15 +126,17 @@ final class SimpleXMessageCodec {
     }
 
     /**
-     * File-send form of the id-addressed {@code /_send} (D74, design §6.2.4): one composed message whose {@code filePath} names the spool file beside a file-typed msgContent; MIME / display name are not wire bytes here.
+     * File-send form of the id-addressed {@code /_send} (D74, design §6.2.4): one composed message whose {@code filePath} names the spool file; an image MIME with a preview emits the verified image-typed msgContent carrying the preview inline, anything else the plain file-typed msgContent. The MIME string itself and the display name are not wire bytes; the preview is.
      */
     static String encodeSendFileCommand(String corrId,
                                         ScopeRef scope,
                                         String filePath,
                                         String mimeType,
-                                        String displayFileName) throws MessagingException {
+                                        String displayFileName,
+                                        @Nullable String imagePreview) throws MessagingException {
         String target = targetSelector(scope);
-        String cmd = "/_send " + target + " json " + fileComposedMessageArray(filePath);
+        String cmd = "/_send " + target + " json "
+                + fileComposedMessageArray(filePath, mimeType, imagePreview);
         return envelope(corrId, cmd);
     }
 
@@ -277,11 +279,18 @@ final class SimpleXMessageCodec {
         return payload.toString();
     }
 
-    /** The {@code /_send} attachment payload: a one-element array whose composed message carries {@code filePath} plus a file-typed msgContent (the array form the text path documents). */
-    private static String fileComposedMessageArray(String filePath) {
+    /** The {@code /_send} attachment payload: a one-element array whose composed message carries {@code filePath} beside an image-typed msgContent with the inline preview when the MIME is an image AND a preview is present (design §6.2.4), the plain file-typed msgContent otherwise. */
+    private static String fileComposedMessageArray(String filePath, String mimeType,
+                                                   @Nullable String imagePreview) {
         ObjectNode msgContent = MAPPER.createObjectNode();
-        msgContent.put("type", "file");
-        msgContent.put("text", "");
+        if (mimeType.startsWith("image/") && imagePreview != null) {
+            msgContent.put("type", "image");
+            msgContent.put("text", "");
+            msgContent.put("image", imagePreview);
+        } else {
+            msgContent.put("type", "file");
+            msgContent.put("text", "");
+        }
         ObjectNode wrapper = MAPPER.createObjectNode();
         wrapper.put("filePath", filePath);
         wrapper.set("msgContent", msgContent);

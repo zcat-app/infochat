@@ -7,6 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import app.zcat.infochat.messaging.OutboundAttachment;
+import app.zcat.infochat.messaging.ScopeRef;
+
 import jakarta.json.JsonObject;
 
 
@@ -264,6 +267,39 @@ class SignalMessageCodecTest {
         assertEquals("group-id-base64==", groupParams.getString("groupId"));
         assertEquals("/var/spool/infochat/out/img-123.png",
                 groupParams.getJsonArray("attachments").getString(0));
+    }
+
+    @Test
+    void attachmentEncodeOutputIsPreviewBlind() {
+        // §10 non-coupling pin (design §6.2.4): signal-cli attaches by path,
+        // so imagePreview must never reach this wire form — an attachment
+        // carrying a preview encodes identically to today's preview-less form.
+        OutboundAttachment withPreview = new OutboundAttachment(
+                new ScopeRef.Dm("+15557654321"),
+                "/var/spool/infochat/out/img-123.png",
+                "image/png", "img-123.png", "corr-att",
+                "data:image/png;base64,aGVsbG8=");
+        String dmFromRecord = codec.encodeSendWithAttachment(
+                48L, "+15551234567",
+                ((ScopeRef.Dm) withPreview.scope()).contactId(), withPreview.filePath());
+        assertEquals(codec.encodeSendWithAttachment(
+                        48L, "+15551234567", "+15557654321",
+                        "/var/spool/infochat/out/img-123.png"),
+                dmFromRecord,
+                "a preview-carrying attachment encodes identically to the preview-less form");
+        assertFalse(dmFromRecord.contains("data:image"),
+                "the preview never reaches the signal-cli wire form");
+        assertEquals(java.util.Set.of("account", "recipient", "message", "attachments"),
+                parse(dmFromRecord).getJsonObject("params").keySet(),
+                "the DM attachment params carry exactly today's members");
+
+        String groupFromRecord = codec.encodeGroupSendWithAttachment(
+                49L, "+15551234567", "group-id-base64==", withPreview.filePath());
+        assertEquals(codec.encodeGroupSendWithAttachment(
+                        49L, "+15551234567", "group-id-base64==",
+                        "/var/spool/infochat/out/img-123.png"),
+                groupFromRecord,
+                "the group attachment encode is equally preview-blind");
     }
 
 }

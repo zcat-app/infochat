@@ -520,6 +520,13 @@
   limit 15,602 minus wrapper) plus the standalone-upload nuance are
   the recorded inputs M1-842/M1-843 build on.
 
+  **Shipped form (M1-843).** The adapter's attachment encoder ships
+  exactly this split: an image MIME carrying a preview emits the
+  image-typed msgContent `{"type":"image","text":"","image":"<data
+  URI>"}` beside the unchanged `filePath`; every non-image attachment,
+  and an image without a preview, emits the plain file form above,
+  byte-for-byte (`SimpleXMessageCodec.fileComposedMessageArray`).
+
   **Bundle v7.0.0 surface review (M1-838).** The image now pins
   simplex-chat `v7.0.0` (binary reports 7.0.0.11; artifact
   `simplex-chat-ubuntu-22_04-x86_64`, build-time sha256 gate in
