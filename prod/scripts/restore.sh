@@ -730,6 +730,59 @@ if [[ "${#drifted_msgs[@]}" -gt 0 ]]; then
 fi
 echo "  Flyway history matches this checkout ($checked applied SQL migration(s) checked)."
 
+# ── inherited failed-state probe (M1-822) ──────────────────────────────
+# A source-host D42 ladder trip migrates with the dump as status='failed' rows the
+# fetcher never selects back; surface them WARN-and-continue (P7), failed probe → skip note (P10).
+failed_pair_rows=0
+failed_source_count=0
+failed_pairs=()
+INHERITED_STATE_FILE="$STAGING/inherited-failed-state.psv"
+if ! docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" exec -T postgres \
+  sh -c 'PGPASSWORD="$INFOCHAT_DB_PASSWORD" psql -h 127.0.0.1 -U infochat -d infochat -tAq -v inherited_failed_probe=1' \
+  <<'SQL' > "$INHERITED_STATE_FILE" 2>/dev/null
+SELECT 'PAIR|' || asset || '|' || sub_verb || '|' || consecutive_failures || '|' || COALESCE(last_failure_at::text, '') || '|' || COALESCE(is_default, false)::text
+  FROM asset_config
+ WHERE status = 'failed'
+UNION ALL
+SELECT 'SOURCES|' || count(*)::text || '||||'
+  FROM source
+ WHERE status = 'failed' AND deleted_at IS NULL;
+SQL
+then
+  echo "NOTE: inherited-failed-state probe failed (informational) — continuing without the inherited-failure report." >&2
+fi
+while IFS='|' read -r kind f1 f2 f3 f4 f5; do
+  case "$kind" in
+    PAIR)
+      failed_pair_rows=$((failed_pair_rows + 1))
+      failed_pairs+=("$f1|$f2|$f3|$f4|$f5")
+      ;;
+    SOURCES)
+      failed_source_count="$f1"
+      ;;
+  esac
+done < "$INHERITED_STATE_FILE"
+if [[ "$failed_pair_rows" -gt 0 || "$failed_source_count" -gt 0 ]]; then
+  echo "WARN: the restored DB inherited failed operational state from the source host — the" >&2
+  echo "      D42 fetch-failure ladder tripped there and the state migrated with the dump." >&2
+  echo "      The fetcher never retries failed rows; the clone is faithful, so this is a" >&2
+  echo "      warning, not a failure — recovery is operator-side:" >&2
+  for pair in "${failed_pairs[@]}"; do
+    IFS='|' read -r asset sub_verb failures last_failure is_default <<< "$pair"
+    echo "        $asset/$sub_verb: consecutive_failures=$failures, last_failure_at=$last_failure" >&2
+    if [[ "$is_default" == t ]]; then
+      echo "          bare /$asset resolves to this default pair — the bare command is the" >&2
+      echo "          dead surface while explicit sub-verbs may work" >&2
+    fi
+    echo "          recovery UPDATE (docs/design/10-asset-commands.md §10.8b):" >&2
+    echo "            UPDATE asset_config SET status='active', consecutive_failures=0" >&2
+    echo "              WHERE asset='$asset' AND sub_verb='$sub_verb';" >&2
+  done
+  if [[ "$failed_source_count" -gt 0 ]]; then
+    echo "        $failed_source_count failed source(s) — re-enable each with /source-enable." >&2
+  fi
+fi
+
 # ── re-provision models from the RESTORED backend config ────────────────
 # Idempotent, and WITHOUT re-running the interactive 4-llm.sh (which would
 # re-prompt and rewrite the config restore just laid down). The backend is read
@@ -939,6 +992,14 @@ cat <<'DONE'
   Two live instances on one messaging identity corrupt session/ratchet state.
 ========================================================================
 DONE
+
+# The banner above is static; the inherited-failure count repeats it when the WARN
+# block fired (the operator reads the banner at cutover time, possibly long after
+# the WARN scrolled) — only then, so a clean clone stays silent (M1-822).
+if [[ "$failed_pair_rows" -gt 0 || "$failed_source_count" -gt 0 ]]; then
+  echo "  NOTE: this clone inherited $failed_pair_rows failed asset pair(s) and $failed_source_count failed source(s)" >&2
+  echo "        from the source host — the WARN block above names the recovery actions (§10.8b UPDATE; /source-enable)." >&2
+fi
 
 if [[ "$verify_status" -ne 0 ]]; then
   echo "NOTE: automated health verification reported a problem (see above) — resolve before cutover." >&2

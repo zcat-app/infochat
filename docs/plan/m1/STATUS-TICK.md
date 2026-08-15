@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 13 |
+| pending | 12 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 54 |
+| done | 55 |
 | deferred | 0 |
 | abandoned | 0 |
 | **total** | **67** |
@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-822 — restore.sh surfaces inherited failed asset pairs and sources (complexity: low, risk: low)
 - M1-836 — /asset-enable admin command to reset a failed asset pair (complexity: medium, risk: medium)
 - M1-839 — Re-verify SimpleX text/group wire forms on CLI v7.0.0 (complexity: high, risk: medium)
 - M1-840 — Re-verify SimpleX XFTP attachment surface on CLI v7.0.0 (complexity: high, risk: high)
@@ -148,7 +147,7 @@ M1-815 (done)
 M1-818 (done)
 M1-819 (done)
   └── M1-821 (done)
-        └── M1-822 (pending) ← runnable
+        └── M1-822 (done)
 M1-820 (done)
 M1-823 (done)
   └── M1-824 (done)

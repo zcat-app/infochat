@@ -94,6 +94,8 @@ class RestoreWiringTest {
     // M1-821 adds the Collector `up -d --wait` bring-up (FAKE_COLLECTOR_WAIT_FAIL; the
     // infochat-collector marker distinguishes it from the postgres bring-up), the `logs` call
     // (FAKE_COLLECTOR_LOGS_FILE/_FAIL), and the `--entrypoint ls` GGUF probe (FAKE_MODEL_LS_ABSENT).
+    // M1-822 adds the inherited-failed-state probe (`inherited_failed_probe` psql variable in
+    // argv; FAKE_INHERITED_STATE_FILE/_EXIT).
     // Every invocation's argv is appended to FAKE_DOCKER_ARGV_LOG so tests can assert
     // which docker steps ran (e.g. that no image build/bring-up followed a failed gate).
     // Each recognized in-container exec (role-reconstruct psql, pg_restore, table probe)
@@ -143,6 +145,10 @@ class RestoreWiringTest {
             + "      echo \"FAKE-DOCKER: exec flyway-history probe psql (M1-819 gate)\"\n"
             + "      [[ -n \"${FAKE_FLYWAY_HISTORY_FILE:-}\" ]] && printf '%s\\n' \"$(<\"$FAKE_FLYWAY_HISTORY_FILE\")\"\n"
             + "      exit \"${FAKE_FLYWAY_HISTORY_EXIT:-0}\" ;;\n"
+            + "    *inherited_failed_probe*)\n"
+            + "      echo \"FAKE-DOCKER: exec inherited-failed-state probe psql (M1-822)\"\n"
+            + "      [[ -n \"${FAKE_INHERITED_STATE_FILE:-}\" ]] && printf '%s\\n' \"$(<\"$FAKE_INHERITED_STATE_FILE\")\"\n"
+            + "      exit \"${FAKE_INHERITED_STATE_EXIT:-0}\" ;;\n"
             + "    *-tAqc*)\n"
             + "      echo \"FAKE-DOCKER: exec table-presence probe psql\"\n"
             + "      [[ \"${FAKE_DB_TABLES:-absent}\" == present ]] && echo \"public|flyway_schema_history|table|infochat\"\n"
@@ -912,6 +918,122 @@ class RestoreWiringTest {
                 "the partial-state note must still print:\n" + r.output);
         assertEquals(-1, r.output.indexOf("PARTIAL RESTORE", first + 1),
                 "the partial-state note must print exactly once (P10):\n" + r.output);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void inheritedFailedAssetPairsSurfaceAsRestoreWarning(@TempDir Path tmp) throws Exception {
+        // M1-822 reproduction (live 2026-08-11): a status='failed' zcash/coingecko pair
+        // inherited with the dump made bare /zcash look broken; the probe must WARN naming
+        // the pair + both recovery pointers and CONTINUE (P7).
+        Path failedStateFixture = tmp.resolve("inherited-state.txt");
+        Files.writeString(failedStateFixture,
+                "PAIR|zcash|coingecko|5|2026-07-31 10:00:00+00|t\n"
+                + "SOURCES|1||||\n");
+        Path bundle = buildBringUpBundle(tmp);
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false, Map.of(
+                "FAKE_DB_TABLES", "present",
+                "FAKE_INHERITED_STATE_FILE", failedStateFixture.toString()), "--source-stopped");
+
+        assertEquals(0, r.exitCode,
+                "the WARN must not change the exit path (P7):\n" + r.output);
+        assertTrue(r.output.contains("WARN: the restored DB inherited failed operational state"),
+                "the probe must produce a WARN block:\n" + r.output);
+        assertTrue(r.output.contains("zcash/coingecko: consecutive_failures=5, last_failure_at=2026-07-31"),
+                "the WARN must name asset, sub_verb, consecutive_failures and last_failure_at:\n" + r.output);
+        assertTrue(r.output.contains("UPDATE asset_config SET status='active', consecutive_failures=0")
+                        && r.output.contains("WHERE asset='zcash' AND sub_verb='coingecko';"),
+                "the WARN must print the §10.8b recovery UPDATE shape:\n" + r.output);
+        assertTrue(r.output.contains("/source-enable"),
+                "the WARN must name the /source-enable pointer:\n" + r.output);
+        assertTrue(r.output.contains("bare /zcash"),
+                "a failed is_default pair must flag the bare-command dead surface:\n" + r.output);
+        // P8: the WARN names the §10.8b UPDATE and /source-enable ONLY — /asset-enable does
+        // not exist yet (batch F owns introducing it) and must never appear in the script.
+        assertFalse(Files.readString(repoRoot().resolve("prod/scripts/restore.sh")).contains("/asset-enable"),
+                "the script must never name the not-yet-existing /asset-enable (P8)");
+        String argvLog = Files.readString(tmp.resolve("docker-argv.log"));
+        int probeIdx = argvLog.indexOf("inherited_failed_probe=1");
+        int rehydrateIdx = argvLog.indexOf("llamacpp-embeddings");
+        assertTrue(probeIdx >= 0,
+                "the inherited-failed-state probe must reach the fake docker:\n" + argvLog);
+        assertTrue(rehydrateIdx > probeIdx,
+                "the probe runs before model rehydration, and the restore CONTINUES past it (P7):\n"
+                        + argvLog);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void cleanInheritedStatePrintsNoAssetWarning(@TempDir Path tmp) throws Exception {
+        // M1-822 acceptance 2: an all-active probe result (no failed asset pair, zero failed
+        // sources) must print no asset/source WARN — a mutation that always warns fails this.
+        Path failedStateFixture = tmp.resolve("inherited-state.txt");
+        Files.writeString(failedStateFixture, "SOURCES|0||||\n");
+        Path bundle = buildBringUpBundle(tmp);
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false, Map.of(
+                "FAKE_DB_TABLES", "present",
+                "FAKE_INHERITED_STATE_FILE", failedStateFixture.toString()), "--source-stopped");
+
+        assertEquals(0, r.exitCode, "the clean run must complete:\n" + r.output);
+        assertFalse(r.output.contains("WARN: the restored DB inherited failed operational state"),
+                "an all-active probe must print no inherited-state WARN:\n" + r.output);
+        assertFalse(r.output.contains("UPDATE asset_config"),
+                "an all-active probe must print no §10.8b recovery UPDATE:\n" + r.output);
+        assertFalse(r.output.contains("/source-enable"),
+                "an all-active probe must print no /source-enable pointer:\n" + r.output);
+        String bannerTail = r.output.substring(r.output.indexOf("CLONE RECONSTRUCTED"));
+        assertFalse(bannerTail.contains("failed asset pair(s)"),
+                "the clean run's banner must not repeat an inherited-failure count:\n" + r.output);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void inheritedStateProbeFailureDegradesToSkipNote(@TempDir Path tmp) throws Exception {
+        // M1-822 P10: the probe is informational — a failed psql must yield a one-line skip
+        // note, the restore continues, and the partial-state note must NOT appear (an
+        // informational probe must not abort or scare).
+        Path bundle = buildBringUpBundle(tmp);
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false, Map.of(
+                "FAKE_DB_TABLES", "present",
+                "FAKE_INHERITED_STATE_EXIT", "1"), "--source-stopped");
+
+        assertEquals(0, r.exitCode,
+                "a failed probe must not abort the restore (P10):\n" + r.output);
+        assertTrue(r.output.contains("inherited-failed-state probe failed"),
+                "the probe failure must yield the one-line skip note:\n" + r.output);
+        assertFalse(r.output.contains("PARTIAL RESTORE"),
+                "an informational probe failure must NOT print the partial-state note (P10):\n"
+                        + r.output);
+        assertFalse(r.output.contains("WARN: the restored DB inherited failed operational state"),
+                "the probe failure must not fabricate a WARN from partial state:\n" + r.output);
+        String argvLog = Files.readString(tmp.resolve("docker-argv.log"));
+        assertTrue(argvLog.contains("llamacpp-embeddings"),
+                "the restore must continue to model rehydration after the skip note:\n" + argvLog);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void finalBannerRepeatsInheritedFailureCount(@TempDir Path tmp) throws Exception {
+        // M1-822 acceptance 4: the operator reads the CLONE RECONSTRUCTED banner at cutover
+        // time, possibly long after the WARN scrolled — the banner must repeat the count when
+        // failed pairs/sources were found.
+        Path failedStateFixture = tmp.resolve("inherited-state.txt");
+        Files.writeString(failedStateFixture,
+                "PAIR|zcash|coingecko|5|2026-07-31 10:00:00+00|t\n"
+                + "SOURCES|1||||\n");
+        Path bundle = buildBringUpBundle(tmp);
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false, Map.of(
+                "FAKE_DB_TABLES", "present",
+                "FAKE_INHERITED_STATE_FILE", failedStateFixture.toString()), "--source-stopped");
+
+        assertEquals(0, r.exitCode, "the restore must complete:\n" + r.output);
+        String bannerTail = r.output.substring(r.output.indexOf("CLONE RECONSTRUCTED"));
+        assertTrue(bannerTail.contains("inherited 1 failed asset pair(s) and 1 failed source(s)"),
+                "the final banner must repeat the inherited-failure count:\n" + bannerTail);
     }
 
     // --- helpers ----------------------------------------------------------------

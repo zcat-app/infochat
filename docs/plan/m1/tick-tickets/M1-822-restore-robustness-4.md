@@ -1,13 +1,13 @@
 ---
 id: M1-822
 title: restore.sh surfaces inherited failed asset pairs and sources
-status: pending
+status: done
 created: 2026-08-13
-last_updated: 2026-08-13
+last_updated: 2026-08-15
 flow: tick
 reproduction: >-
   RestoreWiringTest#inheritedFailedAssetPairsSurfaceAsRestoreWarning
-  (to-be-written — child of a 2+ decomposition, analysis
+  (written and run RED at start 2026-08-15 — analysis
   docs/plan/m1/tick-analysis/restore-robustness.md). Probe against the
   current tree: grep -n 'asset_config' prod/scripts/restore.sh returns
   nothing — the restore never inspects inherited operational state.
@@ -89,11 +89,59 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: APPROVE-WITH-FIXES
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY WARN, SCOPE PASS"
+    diff_stats: "5 files changed, 240 insertions(+), 11 deletions(-)"
+    findings: "1 low (MAINTAINABILITY) — the M1-822 fake-docker harness comment named the probe knobs FAKE_FAILED_STATE_FILE/_EXIT while the fake reads FAKE_INHERITED_STATE_FILE/_EXIT; the comment-only correction was applied with zero executable-line changes."
+    fix_probes: "grep -c 'FAKE_FAILED_STATE' RestoreWiringTest.java prints 0 and grep -n 'FAKE_INHERITED_STATE_FILE/_EXIT' shows the corrected comment at :98; ./mvnw -B -pl infochat-provider -am test-compile BUILD SUCCESS (2026-08-15 14:08); fixed-tree snapshot .scratch/tick-fixes-M1-822.tree = 8e7fa657d906dced14ef8930006427fda10725de; round-1 green log remains .scratch/tick-test-M1-822-r1.log (BUILD SUCCESS, newer than every touched file)."
+    verdict_file: .scratch/tick-review-M1-822-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check: {
+  checked_on: 2026-08-15
+  citations_hold: true
+  line_drift_note: >-
+    All file:line citations verified true against the current tree; line
+    numbers drifted since authoring (M1-819/821 landed in between,
+    shifting later regions): schema-presence backstop at restore.sh:618-626
+    (ticket says :600-607), trap arming at :445-446 (ticket says :426-428),
+    verify propagation at :943-946 (ticket says :808-811), REAL_TOOLS at
+    RestoreWiringTest.java:72-74 (ticket says :66-69), fake docker at
+    :133-162 (ticket says :121-136). No claim is false — positions only;
+    implementation uses current numbers.
+  gate_position_verified: >-
+    M1-819 gate runs restore.sh:671-731; the probe inserts between :731 and
+    the re-provision-models block at :733. Gate failures exit before the
+    probe, so the M1-819 controls hold (§10).
+  analysis_copied_for_lint: >-
+    tick-analysis/ is gitignored, so a worktree created from main has no
+    analysis copy and the ANALYSIS-REF-RESOLVABLE lint BLOCKERed; the file
+    was copied from the main checkout into the worktree's
+    docs/plan/m1/tick-analysis/ (gitignored, untracked — not committed)
+    and lint then passed clean (0 findings).
+  pitfalls_cross_read: >-
+    P7/P8/P9/P10 all landed in the ticket body; P5's no-leak posture is
+    carried in the Approach controls; P1-P4/P6/P11 belong to the sibling
+    tickets (819/820/821) and are correctly not carried here.
+  blocked_by_seam_tests: >-
+    M1-819 added restoredHistoryChecksumMismatchFailsLoudAfterPgRestore,
+    failedHistoryRowsAndNonSqlRowsAreIgnored,
+    appliedVersionAbsentFromCheckoutGetsNewerBundleMessage,
+    historyProbeFailureAbortsWithPartialStateNote,
+    matchingHistoryPassesGateAndRestoreContinues; M1-821 added
+    partialStateNoteNamesHowToVerifyAndFinishCommands,
+    customGgufFailurePrintsExactEnvFileBearingComposeCommands,
+    collectorWaitFailurePrintsLogExcerptAndSignatures,
+    collectorLogsFailureDegradesToSkipLineAndSinglePartialNote. Traced
+    under the planned change: every gate-failure case exits before the new
+    probe; every bring-up case runs the probe with FAKE_FAILED_STATE_FILE
+    unset (fake prints nothing, exit 0) so no WARN fires and no existing
+    assertion is impacted. No pre-existing test modified.
+}
 escalation_reason:
 ---
 

@@ -1179,7 +1179,15 @@ for it; the manual steps 1-5 above remain the under-the-hood description of what
   instructions to start the Provider manually once the source host is stopped;
   unattended/scripted runs (e.g. a recovery round-trip re-run) must pass
   `--source-stopped` to reach the Provider start. With consent it starts the
-  Provider and runs the §7.10 step-5 health verification.
+  Provider and runs the §7.10 step-5 health verification. After the Flyway-history
+  gate it also probes the restored DB for operational state inherited from the
+  source host — `asset_config` pairs at `status = 'failed'` and `source` rows at
+  `status = 'failed'` — and WARNs (naming each failed pair's asset, sub-verb,
+  consecutive-failure count and last-failure timestamp, plus the §10.8b recovery
+  UPDATE and the `/source-enable` pointer), continuing the restore unchanged:
+  the clone is faithful and the inherited state is legitimate source-host history
+  (the D42 fetch ladder tripped there), so the WARN reports and the operator
+  recovers — the restore never fails or auto-resets inherited failure state.
 - **`shred-bundle.sh [-y|--yes] <target>`** — the closing step of the migration
   lifecycle: pack → transfer → restore → verify → **dispose**. Once the
   clone is verified healthy and the source decommissioned, the bundle — and any
