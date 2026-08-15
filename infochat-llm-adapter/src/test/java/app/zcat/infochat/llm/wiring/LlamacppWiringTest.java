@@ -510,6 +510,73 @@ class LlamacppWiringTest {
                 "the stale remote API key secret must be removed from secrets.env:\n" + secrets);
     }
 
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void gpuCapableHostMergesTheVulkanOverlayForBothLlamacppServices(@TempDir Path tmp) throws Exception {
+        // Reproduction (P10 made structural): the SAME positional stdin as the
+        // pinned-default drive — no new prompt — with the probe seam forcing
+        // GPU-present regardless of the host's /dev state (P3).
+        Map<String, String> props = runWizard(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "on"));
+        assertEquals(GEN_GGUF, props.get("infochat.llm.chat.model"),
+                "the generative GGUF must still drive every LLM task under the merged overlay");
+
+        String argv = Files.readString(tmp.resolve("docker-argv.log"));
+        String merged = "-f " + repoRoot().resolve("docker-compose.yml")
+                + " -f " + repoRoot().resolve("docker-compose.gpu.yml");
+        for (String service : new String[] {"llamacpp", "llamacpp-embeddings"}) {
+            List<String> ups = composeUpInvocations(argv, service);
+            assertEquals(1, ups.size(), "exactly one compose up for " + service + ":\n" + argv);
+            assertTrue(ups.get(0).contains(merged),
+                    service + " up must merge the base file first, then the Vulkan overlay:\n" + ups.get(0));
+            assertTrue(ups.get(0).contains("--env-file"),
+                    service + " up must keep the --env-file seam:\n" + ups.get(0));
+        }
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void forcedGpuOffKeepsTheBaseFileOnly(@TempDir Path tmp) throws Exception {
+        // Override seam: INFOCHAT_LLAMACPP_GPU=off keeps base-file-only ups even
+        // against render nodes; the decision is probe-driven and never a prompt.
+        runWizard(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "off"));
+
+        String argv = Files.readString(tmp.resolve("docker-argv.log"));
+        String base = "-f " + repoRoot().resolve("docker-compose.yml");
+        assertFalse(argv.contains("docker-compose.gpu.yml"),
+                "INFOCHAT_LLAMACPP_GPU=off must keep every compose call on the base file:\n" + argv);
+        for (String service : new String[] {"llamacpp", "llamacpp-embeddings"}) {
+            List<String> ups = composeUpInvocations(argv, service);
+            assertEquals(1, ups.size(), "exactly one compose up for " + service + ":\n" + argv);
+            assertTrue(ups.get(0).contains(base),
+                    service + " up must keep the base compose file:\n" + ups.get(0));
+        }
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void ollamaEmbeddingsUpNeverMergesTheGpuOverlay(@TempDir Path tmp) throws Exception {
+        // P9 negative: the overlay defines no ollama keys — with GPU forced on,
+        // the llamacpp up merges it and the ollama-embeddings up stays base-only.
+        runWizard(tmp, "llamacpp\n\nollama\n" + ACCEPT_TIMING_DEFAULTS,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "on"));
+
+        String argv = Files.readString(tmp.resolve("docker-argv.log"));
+        String base = "-f " + repoRoot().resolve("docker-compose.yml");
+        String merged = base + " -f " + repoRoot().resolve("docker-compose.gpu.yml");
+        List<String> llamacppUps = composeUpInvocations(argv, "llamacpp");
+        assertEquals(1, llamacppUps.size(), "exactly one generative compose up:\n" + argv);
+        assertTrue(llamacppUps.get(0).contains(merged),
+                "the llamacpp up must merge the Vulkan overlay with GPU forced on:\n" + llamacppUps.get(0));
+        List<String> ollamaUps = composeUpInvocations(argv, "ollama");
+        assertEquals(1, ollamaUps.size(), "exactly one ollama compose up:\n" + argv);
+        assertTrue(ollamaUps.get(0).contains(base),
+                "the ollama up must keep the base compose file:\n" + ollamaUps.get(0));
+        assertFalse(ollamaUps.get(0).contains("docker-compose.gpu.yml"),
+                "the ollama up must never merge the GPU overlay:\n" + ollamaUps.get(0));
+    }
+
     // --- helpers ----------------------------------------------------------------
 
     /** Run prod/scripts/4-llm.sh with a fake docker on PATH; return generated props. */
@@ -648,6 +715,11 @@ class LlamacppWiringTest {
                 .findFirst()
                 .orElseThrow(() -> new AssertionError(
                         "no download invocation recorded in the fake-docker argv:\n" + argv));
+    }
+
+    /** The recorded compose {@code up -d <service>} argv lines (an up line ends with the service name). */
+    private List<String> composeUpInvocations(String argv, String service) {
+        return argv.lines().filter(l -> l.endsWith("up -d " + service)).toList();
     }
 
     /** True when the line carries the exact whitespace-delimited token (name-only -e flags stay unexpanded). */

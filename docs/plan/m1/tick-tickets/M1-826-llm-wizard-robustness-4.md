@@ -1,9 +1,9 @@
 ---
 id: M1-826
 title: "Probe GPU capability and own the llamacpp overlay decision"
-status: pending
+status: done
 created: 2026-08-13
-last_updated: 2026-08-13
+last_updated: 2026-08-15
 flow: tick
 reproduction: >-
   Probe (RED on main): `grep -n 'gpu\|GPU' prod/scripts/4-llm.sh` prints
@@ -14,10 +14,9 @@ reproduction: >-
   (.scratch/setup-hurdles.md item 10): a 23 GB Q6 MoE inferred on CPU on a
   GPU host — perceived as "model is slow / thinking must be on". Test:
   LlamacppWiringTest.gpuCapableHostMergesTheVulkanOverlayForBothLlamacppServices
-  (to-be-written — needs the probe seam this ticket adds; `start` writes it
-  and runs it RED on main before any fix code, workflow §0; on any
-  render-node-less host the auto probe alone reproduces the CPU-only
-  bring-up).
+  (written by `start`, run RED on main before any fix code, workflow §0;
+  on any render-node-less host the auto probe alone reproduces the
+  CPU-only bring-up).
 analysis_ref: docs/plan/m1/tick-analysis/llm-wizard-robustness.md
 blocked_by: []
 files_scope:
@@ -74,6 +73,28 @@ spec_refs:
   - docs/design/07-deployment.md §7.8.7
   - docs/spec/security.md §Trust boundaries
 decision_refs: []
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: APPROVE
+    checks:
+      SPEC-TRUTHNESS-CHECK: PASS
+      SECURITY-CHECK: PASS
+      TEST-ADEQUACY-CHECK: PASS
+      MAINTAINABILITY-CHECK: PASS
+      SCOPE-CHECK: PASS
+    diff_stats: "5 files, 119 insertions(+), 19 deletions(-) (r1)"
+clarity_check:
+  lint: "tick-lint 0 findings, 0 BLOCKERs (2026-08-15)"
+  self_check: >-
+    All file:line citations verified against the tree (4-llm.sh:455-456/:467-468/:475-476/:643-644/:29,
+    docker-compose.gpu.yml:29-44, LlamacppWiringTest:173/:192/:595-644, 07-deployment.md:796/:1006,
+    4b-image.sh:777/:814, restore.sh:650/:657, setup.sh:164-167); census grep re-run clean, every
+    returned path has a row; analysis pitfalls P3/P8/P9/P10/P14 all carried, P11/P12 belong to M1-827
+    per the decomposition; blocked_by empty; no ambiguity. Started after rebasing onto landed M1-823
+    (850ec830): its exit-3 class + usage line shift the bring-up line numbers (~+7) but do not change
+    this ticket's region; its two new drives join test_plan.preserves ("all tests currently green on
+    main"). Live-proof host is this Strix Halo box (renderD128 present, rootless ACLs applied).
 ---
 
 # M1-826: Probe GPU capability and own the llamacpp overlay decision

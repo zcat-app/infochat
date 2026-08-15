@@ -30,6 +30,7 @@ RUNTIME_DIR="${INFOCHAT_RUNTIME_DIR:-$PROD_DIR/runtime}"
 CONFIG_FILE="$RUNTIME_DIR/application.properties"
 SECRETS_FILE="$RUNTIME_DIR/secrets.env"
 COMPOSE_FILE="$REPO_ROOT/docker-compose.yml"
+GPU_OVERLAY="$REPO_ROOT/docker-compose.gpu.yml"
 
 DEFAULT_BACKEND="ollama"
 VALID_BACKENDS="ollama llamacpp remote"
@@ -460,8 +461,27 @@ case "$backend" in
     # recovery source. $gen_sha may be empty (operator skipped the custom SHA prompt).
     set_secret INFOCHAT_LLAMACPP_GGUF_URL "$gen_url"
     set_secret INFOCHAT_LLAMACPP_GGUF_SHA "$gen_sha"
-    echo "+ docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod --profile llamacpp up -d llamacpp"
-    docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod --profile llamacpp up -d llamacpp
+    # GPU overlay decision: probe Vulkan render nodes, INFOCHAT_LLAMACPP_GPU=on|off
+    # overrides, printed never prompted (§7.7.2); both llama.cpp ups share the
+    # assembled -f list, the ollama up stays base-only (§7.8.7).
+    llamacpp_gpu="${INFOCHAT_LLAMACPP_GPU:-auto}"
+    if compgen -G "/dev/dri/renderD*" >/dev/null; then render_nodes="present"; else render_nodes="absent"; fi
+    case "$llamacpp_gpu" in
+      on)  gpu_on=1 ;;
+      off) gpu_on=0 ;;
+      auto) if [[ "$render_nodes" == "present" ]]; then gpu_on=1; else gpu_on=0; fi ;;
+      *) echo "FAIL: INFOCHAT_LLAMACPP_GPU must be on|off (got '$llamacpp_gpu')." >&2; exit 1 ;;
+    esac
+    LLAMACPP_COMPOSE_FILES=(-f "$COMPOSE_FILE")
+    if [[ "$gpu_on" -eq 1 ]]; then
+      LLAMACPP_COMPOSE_FILES+=(-f "$GPU_OVERLAY")
+      gpu_build="Vulkan build (docker-compose.gpu.yml merged)"
+    else
+      gpu_build="CPU build (base file only)"
+    fi
+    echo "GPU probe: /dev/dri render nodes ${render_nodes}; INFOCHAT_LLAMACPP_GPU=${llamacpp_gpu} -> llama.cpp ${gpu_build}"
+    echo "+ docker compose ${LLAMACPP_COMPOSE_FILES[*]} --env-file $SECRETS_FILE --profile prod --profile llamacpp up -d llamacpp"
+    docker compose "${LLAMACPP_COMPOSE_FILES[@]}" --env-file "$SECRETS_FILE" --profile prod --profile llamacpp up -d llamacpp
 
     if [[ "$emb_backend" == "llamacpp" ]]; then
       fetch_gguf "$emb_url" "$emb_file" "$emb_sha"
@@ -472,8 +492,8 @@ case "$backend" in
       # from Ollama and has no llama.cpp embed GGUF to recover.
       set_secret INFOCHAT_LLAMACPP_EMBED_GGUF_URL "$emb_url"
       set_secret INFOCHAT_LLAMACPP_EMBED_GGUF_SHA "$emb_sha"
-      echo "+ docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod --profile llamacpp-embeddings up -d llamacpp-embeddings"
-      docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod --profile llamacpp-embeddings up -d llamacpp-embeddings
+      echo "+ docker compose ${LLAMACPP_COMPOSE_FILES[*]} --env-file $SECRETS_FILE --profile prod --profile llamacpp-embeddings up -d llamacpp-embeddings"
+      docker compose "${LLAMACPP_COMPOSE_FILES[@]}" --env-file "$SECRETS_FILE" --profile prod --profile llamacpp-embeddings up -d llamacpp-embeddings
       emb_base_url="$LLAMACPP_EMBED_URL"
       emb_model="$emb_file"
     else
