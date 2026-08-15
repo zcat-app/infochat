@@ -260,6 +260,24 @@ class OpenAiCompatibleProviderTest {
     }
 
     @Test
+    void nonStreamingCallCarriesNoStreamFields() throws Exception {
+        // The usage opt-in lives ONLY on the stream branch: a
+        // single-string call's body must stay byte-shape-identical.
+        OpenAiCompatibleProvider provider = new OpenAiCompatibleProvider(new StubConfig(Map.of(
+            "infochat.llm.chat.base-url", baseUrl,
+            "infochat.llm.chat.api-key", "",
+            "infochat.llm.chat.model", "model-chat")));
+
+        provider.generate(ModelTask.CHAT_AGENT, "sys", "usr");
+
+        JsonNode body = JSON.readTree(receivedBodies.get(0));
+        assertFalse(body.has("stream"),
+            "a non-streaming call must not carry the stream field");
+        assertFalse(body.has("stream_options"),
+            "the usage opt-in must stay confined to the stream branch");
+    }
+
+    @Test
     void failsStartupScanOnNonPositiveMaxTokensNamingTheProperty() {
         // Sibling of AnthropicProviderTest's guard (M1-412 pattern): a
         // non-positive explicit max-tokens must fail the startup scan

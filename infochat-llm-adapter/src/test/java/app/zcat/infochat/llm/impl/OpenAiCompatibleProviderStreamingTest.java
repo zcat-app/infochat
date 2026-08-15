@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -72,6 +73,37 @@ class OpenAiCompatibleProviderStreamingTest {
     }
 
     @Test
+    void aStreamingRequestCarriesTheDecidedUsageOptIn() throws Exception {
+        // The OBSERVED with-flag shape (OpenAI, docs/measurement/
+        // streaming-usage-optin.md §3): the finish frame carries
+        // usage:null, then a terminal empty-choices usage frame, [DONE].
+        mockServer = new SseMockServer(os -> os.write(SseMockServer.sseFrames(
+            "{\"choices\":[{\"delta\":{\"content\":\"Hel\"}}]}",
+            "{\"choices\":[{\"delta\":{\"content\":\"lo\"}}],\"finish_reason\":\"stop\",\"usage\":null}",
+            "{\"choices\":[],\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":9,\"total_tokens\":29}}",
+            "[DONE]")));
+        List<String> chunks = new CopyOnWriteArrayList<>();
+
+        LlmResponse response = providerFor(mockServer.baseUrl())
+            .generateStreaming(ModelTask.CHAT_AGENT, "sys", "usr", chunks::add);
+
+        assertEquals(List.of("Hel", "lo"), chunks,
+            "the content deltas must reach the consumer in wire order");
+        assertEquals("Hello", response.text(),
+            "the final text is the assembled chunks");
+        assertNotNull(response.usage(),
+            "the terminal empty-choices usage frame must populate usage");
+        assertEquals(20, response.usage().inputTokens());
+        assertEquals(9, response.usage().outputTokens());
+        var body = JSON.readTree(mockServer.receivedBodies().get(0));
+        assertTrue(body.path("stream").asBoolean(),
+            "the streaming request must carry stream:true on the wire body");
+        assertTrue(body.path("stream_options").path("include_usage").asBoolean(false),
+            "the streaming request must carry the decided usage opt-in on the wire "
+                + "body (docs/measurement/streaming-usage-optin.md §5)");
+    }
+
+    @Test
     void deepSeekInheritsTheStreamingShape() throws Exception {
         // DeepSeekProvider is an OpenAiCompatibleProvider subclass speaking
         // the same /chat/completions SSE wire shape — the inherited
@@ -102,6 +134,32 @@ class OpenAiCompatibleProviderStreamingTest {
             "the DeepSeek streaming request must carry stream:true");
         assertEquals("disabled", body.path("thinking").path("type").asText(),
             "the subclass body seam must still ride the streaming request");
+        assertTrue(body.path("stream_options").path("include_usage").asBoolean(false),
+            "the inherited usage opt-in must ride the DeepSeek streaming request "
+                + "alongside the thinking field");
+    }
+
+    @Test
+    void streamWithNoUsageFrameCompletesWithNullUsage() throws Exception {
+        // The OBSERVED without-flag shape (Ollama/llama.cpp/OpenAI, docs/
+        // measurement/streaming-usage-optin.md §3): a finish frame, no
+        // usage block anywhere, then [DONE].
+        mockServer = new SseMockServer(os -> os.write(SseMockServer.sseFrames(
+            "{\"choices\":[{\"delta\":{\"content\":\"Ahoj\"}}]}",
+            "{\"choices\":[{\"delta\":{\"content\":\"!\"}}],\"finish_reason\":\"stop\"}",
+            "[DONE]")));
+        List<String> chunks = new CopyOnWriteArrayList<>();
+
+        LlmResponse response = providerFor(mockServer.baseUrl())
+            .generateStreaming(ModelTask.CHAT_AGENT, "sys", "usr", chunks::add);
+
+        assertEquals(List.of("Ahoj", "!"), chunks,
+            "every chunk of a usage-less stream must still reach the consumer");
+        assertEquals("Ahoj!", response.text(),
+            "the text assembles normally without a usage report");
+        assertNull(response.usage(),
+            "a stream with no usage frame reports no usage — nothing synthesizes "
+                + "a figure (llm.md: the call counts as reporting no usage)");
     }
 
     @Test

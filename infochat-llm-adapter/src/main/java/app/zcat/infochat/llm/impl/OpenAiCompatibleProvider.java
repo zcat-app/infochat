@@ -46,6 +46,9 @@ import java.util.function.Consumer;
  * {@code "temperature": 0} — D58 (a) decodes the translation leg
  * greedily, and the field must be ON the wire request, not a config
  * knob (M1-746).
+ * A streaming call additionally carries {@code "stream": true} and
+ * {@code "stream_options": {"include_usage": true}} — streamed replies
+ * report usage only when asked (docs/measurement/streaming-usage-optin.md).
  * Response body's load-bearing path is
  * {@code choices[0].message.content} — the model's plain text reply.
  * The optional {@code usage.prompt_tokens} / {@code usage.completion_tokens}
@@ -248,7 +251,7 @@ public class OpenAiCompatibleProvider implements LlmProvider {
 
     /**
      * Assembles the request body shared by the single-string and
-     * streaming calls; {@code stream} adds the SSE request field only.
+     * streaming calls; {@code stream} adds the SSE request fields only.
      */
     private String assembleBody(ModelTask task, TaskConfig cfg, String systemPrompt,
                                 String userPrompt, boolean stream) {
@@ -274,6 +277,10 @@ public class OpenAiCompatibleProvider implements LlmProvider {
             }
             if (stream) {
                 root.put("stream", true);
+                // The usage opt-in: streamed replies report usage only
+                // when asked, and every observed fleet backend tolerates
+                // the field (docs/measurement/streaming-usage-optin.md §5).
+                root.putObject("stream_options").put("include_usage", true);
             }
             ArrayNode messages = root.putArray("messages");
             ObjectNode system = messages.addObject();

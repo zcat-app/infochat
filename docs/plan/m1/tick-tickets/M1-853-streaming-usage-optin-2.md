@@ -1,15 +1,16 @@
 ---
 id: M1-853
 title: "Land the observed streaming usage opt-in request shape"
-status: pending
+status: done
 created: 2026-08-15
 last_updated: 2026-08-15
 flow: tick
 reproduction: >-
-  to-be-written: OpenAiCompatibleProviderStreamingTest#aStreamingRequestCarriesTheDecidedUsageOptIn
+  OpenAiCompatibleProviderStreamingTest#aStreamingRequestCarriesTheDecidedUsageOptIn
   (child of a 2+ decomposition, analysis
-  docs/plan/m1/tick-analysis/streaming-usage-optin.md). The marker converts
-  at start, AFTER M1-852's record fixes the decided shape (workflow §0):
+  docs/plan/m1/tick-analysis/streaming-usage-optin.md). The marker converted
+  at start 2026-08-15, run RED first on the absent wire field (after
+  M1-852's record fixed the decided shape, workflow §0):
   the test drives generateStreaming against the SseMockServer fake whose
   frames mirror the OBSERVED with-flag wire shape from the record, then
   asserts on the captured request body (SseMockServer.receivedBodies(),
@@ -86,11 +87,18 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "5 files, +95/-13"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-853-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check: "2026-08-15 pass — lint clean (after copying the gitignored tick-analysis/streaming-usage-optin.md from the main checkout, the M1-847 pattern); citations spot-checked and hold (assembleBody stream branch OpenAiCompatibleProvider.java:275-277, temperature precedent :46-48/:272-274, customizeRequestBody no-op :331-333, StreamingParser usage-from-any-frame :401-407 with NullNode-safe usage:null and empty-choices-skip :396-400, StreamingTest fakes :55-56/:82-83, deepSeekInheritsTheStreamingShape body assertions :100-104, OpenAiCompatibleProviderTest receivedBodies seam :49/:67-72 and field-ABSENT precedent :258); census grep re-ran clean (include_usage|stream_options: zero Java hits; the only non-doc candidate is the single stream branch, AnthropicProvider.java:220-222 verified opt-in-free); analysis pitfalls P1-P10 all present and matching (P3/P4/P10 were M1-852's); blocked_by M1-852 added NO tests (its commit f6a40674 touches docs/measurement + board + ticket only) so preserves is vacuously safe; the record's decision §5 is unambiguous (unconditional stream_options.include_usage=true in the shared stream branch, fakes mirror placements (a) empty-choices terminal frame and (b) finish-frame usage, no parser adaptation indicated, no config key, no sniffing) — no contradiction with the ticket's assumption, no blocking question"
 escalation_reason:
 ---
 
@@ -247,3 +255,25 @@ required.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-853-streaming-usage-optin-2.md
 ```
+
+## Review observations
+
+Recorded from round-1 review (verdict .scratch/tick-review-M1-853-r1.txt);
+`TOUCHED-BY-THIS-DIFF: no`, no `DECIDE-BEFORE:` — informational, filing is
+the user's call:
+
+- RECOMMENDED-NEW-TICKET: the adapter's unconditional `max_tokens` field is
+  rejected outright by OpenAI's gpt-5 model family. WHAT: every request body
+  from `assembleBody` carries `max_tokens` (OpenAiCompatibleProvider.java:265),
+  and M1-852's live observation recorded gpt-5.6-luna answering HTTP 400
+  `unsupported_parameter` ("Use 'max_completion_tokens' instead") to that
+  shape, streaming and non-streaming alike, with and without the new flag.
+  WRONG: an operator pointing any task at a gpt-5-family model gets a 400 on
+  every call — the request never reaches the wire question this ticket
+  answered. EXPECTED: if gpt-5-family models are ever a supported
+  configuration, a per-family body branch (the measurement record names the
+  same seam this ticket's decision fed); the record explicitly sets no
+  direction and leaves it to a future ticket
+  (docs/measurement/streaming-usage-optin.md §4).
+  TOUCHED-BY-THIS-DIFF: no — the unconditional `max_tokens` predates this
+  diff, which adds only `stream_options` inside the stream branch.
