@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 64 |
 | deferred | 0 |
 | abandoned | 0 |
-| **total** | **69** |
+| **total** | **71** |
 
 ---
 
@@ -26,6 +26,8 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-844 — Measure grounded in-language chat with the tool loop (complexity: high, risk: medium)
+- M1-854 — Recalibrate image preview to real generator output (complexity: medium, risk: medium)
+- M1-855 — SimpleX v7 completion contract on the live bot path (complexity: high, risk: medium)
 
 ---
 
@@ -177,4 +179,6 @@ M1-850 (done)
 M1-852 (done)
   └── M1-853 (done)
         └── M1-849 (pending) [see above]
+M1-854 (pending) ← runnable
+M1-855 (pending) ← runnable
 ```
