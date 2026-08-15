@@ -176,7 +176,9 @@ from.
   to `asset_config` — a parked asset feed recovers only by
   operator action in v1; extending re-probe to asset feeds is its
   own decision, not an automatic consequence of the amendment. The
-  Provider has `SELECT` on both `asset_config` and `price_snapshot`.
+  Provider has `SELECT` on both `asset_config` and `price_snapshot`,
+  plus — for the `/asset-enable` operator reset — a column-scoped
+  `UPDATE` (`status`, `consecutive_failures`) on `asset_config`.
 - **`StreamSource`** — *long-lived, event-driven*. Started once at
   Collector startup; runs as a supervised worker that maintains its
   own connection (typically `wss://`, but the SPI is named around

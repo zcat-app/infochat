@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-836 — /asset-enable admin command to reset a failed asset pair (complexity: medium, risk: medium)
 - M1-839 — Re-verify SimpleX text/group wire forms on CLI v7.0.0 (complexity: high, risk: medium)
 - M1-840 — Re-verify SimpleX XFTP attachment surface on CLI v7.0.0 (complexity: high, risk: high)
 - M1-843 — SimpleX codec: image-typed sends with inline preview (complexity: medium, risk: medium)
@@ -74,6 +73,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-842 | Outbound preview generation + SPI preview field | 2026-08-15 | round 1 APPROVE-WITH-FIXES |
 | M1-841 | Probe SimpleX image-type composed-message surface | 2026-08-15 | round 1 APPROVE |
 | M1-838 | Bundle simplex-chat v7.0.0; re-verify launch surface | 2026-08-15 | round 1 APPROVE |
+| M1-836 | /asset-enable admin command to reset a failed asset pair | 2026-08-15 | round 1 APPROVE |
 | M1-835 | Truthful boot signal for unresolvable LLM endpoints | 2026-08-15 | round 2 APPROVE |
 | M1-834 | Admin-notify on LLM circuit-breaker open transitions | 2026-08-15 | round 2 APPROVE |
 | M1-833 | Document reboot resilience in guides and design notes | 2026-08-15 | round 1 APPROVE |
@@ -161,7 +161,7 @@ M1-832 (done)
   └── M1-833 (done) [see above]
 M1-834 (done)
 M1-835 (done)
-M1-836 (pending) ← runnable
+M1-836 (done)
 M1-838 (done)
   ├── M1-839 (pending) ← runnable
   └── M1-840 (pending) ← runnable

@@ -127,6 +127,7 @@ public final class LlmOutputSanitizerCore {
             "/remove-source",
             "/source-enable",
             "/source-disable",
+            "/asset-enable",
             "/list-sources --all",
             "/list-sources --include-deleted",
             "/approve-group",

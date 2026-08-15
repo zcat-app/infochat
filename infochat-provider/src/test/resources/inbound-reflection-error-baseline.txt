@@ -31,6 +31,12 @@ AddSourceCommandHandler.java | error.add_source.nitter_host_type_conflict | 0 | 
 AddSourceCommandHandler.java | error.add_source.rate_limit | 0 | Long.toString(rateCapBucket.addSourceRetryAfterSeconds(user.id)) | bot-authored: bucket-state-computed retry delay in seconds (a long read from RateCapBucket token state), never inbound text (M1-705)
 ApproveGroupCommandHandler.java | error.group_not_found | 0 | groupId | bot-admin-only: is_admin gate precedes parseGroupId in ApproveGroupCommandHandler.handle (M1-657); reader is already an admin
 ApproveGroupCommandHandler.java | error.group_not_found | 0 | parseGroupIdRaw(rawText) | bot-admin-only: is_admin gate precedes parseGroupId in ApproveGroupCommandHandler.handle (M1-657); reader is already an admin
+AssetEnableCommandHandler.java | error.asset.not_configured | 0 | asset | bot-admin-only: is_admin gate precedes all parsing in AssetEnableCommandHandler.handle; reader is already an admin, and the token passed a parse-time vocabulary-shape gate (lowercase slug)
+AssetEnableCommandHandler.java | error.asset.not_configured | 1 | String.join(", ", subVerbs) | bot-authored: the asset's registered sub-verb list read from asset_config
+AssetEnableCommandHandler.java | error.asset_enable.already_active | 0 | asset | provably-constrained: post-lookup — reached only after the pair matched an asset_config row (registry vocabulary), behind the is_admin gate
+AssetEnableCommandHandler.java | error.asset_enable.already_active | 1 | subVerb | provably-constrained: post-lookup — the matched asset_config row's sub-verb, behind the is_admin gate
+AssetEnableCommandHandler.java | error.asset_enable.not_enabled | 0 | asset | provably-constrained: post-lookup — reached only after the pair matched an asset_config row (registry vocabulary), behind the is_admin gate
+AssetEnableCommandHandler.java | error.asset_enable.not_enabled | 1 | subVerb | provably-constrained: post-lookup — the matched asset_config row's sub-verb, behind the is_admin gate
 AssetHandler.java | error.asset.default_disabled | 0 | assetName | bot-authored: the asset command's own registry name (e.g. zcash), not inbound-arbitrary text
 AssetHandler.java | error.asset.default_disabled | 1 | String.join(", ", enabledSubVerbs) | bot-authored: the enabled/registered asset sub-verb or quote-currency list from the asset registry
 AssetHandler.java | error.asset.no_data | 0 | assetName | bot-authored: the asset command's own registry name (e.g. zcash), not inbound-arbitrary text

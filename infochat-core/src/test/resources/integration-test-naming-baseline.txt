@@ -47,6 +47,7 @@ app.zcat.infochat.provider.chat.tool.SearchPostsToolTest
 app.zcat.infochat.provider.command.AdminGatedGroupScopeTest
 app.zcat.infochat.provider.command.ApproveGroupCommandHandlerTest
 app.zcat.infochat.provider.command.asset.AssetSnapshotReaderClockTest
+app.zcat.infochat.provider.command.AssetEnableCommandHandlerTest
 app.zcat.infochat.provider.command.AuditCommandHandlerTest
 app.zcat.infochat.provider.command.BanCommandHandlerTest
 app.zcat.infochat.provider.command.ClearCommandHandlerTest

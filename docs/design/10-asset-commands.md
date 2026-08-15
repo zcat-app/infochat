@@ -413,20 +413,23 @@ reply.
 
 ## 10.8b Asset feed recovery (operator-side)
 
-Unlike sources, which have `/source-enable` for admin-driven recovery
-from `failed`, asset feeds in v1 have **no chat-command equivalent**.
-When an `asset_config` row crosses the consecutive-failure threshold
-and flips to `status = 'failed'`, recovery is operator-side:
+Sources have `/source-enable` for admin-driven recovery from `failed`;
+asset feeds have the admin-side mirror `/asset-enable <asset>
+[sub-verb]` (spec: `commands.md` §Asset commands), which resets the
+named pair — the bare form resolves the `is_default` pair — by writing
+`status = 'active'` and zeroing the failure counter in one audited
+transaction. Enablement is operator-curated, so `enabled = false` pairs
+are refused with a pointer to the bootstrap re-list path rather than
+silently re-enabled.
+
+The direct SQL remains the host-level fallback for a Provider that is
+down or unreachable:
 
   ```sql
   UPDATE asset_config
      SET status = 'active', consecutive_failures = 0
    WHERE asset = 'zcash' AND sub_verb = 'kraken';
   ```
-
-A chat-command equivalent (e.g. `/asset-enable <asset> <sub-verb>`)
-is a v2 candidate; v1 accepts the operator-side gap because asset
-feeds are operator-curated and the failure surface is small.
 
 ## 10.9 Deferred to v2
 

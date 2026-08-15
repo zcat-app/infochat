@@ -144,6 +144,9 @@ public final class BundleKeys {
     /** Short-help line for {@code /source-disable} (bot-admin tier). */
     public static final String HELP_CMD_SOURCE_DISABLE_SHORT = "help.cmd.source-disable.short";
 
+    /** Short-help line for {@code /asset-enable} (bot-admin tier). */
+    public static final String HELP_CMD_ASSET_ENABLE_SHORT = "help.cmd.asset-enable.short";
+
     /** Short-help line for {@code /approve-group} (bot-admin tier). */
     public static final String HELP_CMD_APPROVE_GROUP_SHORT = "help.cmd.approve-group.short";
 
@@ -444,6 +447,12 @@ public final class BundleKeys {
 
     /** {@code /source-disable} examples. */
     public static final String HELP_CMD_SOURCE_DISABLE_EXAMPLES = "help.cmd.source-disable.examples";
+
+    /** {@code /asset-enable} usage detail. */
+    public static final String HELP_CMD_ASSET_ENABLE_USAGE = "help.cmd.asset-enable.usage";
+
+    /** {@code /asset-enable} examples. */
+    public static final String HELP_CMD_ASSET_ENABLE_EXAMPLES = "help.cmd.asset-enable.examples";
 
     /** {@code /approve-group} usage detail. */
     public static final String HELP_CMD_APPROVE_GROUP_USAGE = "help.cmd.approve-group.usage";
@@ -1296,6 +1305,18 @@ public final class BundleKeys {
      */
     public static final String REPLY_SOURCE_ENABLE_NO_SUBSCRIPTIONS_RESTORED =
             "reply.source_enable.no_subscriptions_restored";
+
+    /** {@code /asset-enable}: no {@code asset_config} row matches the named pair. Fixed text — the unvalidated inbound token is never echoed. */
+    public static final String ERROR_ASSET_ENABLE_UNKNOWN_PAIR = "error.asset_enable.unknown_pair";
+
+    /** {@code /asset-enable} against an {@code enabled = false} pair — refused naming the bootstrap re-list path; {@code enabled} is never written. Tokens: {@code {0}} = asset, {@code {1}} = sub-verb. */
+    public static final String ERROR_ASSET_ENABLE_NOT_ENABLED = "error.asset_enable.not_enabled";
+
+    /** {@code /asset-enable}: target pair is already {@code status='active'}. Tokens: {@code {0}} = asset, {@code {1}} = sub-verb. */
+    public static final String ERROR_ASSET_ENABLE_ALREADY_ACTIVE = "error.asset_enable.already_active";
+
+    /** {@code /asset-enable} success reply. Tokens: {@code {0}} = asset, {@code {1}} = sub-verb. */
+    public static final String REPLY_ASSET_ENABLE_SUCCESS = "reply.asset_enable.success";
 
     /** {@code /source-disable <id>}: parse failure on the positional {@code <id>} (not a UUID literal). */
     public static final String ERROR_SOURCE_DISABLE_UNKNOWN_ID = "error.source_disable.unknown_id";

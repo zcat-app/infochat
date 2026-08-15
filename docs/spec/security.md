@@ -2056,13 +2056,18 @@ Three Postgres roles, least-privilege (decision D34):
     running admin bootstrap under a higher-privilege connection, a
     separate architectural change the Provider's "never hold owner
     credentials" rule currently precludes. Also: `SELECT` on
-  collector-owned tables (including **`SELECT`-only on
-  `price_snapshot`** and **`SELECT`-only on `asset_config`**: the
+  collector-owned tables (**`SELECT`-only on `price_snapshot`**: the
   Provider reads the latest snapshot per `(asset, sub_verb)` for
-  `/zcash` and `/monero` and reads `asset_config` to gate `/help`,
-  parse sub-verbs, and surface stale-data warnings; never writes to
-  either); the source-management commands are the documented write
-  exception to "`SELECT` on collector-owned tables" — per V31 the
+  `/zcash` and `/monero`, never writes to it; `SELECT` on
+  `asset_config` to gate `/help`, parse sub-verbs, and surface
+  stale-data warnings, plus — per V80, for `/asset-enable` — a
+  **column-scoped** `UPDATE` on `asset_config` (`status`,
+  `consecutive_failures` only; enablement, default-pair placement,
+  quote currency, and attribution stay read-only so a Provider
+  SQL-injection foothold cannot re-enable a bootstrap-removed pair or
+  move the default sub-verb)); the source-management commands and
+  `/asset-enable` are the documented write exceptions to
+  "`SELECT` on collector-owned tables" — per V31 the
   Provider holds `INSERT` on `source` and `tag` plus a **column-scoped**
   `UPDATE` on `source` (`status`, `consecutive_failures`, `deleted_at`,
   `deleted_by`, `bootstrap_tags`, and — per V75, because `/source-enable`

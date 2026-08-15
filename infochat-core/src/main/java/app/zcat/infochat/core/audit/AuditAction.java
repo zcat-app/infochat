@@ -167,6 +167,10 @@ public enum AuditAction implements AuditVerb {
     SOURCE_ENABLE,
     SOURCE_ENABLE_INTENT,
     SOURCE_DISABLE,
+    // ASSET_ENABLE records a bot admin's /asset-enable reset of a tripped
+    // D42 asset ladder, audit-before-effect in the SAME transaction as the
+    // UPDATE. No _INTENT counterpart: re-enabling is not confirm-gated.
+    ASSET_ENABLE,
     // UNFOLLOW_SOURCE (M1-419) records a per-scope source unsubscribe:
     // the caller scope's source_subscription row is deleted while the
     // global source row is untouched (contrast REMOVE_SOURCE's

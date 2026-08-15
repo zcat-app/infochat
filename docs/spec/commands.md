@@ -206,6 +206,7 @@ them to the marked region — doing so would red the build.
 <!-- command-index:begin -->
 /add-source
 /approve-group
+/asset-enable
 /audit
 /ban
 /clear
@@ -696,6 +697,19 @@ verb.
   exposed for `/monero`. Asymmetric availability across assets is
   permitted by design — `bootstrap-assets.json` configures the
   per-asset sub-verb allowlist.
+- `/asset-enable <asset> [sub-verb]` — bot-admin only (§Permission
+  model). Transitions a non-`active` `asset_config` pair to
+  `status='active'` and zeroes `consecutive_failures`, so the
+  Collector's next per-host fetch tick resumes the pair. The bare form
+  addresses the `is_default` pair; when no row carries
+  `is_default = true`, the same friendly "not configured" error as
+  bare `/<asset>` fires. `enabled = false` pairs are refused with the
+  bootstrap re-list path named — the command never edits
+  operator-curated enablement. No reachability probe (the fetch URL is
+  collector-constructed, not stored on the pair) and no confirm gate
+  (re-enabling is non-destructive; a still-failing upstream re-trips
+  the failure ladder). Audit-logged before effect in the same
+  transaction.
 
 Cross-cutting rules for asset commands (D39):
 
@@ -1722,7 +1736,7 @@ cannot silently shrink across versions.
   `/invite list`, `/invite revoke`, `/invite bot-contact`,
   `/invite pending-contacts`, `/quarantine list`,
   `/quarantine approve`, `/quarantine reject`, `/audit`, `/pending`,
-  `/remove-source`, `/source-enable`, `/source-disable`,
+  `/remove-source`, `/source-enable`, `/source-disable`, `/asset-enable`,
   `/list-sources --all`, `/list-sources --include-deleted`,
   `/approve-group`, `/reject-group`, `/list-groups`,
   `/recover-pool`.

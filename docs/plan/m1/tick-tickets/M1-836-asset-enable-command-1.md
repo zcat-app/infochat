@@ -1,15 +1,15 @@
 ---
 id: M1-836
 title: "/asset-enable admin command to reset a failed asset pair"
-status: pending
+status: done
 created: 2026-08-13
-last_updated: 2026-08-13
+last_updated: 2026-08-15
 flow: tick
 reproduction: >-
   AssetEnableCommandHandlerTest#failedPairResetWritesActiveStatusZeroCounterAndAuditRow
-  (to-be-written — the handler bean does not exist; the RED evidence at start
-  is the test failing against the absent AssetEnableCommandHandler class, the
-  M1-818 shape). Live incident backing it (.scratch/setup-hurdles.md items
+  (run RED at start 2026-08-15 against the absent AssetEnableCommandHandler
+  class — compile failure "cannot find symbol", the M1-818 shape; log:
+  .scratch/tick-red-M1-836.log). Live incident backing it (.scratch/setup-hurdles.md items
   11-12, 2026-08-11): the zcash/coingecko asset_config row sat at
   status='failed', consecutive_failures=5 with a HEALTHY upstream (HTTP 200
   probed by hand); the fetcher enumerates only
@@ -106,7 +106,14 @@ decision_refs:
   - D39
   - D42
 
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS WARN (style leg only: §12 approval of the exact amendment wording not attested on disk; spec prose rule-text only, matches declared wording), SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY WARN (5 comment/javadoc header blocks over the 3-line cap, informational), SCOPE PASS"
+    diff_stats: "21 files, +995/-27"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-836-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -452,3 +459,17 @@ bootstrap re-list already covers operator disablement — not needed.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-836-asset-enable-command-1.md
 ```
+
+## Review observations
+
+Round 1 (APPROVE) RECOMMENDED-NEW-TICKET, recorded per the review dispatch
+(TOUCHED-BY-THIS-DIFF: no, no DECIDE-BEFORE — filing is the user's call):
+
+- The applied V14 migration's header comment still asserts the pre-ticket
+  world: V14__asset_config.sql:30-34 says operator recovery "is the runbook
+  SQL in docs/design/10-asset-commands.md §10.8b (no chat-command equivalent
+  in v1)", although /asset-enable now exists. This ticket correctly did NOT
+  touch it — editing an applied migration breaks Flyway checksum validation
+  on restores (pitfall P9) — so the fix needs its own ticket pairing the
+  comment correction with a checksum-safe mechanism (e.g. flyway repair or a
+  documented re-baseline step).

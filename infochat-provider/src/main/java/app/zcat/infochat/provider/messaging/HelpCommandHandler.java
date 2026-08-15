@@ -178,6 +178,7 @@ public class HelpCommandHandler implements CommandHandler {
             new CommandHelp("remove-source", BundleKeys.HELP_CMD_REMOVE_SOURCE_SHORT, BundleKeys.HELP_CMD_REMOVE_SOURCE_USAGE, BundleKeys.HELP_CMD_REMOVE_SOURCE_EXAMPLES, HelpTier.BOT_ADMIN),
             new CommandHelp("source-enable", BundleKeys.HELP_CMD_SOURCE_ENABLE_SHORT, BundleKeys.HELP_CMD_SOURCE_ENABLE_USAGE, BundleKeys.HELP_CMD_SOURCE_ENABLE_EXAMPLES, HelpTier.BOT_ADMIN),
             new CommandHelp("source-disable", BundleKeys.HELP_CMD_SOURCE_DISABLE_SHORT, BundleKeys.HELP_CMD_SOURCE_DISABLE_USAGE, BundleKeys.HELP_CMD_SOURCE_DISABLE_EXAMPLES, HelpTier.BOT_ADMIN),
+            new CommandHelp("asset-enable", BundleKeys.HELP_CMD_ASSET_ENABLE_SHORT, BundleKeys.HELP_CMD_ASSET_ENABLE_USAGE, BundleKeys.HELP_CMD_ASSET_ENABLE_EXAMPLES, HelpTier.BOT_ADMIN),
             new CommandHelp("approve-group", BundleKeys.HELP_CMD_APPROVE_GROUP_SHORT, BundleKeys.HELP_CMD_APPROVE_GROUP_USAGE, BundleKeys.HELP_CMD_APPROVE_GROUP_EXAMPLES, HelpTier.BOT_ADMIN),
             new CommandHelp("reject-group", BundleKeys.HELP_CMD_REJECT_GROUP_SHORT, BundleKeys.HELP_CMD_REJECT_GROUP_USAGE, BundleKeys.HELP_CMD_REJECT_GROUP_EXAMPLES, HelpTier.BOT_ADMIN),
             new CommandHelp("list-groups", BundleKeys.HELP_CMD_LIST_GROUPS_SHORT, BundleKeys.HELP_CMD_LIST_GROUPS_USAGE, BundleKeys.HELP_CMD_LIST_GROUPS_EXAMPLES, HelpTier.BOT_ADMIN),
