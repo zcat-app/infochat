@@ -91,6 +91,9 @@ class RestoreWiringTest {
     // The `compose` branch (M1-580) parametrizes the DB probes: pg_restore
     // (FAKE_PG_RESTORE_EXIT/_STDERR_FILE), the `\dt` backstop (FAKE_DB_TABLES), and the M1-819
     // flyway-history probe (`flyway_schema_history` in argv; FAKE_FLYWAY_HISTORY_FILE/_EXIT).
+    // M1-821 adds the Collector `up -d --wait` bring-up (FAKE_COLLECTOR_WAIT_FAIL; the
+    // infochat-collector marker distinguishes it from the postgres bring-up), the `logs` call
+    // (FAKE_COLLECTOR_LOGS_FILE/_FAIL), and the `--entrypoint ls` GGUF probe (FAKE_MODEL_LS_ABSENT).
     // Every invocation's argv is appended to FAKE_DOCKER_ARGV_LOG so tests can assert
     // which docker steps ran (e.g. that no image build/bring-up followed a failed gate).
     // Each recognized in-container exec (role-reconstruct psql, pg_restore, table probe)
@@ -121,6 +124,10 @@ class RestoreWiringTest {
             + "    echo \"FAKE-DOCKER: untar mount specs: ${mounts[*]}\"\n"
             + "    exec tar \"${cmd_args[@]}\"\n"
             + "  fi\n"
+            + "  if [[ \"$entrypoint\" == ls ]]; then\n"
+            + "    [[ \"${FAKE_MODEL_LS_ABSENT:-}\" == 1 ]] && exit 1\n"
+            + "    exit 0\n"
+            + "  fi\n"
             + "  exit 0\n"
             + "fi\n"
             + "if [[ \"$1\" == compose ]]; then\n"
@@ -139,6 +146,15 @@ class RestoreWiringTest {
             + "    *-tAqc*)\n"
             + "      echo \"FAKE-DOCKER: exec table-presence probe psql\"\n"
             + "      [[ \"${FAKE_DB_TABLES:-absent}\" == present ]] && echo \"public|flyway_schema_history|table|infochat\"\n"
+            + "      exit 0 ;;\n"
+            + "    *\"up -d --wait\"*infochat-collector*)\n"
+            + "      echo \"FAKE-DOCKER: collector bring-up (--wait)\"\n"
+            + "      [[ \"${FAKE_COLLECTOR_WAIT_FAIL:-}\" == 1 ]] && exit 1\n"
+            + "      exit 0 ;;\n"
+            + "    *logs*infochat-collector*)\n"
+            + "      echo \"FAKE-DOCKER: collector log excerpt\"\n"
+            + "      [[ -n \"${FAKE_COLLECTOR_LOGS_FILE:-}\" ]] && printf '%s\\n' \"$(<\"$FAKE_COLLECTOR_LOGS_FILE\")\"\n"
+            + "      [[ \"${FAKE_COLLECTOR_LOGS_FAIL:-}\" == 1 ]] && exit 1\n"
             + "      exit 0 ;;\n"
             + "  esac\n"
             + "  exit 0\n"
@@ -740,6 +756,164 @@ class RestoreWiringTest {
                 "the model/build steps must be reached after the gate passes:\n" + argvLog);
     }
 
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void partialStateNoteNamesHowToVerifyAndFinishCommands(@TempDir Path tmp) throws Exception {
+        // M1-821 reproduction: a post-mutation failure (M1-819 drifted checksum) prints,
+        // AFTER placed items + the fresh-recipe, a verify block naming 8-verify.sh and
+        // both Collector log signatures (P6 order; P5: sentinel passwords never appear).
+        Path historyFixture = tmp.resolve("flyway-history.txt");
+        long drifted = flywayChecksum(migrationFile("V50__banned_admin_actor_checks.sql")) + 1;
+        Files.writeString(historyFixture,
+                "50|V50__banned_admin_actor_checks.sql|" + drifted + "|t\n");
+        Path bundle = buildSandboxedBundleWithSecrets(tmp,
+                "INFOCHAT_DB_PASSWORD=\"SENTINEL-DB-7f3a\"\n"
+                + "INFOCHAT_COLLECTOR_PASSWORD=\"SENTINEL-COLLECTOR-7f3a\"\n"
+                + "INFOCHAT_PROVIDER_PASSWORD=\"SENTINEL-PROVIDER-7f3a\"\n");
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false, Map.of(
+                "FAKE_DB_TABLES", "present",
+                "FAKE_FLYWAY_HISTORY_FILE", historyFixture.toString()));
+
+        assertNotEquals(0, r.exitCode,
+                "the drifted history must fail the restore:\n" + r.output);
+        assertTrue(r.output.contains("PARTIAL RESTORE"),
+                "the post-mutation failure must print the partial-state note:\n" + r.output);
+        // P6 ordering: placed items, then the return-to-fresh recipe, then the verify block.
+        int placedIdx = r.output.indexOf("Placed so far:");
+        int recipeIdx = r.output.indexOf("return this host to FRESH");
+        int verifyIdx = r.output.indexOf("HOW TO VERIFY");
+        assertTrue(placedIdx >= 0 && recipeIdx >= 0 && verifyIdx >= 0,
+                "the note must print placed items, the fresh-recipe, and the verify block:\n" + r.output);
+        assertTrue(placedIdx < recipeIdx && recipeIdx < verifyIdx,
+                "the verify block must come AFTER the placed-items list and the return-to-fresh "
+                        + "recipe (P6):\n" + r.output);
+        assertTrue(r.output.contains("8-verify.sh"),
+                "the verify block must name 8-verify.sh:\n" + r.output);
+        assertTrue(r.output.contains("FlywayValidateException"),
+                "the verify block must name the FlywayValidateException signature:\n" + r.output);
+        assertTrue(r.output.contains("no password was provided")
+                        && r.output.contains("MANUAL bring-up")
+                        && r.output.contains("--env-file"),
+                "the SCRAM signature must be framed as a manual-bring-up diagnosis naming the "
+                        + "missing --env-file (P5):\n" + r.output);
+        // P5: the new text references the secrets.env PATH only — no expanded secret values.
+        assertFalse(r.output.contains("SENTINEL-DB-7f3a"),
+                "no expanded INFOCHAT_DB_PASSWORD value may appear in printed output (P5):\n"
+                        + r.output);
+        assertFalse(r.output.contains("SENTINEL-COLLECTOR-7f3a"),
+                "no expanded INFOCHAT_COLLECTOR_PASSWORD value may appear in printed output (P5):\n"
+                        + r.output);
+        assertFalse(r.output.contains("SENTINEL-PROVIDER-7f3a"),
+                "no expanded INFOCHAT_PROVIDER_PASSWORD value may appear in printed output (P5):\n"
+                        + r.output);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void customGgufFailurePrintsExactEnvFileBearingComposeCommands(@TempDir Path tmp) throws Exception {
+        // M1-821 acceptance 2: the no-persisted-URL fail-loud message prints EXACT
+        // bring-up commands — each carrying -f, --env-file, the compose() profiles — with
+        // the manual GGUF-fetch docker command intact (M1-571 control).
+        Path bundle = buildCustomGgufBundle(tmp);
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false, Map.of(
+                "FAKE_DB_TABLES", "present",
+                "FAKE_MODEL_LS_ABSENT", "1"));
+
+        assertNotEquals(0, r.exitCode,
+                "a custom GGUF with no persisted URL must fail loud:\n" + r.output);
+        assertTrue(r.output.contains("download URL was never persisted"),
+                "the failure must name the never-persisted URL:\n" + r.output);
+        assertTrue(r.output.contains("docker run --rm -u 0:0 --network host")
+                        && r.output.contains("-fL -o \"/models/custom-model.gguf\""),
+                "the manual GGUF-fetch docker command must stay intact (M1-571 control):\n"
+                        + r.output);
+        // Every printed bring-up command carries -f, --env-file, and the compose() profiles.
+        // (Only the indented command lines — the verify block's prose mention of
+        // "docker compose logs" must not count as a printed command.)
+        List<String> composeLines = r.output.lines()
+                .filter(line -> line.startsWith("        docker compose"))
+                .toList();
+        assertFalse(composeLines.isEmpty(),
+                "the message must print exact bring-up commands:\n" + r.output);
+        for (String line : composeLines) {
+            assertTrue(line.contains("-f ") && line.contains("--env-file")
+                            && line.contains("--profile prod"),
+                    "each bring-up command must carry -f, --env-file, and --profile prod "
+                            + "(compose() at restore.sh:116): " + line + "\n" + r.output);
+        }
+        assertTrue(r.output.contains("--profile llamacpp up -d llamacpp")
+                        && r.output.contains("--profile llamacpp-embeddings up -d llamacpp-embeddings"),
+                "the llamacpp service starts must carry their profile flags:\n" + r.output);
+        String argvLog = Files.readString(tmp.resolve("docker-argv.log"));
+        assertFalse(argvLog.contains("build") || argvLog.contains("up -d infochat-provider"),
+                "no image-build or provider-start step may follow the failed GGUF check:\n"
+                        + argvLog);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void collectorWaitFailurePrintsLogExcerptAndSignatures(@TempDir Path tmp) throws Exception {
+        // M1-821 acceptance 3: a failing Collector --wait prints a BOUNDED log excerpt
+        // (--tail 60 reached the fake), the named-signature guidance, then the partial
+        // note exactly once (P10).
+        Path logsFixture = tmp.resolve("collector-logs.txt");
+        Files.writeString(logsFixture,
+                "2026-08-15T00:00:00Z ERROR [org.flywaydb.core] Migration checksum mismatch"
+                        + " for migration version 50\n"
+                + "Caused by: org.flywaydb.core.api.FlywayValidateException: Validate failed\n");
+        Path bundle = buildBringUpBundle(tmp);
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false, Map.of(
+                "FAKE_DB_TABLES", "present",
+                "FAKE_COLLECTOR_WAIT_FAIL", "1",
+                "FAKE_COLLECTOR_LOGS_FILE", logsFixture.toString()), "--source-stopped");
+
+        assertNotEquals(0, r.exitCode,
+                "a failing Collector --wait must fail the restore:\n" + r.output);
+        assertTrue(r.output.contains("checksum mismatch for migration version 50"),
+                "the bounded log excerpt must be printed:\n" + r.output);
+        assertTrue(r.output.contains("Named signatures")
+                        && r.output.contains("no password was provided")
+                        && r.output.contains("MANUAL bring-up"),
+                "the failure leg must print the named-signature guidance:\n" + r.output);
+        int first = r.output.indexOf("PARTIAL RESTORE");
+        assertTrue(first >= 0,
+                "the post-mutation failure must print the partial-state note:\n" + r.output);
+        assertEquals(-1, r.output.indexOf("PARTIAL RESTORE", first + 1),
+                "the partial-state note must print exactly once:\n" + r.output);
+        String argvLog = Files.readString(tmp.resolve("docker-argv.log"));
+        assertTrue(argvLog.contains("logs --tail 60 infochat-collector"),
+                "the log excerpt must be bounded (--tail 60 reached the fake docker):\n"
+                        + argvLog);
+        assertFalse(argvLog.contains("up -d infochat-provider"),
+                "no Provider start may follow the failed Collector wait:\n" + argvLog);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void collectorLogsFailureDegradesToSkipLineAndSinglePartialNote(@TempDir Path tmp) throws Exception {
+        // M1-821 P10 second variant: `compose logs` itself failing degrades to a skip
+        // line — the original --wait failure survives and the note prints exactly once.
+        Path bundle = buildBringUpBundle(tmp);
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false, Map.of(
+                "FAKE_DB_TABLES", "present",
+                "FAKE_COLLECTOR_WAIT_FAIL", "1",
+                "FAKE_COLLECTOR_LOGS_FAIL", "1"), "--source-stopped");
+
+        assertNotEquals(0, r.exitCode,
+                "the original --wait failure must survive a failed logs call:\n" + r.output);
+        assertTrue(r.output.contains("collecting the log excerpt failed"),
+                "a failed compose logs must print the skip line (P10):\n" + r.output);
+        int first = r.output.indexOf("PARTIAL RESTORE");
+        assertTrue(first >= 0,
+                "the partial-state note must still print:\n" + r.output);
+        assertEquals(-1, r.output.indexOf("PARTIAL RESTORE", first + 1),
+                "the partial-state note must print exactly once (P10):\n" + r.output);
+    }
+
     // --- helpers ----------------------------------------------------------------
 
     /** Drive the real restore.sh under a controlled PATH; return exit code + combined output. */
@@ -911,6 +1085,33 @@ class RestoreWiringTest {
         return bundle;
     }
 
+    /** As {@link #buildSandboxedBundle}, but with a caller-supplied secrets.env body so a
+     * test can plant SENTINEL password values and assert they never leak (M1-821 P5). */
+    private Path buildSandboxedBundleWithSecrets(Path tmp, String secretsEnv) throws Exception {
+        String dataDirAbs = tmp.resolve("idroot/signal-cli").toString();
+        String dataRel = dataDirAbs.substring(1);       // "${dir#/}" — strip the leading '/'
+        Path staging = Files.createDirectories(tmp.resolve("ssrc"));
+        Files.createDirectories(staging.resolve("db"));
+        Files.createDirectories(staging.resolve("runtime"));
+        Files.writeString(staging.resolve("db/infochat.pgc"), "PGDMP-dummy");
+        Files.writeString(staging.resolve("runtime/secrets.env"),
+                secretsEnv + "INFOCHAT_SIGNAL_DATA_DIR=\"" + dataDirAbs + "\"\n");
+        Files.writeString(staging.resolve("runtime/application.properties"), "quarkus.profile=vps\n");
+        Files.writeString(staging.resolve("runtime/bootstrap-sources.json"), "[]\n");
+
+        // Nested identity tar naming the rel path exactly as pack.sh names
+        // adapter_rel_paths (relative to /, no ./ prefix) so the allowlisted extraction
+        // matches the member by name.
+        Path idsrc = Files.createDirectories(tmp.resolve("ssid"));
+        Files.createDirectories(idsrc.resolve(dataRel));
+        Files.writeString(idsrc.resolve(dataRel).resolve("keyfile"), "id");
+        run(idsrc, "tar", "-czpf", staging.resolve("identities.tgz").toString(), dataRel);
+
+        Path bundle = tmp.resolve("sentinel-bundle.tgz");
+        run(staging, "tar", "-czf", bundle.toString(), ".");
+        return bundle;
+    }
+
     /**
      * As {@link #buildSandboxedBundle} (same TempDir-sandboxed identity dir), but with an
      * application.properties whose backend endpoints let {@code rehydrate_models} succeed
@@ -975,6 +1176,35 @@ class RestoreWiringTest {
         run(idsrc, "tar", "-czpf", staging.resolve("identities.tgz").toString(), dataRel);
 
         Path bundle = tmp.resolve("newformat-bundle.tgz");
+        run(staging, "tar", "-czf", bundle.toString(), ".");
+        return bundle;
+    }
+
+    /** As {@link #buildBringUpBundle}, but secrets.env names a CUSTOM generative GGUF with
+     * no persisted URL (pre-M1-571 shape) — rehydrate_models then reaches the
+     * no-persisted-URL fail-loud message (M1-821 acceptance 2). */
+    private Path buildCustomGgufBundle(Path tmp) throws Exception {
+        String dataDirAbs = tmp.resolve("idroot/signal-cli").toString();
+        String dataRel = dataDirAbs.substring(1);       // "${dir#/}" — strip the leading '/'
+        Path staging = Files.createDirectories(tmp.resolve("usrc"));
+        Files.createDirectories(staging.resolve("db"));
+        Files.createDirectories(staging.resolve("runtime"));
+        Files.writeString(staging.resolve("db/infochat.pgc"), "PGDMP-dummy");
+        Files.writeString(staging.resolve("runtime/secrets.env"),
+                "INFOCHAT_DB_PASSWORD=\"pw\"\nINFOCHAT_SIGNAL_DATA_DIR=\"" + dataDirAbs + "\"\n"
+                + "INFOCHAT_LLAMACPP_GGUF=\"custom-model.gguf\"\n");
+        Files.writeString(staging.resolve("runtime/application.properties"),
+                "quarkus.profile=vps\n"
+                + "infochat.llm.chat.base-url=http://llamacpp:8080/v1\n"
+                + "infochat.embeddings.base-url=http://llamacpp-embeddings:8080/v1\n");
+        Files.writeString(staging.resolve("runtime/bootstrap-sources.json"), "[]\n");
+
+        Path idsrc = Files.createDirectories(tmp.resolve("uid"));
+        Files.createDirectories(idsrc.resolve(dataRel));
+        Files.writeString(idsrc.resolve(dataRel).resolve("keyfile"), "id");
+        run(idsrc, "tar", "-czpf", staging.resolve("identities.tgz").toString(), dataRel);
+
+        Path bundle = tmp.resolve("custom-gguf-bundle.tgz");
         run(staging, "tar", "-czf", bundle.toString(), ".");
         return bundle;
     }

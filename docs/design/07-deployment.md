@@ -1278,7 +1278,12 @@ a partially-populated database, and `restore.sh`'s fresh-host gates will refuse 
 plain re-run. Return the target to fresh — remove the Postgres data volume
 (`docker volume rm <project>_infochat-pgdata`), the placed `prod/runtime` files, and
 the restored identity dirs (root-owned; remove via a root container) — `restore.sh`
-prints this exact recipe on any post-mutation failure. `prod/setup.sh
+prints this exact recipe on any post-mutation failure. Before teardown or retry,
+verify what actually landed: run `prod/scripts/8-verify.sh`, and check the Collector
+logs for the two named signatures — `FlywayValidateException` (the dump's applied
+migrations drift from this checkout) and `no password was provided` on a manual
+bring-up (compose started without `--env-file prod/runtime/secrets.env`, blanking the
+`${INFOCHAT_*_PASSWORD:-}` pass-throughs). `prod/setup.sh
 --reset --hard` is NOT a substitute: it keeps `secrets.env`, so the fresh-host gate
 still refuses, and it falls through into the interactive setup wizard. Fix the
 underlying cause, then re-run `restore.sh` with the bundle.

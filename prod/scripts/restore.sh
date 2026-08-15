@@ -283,11 +283,16 @@ ensure_gguf() {
         echo "          $CURL_IMAGE -fL -o \"/models/$file\" \"<your-gguf-url>\"" >&2
         echo "      then EITHER return this host to fresh (recipe in the partial-state note" >&2
         echo "      below) and re-run restore.sh — the fetched model survives in its volume" >&2
-        echo "      and is reused — OR finish bring-up manually in restore.sh's own order:" >&2
-        echo "      start the needed llama.cpp service(s), compose build the two apps, start" >&2
-        echo "      Collector (wait healthy) then Provider, then 8-verify.sh. Pinned default" >&2
-        echo "      GGUFs are auto-recovered; only custom overrides from a pre-M1-571 bundle" >&2
-        echo "      need this." >&2
+        echo "      and is reused — OR finish bring-up manually in restore.sh's own order" >&2
+        echo "      (each command carries -f, --env-file, and the profiles restore.sh uses):" >&2
+        echo "        docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod --profile llamacpp up -d llamacpp" >&2
+        echo "        docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod --profile llamacpp-embeddings up -d llamacpp-embeddings" >&2
+        echo "        docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod build infochat-collector infochat-provider" >&2
+        echo "        docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod up -d --wait --wait-timeout $COLLECTOR_WAIT_TIMEOUT infochat-collector" >&2
+        echo "        docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE --profile prod up -d infochat-provider" >&2
+        echo "        $VERIFY_SCRIPT" >&2
+        echo "      Pinned default GGUFs are auto-recovered; only custom overrides from a" >&2
+        echo "      pre-M1-571 bundle need this." >&2
         exit 1
       fi
       ;;
@@ -422,6 +427,19 @@ print_partial_state_note() {
     echo "      the restored identity dirs may be the only copy on this host."
   } >&2
   print_fresh_host_recipe
+  {
+    echo ""
+    echo "      HOW TO VERIFY what landed before teardown or retry:"
+    echo "        $VERIFY_SCRIPT"
+    echo "      A failing Collector names its cause in its log"
+    echo "      (docker compose logs infochat-collector):"
+    echo "        - FlywayValidateException = the dump's applied migrations drift from this"
+    echo "          checkout (any earlier Flyway-history check names the drifted versions)"
+    echo "        - 'no password was provided' (SCRAM) on a MANUAL bring-up = compose was"
+    echo "          started without --env-file $SECRETS_FILE, so the \${INFOCHAT_*_PASSWORD:-}"
+    echo "          pass-throughs blank out (restore.sh's own compose calls always carry"
+    echo "          --env-file)"
+  } >&2
 }
 set -E
 trap 'print_partial_state_note' ERR
@@ -817,7 +835,19 @@ if [[ "$build_rc" -ne 0 ]]; then
   exit "$build_rc"
 fi
 echo "+ start Collector (wait up to ${COLLECTOR_WAIT_TIMEOUT}s for healthy — it runs Flyway, an idempotent no-op over the restored schema)"
-compose up -d --wait --wait-timeout "$COLLECTOR_WAIT_TIMEOUT" infochat-collector
+if ! compose up -d --wait --wait-timeout "$COLLECTOR_WAIT_TIMEOUT" infochat-collector; then
+  echo "FAIL: the Collector did not become healthy within ${COLLECTOR_WAIT_TIMEOUT}s." >&2
+  echo "      Bounded Collector log excerpt (docker compose logs --tail 60):" >&2
+  if ! compose logs --tail 60 infochat-collector 2>/dev/null; then
+    echo "      (collecting the log excerpt failed — see the Collector's own logs)" >&2
+  fi
+  echo "      Named signatures:" >&2
+  echo "        - FlywayValidateException = the dump's applied migrations drift from this checkout" >&2
+  echo "        - 'no password was provided' (SCRAM) on a MANUAL bring-up = compose was started" >&2
+  echo "          without --env-file $SECRETS_FILE, so the \${INFOCHAT_*_PASSWORD:-} pass-throughs" >&2
+  echo "          blank out (restore.sh's own compose calls always carry --env-file)" >&2
+  exit 1
+fi
 
 # The clone is fully placed once the Collector is up: every bundle artifact
 # (DB, identities, config) has landed, so from here a failure is a health

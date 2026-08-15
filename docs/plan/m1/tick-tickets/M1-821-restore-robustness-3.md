@@ -1,13 +1,15 @@
 ---
 id: M1-821
 title: restore.sh failure paths print verify steps + exact commands
-status: pending
+status: done
 created: 2026-08-13
-last_updated: 2026-08-13
+last_updated: 2026-08-15
 flow: tick
 reproduction: >-
   RestoreWiringTest#partialStateNoteNamesHowToVerifyAndFinishCommands
-  (to-be-written — child of a 2+ decomposition, analysis
+  (written at start, run RED 2026-08-15 via `./mvnw -pl infochat-provider
+  -am verify`: 23 tests ran, the new case failed on the missing verify
+  block — child of a 2+ decomposition, analysis
   docs/plan/m1/tick-analysis/restore-robustness.md). Probe against the
   current tree: sed -n '411,425p' prod/scripts/restore.sh — the PARTIAL
   RESTORE banner lists placed items and the teardown recipe only; no
@@ -81,11 +83,32 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: REWORK
+    checks: SPEC-TRUTHNESS FAIL, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS
+    diff_stats: "5 files changed, 293 insertions(+), 19 deletions(-)"
+    rework_items: 2
+  - round: 2
+    date: 2026-08-15
+    verdict: APPROVE
+    checks: SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS
+    diff_stats: "fix hunks: 4 files changed, 33 insertions(+), 4 deletions(-); cumulative vs merge-base: 5 files changed, 322 insertions(+), 19 deletions(-)"
+    rework_dispositions: "item 1 SATISFIED, item 2 SATISFIED (probes re-run; full-reactor verify green, RestoreWiringTest 26/26 surefire, provider failsafe 344/0/0/8)"
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check: {
+  line-drift-after-M1-819: >
+    All file:line citations verified true against the current tree; several
+    line numbers drifted since authoring (M1-819 landed the Flyway gate,
+    shifting later regions): the Collector --wait call is at restore.sh:820
+    (ticket says :714-715), docker-compose.yml pass-throughs at :59-61/117-118/185
+    (ticket says :55-57/112-113/179), ensure_gguf message at :284-297 (ticket says
+    :278-291). No claim is false — positions only. The implementation used the
+    current numbers.
+  }
 escalation_reason:
 ---
 
@@ -247,6 +270,29 @@ helpers; disposed rows:
   8-verify.sh itself. Disposed: unchanged.
 - M1-819's new gate message (sibling, blocked_by) — carries its own
   recovery options. Disposed: sibling owns it; this ticket must not edit it.
+
+## Round 1 rework
+
+Verdict file: `.scratch/tick-review-M1-821-r1.txt` (REWORK, 2 items, 0
+critical/high). REWORK ITEMS verbatim:
+
+1. (Finding 1) Delete the stray leading backtick at docs/design/07-deployment.md:1286
+   so the cross-line `prod/setup.sh --reset --hard` code span pairs as before,
+   evaluated via `grep -n '^`--reset' docs/design/07-deployment.md` → no matches.
+2. (Finding 2) Reword the parenthetical at prod/scripts/restore.sh:437 to drop the
+   transcript-dependent "see the Flyway-history check above" reference, evaluated
+   via `grep -n 'check above' prod/scripts/restore.sh` → no matches plus
+   `./mvnw -pl infochat-provider -am verify` green (RestoreWiringTest 26/26).
+
+## Review observations
+
+Round-1 reviewer recommended-new-ticket entry (TOUCHED-BY-THIS-DIFF: yes, no
+DECIDE-BEFORE — recorded, not relayed; filing is the user's call): the
+ensure_gguf manual-finish recipe covers only llama.cpp backends — for a
+restored config pairing the custom GGUF with an OLLAMA embeddings backend,
+the printed exact commands start both llama.cpp services and never start
+the ollama daemon or pull its models (dead embeddings backend, degraded
+verify). The omission predates this diff; this diff rewrote the message.
 
 ## Pre-flight self-check (author-side)
 
