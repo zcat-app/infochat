@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 18 |
+| pending | 17 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 49 |
+| done | 50 |
 | deferred | 0 |
 | abandoned | 0 |
 | **total** | **67** |
@@ -26,7 +26,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-822 — restore.sh surfaces inherited failed asset pairs and sources (complexity: low, risk: low)
-- M1-827 — Fail loud when the GPU container would see no device (complexity: medium, risk: medium)
 - M1-835 — Truthful boot signal for unresolvable LLM endpoints (complexity: medium, risk: medium)
 - M1-836 — /asset-enable admin command to reset a failed asset pair (complexity: medium, risk: medium)
 - M1-838 — Bundle simplex-chat v7.0.0; re-verify launch surface (complexity: medium, risk: high)
@@ -84,9 +83,9 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-830 | Port prod restart-policy drift into docker-compose.yml | 2026-08-15 | round 1 APPROVE |
 | M1-829 | Split 4b-image.sh picker into decision view + --verbose detail | 2026-08-15 | round 2 APPROVE |
 | M1-828 | Document post-setup tool boundaries (profile vs switch-llm vs wizard) | 2026-08-15 | round 1 APPROVE |
+| M1-827 | Fail loud when the GPU container would see no device | 2026-08-15 | round 2 APPROVE |
 | M1-826 | Probe GPU capability and own the llamacpp overlay decision | 2026-08-15 | round 1 APPROVE |
 | M1-825 | Disclose the no-refetch status of locally-staged GGUFs | 2026-08-15 | round 1 APPROVE |
-| M1-824 | Stage operator-local GGUF files into the model volume | 2026-08-15 | round 2 APPROVE |
 
 ---
 
@@ -159,7 +158,7 @@ M1-823 (done)
   └── M1-824 (done)
         └── M1-825 (done)
 M1-826 (done)
-  └── M1-827 (pending) ← runnable
+  └── M1-827 (done)
 M1-828 (done)
 M1-829 (done)
 M1-830 (done)

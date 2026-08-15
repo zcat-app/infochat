@@ -1,9 +1,24 @@
 ---
 id: M1-827
 title: "Fail loud when the GPU container would see no device"
-status: pending
+status: done
 created: 2026-08-13
-last_updated: 2026-08-13
+last_updated: 2026-08-15
+clarity_check: >-
+  2026-08-15 start pre-flight: lint clean; citations spot-checked
+  (docker-compose.gpu.yml:21-28/:34-36, 0-doctor.sh linger block); census
+  re-run — all returned paths have rows (0-doctor.sh rootless lines are
+  M1-831's linger check, landed after this ticket's reproduction; the
+  reproduction's "prints nothing" prose is stale but the premise — no
+  wizard step checks the rootless ACL trap — holds; 4b-image.sh's gate now
+  sits at :789-790, still the deferred batch-C row); analysis pitfalls
+  P3/P8/P11/P12/P14 all landed; M1-826's three drives traced green under
+  the plan (fake-docker info branch defaults non-rootless; exec
+  list-devices defaults non-empty). No blocking ambiguity. Item 6's
+  doctor grep as written ('setfacl\|renderD\|rootless') is stale: M1-831
+  (landed after this ticket was drafted) added rootless-linger text to
+  0-doctor.sh; the probe's substance — doctor gains no ACL/GPU check —
+  holds via 'setfacl\|renderD' printing nothing + DoctorWiringTest green.
 flow: tick
 reproduction: >-
   Probe (RED on main + M1-826): `grep -rn 'setfacl\|rootless\|list-devices'
@@ -16,8 +31,8 @@ reproduction: >-
   --list-devices` prints an EMPTY list with no error — a host without the
   /dev/dri ACLs gets a GPU container that sees no device, silently. Test:
   LlamacppWiringTest.rootlessGpuHostWithoutRenderNodeAccessFailsWithTheSetfaclRemedy
-  (to-be-written — needs the M1-826 GPU branch and this ticket's docker-info
-  stub; `start` writes it and runs it RED before any fix code, workflow §0).
+  (written at start and run RED before any fix code, workflow §0 — rc 0 with
+  both ups recorded, gate absent).
 analysis_ref: docs/plan/m1/tick-analysis/llm-wizard-robustness.md
 blocked_by: [M1-826]
 files_scope:
@@ -73,6 +88,21 @@ spec_refs:
   - docs/design/07-deployment.md §7.8.7
   - docs/spec/security.md §Trust boundaries
 decision_refs: []
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY FAIL, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "5 files changed, 190 insertions(+), 11 deletions(-)"
+    rework_items: 1
+    verdict_file: .scratch/tick-review-M1-827-r1.txt
+  - round: 2
+    date: 2026-08-15
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "5 files changed, 230 insertions(+), 11 deletions(-)"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-827-r2.txt
 ---
 
 # M1-827: Fail loud when the GPU container would see no device
@@ -208,3 +238,14 @@ Class: wizard GPU/device prerequisite checks (re-runnable:
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-827-llm-wizard-robustness-5.md
 ```
+
+## Round 1 rework
+
+1. Finding 1: add the read-only-node drive beside
+   LlamacppWiringTest.java:761 (perms `r--r--r--`, FAKE_DOCKER_ROOTLESS=1,
+   INFOCHAT_LLAMACPP_GPU_NODES), asserting rc non-zero and no "up -d" in
+   docker-argv.log — evaluated via
+   LlamacppWiringTest.rootlessGpuHostWithReadOnlyRenderNodeAccessFails
+   (assertNotEquals(0, run.rc) + assertFalse(argv.contains("up -d"))),
+   which must pass on the current production code and go RED when the
+   `|| ! -w "$node"` leg at prod/scripts/4-llm.sh:324 is removed.

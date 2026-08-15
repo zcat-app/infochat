@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -832,6 +833,115 @@ class LlamacppWiringTest {
                 "the ollama up must never merge the GPU overlay:\n" + ollamaUps.get(0));
     }
 
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void rootlessGpuHostWithoutRenderNodeAccessFailsWithTheSetfaclRemedy(@TempDir Path tmp) throws Exception {
+        // Reproduction: rootless docker + GPU on + nodes this user cannot
+        // read+write — the M1-744 trap (group_add ineffective, empty list,
+        // no error). Gate fires BEFORE bring-up; names nodes, setfacl, udev (§7.8.7).
+        Path renderNode = tmp.resolve("renderD128");
+        Path cardNode = tmp.resolve("card0");
+        for (Path node : new Path[] {renderNode, cardNode}) {
+            Files.writeString(node, "node");
+            Files.setPosixFilePermissions(node, PosixFilePermissions.fromString("---------"));
+        }
+
+        WizardRun run = runWizardCapture(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "on",
+                       "FAKE_DOCKER_ROOTLESS", "1",
+                       "INFOCHAT_LLAMACPP_GPU_NODES", renderNode + " " + cardNode));
+
+        assertNotEquals(0, run.rc, "a rootless host without render-node access must fail loud:\n" + run.output);
+        for (String expected : new String[] {"rootless", renderNode.toString(), cardNode.toString(),
+                "setfacl", "udev", "§7.8.7"}) {
+            assertTrue(run.output.contains(expected),
+                    "the failure must name '" + expected + "':\n" + run.output);
+        }
+        String argv = Files.readString(tmp.resolve("docker-argv.log"));
+        assertFalse(argv.contains("up -d"), "the gate must fire before any compose bring-up:\n" + argv);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void rootlessGpuHostWithReadOnlyRenderNodeAccessFails(@TempDir Path tmp) throws Exception {
+        // The write leg of the gate: a READABLE-but-not-writable node must
+        // still refuse — read alone cannot map the device for container-root.
+        Path roNode = tmp.resolve("renderD128");
+        Files.writeString(roNode, "node");
+        Files.setPosixFilePermissions(roNode, PosixFilePermissions.fromString("r--r--r--"));
+
+        WizardRun run = runWizardCapture(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "on",
+                       "FAKE_DOCKER_ROOTLESS", "1",
+                       "INFOCHAT_LLAMACPP_GPU_NODES", roNode.toString()));
+
+        assertNotEquals(0, run.rc, "a read-only render node under rootless must fail loud:\n" + run.output);
+        assertTrue(run.output.contains(roNode.toString()),
+                "the failure must name the read-only node:\n" + run.output);
+        String argv = Files.readString(tmp.resolve("docker-argv.log"));
+        assertFalse(argv.contains("up -d"), "the gate must fire before any compose bring-up:\n" + argv);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void rootfulOrAclPresentGpuHostProceeds(@TempDir Path tmp) throws Exception {
+        // FAILURE-MODE against over-blocking: rootful proceeds regardless of
+        // node access (group_add works there); rootless + rw nodes (the prod
+        // host's post-ACL shape) proceeds. Both reach bring-up AND verification.
+        Path blockedNode = tmp.resolve("renderD128");
+        Files.writeString(blockedNode, "node");
+        Files.setPosixFilePermissions(blockedNode, PosixFilePermissions.fromString("---------"));
+        runWizard(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "on",
+                       "INFOCHAT_LLAMACPP_GPU_NODES", blockedNode.toString()));
+        String rootfulArgv = Files.readString(tmp.resolve("docker-argv.log"));
+        assertTrue(rootfulArgv.contains("up -d llamacpp"),
+                "rootful docker + GPU on must proceed to bring-up regardless of node access:\n" + rootfulArgv);
+
+        Path aclHost = Files.createDirectories(tmp.resolve("acl-host"));
+        Path rwNode = aclHost.resolve("renderD128");
+        Files.writeString(rwNode, "node");
+        Files.setPosixFilePermissions(rwNode, PosixFilePermissions.fromString("rw-rw-rw-"));
+        runWizard(aclHost, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "on",
+                       "FAKE_DOCKER_ROOTLESS", "1",
+                       "INFOCHAT_LLAMACPP_GPU_NODES", rwNode.toString()));
+        String aclArgv = Files.readString(aclHost.resolve("docker-argv.log"));
+        assertTrue(aclArgv.contains("up -d llamacpp"),
+                "rootless + ACL-present must proceed to bring-up:\n" + aclArgv);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void gpuUpFailsLoudWhenTheContainerSeesNoDevice(@TempDir Path tmp) throws Exception {
+        // P11 end-of-path assertion: the -f flags prove the overlay, not the
+        // device — after EACH GPU up the wizard execs llama-server
+        // --list-devices; empty list or failed exec fails loud (both services).
+        WizardRun genEmpty = runWizardCapture(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "on", "FAKE_DOCKER_NO_DEVICES", "1"));
+        assertNotEquals(0, genEmpty.rc, "a generative container listing zero devices must fail loud:\n" + genEmpty.output);
+        assertTrue(genEmpty.output.contains("§7.8.7"),
+                "the trap failure must point at the §7.8.7 remedy:\n" + genEmpty.output);
+        String genArgv = Files.readString(tmp.resolve("docker-argv.log"));
+        assertTrue(genArgv.contains("/app/llama-server --list-devices"),
+                "the wizard must exec /app/llama-server --list-devices after the GPU up (the live image shape):\n" + genArgv);
+
+        Path embHost = Files.createDirectories(tmp.resolve("emb-host"));
+        WizardRun embEmpty = runWizardCapture(embHost, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "on", "FAKE_DOCKER_NO_EMBED_DEVICES", "1"));
+        assertNotEquals(0, embEmpty.rc,
+                "an embeddings container listing zero devices must fail loud:\n" + embEmpty.output);
+        String embArgv = Files.readString(embHost.resolve("docker-argv.log"));
+        assertTrue(embArgv.contains("llamacpp-embeddings /app/llama-server --list-devices"),
+                "the embeddings GPU up must also be device-verified:\n" + embArgv);
+
+        Path deadHost = Files.createDirectories(tmp.resolve("dead-host"));
+        WizardRun dead = runWizardCapture(deadHost, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "on", "FAKE_DOCKER_EXEC_EXIT", "1"));
+        assertNotEquals(0, dead.rc,
+                "a failed verification exec (container down) is not-verified, never passed:\n" + dead.output);
+    }
+
     // --- helpers ----------------------------------------------------------------
 
     /** Run prod/scripts/4-llm.sh with a fake docker on PATH; return generated props. */
@@ -897,12 +1007,30 @@ class LlamacppWiringTest {
      * argument fetch_gguf passes), no-op the compose up / exec and the volume
      * download/run, answer the sha256sum probe with the pinned digests so the
      * enforced-checksum path passes. No real container ever runs.
+     *
+     * <p>GPU-gate stubs (M1-827): {@code info} prints rootless only under {@code FAKE_DOCKER_ROOTLESS};
+     * {@code exec --list-devices} lists a fake device unless FAKE_DOCKER_NO_DEVICES[_EMBED] empties it.
      */
     private String fakeDockerScript() {
         return "#!/usr/bin/env bash\n"
                 + "printf '%s\\n' \"$*\" >> \"$FAKE_DOCKER_ARGV\"\n"
                 + "sub=\"$1\"\n"
-                + "if [ \"$sub\" = \"compose\" ]; then exit 0; fi\n"
+                + "if [ \"$sub\" = \"info\" ]; then\n"
+                + "  [ -n \"${FAKE_DOCKER_ROOTLESS:-}\" ] && echo 'name=rootless'\n"
+                + "  exit 0\n"
+                + "fi\n"
+                + "if [ \"$sub\" = \"compose\" ]; then\n"
+                + "  case \"$*\" in\n"
+                + "    *\"--list-devices\"*)\n"
+                + "      if [ -z \"${FAKE_DOCKER_NO_DEVICES:-}\" ] \\\n"
+                + "         && { [ -z \"${FAKE_DOCKER_NO_EMBED_DEVICES:-}\" ] || [[ \"$*\" != *llamacpp-embeddings* ]]; }; then\n"
+                + "        echo 'Vulkan0: fake render device (RADV FAKE)'\n"
+                + "      fi\n"
+                + "      exit \"${FAKE_DOCKER_EXEC_EXIT:-0}\"\n"
+                + "      ;;\n"
+                + "  esac\n"
+                + "  exit 0\n"
+                + "fi\n"
                 + "if [ \"$sub\" = \"run\" ]; then\n"
                 + "  ep=\"\"; prev=\"\"; last=\"\"\n"
                 + "  for a in \"$@\"; do\n"

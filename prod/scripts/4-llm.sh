@@ -315,6 +315,60 @@ preflight_gguf_url() {
   fi
 }
 
+# Rootless /dev/dri ACL gate, GPU-selected path only (doctor's hard-fail
+# contract stays out): rootless makes group_add a no-op, so missing host-user
+# rw on the render/card nodes means no device (§7.8.7) — fail before bring-up.
+gpu_rootless_acl_gate() {
+  docker info --format '{{.SecurityOptions}}' 2>/dev/null | grep -q rootless || return 0
+  local nodes=() node
+  if [[ -n "${INFOCHAT_LLAMACPP_GPU_NODES:-}" ]]; then
+    read -ra nodes <<< "$INFOCHAT_LLAMACPP_GPU_NODES"
+  else
+    for node in /dev/dri/renderD* /dev/dri/card*; do
+      if [[ -e "$node" ]]; then nodes+=("$node"); fi
+    done
+  fi
+  local blocked=()
+  for node in ${nodes+"${nodes[@]}"}; do
+    if [[ ! -r "$node" || ! -w "$node" ]]; then blocked+=("$node"); fi
+  done
+  if [[ ${#blocked[@]} -gt 0 ]]; then
+    echo "FAIL: rootless Docker detected, but this user lacks read+write access to:" >&2
+    printf '      %s\n' "${blocked[@]}" >&2
+    echo "      Under rootless docker the overlay's group_add is ineffective and the" >&2
+    echo "      GPU container would see the node as 65534:65534 — llama-server then lists" >&2
+    echo "      ZERO devices with no error (a silently-CPU 'GPU' build)." >&2
+    gpu_device_remedy
+    exit 1
+  fi
+}
+
+# End-of-path device verification (§8): the -f flags prove the overlay, not
+# the device — an empty list is the rootless trap; a failed exec is
+# not-verified, never passed.
+verify_gpu_device() {
+  local service="$1" profile="$2" devices
+  if ! devices="$(docker compose "${LLAMACPP_COMPOSE_FILES[@]}" --env-file "$SECRETS_FILE" \
+      --profile prod --profile "$profile" exec -T "$service" /app/llama-server --list-devices 2>&1)"; then
+    echo "FAIL: could not verify a GPU device in $service (llama-server --list-devices exec failed)." >&2
+    gpu_device_remedy
+    exit 1
+  fi
+  # A device line is "Vulkan0: ..." — a bare "Available devices:" header with
+  # nothing under it is the empty list (measured M1-744), not a pass.
+  if ! printf '%s\n' "$devices" | grep -Eq '[A-Za-z]+[0-9]+:'; then
+    echo "FAIL: $service lists ZERO GPU devices — the GPU container sees no device." >&2
+    gpu_device_remedy
+    exit 1
+  fi
+  echo "+ $service sees a GPU device: $(printf '%s\n' "$devices" | grep -E '[A-Za-z]+[0-9]+:' | head -n 1)"
+}
+
+gpu_device_remedy() {
+  echo "      Remedy: host-side ACLs — setfacl on the /dev/dri renderD*/card* nodes," >&2
+  echo "      persisted with the udev rule; runbook: docs/design/07-deployment.md §7.8.7." >&2
+}
+
 umask 077
 mkdir -p "$RUNTIME_DIR"
 
@@ -546,12 +600,14 @@ case "$backend" in
     if [[ "$gpu_on" -eq 1 ]]; then
       LLAMACPP_COMPOSE_FILES+=(-f "$GPU_OVERLAY")
       gpu_build="Vulkan build (docker-compose.gpu.yml merged)"
+      gpu_rootless_acl_gate
     else
       gpu_build="CPU build (base file only)"
     fi
     echo "GPU probe: /dev/dri render nodes ${render_nodes}; INFOCHAT_LLAMACPP_GPU=${llamacpp_gpu} -> llama.cpp ${gpu_build}"
     echo "+ docker compose ${LLAMACPP_COMPOSE_FILES[*]} --env-file $SECRETS_FILE --profile prod --profile llamacpp up -d llamacpp"
     docker compose "${LLAMACPP_COMPOSE_FILES[@]}" --env-file "$SECRETS_FILE" --profile prod --profile llamacpp up -d llamacpp
+    if [[ "$gpu_on" -eq 1 ]]; then verify_gpu_device llamacpp llamacpp; fi
 
     if [[ "$emb_backend" == "llamacpp" ]]; then
       if [[ -n "$emb_url" ]]; then
@@ -568,6 +624,7 @@ case "$backend" in
       set_secret INFOCHAT_LLAMACPP_EMBED_GGUF_SHA "$emb_sha"
       echo "+ docker compose ${LLAMACPP_COMPOSE_FILES[*]} --env-file $SECRETS_FILE --profile prod --profile llamacpp-embeddings up -d llamacpp-embeddings"
       docker compose "${LLAMACPP_COMPOSE_FILES[@]}" --env-file "$SECRETS_FILE" --profile prod --profile llamacpp-embeddings up -d llamacpp-embeddings
+      if [[ "$gpu_on" -eq 1 ]]; then verify_gpu_device llamacpp-embeddings llamacpp-embeddings; fi
       emb_base_url="$LLAMACPP_EMBED_URL"
       emb_model="$emb_file"
     else
