@@ -289,38 +289,31 @@ If Dev Services fails to start a container, check, in order:
 
 **Different test each run, failing before any test logic runs**
 (`ContainerLaunchException` → `RootlessKit PortManager.AddPort(): … bind:
-address already in use`) is an environment failure, not a regression: the
-rootless Docker daemon allocates each container's published host port from the
-ephemeral range of its own network namespace — **copied from the host at daemon
-start**. When the two bands overlap, container publishes race live host sockets
-(your stack's outbound connections, other suites, TIME-WAIT residue). A host
-port-split sysctl silently dies at every daemon restart.
+address already in use`) is an environment failure, not a regression. Rootless
+Docker publishes container ports from an internal allocator whose band is
+effectively fixed at ~40000–60999; when the host kernel hands outbound sockets
+from the same band, container publishes race them.
 
-Diagnose in one step (no root) — if the two ranges overlap, the race is live.
-**Get the pid right:** under `--detach-netns` the rootlesskit *parent* stays in
-the host netns; the daemon's netns belongs to its **child** process. Find the
-process whose `ns/net` differs from yours (`pgrep -f 'rootlesskit|dockerd'`),
-then read the child's band through it:
+The fix is the **host** kernel range (the only live lever — sysctl into the
+docker daemon's network namespace is a no-op for the publish band):
 
 ```bash
-awk '{print $1"-"$2}' /proc/sys/net/ipv4/ip_local_port_range      # host
-awk '{print $1"-"$2}' /proc/<child-pid>/root/proc/sys/net/ipv4/ip_local_port_range
+sudo sysctl -w net.ipv4.ip_local_port_range="32768 39999"
 ```
 
-Fix live (sudo; no daemon or container restart) by giving the **daemon child**
-a disjoint band — e.g. host keeps `40000 60999`, daemon gets `32768 39999`:
+Verify empirically by asking docker (never by reading sysctls — allocator
+behavior is the ground truth):
 
 ```bash
-sudo nsenter -t <child-pid> -n sysctl -w net.ipv4.ip_local_port_range="32768 39999"
+id=$(docker run --rm -d -P pgvector/pgvector:pg16)
+docker port "$id" | head -1   # healthy = a 40000-band draw while host is 32768-39999
+docker rm -f "$id"
 ```
 
-Targeting the rootlesskit parent — or the host itself — moves the wrong band:
-it can look fixed while actually having swapped the problem to the host side,
-and a later host restore silently re-arms the race.
-
-The fix resets on the next daemon restart — re-diagnose after any restart or
-reboot. `scripts/verify-serialized.sh` prints this warning automatically when
-it detects the overlap, naming the correct pid and command.
+Durable fix: `/etc/sysctl.d/99-docker-port-split.conf` must carry the SAME
+direction (`32768 39999`) — its original `40000 60999` direction re-arms the
+race at reboot. `scripts/verify-serialized.sh` warns at verify start when the
+host band overlaps the docker publish band.
 
 ### Known flaky integration tests
 

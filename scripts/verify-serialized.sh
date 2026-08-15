@@ -51,44 +51,28 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
 
-# Rootless-docker port-split check (2026-08-15 incident): the rootless
-# daemon picks each container's published host port from the ephemeral
-# range of its OWN network namespace, which it copies from the host at
-# daemon start — a host-level split sysctl silently dies at every daemon
-# restart. With the bands overlapping, container publishes race live
-# host sockets and random ITs fail at container startup with
-# "RootlessKit PortManager.AddPort(): … bind: address already in use"
-# (engineering-rules §5 environment class; full recipe:
-# .agents/memory/rootless-docker-port-split.md, DEVELOPER.md
-# §Troubleshooting). Read-only, needs no root, WARN only — the operator
-# owns the sudo fix. PID trap (cost this repo an afternoon): the
-# rootlesskit PARENT stays in the host netns under --detach-netns — the
-# daemon's netns belongs to its CHILD process, so discovery must compare
-# ns/net inodes, never trust "the rootlesskit pid". Reading the child's
-# sysctl via /proc/<pid>/root/proc works without root.
+# Rootless-docker port-split check (2026-08-15 incident). Rootless docker
+# publishes container ports from an INTERNAL allocator whose band is
+# effectively fixed at the 40000-60999 half of the default 32768-60999
+# ephemeral range (observed live: draws are 40000-band and sequential
+# regardless of any daemon-netns sysctl — neither a netns sysctl nor a
+# daemon restart moves the band). Therefore the ONLY live lever is the
+# HOST kernel's ip_local_port_range: while the host hands outbound
+# sockets (test JVMs, prod stacks, agent sessions) from the same
+# 40000-60999 band, container publishes race those sockets and random
+# ITs die at container startup with "RootlessKit PortManager.AddPort():
+# … bind: address already in use" (engineering-rules §5 environment
+# class; 2026-08-15: four same-day suite failures before diagnosis).
+# Fix = host kernel band 32768-39999 (the MIRROR of the Jul 30 split
+# file's original direction — that file set the host to 40000-60999 on
+# the then-belief the daemon honors its netns sysctl; it does not).
+# Read-only, WARN only; the sudo fix is the operator's. Full recipe and
+# the dead ends (daemon-netns sysctl is a no-op): 
+# .agents/memory/rootless-docker-port-split.md, DEVELOPER.md §Troubleshooting.
 host_lo="$(awk '{print $1}' /proc/sys/net/ipv4/ip_local_port_range 2>/dev/null || true)"
 host_hi="$(awk '{print $2}' /proc/sys/net/ipv4/ip_local_port_range 2>/dev/null || true)"
-my_netns="$(readlink /proc/self/ns/net 2>/dev/null || true)"
-daemon_pid=""
-if [ -n "$host_lo" ] && [ -n "$host_hi" ] && [ -n "$my_netns" ]; then
-    for p in $(pgrep -f 'rootlesskit|dockerd' 2>/dev/null | sort -n); do
-        [ -r "/proc/$p/ns/net" ] || continue
-        [ "$(readlink "/proc/$p/ns/net" 2>/dev/null)" != "$my_netns" ] || continue
-        if [ -r "/proc/$p/root/proc/sys/net/ipv4/ip_local_port_range" ]; then
-            daemon_pid="$p"
-            break
-        fi
-    done
-fi
-if [ -n "$daemon_pid" ]; then
-    ns_lo="$(awk '{print $1}' "/proc/$daemon_pid/root/proc/sys/net/ipv4/ip_local_port_range" 2>/dev/null || true)"
-    ns_hi="$(awk '{print $2}' "/proc/$daemon_pid/root/proc/sys/net/ipv4/ip_local_port_range" 2>/dev/null || true)"
-    if [ -n "$ns_lo" ] && [ -n "$ns_hi" ]; then
-        if [ "$ns_lo" -le "$host_hi" ] && [ "$host_lo" -le "$ns_hi" ]; then
-            echo "verify-serialized: WARNING: rootless docker netns port range ($ns_lo-$ns_hi, pid $daemon_pid) overlaps the host range ($host_lo-$host_hi) — container publishes will race live sockets (random 'address already in use' IT failures; resets at every daemon restart)." >&2
-            echo "verify-serialized: live fix (sudo): sudo nsenter -t $daemon_pid -n sysctl -w net.ipv4.ip_local_port_range=\"32768 39999\" — target THIS pid (the daemon-netns child), NOT the rootlesskit parent, and never the host itself (the host side belongs to /etc/sysctl.d/99-docker-port-split.conf)." >&2
-        fi
-    fi
+if [ -n "$host_lo" ] && [ -n "$host_hi" ] && [ "$host_lo" -ge 40000 ]; then
+    echo "verify-serialized: WARNING: host ephemeral port range ($host_lo-$host_hi) overlaps rootless docker's fixed publish band (~40000-60999) — container publishes will race outbound sockets (random 'address already in use' IT failures). Live fix (sudo): sysctl -w net.ipv4.ip_local_port_range=\"32768 39999\" — and align /etc/sysctl.d/99-docker-port-split.conf (its original direction is inverted for rootless docker; see the memory entry)." >&2
 fi
 
 # One lockfile per slot, each on its own descriptor. The descriptors stay

@@ -1,60 +1,60 @@
 ---
 name: rootless-docker-port-split
-description: Random "address already in use" IT failures mean the rootless docker netns port range overlaps the host's — find the daemon-netns CHILD pid (never the rootlesskit parent), fix live with one sudo nsenter, know it resets on daemon restart.
+description: Random "address already in use" IT failures mean the host ephemeral port range overlaps rootless docker's fixed ~40000-60999 publish band — fix is the HOST sysctl at 32768-39999 (the daemon-netns sysctl is a proven no-op; trust only the docker run -P probe).
 metadata:
   type: project
 ---
 
-A rootless Docker daemon picks each container's published host port from the
-ephemeral port range of its **own private network namespace**, which it copies
-from the host **at daemon start**. When the two ranges overlap, every container
-publish races live host sockets (long-running stacks' outbound connections,
-test JVMs' client sockets, TIME-WAIT residue) and random integration tests die
-at container startup with:
+Rootless docker publishes container ports from an internal allocator whose
+band is effectively fixed at the 40000-60999 half of the default
+32768-60999 ephemeral range. When the HOST kernel hands outbound sockets
+(test JVMs, prod stacks' connections, agent sessions, TIME-WAIT residue)
+from the same band, container publishes race those sockets and random
+integration tests die at container startup with:
 
     RootlessKit PortManager.AddPort(): listen tcp4 0.0.0.0:<port>:
     bind: address already in use
 
-**This is an environment failure, not a regression** (engineering-rules §5's
-named environment cause). The signature: different victim test each run, zero
-failures in the modules the diff touches, failure before any test logic runs
+**Environment failure, not a regression** (engineering-rules §5's named
+environment class). Signature: different victim test each run, zero failures
+in the modules the diff touches, failure before any test logic runs
 (`ContainerLaunchException` / `Container startup failed for image
-pgvector/pgvector:pg16`). A host-level port-split sysctl does NOT survive a
-docker daemon restart — the fresh netns re-copies the host range and the race
-returns.
+pgvector/pgvector:pg16`). 2026-08-15: four same-day suite failures before
+diagnosis; every "green in a quiet window" run was a lucky draw.
 
-**PID trap (cost an afternoon, 2026-08-15):** under `--detach-netns` the
-rootlesskit PARENT stays in the host netns; the daemon's netns belongs to its
-CHILD process (a `/proc/self/exe` rootlesskit child). `nsenter -t <parent>`
-sets the HOST, not the daemon — it "fixes" the symptom only by moving the host
-band (an accidental reversed split), and any later host restore re-arms the
-race. Discover the right pid mechanically: among `pgrep -f 'rootlesskit|dockerd'`,
-take the process whose `/proc/<pid>/ns/net` inode DIFFERS from the reader's
-and whose `/proc/<pid>/root/proc/sys/net/ipv4/ip_local_port_range` is readable
-(reads the child netns without root).
-
-**Diagnosis (no root needed):** compare the bands — overlap means the race is
-live.
+**Fix (the only live lever):** move the HOST kernel band off 40000:
 
 ```bash
-awk '{print $1"-"$2}' /proc/sys/net/ipv4/ip_local_port_range   # host
-# daemon: the child pid per the discovery rule above, then
-awk '{print $1"-"$2}' /proc/<child-pid>/root/proc/sys/net/ipv4/ip_local_port_range
+sudo sysctl -w net.ipv4.ip_local_port_range="32768 39999"
+# durable: align /etc/sysctl.d/99-docker-port-split.conf to the SAME
+# direction (32768-39999) — its original 40000-60999 direction predates
+# the rootless-docker finding and re-arms the race at reboot.
 ```
 
-**Live fix (sudo, no daemon restart, no container restart):** point the
-DAEMON's namespace at a band disjoint from the host's — e.g. host stays
-`40000 60999` (what the persistent `/etc/sysctl.d` split file declares),
-daemon gets `32768 39999`:
+**Dead ends — do not repeat (all burned 2026-08-15):**
+
+- A sysctl into the daemon's network namespace is a NO-OP for the publish
+  band: `nsenter -t <pid> -n sysctl -w …` reports success, yet docker keeps
+  drawing 40000-band ports. The band does not follow the daemon netns
+  sysctl, live or across restarts.
+- Namespace forensics mislead: under `--detach-netns` the rootlesskit parent
+  stays in the HOST netns and the child holds the daemon netns — and
+  `/proc/<pid>/root/proc/sys/net/...` resolves against the READER's netns,
+  so it silently reads the host no matter which pid you name. Do not
+  diagnose through procfs-into-netns.
+- `verify-serialized.sh`'s original premise (header + Jul 30 split file)
+  was that the daemon honors its netns port range and only the split
+  direction mattered; on rootless docker that premise is false.
+
+**The only trustworthy probe — ask docker itself** (the allocator is what
+matters, not any sysctl's opinion):
 
 ```bash
-sudo nsenter -t <child-pid> -n sysctl -w net.ipv4.ip_local_port_range="32768 39999"
+id=$(docker run --rm -d -P pgvector/pgvector:pg16)
+docker port "$id" | head -1     # a 40000-band draw = publish band unchanged
+docker rm -f "$id" >/dev/null
 ```
 
-**The fix resets on the next daemon restart** (netns re-copies). After any
-docker daemon restart or reboot, re-run the diagnosis. Durable option: a
-systemd drop-in applying the sysctl into the daemon namespace at start
-(`ExecStartPost` + nsenter), or any equivalent start hook — an operator
-decision, per host. `scripts/verify-serialized.sh` prints an overlap warning
-naming the correct pid and fix command at verify start. Related:
-[[clean-verify-monitoring]].
+Healthy state: host `32768-39999`, docker draws 40000-band. Verify-start
+guard: `scripts/verify-serialized.sh` warns when the host band overlaps
+40000-60999 and prints the fix. Related: [[clean-verify-monitoring]].
