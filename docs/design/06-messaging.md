@@ -487,6 +487,35 @@
   limit 15,602 minus wrapper) plus the standalone-upload nuance are
   the recorded inputs M1-842/M1-843 build on.
 
+  **Bundle v7.0.0 surface review (M1-838).** The image now pins
+  simplex-chat `v7.0.0` (binary reports 7.0.0.11; artifact
+  `simplex-chat-ubuntu-22_04-x86_64`, build-time sha256 gate in
+  `Dockerfile.jvm`). Launch-surface premises re-verified empirically
+  against the pinned binary: the `-p 5225` chat server still binds
+  loopback only (`ss`: single `LISTEN 127.0.0.1:5225`, no wildcard
+  listener — trust boundary #7 holds, re-run of the M1-429 spike); the
+  v6→v7 DB migration is sequential and additive (all 151 v6.5.4 chat-DB
+  migrations present, 13 new applied; observed succeeding on a copy of
+  the bot data-dir with a `/show_address` read-back); the 6b
+  provisioning premises (exit 0 on a bad command, anchored
+  `^bad chat command` / `^simplex-chat: ` markers,
+  `--create-bot-display-name`/`-y`/`-t`/`-e` acceptance, `/ad`
+  idempotency, `https://smp` link format) all hold unchanged — no
+  provisioning-script drift. A v6.5.4→v7.0.0 source tag-diff over the
+  ten adapter-depended surfaces found **no removals and no shape
+  changes to any consumed form**: the `/_send`/`/_update`/`/_join`
+  grammar, composed-message `filePath`, `mentions{}`, group-invitation
+  and address frames, inbound-event constructors, and XFTP event tags
+  are byte-compatible; the only `/_send` change is an optional
+  ` sign=on|off` segment (message signing, defaults off), plus additive
+  CLI flags (`--user-display-name`, relay/headless options — unused by
+  the adapter) and additive `GroupMember.memberVerifiedCode`. The XFTP
+  completion semantics and the 1 GiB ceiling remain measured against
+  v6.5.4's linked simplexmq and are re-verified on v7.0.0 by M1-840;
+  the text/group/mention/invitation/address wire forms are re-captured
+  from the v7.0.0 binary by M1-839 (the tag diff is source evidence,
+  not a substitute for frame capture — the M1-508 lesson).
+
   **Provider-side spool lifecycle** (M1-801; the D75 privacy posture).
   Provider owns the file lifecycle for D74's file-path payload: the
   backend's bytes are spooled in a tmpfs directory, handed to the
@@ -747,7 +776,9 @@
   The decoded field paths below are confirmed against frames captured from a
   live simplex-chat **v6.5.4.1** deployment (a throwaway loopback
   `ws://127.0.0.1:5225` probe). Earlier hand-rolled fixtures encoded different
-  field names and silently dropped 100% of real inbound:
+  field names and silently dropped 100% of real inbound: the v6.5.4→v7.0.0
+  tag diff found no change to any of these paths (M1-838), and M1-839
+  re-captures them from the v7.0.0 binary.
 
   - **chat-type discriminator** is `chatInfo.type` (`"direct"` / `"group"`),
     **not** `chatInfo.chatType`. A real `newChatItems` event with

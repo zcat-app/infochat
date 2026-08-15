@@ -1,21 +1,26 @@
 ---
 id: M1-838
 title: "Bundle simplex-chat v7.0.0; re-verify launch surface"
-status: pending
+status: done
 created: 2026-08-14
-last_updated: 2026-08-14
+last_updated: 2026-08-15
+clarity_check: >-
+  2026-08-15: lint clean (after copying the gitignored tick-analysis doc into
+  the worktree); all file:line citations spot-checked true (Dockerfile.jvm:47-53
+  sole pin site per census grep; 6b markers/flags/link; security.md:71-80);
+  analysis pitfalls P1-P4,P8-P11 all landed; no in-flight tick ticket (no
+  module overlap); blocked_by empty. No blocking ambiguity.
 flow: tick
 reproduction: >-
-  to-be-written: BundledSimplexCliPinTest.dockerfilePinsV700WithBuildTimeSha256
-  (infochat-provider/src/test/java/app/zcat/infochat/provider/config/, beside
-  DocumentedConfigKeyParityTest) — reads
+  BundledSimplexCliPinTest.dockerfilePinsV700WithBuildTimeSha256
+  (infochat-provider/src/test/java/app/zcat/infochat/provider/config/,
+  beside DocumentedConfigKeyParityTest) — reads
   infochat-provider/src/main/docker/Dockerfile.jvm and asserts the
   SIMPLEX_CHAT_VERSION env is v7.0.0 and a 64-hex build-time sha256 guards the
-  download; it fails today because Dockerfile.jvm:47 pins v6.5.4. Companion
-  probe at start: `docker compose run --rm --no-deps --entrypoint
-  /usr/local/bin/simplex-chat infochat-provider --version` prints the 6.5.4.x
-  banner (HANDOFF.md:2527 records the baked binary reporting v6.5.4.1).
-  `start` writes the test and runs it RED before any fix code (workflow §0).
+  download. Run RED 2026-08-15 (worktree .opencode/worktrees/M1-838, log
+  /tmp/opencode/pin-red.log): "The bundled simplex-chat is v6.5.4 but the
+  adapter estate is verified against v7.0.0 … expected: <v7.0.0> but was:
+  <v6.5.4>"; all 1844 other unit tests green.
 analysis_ref: docs/plan/m1/tick-analysis/simplex-cli-v7-upgrade.md
 blocked_by: []
 files_scope:
@@ -61,6 +66,14 @@ decision_refs:
   - D10
   - D37
   - D46
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY WARN (comment-cap, informational — class javadoc naming the real trap), SCOPE PASS"
+    diff_stats: "5 files, +266/-22"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-838-r1.txt
 ---
 
 # M1-838: Bundle simplex-chat v7.0.0; re-verify launch surface
@@ -186,3 +199,130 @@ findings escalate per P10.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-838-simplex-cli-v7-upgrade-1.md
 ```
+
+## Evidence record (2026-08-15, implementation)
+
+All probes ran on this deployment host; URLs/links in captured output are
+redacted below (D37 — frame types and field shapes only, never links).
+
+### Step 1 — upstream evidence (P9, A1, A2)
+
+- Release page (fetched 2026-08-15): tag `v7.0.0`, released 2026-07-28,
+  commit `e11128c`, GPG-signed; binary reports `SimpleX Chat v7.0.0.11`
+  (host run). Artifact name on the release page IS
+  `simplex-chat-ubuntu-22_04-x86_64` (A2 confirmed, not an assumption);
+  a `v7.1-beta.0` exists and was NOT taken.
+- Source tag-diff v6.5.4→v7.0.0 (tarballs of both tags, `src/Simplex/Chat/**`):
+  - `Options.hs`: `-d`/`-p`/`-y`/`-t`/`-e`/`--create-bot-display-name` all
+    present; no `--network` option in either tag. ADDITIVE only:
+    `--user-display-name` (mutually exclusive with
+    `--create-bot-display-name`, unused by us), `--user-image-file`,
+    relay/web-preview flags, `--headless`, `--create-bot-client-service`.
+  - `Library/Commands.hs` `/_send`: grammar gained `signMessagesP` between
+    TTL and ` json `; `signMessagesP = " sign=" *> onOffP <|> pure False` —
+    OPTIONAL, old form parses unchanged. `/_update`, `/_join`,
+    `/show_address`, `/ad`, `/auto_accept` grammar lines: zero diff.
+  - `Controller.hs` event constructors (`CEvtSndFile*`,
+    `NewChatItems`-class, group invitation/join): zero diff.
+  - `Types.hs`: `mentions` field, `UserContactLink` response shape,
+    `MsgContent`/`ComposedMessage` definitions unchanged; ADDITIVE
+    `GroupMember.memberVerifiedCode` and a new `ContactNameOrLink` type
+    (SimpleX Names, not part of any consumed frame).
+  - Migrations (A3): `Store/SQLite/Migrations` strictly additive — all 151
+    v6.5.4 `M20*` files present in v7.0.0 + 13 new (M20260516…M20260720).
+- **Ten-surface dispositions**: surfaces 1,2,5,6,7,8,9 (send/composed
+  grammar, filePath, live=on/off, inbound frames, mentions{},
+  receivedGroupInvitation, /show_address) — unchanged per tag diff, handed
+  to **M1-839** for v7.0.0 frame re-capture (tag diff is source evidence,
+  not a capture). Surfaces 3,4 (XFTP completion semantics, 1 GiB ceiling) —
+  constructors unchanged but v7.0.0 links simplexmq 7.0.0.6 (bumped from
+  6.5.4.x), so the completion-path source check and ceiling re-measurement
+  are **M1-840's** duty. Surface 10 (subprocess launch/loopback) —
+  re-verified empirically below. No D51/D52-shaped change found (P10 clear,
+  no escalation).
+
+### Steps 2-3 — pin test + sha (P1)
+
+- Reproduction RED: see `reproduction:` above (v6.5.4 vs v7.0.0, all 1844
+  other unit tests green). GREEN after the bump.
+- Own TLS download (host curl):
+  `393279f37a57ff7a63b92cffbd583d1d8abb5ea13e28f8caea74539d7c8db91d` —
+  byte-identical to upstream's published `_sha256sums` figure
+  (`393279f3…db91d`); artifact size 79,531,064 bytes.
+- `docker compose --profile prod build infochat-provider` (worktree, host
+  network per compose) — exit 0, image `m1-838-infochat-provider`; baked
+  binary `--version` → `SimpleX Chat v7.0.0.11` (only possible through the
+  correct name+sha at `sha256sum -c`).
+- **Failure-mode probe** (scratch Dockerfile in /tmp, never committed):
+  same layer with the sha's last hex flipped (`…c8db91d`→`…c8db91e`) →
+  real TLS download in-container, then `sha256sum: WARNING: 1 computed
+  checksum did NOT match` / `/usr/local/bin/simplex-chat: FAILED` → build
+  exit code 1. Supply-chain gate proven non-vacuous.
+
+### Step 4 — host probe binary (P8)
+
+This host had no `prod/runtime/simplex-clients/` (the live-harness client
+dirs LiveAdmin/LiveUser do not exist on this box — nothing to back up,
+recorded). Extracted fresh from the rebuilt image to
+`prod/runtime/simplex-clients/bin/simplex-chat`:
+`--version` → `SimpleX Chat v7.0.0.11`; sha256 of the extracted file
+equals the pinned artifact hash byte-for-byte. Old prod image
+(`infochat-prod-infochat-provider`) binary banner recorded pre-upgrade:
+`SimpleX Chat v6.5.4.1`.
+
+### Step 5 — backup + migration (P3)
+
+- Bot data-dir `/home/infochat/infochat/prod/runtime/simplex` (root-owned,
+  read via container): backed up BEFORE any v7.0.0 start to
+  `/home/infochat/pre-v7-upgrade-backup-20260815/simplex-bot-datadir-pre-v7.tar.gz`
+  (contains `simplex_v1_chat.db` + `simplex_v1_agent.db`; tar sha256
+  `6e8e78a7cfb878d00ecd3454c5ff076d55602b8c00a5adbb3b0ccc86aefcc492`).
+- Migration observed on a COPY (live dir untouched: the running v6.5.4
+  Provider keeps serving; the real migration happens at image-roll time
+  with this backup as the rollback): v7.0.0 `-y -e "/show_address"` →
+  exit 0, no `^simplex-chat: ` fatal marker, `Current user: infochat-bot`
+  + address returned (URLs redacted). DB evidence: chat.db
+  `migrations` table 151→164 rows (+13, exactly the new tag files),
+  agent.db 44→45.
+
+### Step 6 — loopback bind (P2)
+
+v7.0.0 binary with production argv shape (`-d <prefix> -p 5225`,
+`SimpleXSubprocess.commandFor`), `ss -tlnp`:
+`LISTEN 0 1024 127.0.0.1:5225 users:(("simplex-chat",pid=…,fd=14))` and
+NO `0.0.0.0:5225` / `[::]:5225` listener. Trust boundary #7 holds on
+v7.0.0 (recorded beside the M1-429 spike result in
+docs/design/06-messaging.md §Bundle v7.0.0 surface review).
+
+### Step 7 — 6b provisioning premises (P4)
+
+Real v7.0.0.11 binary, throwaway data-dir, 6b's exact argv shape
+(`-d <dir>/simplex_v1 -y …`):
+
+| premise | v7.0.0 observation | drift |
+|---|---|---|
+| exit code on bad command | `/definitely-not-a-command` → exit **0** | none |
+| anchored failure markers | line 2 col 0: `bad chat command: Failed reading: empty` | none |
+| `--create-bot-display-name`/`-y`/`-t`/`-e` | all accepted; profile created non-interactively, no prompt | none |
+| `/ad` idempotency | second run: `you already have chat address, to show: /sa` | none |
+| `https://smp` link grep | first `/ad` → 1 hit; `/show_address` → 1 hit | none |
+
+**Zero drift** ⇒ per the pre-authorization, `6b-simplex-provision.sh` and
+`SimpleXProvisioningWiringTest` are UNTOUCHED (fake-docker emulation stays
+at equal strength, still green in verify).
+
+## Review observations (round 1, 2026-08-15)
+
+Recorded from the tick-reviewer's RECOMMENDED-NEW-TICKET entry
+(`TOUCHED-BY-THIS-DIFF: no`, no `DECIDE-BEFORE:` — recorded only; filing a
+ticket is the user's call):
+
+- The live-harness documentation and the actual host layout disagree. The
+  analysis (docs/plan/m1/tick-analysis/simplex-cli-v7-upgrade.md §Ground
+  truth, citing docs/plan/live-e2e/HANDOFF.md:2526-2531) describes a
+  pre-existing host extraction at `prod/runtime/simplex-clients/bin/
+  simplex-chat` and LiveAdmin/LiveUser client dirs as standing facts; on
+  the deployment host neither existed before this ticket (see Step 4
+  record). The live-e2e handoff documentation should match the host it
+  describes (or state the setup steps to recreate the harness layout), so
+  the next live run does not discover the gap mid-probe.

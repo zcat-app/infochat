@@ -41,12 +41,12 @@ RUN apt-get update \
 # build non-zero (M1-394 integrity spirit). One RUN layer, placed above the app
 # COPY so an app-only rebuild reuses it; the signal-cli archive is removed in the
 # same layer so it never reaches the image.
-#   simplex-chat v6.5.4: ubuntu-22_04-x86_64 dynamic Haskell binary; links only
+#   simplex-chat v7.0.0: ubuntu-22_04-x86_64 dynamic Haskell binary; links only
 #     libs already in the Ubuntu base (verified ldd: libgmp/libcrypto.so.3/libzstd).
 #   signal-cli   0.14.5: JVM distribution, runs on this image's JRE 25.
-ENV SIMPLEX_CHAT_VERSION=v6.5.4 \
+ENV SIMPLEX_CHAT_VERSION=v7.0.0 \
     SIGNAL_CLI_VERSION=0.14.5
-RUN SIMPLEX_CHAT_SHA256=8c33b69e3cd5691e7a7aec455fc82955347d631572f0ff2c68eb3e12f50ab655 \
+RUN SIMPLEX_CHAT_SHA256=393279f37a57ff7a63b92cffbd583d1d8abb5ea13e28f8caea74539d7c8db91d \
     && SIGNAL_CLI_SHA256=62d38ebfef3988d78f437e7328183b75ee549d111382e66c1af70d3ebd3cd7a7 \
     && curl -fsSL -o /usr/local/bin/simplex-chat \
         "https://github.com/simplex-chat/simplex-chat/releases/download/${SIMPLEX_CHAT_VERSION}/simplex-chat-ubuntu-22_04-x86_64" \
