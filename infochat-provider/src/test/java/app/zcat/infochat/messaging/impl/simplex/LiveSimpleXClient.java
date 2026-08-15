@@ -59,6 +59,8 @@ public final class LiveSimpleXClient implements AutoCloseable {
     private static final int SUBPROCESS_CRASH_CAP = 3;
     private static final int WS_CONNECT_ATTEMPTS = 5;
     private static final Duration WS_CONNECT_RETRY_PAUSE = Duration.ofSeconds(2);
+    /** Bounds the resp.type capture list — a live session's frame volume is modest, never unbounded. */
+    private static final int OBSERVED_TYPES_CAP = 10_000;
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -72,11 +74,22 @@ public final class LiveSimpleXClient implements AutoCloseable {
     private final List<String> received = new CopyOnWriteArrayList<>();
     // Bodies of harness-parsed chatItemUpdated frames (item-edit finalize), in arrival order.
     private final List<String> finalized = new CopyOnWriteArrayList<>();
+    // Observed file-transfer frames as (raw resp.type, chatItemId, sent/totalSize) — the
+    // re-verification evidence (D37: frame types and numeric sizes only, never content).
+    private final List<FileEvent> fileEvents = new CopyOnWriteArrayList<>();
+    // resp.type tokens of every frame, for awaiting corrId-less async events (contactConnected).
+    private final List<String> observedRespTypes = new CopyOnWriteArrayList<>();
     private final Map<String, CompletableFuture<String>> pendingSendAcks = new ConcurrentHashMap<>();
     private final Map<String, CompletableFuture<String>> pendingRawQueries = new ConcurrentHashMap<>();
+    // Mirrors SimpleXWebSocketClient's release semantics: one future per chat item id,
+    // completed with the resp.type that released it (the adapter blocks on exactly that event).
+    private final Map<String, CompletableFuture<String>> pendingFileCompletions = new ConcurrentHashMap<>();
     private final AtomicLong corrIdSequence = new AtomicLong();
 
     private WebSocket webSocket;
+
+    /** One observed file-transfer frame: raw resp.type plus the chat item id and progress counters when present. */
+    public record FileEvent(String type, String chatItemId, Long sentSize, Long totalSize) {}
 
     /**
      * @param binary  path to the simplex-chat binary (the Provider-image-baked
@@ -128,6 +141,14 @@ public final class LiveSimpleXClient implements AutoCloseable {
                 corrId, new ScopeRef.Dm(contactId), text));
     }
 
+    /** File send through the PRODUCTION encoder (D74, design §6.2.4): returns the acked {@code meta.itemId}; refusals raise codec-classified. */
+    public String sendFile(String contactId, String filePath, String mimeType,
+                           String displayFileName) throws MessagingException {
+        String corrId = nextCorrId();
+        return sendCommand(corrId, SimpleXMessageCodec.encodeSendFileCommand(
+                corrId, new ScopeRef.Dm(contactId), filePath, mimeType, displayFileName));
+    }
+
     /** Send a plain (mention-free) group message via the production codec's group encoding. */
     public void sendGroup(String groupId, String text) throws MessagingException {
         String corrId = nextCorrId();
@@ -168,6 +189,77 @@ public final class LiveSimpleXClient implements AutoCloseable {
         return since(finalized, watermark);
     }
 
+    /** File-transfer frames observed so far, in arrival order (D74 evidence inventory). */
+    public List<FileEvent> fileEvents() {
+        return List.copyOf(fileEvents);
+    }
+
+    /** resp.type tokens observed so far, in arrival order — handshake diagnostics, types only (D37). */
+    public List<String> observedRespTypes() {
+        return List.copyOf(observedRespTypes);
+    }
+
+    /** Block until the terminal event for {@code chatItemId}; returns the resp.type that released it (the adapter's awaitFileCompletion contract). */
+    public String awaitFileCompletion(String chatItemId, Duration timeout)
+            throws MessagingException, InterruptedException {
+        CompletableFuture<String> future =
+                pendingFileCompletions.computeIfAbsent(chatItemId, k -> new CompletableFuture<>());
+        try {
+            return future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            throw new MessagingException(FailureCategory.TRANSIENT,
+                    "no file-completion event for chatItemId=" + chatItemId
+                            + " within " + timeout + " (observed: " + fileEvents + ")", e);
+        } catch (ExecutionException e) {
+            Throwable cause = Objects.requireNonNull(e.getCause());
+            if (cause instanceof MessagingException me) {
+                throw me;
+            }
+            throw new IllegalStateException("file completion failed", cause);
+        }
+    }
+
+    /** Await a frame whose {@code resp.type} is {@code respType} (async events carry no corrId); diagnostics list type tokens only (D37). */
+    public void awaitFrameType(String respType, Duration timeout) throws InterruptedException {
+        long deadlineNanos = System.nanoTime() + timeout.toNanos();
+        while (System.nanoTime() < deadlineNanos) {
+            if (observedRespTypes.contains(respType)) {
+                return;
+            }
+            Thread.sleep(250);
+        }
+        throw new IllegalStateException("[" + label + "] no frame with resp.type=" + respType
+                + " within " + timeout + "; observed types: " + observedRespTypes);
+    }
+
+    /** The conn link of a {@code userContactLink} frame (provisioning step; short form preferred, tree-walked — nesting is version-sensitive). */
+    public static String contactLink(JsonNode userContactLinkFrame) {
+        String link = firstTextualTree(userContactLinkFrame, "connShortLink");
+        if (link == null) {
+            link = firstTextualTree(userContactLinkFrame, "connFullLink");
+        }
+        if (link == null) {
+            throw new IllegalStateException("no conn link in userContactLink frame");
+        }
+        return link;
+    }
+
+    private static String firstTextualTree(JsonNode node, String field) {
+        if (node.isObject()) {
+            JsonNode value = node.get(field);
+            if (value != null && value.isTextual()) {
+                return value.asText();
+            }
+        }
+        for (JsonNode child : node) {
+            String found = firstTextualTree(child, field);
+            if (found != null) {
+                return found;
+            }
+        }
+        return null;
+    }
+
     private static List<String> since(List<String> all, int watermark) {
         List<String> bodies = new ArrayList<>();
         List<String> snapshot = List.copyOf(all);
@@ -185,7 +277,7 @@ public final class LiveSimpleXClient implements AutoCloseable {
      * {@code contactId} and {@code localDisplayName}.
      */
     public String resolveContactId(String displayName) throws Exception {
-        JsonNode response = rawQuery("/contacts");
+        JsonNode response = query("/contacts");
         List<String> matches = new ArrayList<>();
         collectContactIds(response, displayName, matches);
         if (matches.size() != 1) {
@@ -203,7 +295,7 @@ public final class LiveSimpleXClient implements AutoCloseable {
      * MEMBER objects, which also carry a {@code groupId} + {@code localDisplayName}.
      */
     public String resolveGroupId(String groupName) throws Exception {
-        JsonNode response = rawQuery("/groups");
+        JsonNode response = query("/groups");
         List<String> matches = new ArrayList<>();
         collectGroupIds(response, groupName, matches);
         if (matches.size() != 1) {
@@ -222,7 +314,7 @@ public final class LiveSimpleXClient implements AutoCloseable {
      * member objects like the other fixture queries.
      */
     public GroupMember resolveGroupMember(String groupName, String contactId) throws Exception {
-        JsonNode response = rawQuery("/members " + groupName);
+        JsonNode response = query("/members " + groupName);
         Map<String, String> displayNamesByGroupMemberId = new LinkedHashMap<>();
         collectGroupMembers(response, contactId, displayNamesByGroupMemberId);
         if (displayNamesByGroupMemberId.size() != 1) {
@@ -316,6 +408,7 @@ public final class LiveSimpleXClient implements AutoCloseable {
                 rawQuery.complete(frame);
             }
         }
+        recordRespType(frame);
         SimpleXMessageCodec.DecodedFrame decoded;
         try {
             decoded = SimpleXMessageCodec.decode(frame);
@@ -338,7 +431,71 @@ public final class LiveSimpleXClient implements AutoCloseable {
                             "simplex-chat error: " + error.detail()));
                 }
             }
-            default -> extractFinalizedBody(frame).ifPresent(finalized::add);
+            // File-send release events, mirroring SimpleXWebSocketClient.dispatch:
+            // the future's value names the resp.type that released (D74, design §6.2.4).
+            case SimpleXMessageCodec.FileSendComplete done -> {
+                String rawType = rawRespType(frame);
+                fileEvents.add(new FileEvent(rawType, done.chatItemId(), null, null));
+                pendingFileCompletions
+                        .computeIfAbsent(done.chatItemId(), k -> new CompletableFuture<>())
+                        .complete(rawType);
+            }
+            case SimpleXMessageCodec.FileSendFailed failed -> {
+                String rawType = rawRespType(frame);
+                fileEvents.add(new FileEvent(rawType, failed.chatItemId(), null, null));
+                pendingFileCompletions
+                        .computeIfAbsent(failed.chatItemId(), k -> new CompletableFuture<>())
+                        .completeExceptionally(new MessagingException(FailureCategory.PERMANENT,
+                                "simplex-chat reported the file transfer failed (" + rawType + ")"));
+            }
+            default -> {
+                captureFileProgress(frame);
+                extractFinalizedBody(frame).ifPresent(finalized::add);
+            }
+        }
+    }
+
+    private void recordRespType(String frame) {
+        if (observedRespTypes.size() >= OBSERVED_TYPES_CAP) {
+            return;
+        }
+        String type = rawRespType(frame);
+        if (type != null) {
+            observedRespTypes.add(type);
+        }
+    }
+
+    /** Capture the Ignored snd* progress frames — the codec flattens them; the evidence needs types and sizes (D37: no content). */
+    private void captureFileProgress(String frame) {
+        JsonNode resp;
+        try {
+            resp = MAPPER.readTree(frame).path("resp");
+        } catch (JsonProcessingException e) {
+            return;
+        }
+        String type = resp.path("type").asText("");
+        if (!type.startsWith("sndFile")) {
+            return;
+        }
+        JsonNode sentSize = resp.get("sentSize");
+        JsonNode totalSize = resp.get("totalSize");
+        fileEvents.add(new FileEvent(type,
+                fileEventChatItemId(resp),
+                sentSize != null && sentSize.isNumber() ? sentSize.asLong() : null,
+                totalSize != null && totalSize.isNumber() ? totalSize.asLong() : null));
+    }
+
+    private static String fileEventChatItemId(JsonNode resp) {
+        JsonNode itemId = resp.path("chatItem").path("chatItem").path("meta").get("itemId");
+        return itemId != null && (itemId.isTextual() || itemId.isNumber()) ? itemId.asText() : null;
+    }
+
+    private static String rawRespType(String frame) {
+        try {
+            JsonNode type = MAPPER.readTree(frame).path("resp").path("type");
+            return type.isTextual() ? type.asText() : null;
+        } catch (JsonProcessingException e) {
+            return null;
         }
     }
 
@@ -351,13 +508,13 @@ public final class LiveSimpleXClient implements AutoCloseable {
         }
     }
 
-    /** Transmit one command envelope and block until its corrId ack (or error). */
-    private void sendCommand(String corrId, String envelope) throws MessagingException {
+    /** Transmit one command envelope and block for its corrId ack; returns the acked {@code chatItemId}. */
+    private String sendCommand(String corrId, String envelope) throws MessagingException {
         CompletableFuture<String> ack = new CompletableFuture<>();
         pendingSendAcks.put(corrId, ack);
         try {
             webSocket.sendText(envelope, true).get(ACK_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
-            ack.get(ACK_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
+            return ack.get(ACK_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new MessagingException(FailureCategory.TRANSIENT,
@@ -378,8 +535,8 @@ public final class LiveSimpleXClient implements AutoCloseable {
         }
     }
 
-    /** Send one raw corrId command on the single connection and return the parsed response frame. */
-    private JsonNode rawQuery(String cmd) throws Exception {
+    /** Send one raw corrId command, returning the parsed response — provisioning steps the codec does not model ({@code /ad}, {@code /connect}). */
+    public JsonNode query(String cmd) throws Exception {
         String corrId = nextCorrId();
         CompletableFuture<String> response = new CompletableFuture<>();
         pendingRawQueries.put(corrId, response);

@@ -360,7 +360,8 @@
   testable ahead of the production codecs.
 
   **Verified ceilings (M1-800, measured against the bundled
-  transports).** `maxOutboundAttachmentBytes` is
+  transports; re-measured on the v7.0.0 bundle by M1-840).**
+  `maxOutboundAttachmentBytes` is
   `1_073_741_824` (1 GiB) for SimpleX and `157_286_400` (150 MiB)
   for Signal. Measurement method, both extracted from the bundled
   binaries the adapters spawn (provider image
@@ -371,6 +372,17 @@
     an over-limit file with the `fileSize` error before any upload
     starts); the 5 GiB `maxFileSizeHard` is the agent-internal limit
     for standalone uploads and never applies to contact/group sends.
+    **v7.0.0 re-measurement (M1-840): unchanged 1 GiB.** The v7.0.0
+    release pins simplexmq `efaad8e7` (`cabal.project`), whose
+    `Simplex.FileTransfer.Description` still declares
+    `maxFileSize = gb 1` / `maxFileSizeHard = gb 5`; the chat-side
+    `checkSndFile` enforces it pre-upload via `maxXFTPFileSize`
+    (badge-less senders get the plain soft limit — the bot never
+    carries a badge; v7 adds badged tiers gb 2/gb 5 that never apply
+    here). Empirical arm, live on the bundled v7.0.0.11 binary
+    (LiveSimpleXFileSendIT): a sparse 1 GiB + 1 byte file is refused
+    `chatCmdError` tag `fileSize`, classified PERMANENT, before any
+    upload starts.
   - Signal — signal-cli 0.14.5's service library declares
     `ServiceConfig.MAX_ATTACHMENT_SIZE = 157286400` (150 MiB), the
     Signal service's single-attachment ceiling; signal-cli performs
@@ -379,33 +391,54 @@
     the upload attempt.
 
   **SimpleX wire form and XFTP completion signal (M1-800, verified
-  against the bundled simplex-chat v6.5.4.1).** The file send is the
+  against the bundled simplex-chat v6.5.4.1; re-verified on the
+  bundled v7.0.0 by M1-840 — the current trail).** The file send is the
   same id-addressed `/_send <target> json …` verb as text, carrying
   one composed message with a `filePath` member next to
   `msgContent` (`{"filePath":"…","msgContent":{"type":"file","text":""}}`);
   simplex-chat's composed-message parser accepts `filePath` (plain
-  file) and starts an XFTP upload (live-probed: a real upload ran,
-  emitting `sndFileProgressXFTP` frames with `sentSize`/`totalSize`).
-  The completion signal `sendAttachment` blocks on is the async
-  **`sndFileCompleteXFTP`** event whose `chatItem` carries the same
-  `itemId` the send's `newChatItems` ack returned: simplex-chat emits
-  it when the XFTP upload is done AND the file-description message is
-  handed to the recipient's queue (the `SENT` confirmation), for both
-  direct and group scopes — after it, the transport never reads the
-  local file again, so the spool file is safe to release. Failure
-  surfaces as `sndFileError` (with the chat item when one exists) or
-  as the send command's `chatCmdError` (`fileNotFound`, `fileSize`,
-  `fileIOError` tags — all classify PERMANENT). A contact that is not
-  ready degrades the same upload to `sndStandaloneFileComplete`
-  (live-probed) — the adapter treats any completion other than
-  `sndFileCompleteXFTP` on its own chat item as a PERMANENT failure
-  rather than a delivery. Verification trail: bundled-binary command
-  surface (`/file @<contact> <file_path>` help text), live WS probe
-  of a real XFTP upload, and the shipped version's source
-  (v6.5.4 tag: `Subscriber.hs` SFDONE/`checkSndInlineFTComplete`);
-  the probe host's inbound SMP delivery is broken (even the
-  profile-creation welcome never arrives), so the ready-contact
-  completion frame itself is source-verified, not live-captured.
+  file) and starts an XFTP upload. The completion signal
+  `sendAttachment` blocks on is the async **`sndFileCompleteXFTP`**
+  event whose `chatItem` carries the same `itemId` the send's
+  `newChatItems` ack returned: simplex-chat emits it when the XFTP
+  upload is done AND the file-description message is handed to the
+  recipient's queue (the `SENT` confirmation), for both direct and
+  group scopes — after it, the transport never reads the local file
+  again, so the spool file is safe to release. Failure surfaces as
+  `sndFileError` (with the chat item when one exists) or as the send
+  command's `chatCmdError` (`fileNotFound`, `fileSize`, `fileIOError`
+  tags — all classify PERMANENT). A contact that is not ready
+  degrades the same upload to `sndStandaloneFileComplete` — the
+  adapter treats any completion other than `sndFileCompleteXFTP` on
+  its own chat item as a PERMANENT failure rather than a delivery.
+
+  v7.0.0 verification trail (M1-840, bundled binary reports
+  `SimpleX Chat v7.0.0.11`, run log records the banner): live
+  `LiveSimpleXFileSendIT` (opt-in, standalone two-identity throwaway
+  harness on the public SMP/XFTP servers — never a second connection
+  against the prod provider, whose chat server races every connected
+  WS client on one shared output queue) sends through the production
+  `encodeSendFileCommand` output and observes the ack
+  `newChatItems` with `meta.itemId`, `sndFileProgressXFTP` frames
+  (`sentSize`/`totalSize`), then `sndFileCompleteXFTP` carrying the
+  same `itemId` — the identical frame sequence the v6.5.4.1 trail
+  recorded, no drift; the over-ceiling and missing-file refusals
+  arrive PERMANENT with the `fileSize`/`fileNotFound` tags. A v7
+  wrinkle that does NOT touch this surface: bot-mode profiles
+  provisioned without `--create-bot-allow-files` get
+  `files.allow = no` for INBOUND files (the attachment SPI is
+  outbound-only; sending file descriptions is never gated by the
+  preference). Source
+  at the v7.0.0 tag: the `CEvtSndFile*` constructors are
+  zero-diff v6.5.4→v7.0.0 (M1-838's tag diff), the completion path
+  is `Subscriber.hs` `SFDONE` → `checkSndInlineFTComplete`, which
+  emits `CEvtSndFileCompleteXFTP` for XFTP-protocol files on the
+  delivery confirmation (`sndStandaloneFileComplete` when no chat
+  item exists). The v6.5.4-era caveat — completion frame
+  source-verified only, because the probe host's inbound SMP
+  delivery was broken — is superseded: the two-identity harness
+  completes the handshake (deterministic acceptance via
+  `/auto_accept on`) and captures the completion frame live.
 
   **Image-typed composed messages (M1-841, probed against the bundled
   simplex-chat v6.5.4 — the `SIMPLEX_CHAT_VERSION` Dockerfile.jvm pin;

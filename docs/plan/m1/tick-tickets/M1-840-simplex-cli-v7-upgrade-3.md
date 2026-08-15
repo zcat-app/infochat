@@ -1,25 +1,37 @@
 ---
 id: M1-840
 title: "Re-verify SimpleX XFTP attachment surface on CLI v7.0.0"
-status: pending
+status: done
 created: 2026-08-14
-last_updated: 2026-08-14
+last_updated: 2026-08-15
+clarity_check: >-
+  Pre-flight clean 2026-08-15: tick-lint 0 findings (after restoring the
+  gitignored analysis doc into this worktree — tick-analysis/ is untracked
+  by design, absent in fresh worktrees); citations verified
+  (SimpleXAdapter.java:79/:103-105/:851-862/:864-877, codec
+  :129-137/:276-286/:356-364/:977-983, design 06-messaging.md:362-408,
+  LiveSimpleXRoundTripIT.java:44-47); census re-run clean over
+  sndFile*/attachment constants (all hits inside files_scope or untouched
+  SPI consumers); analysis pitfalls P5/P6/P7/P8/P11/P12 all landed in the
+  ticket; M1-838's added test (BundledSimplexCliPinTest, config seam)
+  traced — untouched by this diff. Execution notes: live harness is the
+  M1-841 two-identity throwaway pattern (never a second WS conn against
+  prod — v6.5.4 Server.hs races one shared outputQ); M1-838 left the
+  v6.5.4 + v7.0.0 source tarballs and the v7.0.0.11 binary in /tmp/opencode
+  (source determination needs no network); a concurrent capture session
+  for M1-839 is live on this host — disjoint scratch dirs and WS ports.
 flow: tick
 reproduction: >-
-  to-be-written: LiveSimpleXFileSendIT.fileSendReleasesOnlyOnSndFileCompleteXFTP
+  LiveSimpleXFileSendIT.fileSendReleasesOnlyOnSndFileCompleteXFTP
   (infochat-provider/src/test/java/app/zcat/infochat/provider/live/, opt-in
-  `-Dinfochat.live.simplex=true` like LiveSimpleXRoundTripIT) — drives a real
-  file send through the bundled v7.0.0 binary via LiveSimpleXClient and
-  asserts the ack's meta.itemId, observed sndFileProgressXFTP frames, and
-  that ONLY the verified completion event releases the send; it cannot exist
-  today because the harness has no file-send drive and the v7.0.0 binary
-  lands only with M1-838. The completion contract sendAttachment blocks on
-  (sndFileCompleteXFTP, design 06-messaging.md:381-408) is v6.5.4.1-verified
-  truth — on v7.0.0 it is UNVERIFIED (analysis P5/P6): if upstream renamed or
-  reshaped the event, every attachment send hangs to the 5-minute
-  FILE_COMPLETION_TIMEOUT or releases mid-upload. `start` converts the
-  marker — write the IT, run it against the upgraded binary — before any fix
-  code (workflow §0).
+  `-Dinfochat.live.simplex=true`): written at start and run against the
+  bundled v7.0.0.11 binary — GREEN 2026-08-15 (8.5 s; first run RED on the
+  harness handshake: /ad's default address settings leave auto-accept off —
+  fixed harness-side with /auto_accept on, not v7 drift). Observed wire:
+  ack newChatItems meta.itemId -> sndFileProgressXFTP x2 ->
+  sndFileCompleteXFTP carrying the acked itemId — the adapter's blocking
+  contract holds unadapted; over-ceiling (1 GiB + 1 B) and missing-file
+  sends refuse PERMANENT with the fileSize / fileNotFound tags.
 analysis_ref: docs/plan/m1/tick-analysis/simplex-cli-v7-upgrade.md
 blocked_by: [M1-838]
 files_scope:
@@ -65,6 +77,14 @@ spec_refs:
   - docs/spec/messaging.md §Failure handling
 decision_refs:
   - D74
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY WARN (comment-cap flag on LiveSimpleXFileSendIT class javadoc — informational, no trim demanded), SCOPE PASS"
+    diff_stats: "5 files, +524/-56"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-840-r1.txt
 ---
 
 # M1-840: Re-verify SimpleX XFTP attachment surface on CLI v7.0.0
@@ -191,3 +211,68 @@ and that only on proven drift.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-840-simplex-cli-v7-upgrade-3.md
 ```
+
+## Evidence record (2026-08-15, implementation)
+
+All probes on this deployment host against the M1-838-extracted binary
+`prod/runtime/simplex-clients/bin/simplex-chat`; the IT records its
+banner (`SimpleX Chat v7.0.0.11`) in every run log (P8).
+
+### Step 1 — source determination (P6/P7)
+
+- Completion path at the v7.0.0 tag (`Library/Subscriber.hs`):
+  `SFDONE` handler → sends file descriptions →
+  `checkSndInlineFTComplete` emits `CEvtSndFileCompleteXFTP` for
+  XFTP-protocol files on the delivery confirmation
+  (`CEvtSndStandaloneFileComplete` when no chat item exists) —
+  semantics unchanged from the M1-800-documented v6.5.4 path.
+  `CEvtSndFile*` constructors zero-diff per M1-838's tag diff.
+- Ceiling: v7.0.0's `cabal.project` pins simplexmq `efaad8e7`;
+  `Simplex.FileTransfer.Description` there declares
+  `maxFileSize = gb 1` / `maxFileSizeHard = gb 5`. v7 NEW:
+  chat-side `maxXFTPFileSize` (Badges.hs) gives badged senders
+  gb 2/gb 5; badge-less senders (the bot) keep the soft gb 1.
+- Refusal tags: `ChatErrorType` serializes with `dropPrefix "CE"`
+  → wire tags `fileSize` / `fileNotFound`.
+
+### Steps 2-3 — live IT vs v7.0.0.11 (P5/P6/P8)
+
+- Reproduction RED (harness-side, not v7 drift): first run stalled at
+  the handshake — `/ad`'s default address settings leave auto-accept
+  OFF, so the connection request sat pending. Fixed harness-side with
+  `/auto_accept on` after `/ad` (the M1-841/M1-839 two-identity
+  throwaway pattern; both identities on public SMP/XFTP servers,
+  never a second connection against the prod provider).
+- GREEN (8.5 s): production `encodeSendFileCommand` output accepted;
+  ack `newChatItems` meta.itemId → `sndFileProgressXFTP` ×2
+  (65536/65536, 1/1) → `sndFileCompleteXFTP` carrying the SAME
+  itemId — the adapter's release contract holds unadapted. No
+  standalone/legacy/error completion observed on the ready contact.
+- Refusal arms (real v7 frames through the production codec):
+  sparse 1 GiB + 1 B → PERMANENT, tag `fileSize`; nonexistent path →
+  PERMANENT, tag `fileNotFound`.
+
+### Step 4 — conditional codec/fixture adaptation
+
+NOT TRIGGERED: zero drift observed — SimpleXMessageCodec dispatch,
+SimpleXAdapterAttachmentTest fixtures, and
+AdapterCapabilityContractTest's 1 GiB pin are untouched (the §8
+pre-authorization lapses unused).
+
+### Step 5 — ceiling (P7)
+
+Value unchanged (1 GiB): source `efaad8e7` `maxFileSize = gb 1` +
+empirical refusal at 1 GiB + 1 B. `SimpleXAdapter.
+MAX_OUTBOUND_ATTACHMENT_BYTES` and the contract pin stay as-is;
+the measurement record is in design §6.2.4 next to the M1-800
+record.
+
+### Step 6 — design §6.2.4 (P11)
+
+Ceilings paragraph and wire-form/completion paragraph re-anchored to
+the v7.0.0 trail (live capture + source citation + superseded-caveat
+note: the v6-era "inbound SMP broken → source-verified only" no
+longer holds for this surface). Version-reference sweep confined to
+touched files: the IT asserts the v7.0.0 banner; LiveSimpleXClient
+carried no version references; no other file's version prose
+touched.
