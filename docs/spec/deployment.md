@@ -252,7 +252,13 @@ reads false. The entry states corpus availability, never backend
 liveness, and the check stays UP regardless — readiness does not fail
 on a corpus build failure. The corpora self-heal on the next startup
 with a healthy embedding backend. An absent embedding backend is a
-supported degraded mode, not a readiness failure.
+supported degraded mode, not a readiness failure. A configured LLM or
+embedding endpoint whose host does not resolve at boot is surfaced the
+same way: an ERROR log line names the configuration key and the
+redacted endpoint, stating that the deployment runs in this degraded
+mode until the backend is reachable. That line is the boot-time signal
+for an absent backend even when warm corpora still read true — corpus
+availability never implies backend liveness.
 
 **Bootstrap admin drift.** Per enabled adapter: if the configured
 bootstrap admin contact id for that adapter does not match an

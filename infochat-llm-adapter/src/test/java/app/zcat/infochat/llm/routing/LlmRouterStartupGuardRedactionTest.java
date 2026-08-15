@@ -4,6 +4,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.net.InetAddress;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,15 +30,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>Plain JUnit5 (no Quarkus boot), same direct
  * {@link LlmRouterStartupGuard#validateLocalOnlyConfiguration(Map)} seam and
  * {@link CapturingHandler} the sibling {@code LlmRouterStartupGuardLocalOnlyTest}
- * uses. The host {@code api.openai.com} counts as non-loopback whether or not DNS
- * resolves it (a failed lookup also counts as non-loopback), so the assertions
- * are stable offline.
+ * uses. The host {@code api.openai.com} is stubbed to a public address via the
+ * resolver seam, so the assertions are stable offline.
  */
 class LlmRouterStartupGuardRedactionTest {
 
     private static final String CREDENTIAL_BASE_URL = "https://user:pass@api.openai.com/v1";
     private static final String CREDENTIAL_SUBSTRING = "user:pass";
     private static final String REDACTED_HOST = "api.openai.com";
+
+    // Every host resolves to one public address — see the sibling test.
+    private static final LlmRouterStartupGuard.HostResolver REMOTE_RESOLVER = host ->
+        new InetAddress[]{ InetAddress.getByAddress(new byte[]{8, 8, 8, 8}) };
 
     private Logger jul;
     private CapturingHandler capturer;
@@ -85,7 +89,7 @@ class LlmRouterStartupGuardRedactionTest {
         snapshot.put(LlmRouterStartupGuard.CONFIG_KEY_EMBEDDINGS_BASE_URL, CREDENTIAL_BASE_URL);
 
         assertDoesNotThrow(
-            () -> LlmRouterStartupGuard.validateLocalOnlyConfiguration(snapshot),
+            () -> LlmRouterStartupGuard.validateLocalOnlyConfiguration(snapshot, REMOTE_RESOLVER),
             "a credential-bearing remote embedding base-url without local-only is allowed");
 
         List<LogRecord> warns = capturer.recordsAtLevel(Level.WARNING);
@@ -104,7 +108,7 @@ class LlmRouterStartupGuardRedactionTest {
         snapshot.put("infochat.llm.summarizer.base-url", CREDENTIAL_BASE_URL);
 
         assertDoesNotThrow(
-            () -> LlmRouterStartupGuard.validateLocalOnlyConfiguration(snapshot),
+            () -> LlmRouterStartupGuard.validateLocalOnlyConfiguration(snapshot, REMOTE_RESOLVER),
             "a credential-bearing per-task base-url without local-only is allowed");
 
         List<LogRecord> warns = capturer.recordsAtLevel(Level.WARNING);

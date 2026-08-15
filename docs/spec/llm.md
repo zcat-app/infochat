@@ -197,6 +197,17 @@ it may not be minted for), the mirror of the credential-coupling rule;
 it is a WARN, not a boot failure, because the same shape is the
 legitimate "separate credential for the default endpoint" config.
 
+An unresolvable configured endpoint — a per-task base-url, the shared
+default, or the embedding base-url whose host fails DNS resolution at
+boot — is instead reported as backend-absent: an ERROR log line names
+the configuration key and the redacted endpoint and states that calls
+on that route fail until the backend is reachable. Startup is never
+aborted for an unresolvable endpoint (an absent backend is the
+supported degraded mode), and it is never reported as a remote route —
+nothing can leave the host. Under local-only the same unresolvable
+endpoint remains a conflict that fails startup: the privacy gate fails
+closed on a host that cannot be proven on-host.
+
 **No fallback chain in v1.** The router resolves `(ModelTask,
 scope_language)` to **exactly one** `LlmProvider`; an unreachable
 provider degrades that task to its task-specific failure path

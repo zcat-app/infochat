@@ -21,6 +21,8 @@ import java.net.URISyntaxException;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -87,11 +89,14 @@ import java.util.Set;
  * default (WARN, boot continues); {@link #CONFIG_KEY_MISMATCH_FAIL_FAST}
  * opts into abort-on-mismatch. See {@link #checkProviderModelMismatch}.
  *
- * <h2>Loopback check</h2>
+ * <h2>Host classification: tri-state, fail-closed under local-only</h2>
  * <p>The "non-loopback host" check DNS-resolves the URI host via
  * {@link InetAddress#getAllByName(String)} and treats it as loopback
  * only when EVERY resolved address {@link InetAddress#isLoopbackAddress()
  * is loopback} — a multi-record host with any public sibling is off-host.
+ * <p>Boot scans classify each configured host into one of three states:
+ * ON_HOST, REMOTE (a resolved non-loopback address — egress), or
+ * UNRESOLVED (the lookup fails: the backend is absent).
  * This catches the common literals ({@code localhost}, {@code 127.0.0.1},
  * {@code ::1}) plus any /etc/hosts alias that resolves to a loopback IP. The
  * DNS-rebind window (host resolves to loopback at startup but to a
@@ -100,13 +105,22 @@ import java.util.Set;
  * startup, not per call." The per-call SSRF defense lives in
  * {@code infochat-ssrf}'s {@code SsrfGuardedHttpClient}, not in the
  * LLM-call path.
+ * <p>An UNRESOLVED endpoint is backend-absent, never remote: an ERROR
+ * line names the config key, the redacted URL, and the degraded-mode
+ * consequence, and boot is never aborted for it.
  *
+ * <p>Local-only is fail-closed across the tri-state: ON_HOST is the only
+ * verdict that passes the privacy gate, so an UNRESOLVED route offends
+ * exactly like a REMOTE one — unprovable on-host means off-host.
  * <h2>Test seam</h2>
  * <p>{@link #validateLocalOnlyConfiguration(Map)} is public static
  * so {@code LocalOnlyConflictStartupIT} can invoke it directly
  * without re-bootstrapping Quarkus inside the test method. The CDI
  * @PostConstruct path delegates to the same validator after reading
  * the relevant keys from MicroProfile {@link Config}.
+ * <p>The package-private
+ * {@link #validateLocalOnlyConfiguration(Map, HostResolver)} overload is
+ * the DNS seam for the resolution tests.
  */
 @Startup
 @Priority(150)
@@ -271,10 +285,18 @@ public class LlmRouterStartupGuard {
      * directly.
      */
     public static void validateLocalOnlyConfiguration(Map<String, String> snapshot) {
+        validateLocalOnlyConfiguration(snapshot, InetAddress::getAllByName);
+    }
+
+    /** The DNS seam: the same validator with the host resolver injected so tests
+     * stub resolution outcomes (a public address, an unresolvable host, per-host
+     * call counting) and stay offline-stable. */
+    static void validateLocalOnlyConfiguration(Map<String, String> snapshot, HostResolver resolver) {
         boolean localOnly = "true".equalsIgnoreCase(stripOrEmpty(snapshot.get(CONFIG_KEY_LOCAL_ONLY)));
+        HostRouteCache hosts = new HostRouteCache(resolver);
 
         String embeddingBaseUrl = stripOrEmpty(snapshot.get(CONFIG_KEY_EMBEDDINGS_BASE_URL));
-        boolean embeddingRemote = isRemoteBaseUrl(embeddingBaseUrl);
+        HostRoute embeddingRoute = hosts.routeOf(embeddingBaseUrl);
 
         if (!localOnly) {
             // docs/spec/llm.md §Per-task routing rules: "Switching the
@@ -282,12 +304,13 @@ public class LlmRouterStartupGuard {
             // confirmation log line on startup so operators see when post
             // bodies start leaving the host." This is the non-local-only
             // path — a remote endpoint is allowed, but loud.
-            if (embeddingRemote) {
+            if (embeddingRoute == HostRoute.REMOTE) {
                 LOG.warnf("LlmRouterStartupGuard: embedding provider is remote (%s=%s); "
                         + "post title+summary will leave the host for embedding generation.",
                     CONFIG_KEY_EMBEDDINGS_BASE_URL, LlmHttpSupport.redactUserInfo(embeddingBaseUrl));
             }
-            warnRemoteLlmTaskRoutes(snapshot);
+            hosts.signalBackendAbsentIfUnresolved(CONFIG_KEY_EMBEDDINGS_BASE_URL, embeddingBaseUrl);
+            warnRemoteLlmTaskRoutes(snapshot, hosts);
             return;
         }
 
@@ -301,14 +324,14 @@ public class LlmRouterStartupGuard {
             offenders.add("default key=" + LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER
                 + " provider=" + defaultProvider);
         }
-        for (PerTaskRoute route : perTaskRoutes(snapshot)) {
-            if (route.offHostBaseUrl() != null) {
+        for (PerTaskRoute route : perTaskRoutes(snapshot, hosts)) {
+            if (route.route() != HostRoute.ON_HOST) {
                 // baseUrlSourceKey, not baseUrlKeyFor(task): a task inheriting
                 // an off-host SHARED default must name the default key — the
                 // per-task key the operator never wrote is the wrong fix line.
                 offenders.add("task=" + route.task().name()
                     + " key=" + route.baseUrlSourceKey()
-                    + " base-url=" + LlmHttpSupport.redactUserInfo(route.offHostBaseUrl()));
+                    + " base-url=" + LlmHttpSupport.redactUserInfo(route.baseUrl()));
             }
             // A per-task provider override naming a cloud-only provider is
             // a conflict regardless of that task's base-url (the operator
@@ -332,7 +355,7 @@ public class LlmRouterStartupGuard {
                     + " languages=" + reachableLanguages);
             }
         }
-        if (embeddingRemote) {
+        if (embeddingRoute != HostRoute.ON_HOST) {
             offenders.add("embedding key=" + CONFIG_KEY_EMBEDDINGS_BASE_URL
                 + " base-url=" + LlmHttpSupport.redactUserInfo(embeddingBaseUrl));
         }
@@ -376,19 +399,22 @@ public class LlmRouterStartupGuard {
      * WARN here too, mirroring the languages axis the local-only fatal branch
      * already checks — so both postures decide "off-host" on the same three
      * axes (base-url, effective provider, languages key). The symmetric
-     * remote-embedding WARN is emitted by the caller before this runs.
+     * remote-embedding WARN is emitted by the caller before this runs. An
+     * UNRESOLVED route surfaces as the backend-absent ERROR instead —
+     * deduped per distinct host, never framed as egress.
      */
-    private static void warnRemoteLlmTaskRoutes(Map<String, String> snapshot) {
+    private static void warnRemoteLlmTaskRoutes(Map<String, String> snapshot, HostRouteCache hosts) {
         String defaultProvider = stripOrEmpty(snapshot.get(LlmRouter.CONFIG_KEY_DEFAULT_PROVIDER))
             .toLowerCase(Locale.ROOT);
-        for (PerTaskRoute route : perTaskRoutes(snapshot)) {
+        for (PerTaskRoute route : perTaskRoutes(snapshot, hosts)) {
             // Effective provider = per-task override when set, else the
             // default the router falls back to. A cloud-only effective
             // provider makes the task remote even with no per-task base-url.
             String effectiveProvider = route.overrideProvider().isEmpty()
                 ? defaultProvider : route.overrideProvider();
             boolean providerRemote = REMOTE_PROVIDER_NAMES.contains(effectiveProvider);
-            if (route.offHostBaseUrl() == null && !providerRemote) {
+            hosts.signalBackendAbsentIfUnresolved(route.baseUrlSourceKey(), route.baseUrl());
+            if (route.route() != HostRoute.REMOTE && !providerRemote) {
                 continue;
             }
             StringBuilder line = new StringBuilder("LlmRouterStartupGuard: remote LLM task=")
@@ -396,8 +422,8 @@ public class LlmRouterStartupGuard {
             if (!effectiveProvider.isEmpty()) {
                 line.append(" provider=").append(effectiveProvider);
             }
-            if (route.offHostBaseUrl() != null) {
-                line.append(" base-url=").append(LlmHttpSupport.redactUserInfo(route.offHostBaseUrl()));
+            if (route.route() == HostRoute.REMOTE) {
+                line.append(" base-url=").append(LlmHttpSupport.redactUserInfo(route.baseUrl()));
             }
             line.append("; post bodies will leave the host.");
             LOG.warn(line.toString());
@@ -707,57 +733,38 @@ public class LlmRouterStartupGuard {
         }
     }
 
-    /**
-     * The per-task off-host facts both branches reuse, computed once per
-     * task: {@code offHostBaseUrl} is the task's EFFECTIVE base-url (the
-     * per-task key, else the shared {@link LlmRouter#CONFIG_KEY_DEFAULT_BASE_URL}
-     * default — the same resolution the providers perform, D56) when it
-     * resolves off-host (else null); {@code baseUrlSourceKey} is the key
-     * that supplied that value, so an offender line names the exact line
-     * the operator must fix (a default-inherited route names the default
-     * key, not the per-task key the operator never wrote); and
-     * {@code overrideProvider} is the per-task provider override lowercased
-     * (empty string when unset — the caller decides cloud-ness via
-     * {@link #REMOTE_PROVIDER_NAMES}). Single-sourcing this keeps the
-     * local-only fatal scan and the non-local-only disclosure WARN from
-     * drifting on what counts as an off-host route.
-     */
-    private record PerTaskRoute(ModelTask task, @Nullable String offHostBaseUrl,
+    /** Per-task facts both postures reuse: the tri-state {@code route} of the
+     * EFFECTIVE base-url (per-task key, else the shared default), the
+     * {@code baseUrlSourceKey} that supplied it, and the provider override. */
+    private record PerTaskRoute(ModelTask task, HostRoute route, String baseUrl,
             String baseUrlSourceKey, String overrideProvider) {
     }
 
-    private static List<PerTaskRoute> perTaskRoutes(Map<String, String> snapshot) {
+    private static List<PerTaskRoute> perTaskRoutes(Map<String, String> snapshot, HostRouteCache hosts) {
         String defaultBaseUrl = stripOrEmpty(snapshot.get(LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL));
-        // Resolve the shared default's loopback-ness ONCE — per-task
-        // resolution would repeat the identical DNS lookup for every task
-        // that inherits it.
-        boolean defaultRemote = isRemoteBaseUrl(defaultBaseUrl);
-        List<PerTaskRoute> routes = new ArrayList<>();
+        List<PerTaskRoute> perTask = new ArrayList<>();
         for (Map.Entry<ModelTask, String> kv : PER_TASK_BASE_URL_KEYS.entrySet()) {
             String perTaskBaseUrl = stripOrEmpty(snapshot.get(kv.getValue()));
-            String offHostBaseUrl;
+            String baseUrl;
             String baseUrlSourceKey;
             if (perTaskBaseUrl.isEmpty()) {
-                offHostBaseUrl = defaultRemote ? defaultBaseUrl : null;
+                baseUrl = defaultBaseUrl;
                 baseUrlSourceKey = LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL;
             } else {
-                offHostBaseUrl = isRemoteBaseUrl(perTaskBaseUrl) ? perTaskBaseUrl : null;
+                baseUrl = perTaskBaseUrl;
                 baseUrlSourceKey = kv.getValue();
             }
             String overrideProvider = stripOrEmpty(snapshot.get(providerKeyFor(kv.getKey())))
                 .toLowerCase(Locale.ROOT);
-            routes.add(new PerTaskRoute(kv.getKey(), offHostBaseUrl, baseUrlSourceKey,
-                overrideProvider));
+            perTask.add(new PerTaskRoute(kv.getKey(), hosts.routeOf(baseUrl), baseUrl,
+                baseUrlSourceKey, overrideProvider));
         }
-        return routes;
+        return perTask;
     }
 
-    /**
-     * The off-host base-url primitive: a non-empty base-url whose host does
-     * not resolve to loopback. Shared by the per-task scan, the embedding
-     * endpoint check, and the disclosure WARN so all three decide "off-host"
-     * identically.
-     */
+    /** The provider/model mismatch scan's off-host gate: a non-empty base-url
+     * whose host is not provably loopback (malformed and unresolvable hosts
+     * count — the same fail-closed posture). */
     private static boolean isRemoteBaseUrl(String baseUrl) {
         return !baseUrl.isEmpty() && !isLoopback(baseUrl);
     }
@@ -792,18 +799,9 @@ public class LlmRouterStartupGuard {
         return ModelTask.languagesKey(providerName);
     }
 
-    /**
-     * Resolve the URI's host via DNS and check whether it is on-host.
-     * Resolution uses {@link InetAddress#getAllByName(String)} (not
-     * {@code getByName}, which returns only the first record): a host is
-     * loopback only when EVERY resolved address is loopback. A multi-A-record
-     * host whose first record sorts loopback but which also carries a public
-     * sibling would otherwise pass the guard while the per-call client connects
-     * to the public address — the silent post-body leak this guard prevents.
-     * Catches the {@code localhost} / {@code 127.0.0.1} / {@code ::1} literals
-     * plus any /etc/hosts alias. A malformed URI counts as NON-loopback so an
-     * operator typo doesn't slip past the guard.
-     */
+    /** Loopback probe behind {@link #isRemoteBaseUrl} (the mismatch scan's
+     * gate; the local-only and disclosure paths classify via
+     * {@link HostRouteCache}). Malformed or unresolvable hosts are NON-loopback. */
     private static boolean isLoopback(String baseUrl) {
         URI uri;
         try {
@@ -827,6 +825,93 @@ public class LlmRouterStartupGuard {
             LOG.warnf("LlmRouterStartupGuard: DNS resolution failed for '%s' (treated as non-loopback): %s",
                 host, e.getMessage());
             return false;
+        }
+    }
+
+    /** The tri-state verdict for a configured base-url host, decided once per
+     * boot scan. ON_HOST is the only verdict the local-only privacy gate
+     * accepts; REMOTE and UNRESOLVED are both off-host there (fail-closed). */
+    enum HostRoute {
+        /** No endpoint configured, or resolution non-empty with every address loopback. */
+        ON_HOST,
+        /** Resolution carries a non-loopback address; a malformed or host-less
+         * base-url also lands here — unprovable on-host means off-host. */
+        REMOTE,
+        /** The DNS lookup fails: the backend is absent, a supported degraded mode. */
+        UNRESOLVED
+    }
+
+    /** DNS seam: resolves a host to all its addresses, throwing exactly like
+     * {@link InetAddress#getAllByName(String)}. Package-private so the
+     * resolution tests can stub outcomes; production injects the real lookup. */
+    @FunctionalInterface
+    interface HostResolver {
+        InetAddress[] resolve(String host) throws UnknownHostException;
+    }
+
+    /** Per-scan classifier memoizing {@link HostRoute} per distinct base-url
+     * (and host) so coinciding keys cost one DNS lookup, log their parse
+     * failure once, and dedupe the backend-absent ERROR per distinct host. */
+    private static final class HostRouteCache {
+
+        private final HostResolver resolver;
+        private final Map<String, HostRoute> byUrl = new HashMap<>();
+        private final Map<String, HostRoute> byHost = new HashMap<>();
+        private final Set<String> absentSignaled = new HashSet<>();
+
+        HostRouteCache(HostResolver resolver) {
+            this.resolver = resolver;
+        }
+
+        HostRoute routeOf(String baseUrl) {
+            if (baseUrl.isEmpty()) {
+                return HostRoute.ON_HOST;
+            }
+            return byUrl.computeIfAbsent(baseUrl, this::classifyUrl);
+        }
+
+        private HostRoute classifyUrl(String baseUrl) {
+            URI uri;
+            try {
+                uri = new URI(baseUrl);
+            } catch (URISyntaxException e) {
+                // Both echoes are userinfo-redacted (URISyntaxException re-quotes
+                // the raw input verbatim) — the leak M1-401 closed on the
+                // sibling parse-failure branch.
+                LOG.warnf("LlmRouterStartupGuard: malformed base-url '%s' (treated as non-loopback): %s",
+                    LlmHttpSupport.redactUserInfo(baseUrl), LlmHttpSupport.redactUserInfo(e.getMessage()));
+                return HostRoute.REMOTE;
+            }
+            String host = uri.getHost();
+            if (host == null || host.isEmpty()) {
+                return HostRoute.REMOTE;
+            }
+            return byHost.computeIfAbsent(host, this::classify);
+        }
+
+        private HostRoute classify(String host) {
+            try {
+                return everyAddressLoopback(resolver.resolve(host))
+                    ? HostRoute.ON_HOST : HostRoute.REMOTE;
+            } catch (UnknownHostException e) {
+                return HostRoute.UNRESOLVED;
+            }
+        }
+
+        /** Emit the backend-absent ERROR for an UNRESOLVED base-url, at most
+         * once per distinct host; no-op for every other classification. */
+        void signalBackendAbsentIfUnresolved(String configKey, String baseUrl) {
+            if (routeOf(baseUrl) != HostRoute.UNRESOLVED) {
+                return;
+            }
+            String host = hostOf(baseUrl);
+            if (host == null || !absentSignaled.add(host)) {
+                return;
+            }
+            LOG.errorf("LlmRouterStartupGuard: %s=%s does not resolve — the configured backend is "
+                    + "absent; startup continues in its supported degraded mode: calls on this route "
+                    + "fail until the backend is reachable again (no post data egress is possible).",
+                configKey, LlmHttpSupport.redactUserInfo(baseUrl));
         }
     }
 

@@ -6,6 +6,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.net.InetAddress;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,15 +40,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>Plain JUnit5 (no Quarkus boot): the guard's pure-function
  * {@link LlmRouterStartupGuard#validateLocalOnlyConfiguration(Map)} is
  * invoked directly with hand-rolled snapshots — the same seam the
- * collector IT uses. A remote host literal ({@code api.openai.com}) is
- * treated as non-loopback whether or not DNS resolves it (a failed
- * lookup also counts as non-loopback), so the assertions are stable
- * offline.
+ * collector IT uses; the WARN-asserting cases feed the resolver-seam
+ * overload with {@code api.openai.com} stubbed to a public address, the
+ * throw-asserting cases rely on the fail-closed classification.
  */
 class LlmRouterStartupGuardLocalOnlyTest {
 
     private static final String REMOTE_BASE_URL = "https://api.openai.com/v1";
     private static final String LOOPBACK_BASE_URL = "http://localhost:11434/v1";
+
+    // Resolves every host to one public address: api.openai.com must classify
+    // REMOTE regardless of the build host's DNS, keeping the egress WARNs
+    // under test deterministic offline and on.
+    private static final LlmRouterStartupGuard.HostResolver REMOTE_RESOLVER = host ->
+        new InetAddress[]{ InetAddress.getByAddress(new byte[]{8, 8, 8, 8}) };
 
     private Logger jul;
     private CapturingHandler capturer;
@@ -248,7 +254,7 @@ class LlmRouterStartupGuardLocalOnlyTest {
         snapshot.put(LlmRouterStartupGuard.CONFIG_KEY_EMBEDDINGS_BASE_URL, REMOTE_BASE_URL);
 
         assertDoesNotThrow(
-            () -> LlmRouterStartupGuard.validateLocalOnlyConfiguration(snapshot),
+            () -> LlmRouterStartupGuard.validateLocalOnlyConfiguration(snapshot, REMOTE_RESOLVER),
             "remote embedding without local-only is allowed (must NOT throw)");
 
         List<LogRecord> warns = capturer.recordsAtLevel(Level.WARNING);
@@ -273,7 +279,7 @@ class LlmRouterStartupGuardLocalOnlyTest {
         snapshot.put(LlmRouter.CONFIG_KEY_DEFAULT_BASE_URL, REMOTE_BASE_URL);
 
         assertDoesNotThrow(
-            () -> LlmRouterStartupGuard.validateLocalOnlyConfiguration(snapshot),
+            () -> LlmRouterStartupGuard.validateLocalOnlyConfiguration(snapshot, REMOTE_RESOLVER),
             "a remote shared default without local-only is allowed (must NOT throw)");
 
         List<LogRecord> warns = capturer.recordsAtLevel(Level.WARNING);
@@ -311,7 +317,7 @@ class LlmRouterStartupGuardLocalOnlyTest {
         snapshot.put("infochat.llm.summarizer.base-url", REMOTE_BASE_URL);
 
         assertDoesNotThrow(
-            () -> LlmRouterStartupGuard.validateLocalOnlyConfiguration(snapshot),
+            () -> LlmRouterStartupGuard.validateLocalOnlyConfiguration(snapshot, REMOTE_RESOLVER),
             "a remote per-task base-url without local-only is allowed (must NOT throw)");
 
         List<LogRecord> warns = capturer.recordsAtLevel(Level.WARNING);

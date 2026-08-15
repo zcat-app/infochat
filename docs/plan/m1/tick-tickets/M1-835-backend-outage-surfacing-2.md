@@ -1,14 +1,16 @@
 ---
 id: M1-835
 title: "Truthful boot signal for unresolvable LLM endpoints"
-status: pending
+status: done
 created: 2026-08-13
-last_updated: 2026-08-13
+last_updated: 2026-08-15
 flow: tick
 reproduction: >-
   LlmRouterStartupGuardResolutionTest.unresolvableConfiguredEndpointSignalsBackendAbsentWithoutAborting
-  (to-be-written — the resolution seam and the ERROR-line leg do not exist
-  yet; `start` writes it and runs it RED before any fix code) — a configured
+  (run RED 2026-08-15 against unmodified main via the public validator and
+  an RFC 6761 .invalid host, .scratch/red-run.log: no ERROR line, and the
+  false `embedding provider is remote ... will leave the host` WARN fired
+  after the `treated as non-loopback` WARN) — a configured
   `infochat.embeddings.base-url` (or LLM base-url) whose host does not
   resolve at boot must produce an ERROR-level backend-absent line naming the
   config key, must NOT abort startup (the absent backend is a supported
@@ -86,11 +88,41 @@ spec_refs:
 decision_refs:
   - D54
   - D56
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS FAIL (malformed base-url WARN re-logged per evaluation — parse-failure branch bypasses the per-host memoization), SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY WARN (comment-cap lint on ResolutionTest javadoc, informational), SCOPE PASS"
+    diff_stats: "8 files, +376/-84"
+    rework_items: 1
+    verdict_file: .scratch/tick-review-M1-835-r1.txt
+  - round: 2
+    date: 2026-08-15
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS; round-1 item 1 SATISFIED"
+    diff_stats: "8 files, +432/-85 (round-2 fix diff: +56/-1, HostRouteCache byUrl memoization + malformedSharedDefaultWarnsOncePerScan)"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-835-r2.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  lint: "tick-lint: 0 findings, 0 BLOCKERs"
+  self_check: >-
+    PASS. Census re-run at start: the grep hits are exactly the enumerated
+    sites — RedactionTest :32/:38/:40/:94/:96/:114 (migrate, acceptance item
+    5), LocalOnlyTest :42-43/:49/:257/:259/:282/:306/:320/:322/:342 (the
+    three `leave the host` cases migrate; :342 is provider-name-based and the
+    throw-asserting cases stay unmodified), LanguageRouteDisclosureTest :79
+    (provider-name-based WARN, no DNS — unmodified per census row),
+    LlmRouterStartupGuardTest :52/:204/:245 (mismatch-guard cases,
+    posture-independent — confirm by re-running with the seam). No new hits.
+    Citations spot-checked green: guard :826-829 WARN leg, :286-289
+    embedding-remote disclosure, :277 isRemoteBaseUrl, :762 disclosure path,
+    :412-418 language-route WARN (provider-name based, no DNS). No ambiguity
+    raised. Module boundary: no tick ticket in-progress/in-review at start;
+    parallel-safe. Migration-touch serialization N/A (migration_touch:
+    false).
 ---
 
 # M1-835: Truthful boot signal for unresolvable LLM endpoints
@@ -257,3 +289,34 @@ python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-835-backend-outage-sur
 
 The lint gate is the mechanical half of readiness; `start` refuses on a
 BLOCKER. Full check table: `docs/process/tick-workflow.md` §1.
+
+## Round 1 rework
+
+Verdict: REWORK (2026-08-15, round 1 of 2). Verdict file:
+`.scratch/tick-review-M1-835-r1.txt`. Fix ONLY the items below, re-run
+`mvn verify`, then `/tick review M1-835` (round 2).
+
+1. Finding 1: evaluate each base-url once per scan so a malformed value
+   logs its "malformed base-url" WARN exactly once — compute the shared
+   default's route once before the loop in perTaskRoutes
+   (LlmRouterStartupGuard.java:743-761) and pass the already-computed
+   HostRoute into signalBackendAbsentIfUnresolved (:898-910, callers at
+   :312 and :416), or memoize the malformed verdict in HostRouteCache
+   (:865-885). Evaluated via the new
+   LlmRouterStartupGuardResolutionTest.malformedSharedDefaultWarnsOncePerScan
+   (exactly one "malformed base-url" record for a malformed shared default
+   and for a malformed embeddings URL), run with
+   `mvn -B -pl infochat-llm-adapter -am test -Dtest=LlmRouterStartupGuardResolutionTest`.
+
+## Review observations
+
+Round 2 (APPROVE) recommended-new-ticket entry, recorded per the review
+dispatch (TOUCHED-BY-THIS-DIFF: no, no DECIDE-BEFORE — user reads, user
+decides whether to file): the provider/model mismatch scan still re-logs
+the "malformed base-url" WARN once per task inheriting a malformed shared
+default (isLoopback's URISyntaxException branch, reachable only from
+checkProviderModelMismatch; up to 7 duplicate WARNs on a boot with a
+malformed default base-url and llama-family models). The same
+once-per-distinct-URL discipline this ticket gave the local-only and
+disclosure scans would fix it; the isLoopback WARN lines are byte-identical
+to the fork point, so it is not a defect of this diff.
