@@ -278,6 +278,15 @@ stage_gguf() {
   fi
 }
 
+# A staged source persists an EMPTY URL (M1-824), so restore.sh cannot re-fetch it
+# on a fresh host — disclose that at setup time; the source file is the only copy.
+staged_source_disclosure() {
+  local file="$1"
+  echo "NOTE: $file is staged from a local file — it is not re-fetchable on a"
+  echo "      fresh-host restore; keep the source file; restore.sh will print the"
+  echo "      manual-staging recipe if a restore ever needs it."
+}
+
 # Preflight one GGUF URL with a host HEAD before any download: the fetch runs
 # on the host's own network path (M1-808), so the host probe is same-path.
 # Network-class exits abort with guidance; a malformed URL (3) hard-fails; an
@@ -430,6 +439,7 @@ case "$backend" in
       elif [[ "$gen_override" == /* && -f "$gen_override" && -r "$gen_override" ]]; then
         gen_url=""   # empty URL marks the staged source (preflight/fetch key on it)
         gen_file="$(basename "$gen_override")"
+        staged_source_disclosure "$gen_file"
         read -rp "Generative GGUF SHA-256 (blank to skip integrity check): " gen_sha
       else
         echo "FAIL: '$gen_override' is neither a full download URL nor an absolute path to an existing file." >&2
@@ -480,6 +490,7 @@ case "$backend" in
         else
           emb_url=""   # staged source — the empty-URL marker from the generative prompt
           emb_file="$(basename "$emb_override")"
+          staged_source_disclosure "$emb_file"
         fi
         read -rp "Embeddings GGUF SHA-256 (blank to skip integrity check): " emb_sha
       else

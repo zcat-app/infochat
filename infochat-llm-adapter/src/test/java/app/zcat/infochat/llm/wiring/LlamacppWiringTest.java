@@ -344,6 +344,83 @@ class LlamacppWiringTest {
 
     @Test
     @EnabledOnOs(OS.LINUX)
+    void locallyStagedGgufRunDisclosesTheRestoreConsequence(@TempDir Path tmp) throws Exception {
+        // M1-825 reproduction: a staged generative GGUF persists an EMPTY URL
+        // (M1-824), so a fresh-host restore cannot re-fetch it — the staged
+        // drive's output must disclose that at setup time.
+        Path local = tmp.resolve("operator-local-model.gguf");
+        Files.writeString(local, "fake gguf bytes");
+        String localPath = local.toAbsolutePath().toString();
+        WizardRun run = runWizardCapture(tmp,
+                "llamacpp\n" + localPath + "\n" + "\n\n\n" + ACCEPT_TIMING_DEFAULTS,
+                Map.of("FAKE_DOCKER_PROBE_ABSENT", "1"));
+
+        assertEquals(0, run.rc, "the staged flow must succeed:\n" + run.output);
+        String disclosure = run.output.lines()
+                .filter(l -> l.contains("not re-fetchable"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError(
+                        "the staged drive must disclose the restore consequence:\n" + run.output));
+        assertTrue(disclosure.contains(local.getFileName().toString()),
+                "the disclosure must name the staged GGUF's basename (P13):\n" + disclosure);
+        assertFalse(disclosure.contains(local.getParent().toString()),
+                "the disclosure must not echo the host directory (P13):\n" + disclosure);
+        assertTrue(run.output.contains("keep the source file"),
+                "the disclosure must tell the operator to keep the source file:\n" + run.output);
+        assertTrue(run.output.contains("manual-staging recipe"),
+                "the disclosure must point at restore.sh's manual-staging recipe:\n" + run.output);
+
+        String secrets = Files.readString(tmp.resolve("runtime/secrets.env"));
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_GGUF_URL=\"\""),
+                "the staged flow must persist an EMPTY URL (M1-824 day-one behavior, pinned as the end state):\n"
+                        + secrets);
+        assertFalse(secrets.contains(localPath),
+                "the host path must appear NOWHERE in secrets.env:\n" + secrets);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void stagedEmbeddingsGgufDisclosesAndPersistsNoRefetchUrl(@TempDir Path tmp) throws Exception {
+        // P6 twin: a staged EMBEDDINGS file drives the same disclosure and
+        // persists an EMPTY INFOCHAT_LLAMACPP_EMBED_GGUF_URL — the symmetric
+        // failure mode to the generative drive.
+        Path emb = tmp.resolve("operator-local-embed.gguf");
+        Files.writeString(emb, "fake gguf bytes");
+        String embPath = emb.toAbsolutePath().toString();
+        WizardRun run = runWizardCapture(tmp,
+                "llamacpp\n\n\n" + embPath + "\nyes\n\n" + ACCEPT_TIMING_DEFAULTS,
+                Map.of("FAKE_DOCKER_PROBE_ABSENT", "1"));
+
+        assertEquals(0, run.rc, "a confirmed staged embeddings override must stage:\n" + run.output);
+        String disclosure = run.output.lines()
+                .filter(l -> l.contains("not re-fetchable"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError(
+                        "the staged embeddings drive must disclose the restore consequence:\n" + run.output));
+        assertTrue(disclosure.contains(emb.getFileName().toString()),
+                "the embeddings disclosure must name the staged basename (P13):\n" + disclosure);
+        String secrets = Files.readString(tmp.resolve("runtime/secrets.env"));
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_EMBED_GGUF_URL=\"\""),
+                "the staged embeddings flow must persist an EMPTY embeddings URL:\n" + secrets);
+        assertFalse(secrets.contains(embPath),
+                "the embeddings host path must never be persisted:\n" + secrets);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void pinnedDefaultRunPrintsNoRefetchDisclosure(@TempDir Path tmp) throws Exception {
+        // Item-3 negative: the pinned-default path IS re-fetchable (restore.sh
+        // re-fetches from its known URL) — a disclosure here would cry wolf on
+        // the default path.
+        WizardRun run = runWizardCapture(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS, Map.of());
+
+        assertEquals(0, run.rc, "the pinned-default drive must succeed:\n" + run.output);
+        assertFalse(run.output.contains("not re-fetchable"),
+                "the re-fetchable pinned-default path must print NO disclosure:\n" + run.output);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
     void stagedGgufSkipsWhenAlreadyInTheVolume(@TempDir Path tmp) throws Exception {
         // P5 control parity: skip-if-present applies to staged files — a PRESENT
         // volume probe records no cp and no download and prints the skip line

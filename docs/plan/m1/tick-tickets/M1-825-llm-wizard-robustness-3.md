@@ -1,9 +1,9 @@
 ---
 id: M1-825
 title: "Disclose the no-refetch status of locally-staged GGUFs"
-status: pending
+status: done
 created: 2026-08-13
-last_updated: 2026-08-13
+last_updated: 2026-08-15
 flow: tick
 reproduction: >-
   Probe (RED on main + M1-824): drive the staged-local-path flow and read the
@@ -16,8 +16,8 @@ reproduction: >-
   a host path there fails a fresh-host restore mid-run (evidence item 7,
   live 2026-08-11). Test:
   LlamacppWiringTest.locallyStagedGgufRunDisclosesTheRestoreConsequence
-  (to-be-written — `start` writes it and runs it RED on the M1-824 tree
-  before any fix code, workflow §0).
+  (written at `start`, ran RED on the M1-824 tree before any fix code:
+  "the staged drive must disclose the restore consequence").
 analysis_ref: docs/plan/m1/tick-analysis/llm-wizard-robustness.md
 blocked_by: [M1-824]
 files_scope:
@@ -63,6 +63,30 @@ spec_refs:
   - docs/design/07-deployment.md §7.10.1
   - docs/design/07-deployment.md §7.7.2 First-run setup wizard
 decision_refs: []
+clarity_check:
+  lint: "tick-lint: 0 findings, 0 BLOCKERs (after copying the gitignored analysis doc into the worktree, the M1-824/M1-829/M1-830/M1-834 convention)"
+  self_check: >-
+    PASS. No in-flight tick tickets (0 in-progress, 0 in-review) — the
+    module-overlap check for worktree operation is vacuous. Citations
+    spot-checked, all claims hold with post-M1-824-merge line drift:
+    set_secret INFOCHAT_LLAMACPP_GGUF_URL at 4-llm.sh:521 (ticket cited
+    :453 pre-merge), restore.sh:268-272 re-fetch branch exact, §7.10.1
+    restore bullet at 07-deployment.md:1158, RestoreWiringTest
+    restoreRecoversCustomGgufFromPersistedUrl at :453, LlamacppWiringTest
+    customGenerativeGgufUrlAndShaArePersistedForRestoreRecovery at :274.
+    Analysis pitfalls P3/P6/P13 all landed with consistent numbering.
+    blocked_by M1-824 (merged) seam tests traced: the six staged drives
+    + the M1-571 pins all stay green under a print-only staged-branch
+    change (no output assertion on the disclosure area exists to break).
+    No replaces:, no superseded worktree of this surface.
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "5 files, +117/-12"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-825-r1.txt
 ---
 
 # M1-825: Disclose the no-refetch status of locally-staged GGUFs
