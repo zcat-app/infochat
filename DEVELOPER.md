@@ -285,6 +285,43 @@ If Dev Services fails to start a container, check, in order:
 - The VPN issue above — Testcontainers connects to the container over loopback.
 - Nothing else is already bound to the ports the run needs (below).
 
+### Random ITs die with "address already in use" at container startup
+
+**Different test each run, failing before any test logic runs**
+(`ContainerLaunchException` → `RootlessKit PortManager.AddPort(): … bind:
+address already in use`) is an environment failure, not a regression: the
+rootless Docker daemon allocates each container's published host port from the
+ephemeral range of its own network namespace — **copied from the host at daemon
+start**. When the two bands overlap, container publishes race live host sockets
+(your stack's outbound connections, other suites, TIME-WAIT residue). A host
+port-split sysctl silently dies at every daemon restart.
+
+Diagnose in one step (no root) — if the two ranges overlap, the race is live.
+**Get the pid right:** under `--detach-netns` the rootlesskit *parent* stays in
+the host netns; the daemon's netns belongs to its **child** process. Find the
+process whose `ns/net` differs from yours (`pgrep -f 'rootlesskit|dockerd'`),
+then read the child's band through it:
+
+```bash
+awk '{print $1"-"$2}' /proc/sys/net/ipv4/ip_local_port_range      # host
+awk '{print $1"-"$2}' /proc/<child-pid>/root/proc/sys/net/ipv4/ip_local_port_range
+```
+
+Fix live (sudo; no daemon or container restart) by giving the **daemon child**
+a disjoint band — e.g. host keeps `40000 60999`, daemon gets `32768 39999`:
+
+```bash
+sudo nsenter -t <child-pid> -n sysctl -w net.ipv4.ip_local_port_range="32768 39999"
+```
+
+Targeting the rootlesskit parent — or the host itself — moves the wrong band:
+it can look fixed while actually having swapped the problem to the host side,
+and a later host restore silently re-arms the race.
+
+The fix resets on the next daemon restart — re-diagnose after any restart or
+reboot. `scripts/verify-serialized.sh` prints this warning automatically when
+it detects the overlap, naming the correct pid and command.
+
 ### Known flaky integration tests
 
 A few ITs have rare, timing-related flakes that are **not** caused by your

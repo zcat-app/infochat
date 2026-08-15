@@ -51,6 +51,46 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
 
+# Rootless-docker port-split check (2026-08-15 incident): the rootless
+# daemon picks each container's published host port from the ephemeral
+# range of its OWN network namespace, which it copies from the host at
+# daemon start — a host-level split sysctl silently dies at every daemon
+# restart. With the bands overlapping, container publishes race live
+# host sockets and random ITs fail at container startup with
+# "RootlessKit PortManager.AddPort(): … bind: address already in use"
+# (engineering-rules §5 environment class; full recipe:
+# .agents/memory/rootless-docker-port-split.md, DEVELOPER.md
+# §Troubleshooting). Read-only, needs no root, WARN only — the operator
+# owns the sudo fix. PID trap (cost this repo an afternoon): the
+# rootlesskit PARENT stays in the host netns under --detach-netns — the
+# daemon's netns belongs to its CHILD process, so discovery must compare
+# ns/net inodes, never trust "the rootlesskit pid". Reading the child's
+# sysctl via /proc/<pid>/root/proc works without root.
+host_lo="$(awk '{print $1}' /proc/sys/net/ipv4/ip_local_port_range 2>/dev/null || true)"
+host_hi="$(awk '{print $2}' /proc/sys/net/ipv4/ip_local_port_range 2>/dev/null || true)"
+my_netns="$(readlink /proc/self/ns/net 2>/dev/null || true)"
+daemon_pid=""
+if [ -n "$host_lo" ] && [ -n "$host_hi" ] && [ -n "$my_netns" ]; then
+    for p in $(pgrep -f 'rootlesskit|dockerd' 2>/dev/null | sort -n); do
+        [ -r "/proc/$p/ns/net" ] || continue
+        [ "$(readlink "/proc/$p/ns/net" 2>/dev/null)" != "$my_netns" ] || continue
+        if [ -r "/proc/$p/root/proc/sys/net/ipv4/ip_local_port_range" ]; then
+            daemon_pid="$p"
+            break
+        fi
+    done
+fi
+if [ -n "$daemon_pid" ]; then
+    ns_lo="$(awk '{print $1}' "/proc/$daemon_pid/root/proc/sys/net/ipv4/ip_local_port_range" 2>/dev/null || true)"
+    ns_hi="$(awk '{print $2}' "/proc/$daemon_pid/root/proc/sys/net/ipv4/ip_local_port_range" 2>/dev/null || true)"
+    if [ -n "$ns_lo" ] && [ -n "$ns_hi" ]; then
+        if [ "$ns_lo" -le "$host_hi" ] && [ "$host_lo" -le "$ns_hi" ]; then
+            echo "verify-serialized: WARNING: rootless docker netns port range ($ns_lo-$ns_hi, pid $daemon_pid) overlaps the host range ($host_lo-$host_hi) — container publishes will race live sockets (random 'address already in use' IT failures; resets at every daemon restart)." >&2
+            echo "verify-serialized: live fix (sudo): sudo nsenter -t $daemon_pid -n sysctl -w net.ipv4.ip_local_port_range=\"32768 39999\" — target THIS pid (the daemon-netns child), NOT the rootlesskit parent, and never the host itself (the host side belongs to /etc/sysctl.d/99-docker-port-split.conf)." >&2
+        fi
+    fi
+fi
+
 # One lockfile per slot, each on its own descriptor. The descriptors stay
 # open for the rest of the script (and are inherited by mvn), so a claimed
 # slot is held for the whole build and released only when the script —

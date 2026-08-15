@@ -47,7 +47,11 @@ and this store is the shared one both worlds read.
 - [Release state: read the truth doc, rank your sources](release-state-source-ranking.md) — live DB/config/git > committed docs > scratch handoffs > memory; always read the date.
 - [v1.0.0 tag was pulled pre-announcement](v1-0-0-tag-pulled-pre-announcement.md) — tagged at `3fb97365`, deleted local+origin 2026-07-25 so M1-687..690 ship first; there is currently NO release tag, and that is expected.
 
+- [Measurements never ride prod containers](measurements-never-ride-prod-containers.md) — benchmark runs target isolated/test instances, never prod as backend or via prod config; any prod stop/pause is logged first where other sessions read.
+
 ## Build, test and CI mechanics
+
+- [Rootless docker port-split](rootless-docker-port-split.md) — random "address already in use" IT deaths = daemon netns ephemeral range overlapping the host's (split dies at every daemon restart); fix via nsenter at the daemon-netns CHILD pid (the rootlesskit parent under --detach-netns is in the HOST netns — targeting it moves the wrong band), resets on restart.
 
 - [mvn -Dtest filtering is blocked by a tripwire](mvn-dtest-filter-blocked-by-tripwire.md) — cross-module `-Dtest` always fails (parent POM `failIfNoTests=true`); IT-only filtering IS legal (`-Dit.test` + `-Dfailsafe.failIfNoSpecifiedTests=false`, never `-Dtest`), otherwise module-scoped and UNFILTERED.
 - [Comment-cap: point-edit comment blocks, never rewrap](comment-cap-point-edit-comment-blocks.md) — tick-comment-cap counts runs of ADDED comment lines and removed lines don't break a run, so rewrapping a 4+ line javadoc/comment block trips the cap; keep untouched lines byte-identical as context.
