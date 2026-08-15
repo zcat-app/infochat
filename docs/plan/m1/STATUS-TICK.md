@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 12 |
+| pending | 9 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 55 |
+| done | 58 |
 | deferred | 0 |
 | abandoned | 0 |
 | **total** | **67** |
@@ -30,7 +30,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-840 — Re-verify SimpleX XFTP attachment surface on CLI v7.0.0 (complexity: high, risk: high)
 - M1-843 — SimpleX codec: image-typed sends with inline preview (complexity: medium, risk: medium)
 - M1-844 — Measure grounded in-language chat with the tool loop (complexity: high, risk: medium)
-- M1-847 — Add a streaming generate shape to the LlmProvider SPI (complexity: high, risk: medium)
 
 ---
 
@@ -50,7 +49,7 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-845 — blocked_by: M1-844 (pending)
 - M1-846 — blocked_by: M1-845 (pending)
 - M1-848 — blocked_by: M1-845 (pending)
-- M1-849 — blocked_by: M1-846 (pending), M1-847 (pending), M1-848 (pending)
+- M1-849 — blocked_by: M1-846 (pending), M1-847 (done), M1-848 (pending)
 
 ---
 
@@ -71,6 +70,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 |---|---|---|---|
 | M1-851 | Per-model image-prompt translation skip: flag + amendment | 2026-08-15 | round 1 APPROVE |
 | M1-850 | Measure Krea native-prompt holding vs the translation leg | 2026-08-15 | round 2 APPROVE |
+| M1-847 | Add a streaming generate shape to the LlmProvider SPI | 2026-08-15 | round 1 APPROVE |
 | M1-842 | Outbound preview generation + SPI preview field | 2026-08-15 | round 1 APPROVE-WITH-FIXES |
 | M1-841 | Probe SimpleX image-type composed-message surface | 2026-08-15 | round 1 APPROVE |
 | M1-838 | Bundle simplex-chat v7.0.0; re-verify launch surface | 2026-08-15 | round 1 APPROVE |
@@ -78,8 +78,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-834 | Admin-notify on LLM circuit-breaker open transitions | 2026-08-15 | round 2 APPROVE |
 | M1-833 | Document reboot resilience in guides and design notes | 2026-08-15 | round 1 APPROVE |
 | M1-832 | Full-stack lifecycle verb prod/scripts/stack.sh | 2026-08-15 | round 1 APPROVE |
-| M1-831 | Doctor fails rootless Docker hosts without linger | 2026-08-15 | round 1 APPROVE |
-| M1-830 | Port prod restart-policy drift into docker-compose.yml | 2026-08-15 | round 1 APPROVE |
 
 ---
 
@@ -176,7 +174,7 @@ M1-844 (pending) ← runnable
         │     └── M1-849 (pending)
         └── M1-848 (pending)
               └── M1-849 (pending) [see above]
-M1-847 (pending) ← runnable
+M1-847 (done)
   └── M1-849 (pending) [see above]
 M1-850 (done)
   └── M1-851 (done)

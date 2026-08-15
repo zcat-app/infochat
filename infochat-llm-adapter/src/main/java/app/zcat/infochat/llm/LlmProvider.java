@@ -1,6 +1,8 @@
 package app.zcat.infochat.llm;
 
 
+import java.util.function.Consumer;
+
 /**
  * Chat-completion + structured-output classification SPI. One
  * {@code generate} call against one {@link ModelTask} + prompt pair
@@ -19,6 +21,44 @@ package app.zcat.infochat.llm;
  * {@code TranslationProvider} in {@code infochat-messaging-adapter}
  * — it is a presentation-layer SPI consumed only by Provider and is
  * grouped with the messaging SPIs, not here.</p>
+ *
+ * <h2>Streaming call shape</h2>
+ *
+ * <p>{@link #supportsStreaming} and {@link #generateStreaming} are the
+ * streaming mirror of {@code generate}, declared HERE rather than on a
+ * sub-interface because the CDI decorator chain (breaker, metered,
+ * budget) forwards only members of the type it decorates: a streaming
+ * shape off this interface would let a streaming call bypass the
+ * wrappers, silently dropping the breaker/metrics/budget controls the
+ * single-string call carries. The defaults are the explicit
+ * cannot-stream posture — {@code supportsStreaming} answers
+ * {@code false} and {@code generateStreaming} refuses — so a provider
+ * that does not override them REPORTS that it cannot stream; a caller
+ * gates on the signal (surfaced through
+ * {@code LlmRouter.streamingSupportedFor}) and never reaches the
+ * refusal unaware.</p>
+ *
+ * <p><b>Chunk and terminal semantics.</b> One
+ * {@link #generateStreaming} call pushes each model-produced text
+ * delta to {@code chunkConsumer} in wire order, on the calling
+ * thread, and returns the assembled {@link LlmResponse} when the
+ * wire's terminal frame arrives. The returned {@code text()} is the
+ * concatenation of every delivered chunk; {@code usage()} carries the
+ * terminal usage frame when the wire sent one. Chunks are DELTAS, not
+ * cumulative prefixes.</p>
+ *
+ * <p><b>Failure semantics.</b> Any failure — transport before or
+ * <b>mid-stream</b>, non-2xx status, a frame that does not parse, a
+ * response body over the operator cap, a stream that ends without
+ * its terminal frame — throws the {@code LlmCallFailedException}
+ * family the concrete providers throw, with the same
+ * transport-vs-application split the circuit breaker classifies on:
+ * a mid-stream transport failure is the unreachable subtype, an
+ * application-level failure the plain type. Chunks already delivered
+ * to the consumer before the failure stay delivered — a failed call
+ * never emits a synthetic chunk, a synthetic terminal, or a partial
+ * result. A consumer that throws propagates its exception unchanged
+ * and aborts the call.</p>
  */
 public interface LlmProvider {
 
@@ -34,6 +74,46 @@ public interface LlmProvider {
      * @return the response carrying the model-produced text. Never null.
      */
     LlmResponse generate(ModelTask task, String systemPrompt, String userPrompt);
+
+    /**
+     * Whether this provider can serve {@code task} as a streaming
+     * call. Explicit, per-task, and side-effect-free: the router
+     * evaluates it at startup for the task whose consumer gates on
+     * it, so an implementation that throws here fails boot rather
+     * than the first live call. The default is the honest
+     * cannot-stream report, not a silent assumption.
+     */
+    default boolean supportsStreaming(ModelTask task) {
+        return false;
+    }
+
+    /**
+     * Run one streaming LLM call for the given task, pushing each
+     * text delta to {@code chunkConsumer} in wire order. Only legal
+     * after {@link #supportsStreaming} answered {@code true} for
+     * {@code task}; the default implementation refuses for providers
+     * that do not stream.
+     *
+     * @param task          the call-shape discriminator, as on
+     *                      {@link #generate}.
+     * @param systemPrompt  the system-role prompt; never null. Pass
+     *                      empty string when the task has no system
+     *                      framing.
+     * @param userPrompt    the user-role prompt; never null.
+     * @param chunkConsumer receives every text delta in wire order;
+     *                      never null. Called on the calling thread;
+     *                      must not block unduly (a slow consumer
+     *                      stalls the stream read up to the per-task
+     *                      timeout).
+     * @return the response carrying the assembled final text and the
+     *         terminal usage frame when the wire sent one. Never
+     *         null.
+     */
+    default LlmResponse generateStreaming(ModelTask task, String systemPrompt, String userPrompt,
+                                          Consumer<String> chunkConsumer) {
+        throw new UnsupportedOperationException(
+            providerName() + " does not support streaming for task " + task.keySegment());
+    }
 
     /**
      * Startup-time assertion that this provider can serve the given

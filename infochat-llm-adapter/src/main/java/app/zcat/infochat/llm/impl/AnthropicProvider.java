@@ -19,6 +19,7 @@ import java.net.http.HttpRequest;
 import java.time.Duration;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 /**
  * Native Anthropic Messages API provider. Uses the Anthropic-specific
@@ -118,6 +119,27 @@ public class AnthropicProvider implements LlmProvider {
     }
 
     /**
+     * The Anthropic SSE shape ({@code content_block_delta} text deltas,
+     * {@code message_start}/{@code message_delta} usage halves, the
+     * {@code message_stop} terminal) serves every {@link ModelTask} —
+     * the capability is wire-dialect-wide, not per-task.
+     */
+    @Override
+    public boolean supportsStreaming(ModelTask task) {
+        return true;
+    }
+
+    @Override
+    public LlmResponse generateStreaming(ModelTask task, String systemPrompt, String userPrompt,
+                                         Consumer<String> chunkConsumer) {
+        TaskConfig cfg = configFor(task);
+        HttpRequest request = buildRequest(task, cfg, systemPrompt, userPrompt, true);
+        return LlmHttpSupport.executeStreamingCall(
+            http, config, request, "AnthropicProvider", cfg.timeoutMs(),
+            new StreamingParser(chunkConsumer));
+    }
+
+    /**
      * Runs {@link #configFor} for its throw-on-missing-key effect and
      * discards the result, so the startup scan fails boot on the same
      * resolution the first {@link #generate} call would perform.
@@ -175,7 +197,14 @@ public class AnthropicProvider implements LlmProvider {
     }
 
     private LlmResponse doCall(ModelTask task, TaskConfig cfg, String systemPrompt, String userPrompt) {
-        String body;
+        HttpRequest request = buildRequest(task, cfg, systemPrompt, userPrompt, false);
+        return LlmHttpSupport.executeJsonCall(
+            http, config, request, "AnthropicProvider", AnthropicProvider::parseContentText);
+    }
+
+    /** Assembles the body shared by both call shapes; {@code stream} adds the SSE request field only. */
+    private static String assembleBody(ModelTask task, TaskConfig cfg, String systemPrompt,
+                                       String userPrompt, boolean stream) {
         try {
             ObjectNode root = LlmHttpSupport.JSON.createObjectNode();
             root.put("model", cfg.model());
@@ -187,6 +216,9 @@ public class AnthropicProvider implements LlmProvider {
             // API accepts "temperature" as a top-level request field.
             if (task == ModelTask.TRANSLATOR) {
                 root.put("temperature", 0);
+            }
+            if (stream) {
+                root.put("stream", true);
             }
 
             // The Messages API rejects an empty system text block, and a
@@ -206,12 +238,16 @@ public class AnthropicProvider implements LlmProvider {
             user.put("role", "user");
             user.put("content", userPrompt);
 
-            body = LlmHttpSupport.JSON.writeValueAsString(root);
+            return LlmHttpSupport.JSON.writeValueAsString(root);
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             throw new LlmCallFailedException(
                 "AnthropicProvider: failed to assemble request body", e);
         }
+    }
 
+    private HttpRequest buildRequest(ModelTask task, TaskConfig cfg, String systemPrompt,
+                                     String userPrompt, boolean stream) {
+        String body = assembleBody(task, cfg, systemPrompt, userPrompt, stream);
         URI uri = URI.create(LlmHttpSupport.joinPath(cfg.baseUrl(), "/messages"));
         HttpRequest.Builder reqBuilder = HttpRequest.newBuilder(uri)
             .timeout(Duration.ofMillis(cfg.timeoutMs()))
@@ -221,10 +257,7 @@ public class AnthropicProvider implements LlmProvider {
         if (!cfg.apiKey().isEmpty()) {
             reqBuilder.header("x-api-key", cfg.apiKey());
         }
-        HttpRequest request = reqBuilder.build();
-
-        return LlmHttpSupport.executeJsonCall(
-            http, config, request, "AnthropicProvider", AnthropicProvider::parseContentText);
+        return reqBuilder.build();
     }
 
     private static LlmResponse parseContentText(String responseBody, URI uri) {
@@ -279,6 +312,90 @@ public class AnthropicProvider implements LlmProvider {
                 usage.path("output_tokens").asLong());
         }
         return new LlmResponse(text.toString(), model, tokenUsage);
+    }
+
+    /**
+     * SSE interpreter for the Anthropic streaming dialect. The frame's
+     * {@code type} field (inside the {@code data} payload, never the
+     * SSE {@code event} line) discriminates: {@code text_delta} frames
+     * reach the chunk consumer in wire order; {@code message_start}
+     * and {@code message_delta} carry the input and output usage
+     * halves (cache-read/creation input folds in, as on the
+     * single-string parse); {@code message_stop} terminates. A frame
+     * that does not parse, or carries no known type, fails the call —
+     * never a synthetic chunk.
+     */
+    private static final class StreamingParser implements LlmHttpSupport.StreamingResponseParser {
+        private final Consumer<String> chunkConsumer;
+        private final StringBuilder text = new StringBuilder();
+        private long inputTokens;
+        private long outputTokens;
+        private boolean sawInputUsage;
+        private boolean sawOutputUsage;
+
+        StreamingParser(Consumer<String> chunkConsumer) {
+            this.chunkConsumer = chunkConsumer;
+        }
+
+        @Override
+        public boolean onFrame(String data) {
+            JsonNode root;
+            try {
+                root = LlmHttpSupport.JSON.readTree(data);
+            } catch (IOException e) {
+                throw new LlmCallFailedException(
+                    "AnthropicProvider: malformed SSE data frame", e);
+            }
+            JsonNode type = root.path("type");
+            if (!type.isTextual()) {
+                throw new LlmCallFailedException(
+                    "AnthropicProvider: SSE data frame has no type discriminator");
+            }
+            switch (type.asText()) {
+                case "message_start" -> {
+                    JsonNode usage = root.path("message").path("usage");
+                    if (usage.path("input_tokens").canConvertToLong()) {
+                        inputTokens = usage.path("input_tokens").asLong()
+                            + usage.path("cache_read_input_tokens").asLong(0L)
+                            + usage.path("cache_creation_input_tokens").asLong(0L);
+                        sawInputUsage = true;
+                    }
+                }
+                case "content_block_delta" -> {
+                    JsonNode delta = root.path("delta");
+                    if ("text_delta".equals(delta.path("type").asText())
+                            && delta.path("text").isTextual()
+                            && !delta.path("text").asText().isEmpty()) {
+                        String chunk = delta.path("text").asText();
+                        text.append(chunk);
+                        chunkConsumer.accept(chunk);
+                    }
+                }
+                case "message_delta" -> {
+                    JsonNode usage = root.path("usage");
+                    if (usage.path("output_tokens").canConvertToLong()) {
+                        outputTokens = usage.path("output_tokens").asLong();
+                        sawOutputUsage = true;
+                    }
+                }
+                case "message_stop" -> {
+                    return true;
+                }
+                case "ping", "content_block_start", "content_block_stop" -> {
+                    // Protocol choreography frames — no text, no usage.
+                }
+                default -> throw new LlmCallFailedException(
+                    "AnthropicProvider: unknown SSE event type '" + type.asText() + "'");
+            }
+            return false;
+        }
+
+        @Override
+        public LlmResponse result() {
+            LlmResponse.TokenUsage usage =
+                sawInputUsage && sawOutputUsage ? new LlmResponse.TokenUsage(inputTokens, outputTokens) : null;
+            return new LlmResponse(text.toString(), null, usage);
+        }
     }
 
     private record TaskConfig(String baseUrl, String apiKey, String model, long timeoutMs, int maxTokens) {

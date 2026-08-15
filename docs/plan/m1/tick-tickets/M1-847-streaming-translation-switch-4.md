@@ -1,20 +1,16 @@
 ---
 id: M1-847
 title: "Add a streaming generate shape to the LlmProvider SPI"
-status: pending
+status: done
 created: 2026-08-14
-last_updated: 2026-08-14
+last_updated: 2026-08-15
 flow: tick
 reproduction: >-
-  to-be-written: OpenAiCompatibleProviderStreamingTest#streamsChunksInOrderToTheConsumer
+  OpenAiCompatibleProviderStreamingTest#streamsChunksInOrderToTheConsumer
   (child of a 2+ decomposition, analysis
-  docs/plan/m1/tick-analysis/streaming-translation-switch.md). Probe:
-  grep -n 'generate' infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/LlmProvider.java
-  shows the single-string SPI (:36), and grep -rni 'sse\|event-stream\|stream'
-  over infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/impl/
-  returns no chunked-response parsing — observed: no provider can stream
-  today, so no consumer of a chunk stream can be written (M1-607 deferred
-  exactly this: "A streaming SPI is a separate, larger decision").
+  docs/plan/m1/tick-analysis/streaming-translation-switch.md; written at
+  start 2026-08-15 and run RED first as a compile failure on the absent
+  SPI, green 271-test module run after, .scratch/tick-red-M1-847.log).
 analysis_ref: docs/plan/m1/tick-analysis/streaming-translation-switch.md
 blocked_by: []
 files_scope:
@@ -88,11 +84,17 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "19 files, +1947/-44"
+    verdict_file: .scratch/tick-review-M1-847-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check: "2026-08-15 pass — lint clean (after copying the gitignored tick-analysis/streaming-translation-switch.md into this worktree, the M1-844 pattern); citations spot-checked and hold (LlmProvider.java:36 single-string generate, :9-16 minimal-SPI javadoc, DeepSeekProvider.java:16-18 subclass, security.md:98-132 boundary 9 incl. 1-8 MiB cap + wire-label rule + usage checks, llm.md:614-630 SPI-design-tier, LlmRouter.java:278-310 assertAllTasksResolve, LlmOutputSanitizer.java:303-319 M1-763 virtual-thread interrupt lesson); both reproduction probes re-ran clean (single-string SPI; no SSE/chunked parsing in impl/); no §Census (N/A, feature slice); analysis pitfalls P11-SPI/P12/P15/P20 all present and matching; replaces: empty and no parked worktree holds a superseded SPI attempt (the 'stream' hits in the M1-817..834 worktrees are the javadoc word 'downstream'); blocked_by empty so no prior-ticket test enumeration; P20 note: the M1-819..843 batch is not fully landed (M1-836..843 pending) but none of it touches infochat-llm-adapter, the ticket declares the SPI work CLI-version-neutral, P20's stated reason targets M1-849's probe, and the user directed the start; no in-flight tick ticket exists so no module overlap"
 escalation_reason:
 ---
 
@@ -155,6 +157,19 @@ P12, P15, P20.
      start against the SPI-minimalism javadoc (a sub-interface keeps
      `LlmProvider`'s single-method surface; a default method that throws
      is the trap to avoid).
+     [Start decision 2026-08-15: the members live ON `LlmProvider` as
+     `supportsStreaming` (default `false`, the explicit cannot-stream
+     report) + `generateStreaming` (default refuses, unreachable past
+     the signal). The sub-interface was tried first and is CDI-illegal
+     for this architecture: the decorator chain decorates the
+     `LlmProvider` type, and a decorated method must be a member of it
+     — with the shape on a sub-interface, either the decorators'
+     delegate violates CDI's delegate-type rule (DefinitionException,
+     caught by the collector module's boot in the first full verify)
+     or streaming calls bypass the wrappers entirely, dropping the
+     breaker/metered/budget controls. The trap is avoided by the
+     signal, not the shape: callers gate on `supportsStreaming` via
+     the router, so no caller reaches the refusing default unaware.]
   3. Implement SSE parsing in OpenAiCompatibleProvider (DeepSeek inherits)
      and AnthropicProvider, through LlmHttpSupport's shared transport so
      the body cap and breaker classification live in one place.

@@ -82,6 +82,29 @@ public class BudgetedLlmProvider implements LlmProvider {
     }
 
     @Override
+    public boolean supportsStreaming(ModelTask task) {
+        return delegate.supportsStreaming(task);
+    }
+
+    /**
+     * The streaming mirror of {@link #generate}: one streaming call is
+     * one budget draw — the accounting shape does not differ from the
+     * single-string call, so a stream costs exactly one unit of
+     * budget, refused before the HTTP attempt as on that path.
+     */
+    @Override
+    public LlmResponse generateStreaming(ModelTask task, String systemPrompt, String userPrompt,
+                                         java.util.function.Consumer<String> chunkConsumer) {
+        if (LlmCallBudget.isBound() && !Thread.currentThread().isInterrupted()
+                && !LlmCallBudget.current().tryDraw()) {
+            throw new LlmCallBudget.RefusedException(
+                "call budget exhausted for task " + task.keySegment()
+                    + "; call refused without an HTTP attempt");
+        }
+        return delegate.generateStreaming(task, systemPrompt, userPrompt, chunkConsumer);
+    }
+
+    @Override
     public void assertTaskConfigResolvable(ModelTask task) {
         delegate.assertTaskConfigResolvable(task);
     }

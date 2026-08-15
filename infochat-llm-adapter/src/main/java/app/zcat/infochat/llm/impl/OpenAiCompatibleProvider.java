@@ -11,6 +11,7 @@ import app.zcat.infochat.llm.routing.LlmRouter;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.Config;
+import org.jspecify.annotations.Nullable;
 
 import java.io.IOException;
 import java.net.URI;
@@ -19,6 +20,7 @@ import java.net.http.HttpRequest;
 import java.time.Duration;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 /**
  * The first concrete {@link LlmProvider} impl, per
@@ -144,6 +146,27 @@ public class OpenAiCompatibleProvider implements LlmProvider {
     }
 
     /**
+     * The OpenAI-compatible SSE shape ({@code data:} frames carrying
+     * {@code choices[0].delta.content}, terminated by the literal
+     * {@code [DONE]} frame) serves every {@link ModelTask} — the
+     * capability is wire-dialect-wide, not per-task.
+     */
+    @Override
+    public boolean supportsStreaming(ModelTask task) {
+        return true;
+    }
+
+    @Override
+    public LlmResponse generateStreaming(ModelTask task, String systemPrompt, String userPrompt,
+                                         Consumer<String> chunkConsumer) {
+        TaskConfig cfg = configFor(task);
+        HttpRequest request = buildRequest(task, cfg, systemPrompt, userPrompt, true);
+        return LlmHttpSupport.executeStreamingCall(
+            http, config, request, "OpenAiCompatibleProvider", cfg.timeoutMs(),
+            new StreamingParser(chunkConsumer));
+    }
+
+    /**
      * Runs {@link #configFor} for its throw-on-missing-key effect and
      * discards the result, so the startup scan fails boot on the same
      * resolution the first {@link #generate} call would perform.
@@ -218,11 +241,21 @@ public class OpenAiCompatibleProvider implements LlmProvider {
     }
 
     private LlmResponse doCall(ModelTask task, TaskConfig cfg, String systemPrompt, String userPrompt) {
+        HttpRequest request = buildRequest(task, cfg, systemPrompt, userPrompt, false);
+        return LlmHttpSupport.executeJsonCall(
+            http, config, request, "OpenAiCompatibleProvider", OpenAiCompatibleProvider::parseChoiceText);
+    }
+
+    /**
+     * Assembles the request body shared by the single-string and
+     * streaming calls; {@code stream} adds the SSE request field only.
+     */
+    private String assembleBody(ModelTask task, TaskConfig cfg, String systemPrompt,
+                                String userPrompt, boolean stream) {
         // Assemble the request body. Jackson handles the JSON escape
         // for any quote, backslash, newline, or non-ASCII codepoint
         // inside the prompt strings — a hand-rolled concat would
         // mis-handle a prompt containing a literal quote.
-        String body;
         try {
             ObjectNode root = LlmHttpSupport.JSON.createObjectNode();
             root.put("model", cfg.model());
@@ -239,6 +272,9 @@ public class OpenAiCompatibleProvider implements LlmProvider {
             if (task == ModelTask.TRANSLATOR) {
                 root.put("temperature", 0);
             }
+            if (stream) {
+                root.put("stream", true);
+            }
             ArrayNode messages = root.putArray("messages");
             ObjectNode system = messages.addObject();
             system.put("role", "system");
@@ -251,12 +287,16 @@ public class OpenAiCompatibleProvider implements LlmProvider {
             // inject provider-only fields (e.g. DeepSeekProvider's thinking
             // toggle) before serialization.
             customizeRequestBody(root, task);
-            body = LlmHttpSupport.JSON.writeValueAsString(root);
+            return LlmHttpSupport.JSON.writeValueAsString(root);
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             throw new LlmCallFailedException(
                 "OpenAiCompatibleProvider: failed to assemble request body", e);
         }
+    }
 
+    private HttpRequest buildRequest(ModelTask task, TaskConfig cfg, String systemPrompt,
+                                     String userPrompt, boolean stream) {
+        String body = assembleBody(task, cfg, systemPrompt, userPrompt, stream);
         URI uri = URI.create(LlmHttpSupport.joinPath(cfg.baseUrl(), "/chat/completions"));
         HttpRequest.Builder reqBuilder = HttpRequest.newBuilder(uri)
             .timeout(Duration.ofMillis(cfg.timeoutMs()))
@@ -267,26 +307,26 @@ public class OpenAiCompatibleProvider implements LlmProvider {
         if (!cfg.apiKey().isEmpty()) {
             reqBuilder.header("Authorization", "Bearer " + cfg.apiKey());
         }
-        HttpRequest request = reqBuilder.build();
-
-        return LlmHttpSupport.executeJsonCall(
-            http, config, request, "OpenAiCompatibleProvider", OpenAiCompatibleProvider::parseChoiceText);
+        return reqBuilder.build();
     }
 
     /**
-     * Body-customization seam for subclasses. Called inside {@link #doCall}
-     * after the base OpenAI-compatible body ({@code model}, {@code max_tokens},
-     * {@code messages}) is assembled and BEFORE it is serialized, so a subclass
-     * may add provider-specific fields to {@code root}. The base implementation
-     * is a NO-OP: the generic OpenAI/Ollama path keeps a byte-identical body to
-     * its pre-seam behaviour (a separate {@link AnthropicProvider} assembles its
-     * own Anthropic-format body and never reaches this seam). {@code DeepSeekProvider}
-     * overrides it to inject the DeepSeek {@code thinking} reasoning toggle.
+     * Body-customization seam for subclasses. Called inside
+     * {@link #assembleBody} after the base OpenAI-compatible body
+     * ({@code model}, {@code max_tokens}, {@code messages}) is assembled
+     * and BEFORE it is serialized, so a subclass may add provider-specific
+     * fields to {@code root}. The base implementation is a NO-OP: the
+     * generic OpenAI/Ollama path keeps a byte-identical body to its
+     * pre-seam behaviour (a separate {@link AnthropicProvider} assembles
+     * its own Anthropic-format body and never reaches this seam).
+     * {@code DeepSeekProvider} overrides it to inject the DeepSeek
+     * {@code thinking} reasoning toggle.
      *
-     * @param root the mutable request-body root, pre-populated with the base
-     *             fields; a subclass mutates it in place.
-     * @param task the task this call serves, so a subclass can read a per-task
-     *             config key (e.g. {@code infochat.llm.<task>.reasoning-effort}).
+     * @param root the mutable request-body root, pre-populated with the
+     *             base fields; a subclass mutates it in place.
+     * @param task the task this call serves, so a subclass can read a
+     *             per-task config key (e.g.
+     *             {@code infochat.llm.<task>.reasoning-effort}).
      */
     protected void customizeRequestBody(ObjectNode root, ModelTask task) {
         // No-op: the generic OpenAI-compatible body is sent unchanged.
@@ -322,6 +362,56 @@ public class OpenAiCompatibleProvider implements LlmProvider {
                 usage.path("completion_tokens").asLong());
         }
         return new LlmResponse(content.asText(), model, tokenUsage);
+    }
+
+    /**
+     * SSE interpreter for the OpenAI-compatible streaming dialect:
+     * {@code choices[0].delta.content} text deltas reach the chunk
+     * consumer in wire order; a frame's optional {@code usage} block
+     * is the terminal usage report (last one wins); the literal
+     * {@code [DONE]} payload terminates. A frame whose JSON does not
+     * parse fails the call — never a synthetic chunk.
+     */
+    private static final class StreamingParser implements LlmHttpSupport.StreamingResponseParser {
+        private final Consumer<String> chunkConsumer;
+        private final StringBuilder text = new StringBuilder();
+        private LlmResponse.@Nullable TokenUsage usage;
+
+        StreamingParser(Consumer<String> chunkConsumer) {
+            this.chunkConsumer = chunkConsumer;
+        }
+
+        @Override
+        public boolean onFrame(String data) {
+            if ("[DONE]".equals(data)) {
+                return true;
+            }
+            JsonNode root;
+            try {
+                root = LlmHttpSupport.JSON.readTree(data);
+            } catch (IOException e) {
+                throw new LlmCallFailedException(
+                    "OpenAiCompatibleProvider: malformed SSE data frame", e);
+            }
+            JsonNode content = root.path("choices").path(0).path("delta").path("content");
+            if (content.isTextual() && !content.asText().isEmpty()) {
+                text.append(content.asText());
+                chunkConsumer.accept(content.asText());
+            }
+            JsonNode usageNode = root.path("usage");
+            if (usageNode.path("prompt_tokens").canConvertToLong()
+                    && usageNode.path("completion_tokens").canConvertToLong()) {
+                usage = new LlmResponse.TokenUsage(
+                    usageNode.path("prompt_tokens").asLong(),
+                    usageNode.path("completion_tokens").asLong());
+            }
+            return false;
+        }
+
+        @Override
+        public LlmResponse result() {
+            return new LlmResponse(text.toString(), null, usage);
+        }
     }
 
     /** Per-task config snapshot extracted by {@link #configFor}. */

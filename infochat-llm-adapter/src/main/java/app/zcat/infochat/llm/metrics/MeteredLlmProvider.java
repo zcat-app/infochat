@@ -155,6 +155,47 @@ public class MeteredLlmProvider implements LlmProvider {
         }
     }
 
+    @Override
+    public boolean supportsStreaming(ModelTask task) {
+        return delegate.supportsStreaming(task);
+    }
+
+    /**
+     * The streaming mirror of {@link #generate}: one call is ONE
+     * metric event — latency, outcome, and the terminal usage frame
+     * record once when the whole stream completes, never per chunk,
+     * with the model label from operator config exactly as on the
+     * single-string path.
+     */
+    @Override
+    public LlmResponse generateStreaming(ModelTask task, String systemPrompt, String userPrompt,
+                                         java.util.function.Consumer<String> chunkConsumer) {
+        LlmCallContext context = LlmCallContext.currentOrFresh().withTask(task);
+        String provider = delegate.providerName();
+        AtomicInteger inflight = metrics.llmInflight(task, provider);
+        long startNanos = System.nanoTime();
+        inflight.incrementAndGet();
+        try {
+            LlmResponse response = LlmCallContext.callWith(context, () ->
+                delegate.generateStreaming(task, systemPrompt, userPrompt, chunkConsumer));
+            Duration latency = Duration.ofNanos(System.nanoTime() - startNanos);
+            String model = configuredModel(task);
+            metrics.recordLlmCall(task, provider, model, LlmMetrics.Outcome.OK, latency,
+                plausibleUsage(task, provider, systemPrompt, userPrompt, response.usage()));
+            LOG.debugf("llm stream ok: trace=%s task=%s provider=%s model=%s latencyMs=%d",
+                context.traceId(), task.keySegment(), provider, model, latency.toMillis());
+            return response;
+        } catch (RuntimeException e) {
+            Duration latency = Duration.ofNanos(System.nanoTime() - startNanos);
+            metrics.recordLlmCall(task, provider, UNKNOWN_MODEL, LlmMetrics.Outcome.FAIL, latency, null);
+            LOG.debugf("llm stream fail: trace=%s task=%s provider=%s latencyMs=%d",
+                context.traceId(), task.keySegment(), provider, latency.toMillis());
+            throw e;
+        } finally {
+            inflight.decrementAndGet();
+        }
+    }
+
     /**
      * The operator-configured model id for {@code task}, read per call
      * from {@code infochat.llm.<task>.model} — the same key, spelled the

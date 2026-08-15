@@ -16,7 +16,8 @@ import jakarta.interceptor.Interceptor;
 /**
  * CDI decorator wrapping every {@link LlmProvider} bean with the
  * per-endpoint circuit breaker (M1-606): an OPEN breaker short-circuits
- * {@link #generate} with the typed
+ * {@link #generate} and its streaming mirror
+ * {@link #generateStreaming} with the typed
  * {@link LlmCallFailedException.ProviderUnreachableException} WITHOUT
  * attempting the HTTP call, so every {@link ModelTask} consumer fails
  * fast on an endpoint already known unreachable and degrades exactly as
@@ -67,6 +68,30 @@ public class CircuitBreakingLlmProvider implements LlmProvider {
 
     @Override
     public LlmResponse generate(ModelTask task, String systemPrompt, String userPrompt) {
+        return withBreaker(task, () -> delegate.generate(task, systemPrompt, userPrompt));
+    }
+
+    @Override
+    public boolean supportsStreaming(ModelTask task) {
+        return delegate.supportsStreaming(task);
+    }
+
+    /**
+     * The streaming mirror of {@link #generate} through the same
+     * acquire/classify/record ladder: a mid-stream failure is
+     * classified by the provider's streaming pipeline exactly as a
+     * single-string transport or application failure, so the breaker
+     * trips on the same evidence either way.
+     */
+    @Override
+    public LlmResponse generateStreaming(ModelTask task, String systemPrompt, String userPrompt,
+                                         java.util.function.Consumer<String> chunkConsumer) {
+        return withBreaker(task,
+            () -> delegate.generateStreaming(task, systemPrompt, userPrompt, chunkConsumer));
+    }
+
+    private LlmResponse withBreaker(ModelTask task,
+                                    java.util.function.Supplier<LlmResponse> call) {
         if (!breakerRegistry.tryAcquireForTask(task)) {
             // Endpoint identity stays out of the message: task + provider
             // name the route; the breaker's own state-transition log lines
@@ -77,7 +102,7 @@ public class CircuitBreakingLlmProvider implements LlmProvider {
         }
         LlmResponse response;
         try {
-            response = delegate.generate(task, systemPrompt, userPrompt);
+            response = call.get();
         } catch (LlmCallFailedException.ProviderUnreachableException e) {
             if (!releasedAsCancelled(task)) {
                 breakerRegistry.recordUnreachableForTask(task);

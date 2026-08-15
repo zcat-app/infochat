@@ -251,6 +251,18 @@ public class LlmRouter {
     }
 
     /**
+     * Whether the provider {@link #forTask} resolves for {@code task}
+     * reports streaming support — the explicit capability signal of
+     * {@link LlmProvider#supportsStreaming}, surfaced through the same
+     * resolution chain (and decorator stack) a live call uses. A
+     * provider that cannot stream reports exactly that
+     * ({@code false}); nothing in the chain assumes streaming.
+     */
+    public boolean streamingSupportedFor(ModelTask task, @Nullable String scopeLanguage) {
+        return forTask(task, scopeLanguage).supportsStreaming(task);
+    }
+
+    /**
      * Startup-time assertion that every {@link ModelTask} resolves to a
      * registered provider under the current config, AND that the
      * resolved provider's per-task config resolves. A per-task provider
@@ -307,6 +319,15 @@ public class LlmRouter {
                 forTask(task, language).assertTaskConfigResolvable(task);
             }
         }
+        // Streaming-capability coherence, same posture as the sweep
+        // above: the CHAT_AGENT capability signal is evaluated through
+        // the exact resolution path a live streaming call gates on, so
+        // a broken signal (one that throws) fails boot here instead of
+        // the first live call. A false verdict is the supported
+        // cannot-stream posture and must NOT fail boot — the caller
+        // degrades to non-streaming, and the per-task config the
+        // streaming call resolves is already asserted above.
+        streamingSupportedFor(ModelTask.CHAT_AGENT, "en");
     }
 
     /**
