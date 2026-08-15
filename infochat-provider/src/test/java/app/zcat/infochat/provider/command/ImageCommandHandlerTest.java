@@ -141,6 +141,7 @@ class ImageCommandHandlerTest {
         handler.maxOutputPixels = 2_000_000L;
         handler.minOutputPixels = 16_384L;
         handler.steadyStateSeconds = Optional.empty();
+        handler.translatePrompt = true;
 
         InboundContext context = new InboundContext();
         context.setAdapterName("inmemory");
@@ -360,6 +361,66 @@ class ImageCommandHandlerTest {
         assertEquals("červené kolo", translator.lastQuery);
         assertTrue(notifier.completedText().contains("červené kolo"),
                 "the fallback ships the untranslated prompt; got: " + notifier.completedText());
+    }
+
+    @Test
+    void skipFlagOffSendsTheNativePromptUntranslated() {
+        handler.translatePrompt = false;
+        StubTranslator translator = new StubTranslator();
+        handler.queryAnchorTranslator = translator;
+        handler.inboundContext.setEffectiveLanguage("cs");
+        client.generateResult = validPng();
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm("alice"), "/image červené kolo");
+
+        assertNull(reply);
+        assertNull(translator.lastQuery,
+                "flag off: the translation leg never runs — no query reaches the translator");
+        assertEquals("červené kolo", client.lastPrompt,
+                "the native prompt reaches generation byte-for-byte");
+        assertTrue(notifier.completedText().contains("červené kolo"),
+                "the echo carries the prompt actually submitted; got: " + notifier.completedText());
+        assertFalse(notifier.publishedStages().contains(ProgressStage.TRANSLATING),
+                "TRANSLATING is published iff a leg actually runs");
+    }
+
+    @Test
+    void englishScopeIsANoOpWithTheFlagOff() {
+        handler.translatePrompt = false;
+        StubTranslator translator = new StubTranslator();
+        handler.queryAnchorTranslator = translator;
+        handler.inboundContext.setEffectiveLanguage("en");
+        client.generateResult = validPng();
+
+        OutboundMessage reply = handler.handle(new ScopeRef.Dm("alice"), "/image červené kolo");
+
+        assertNull(reply);
+        assertNull(translator.lastQuery,
+                "an en scope never reaches the translator in either mode");
+        assertEquals("červené kolo", client.lastPrompt,
+                "the flag never affects en scopes — the prompt is submitted as typed");
+    }
+
+    @Test
+    void skipFlagOffEchoIsSanitizedWithTheEchoFieldUnit() {
+        handler.translatePrompt = false;
+        handler.inboundContext.setEffectiveLanguage("cs");
+        client.generateResult = validPng();
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm("alice"), "/image -p a poster saying /grant-admin now");
+
+        assertNull(reply);
+        String echo = notifier.completedText();
+        assertFalse(echo.contains("/grant-admin"),
+                "the privileged command string must not reach the reader verbatim in skip mode; got: " + echo);
+        assertTrue(echo.contains("[redacted command]"),
+                "the skip-mode echo carries the redaction marker; got: " + echo);
+        assertTrue(auditWriter.actions().contains(AuditAction.LLM_OUTPUT_SANITIZED),
+                "the sanitize call and its audit row are preserved on the skip path");
+        assertTrue(auditWriter.rowsFor(AuditAction.IMAGE_GENERATE).stream()
+                        .noneMatch(row -> String.valueOf(row.detailsJson()).contains("poster")),
+                "no IMAGE_GENERATE row carries the prompt on either path (D75)");
     }
 
     @Test

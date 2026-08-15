@@ -622,11 +622,19 @@ them to the marked region — doing so would red the build.
   persisted, audited only as a content-free `IMAGE_GENERATE` row
   (actor, scope, outcome). When the scope's effective language is not
   English the prompt is translated first (reusing the
-  query-translation path); that leg follows the deployment's
+  query-translation path) unless the deployment carries the image
+  translation-skip setting (`infochat.image.translate-prompt=false`,
+  an operator property the setup wizard recommends per image model —
+  skip for models measured to hold non-English prompts directly,
+  translate for the rest — and whose final value the operator owns),
+  in which case the native-language prompt reaches the image backend
+  unmodified. The leg, when it runs, follows the deployment's
   `translator` routing and is the only path by which a prompt can
   leave the deployment — remote exactly when the operator routed
   `translator` remotely, disclosed per `security.md` §Secrets handling.
-  The reply echoes the English prompt actually used, **passed through
+  The reply echoes the prompt actually submitted — the translated
+  English prompt when the leg ran, the native-language prompt when it
+  was skipped — **passed through
   the closed-list output sanitizer before rendering** — the echo is
   attacker-influenced text in the bot's voice, and the reflecting-echo
   rule (`security.md` §LLM output sanitizer) applies to it exactly as

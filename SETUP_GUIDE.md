@@ -381,6 +381,21 @@ into its workflow template:
 3. **stock qwen_image_vae 1×** — the fallback decoder: the right choice for
    text-heavy renders.
 
+**Prompt translation (per model).** After the model pick, the wizard asks
+whether non-English `/image` prompts are translated to English before
+generation (`infochat.image.translate-prompt`). The recommended answer
+depends on the model: **Krea 2** reads non-English prompts directly, so
+skipping the translation is recommended (it saves about a second per
+prompt and one translator round-trip); **Mage-Flow** and **Z-Image**
+degrade with non-English input, so translation is recommended for them.
+The choice is yours — the wizard writes the value it holds and tells you
+what it picked; to change it later, edit `infochat.image.translate-prompt`
+in `prod/runtime/application.properties` (then restart the Provider), or
+just re-run this step, which asks again and rewrites it. An existing
+install that never re-runs this step keeps translation on — today's
+behavior, the safe posture: it pays the ~1 s translator round-trip per
+non-English prompt and loses nothing.
+
 **Community assets.** Krea downloads two community VAE files; the wizard
 prints their licence status before fetching them: `krea2RealVae_v10`
 (artsyww/KREA2REALVAE) is licence-UNDECLARED on its HuggingFace card, and the
@@ -718,9 +733,11 @@ non-English `/lang`:
   shortened but not stripped of anything.
 - **Your `/image` prompts** — if a chat or group's `/lang` is not English,
   the prompt you type for `/image` is translated to English before the image
-  backend runs. The image backend itself is always local or operator-run;
-  this translation is the only path by which an `/image` prompt can leave
-  the deployment.
+  backend runs, unless the deployment's image model carries the
+  translation-skip setting (a per-model operator choice; see step 4b). The
+  image backend itself is always local or operator-run; the translation,
+  when it runs, is the only path by which an `/image` prompt can leave the
+  deployment.
 - **Headlines of posts you saved**, each time `/saved` lists them.
 - **Headlines of posts a `/summary` returns** — which also reveals what you
   asked about.
@@ -841,7 +858,7 @@ Three things to know before you do:
 | `prod/scripts/2-secrets.sh` | Generate the DB-role passwords | `--defaults` (no-op — no prompts) |
 | `prod/scripts/3-postgres.sh` | Start Postgres and wait until healthy | `--defaults` (no-op — no prompts) |
 | `prod/scripts/4-llm.sh` | Provision the LLM backend; write the LLM + embeddings config | `--defaults` (takes the profile's default backend) |
-| `prod/scripts/4b-image.sh` | Optional: provision the `/image` backend (local ROCm ComfyUI or a remote box); write `infochat.image.*` | `--defaults` (takes `none` — does not enable); `--dry-run` (print the profile gate + model picker and exit); `--verbose` (also print the picker's full detail) |
+| `prod/scripts/4b-image.sh` | Optional: provision the `/image` backend (local ROCm ComfyUI or a remote box); write `infochat.image.*` | `--defaults` (takes `none` — does not enable); `--dry-run` (print the profile gate, model picker, and translation recommendations, then exit); `--verbose` (also print the picker's full detail) |
 | `prod/scripts/5-bootstrap.sh` | Seed `bootstrap-sources.json` and wire the asset (price) commands | `--defaults` (uses the bundled defaults) |
 | `prod/scripts/6-adapter.sh` | Configure the messaging adapter(s); capture the bootstrap-admin credential (SimpleX claim-token / Signal contact id) | `--defaults` (takes `simplex` and the default dirs; still prompts for the values a human must supply) |
 | `prod/scripts/6b-simplex-provision.sh` | Provision the SimpleX bot identity (profile + address + auto-accept) and **re-print the bot's contact link**. A no-op when SimpleX isn't enabled. Run it to recover the link, which the wizard prints only during step 7 and never saves. | _(no `--defaults`)_ |

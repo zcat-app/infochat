@@ -125,6 +125,12 @@ public class ImageCommandHandler implements CommandHandler {
     @ConfigProperty(name = "infochat.image.steady-state-seconds")
     Optional<Double> steadyStateSeconds;
 
+    /** D78 translation-skip: false sends the native-language prompt to
+     * the backend unmodified (operator property; the setup wizard
+     * recommends the value per image model). */
+    @ConfigProperty(name = "infochat.image.translate-prompt", defaultValue = "true")
+    boolean translatePrompt;
+
     @Override
     public String name() {
         return "image";
@@ -239,12 +245,12 @@ public class ImageCommandHandler implements CommandHandler {
         try {
             progressNotifier.publish(scope, ProgressStage.STARTED);
 
-            String englishPrompt = prompt;
-            if (!language.equalsIgnoreCase("en")) {
+            String submittedPrompt = prompt;
+            if (translatePrompt && !language.equalsIgnoreCase("en")) {
                 progressNotifier.publish(scope, ProgressStage.TRANSLATING);
                 // Reused unchanged: en no-op, failure-fallback ships the
                 // original prompt (degraded adherence, not an error).
-                englishPrompt = queryAnchorTranslator.translate(prompt, language, scopeKind, scopeId);
+                submittedPrompt = queryAnchorTranslator.translate(prompt, language, scopeKind, scopeId);
             }
             progressNotifier.publishStageText(scope, generatingBody(queueDepth));
 
@@ -253,8 +259,8 @@ public class ImageCommandHandler implements CommandHandler {
                 // --resolution IS the output contract: the target reaches the
                 // serializer as per-job latent/fit dims (design Final decision 7).
                 png = resolution.isEmpty()
-                        ? comfyUIClient.generate(englishPrompt)
-                        : comfyUIClient.generate(englishPrompt,
+                        ? comfyUIClient.generate(submittedPrompt)
+                        : comfyUIClient.generate(submittedPrompt,
                                 resolution.get().width(), resolution.get().height());
             } catch (ComfyUIClient.JobCancelledException e) {
                 if (!e.jobStarted()) {
@@ -384,7 +390,7 @@ public class ImageCommandHandler implements CommandHandler {
             // The echo is attacker-influenced text in the bot's voice:
             // sanitize with the echo field ALONE as the redaction unit,
             // then interpolate (P6).
-            String sanitizedEcho = llmOutputSanitizer.sanitize(englishPrompt);
+            String sanitizedEcho = llmOutputSanitizer.sanitize(submittedPrompt);
             progressNotifier.complete(scope, format(BundleKeys.IMAGE_REPLY_ECHO, sanitizedEcho));
             delivered = true;
             return null;

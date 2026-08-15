@@ -80,6 +80,15 @@ declare -A MODEL_DISK_REQ_GB=(
   [krea_bf16]=35 [krea_small]=20
 )
 
+# D78 translate-prompt recommendation per model: Krea's encoder holds
+# non-English prompts directly (measured); mage/zimage keep the leg. The
+# ask defaults to this table; an absent model gets translate recommended.
+declare -A MODEL_TRANSLATE_RECOMMENDED=(
+  [mage_bf16]=true [mage_small]=true
+  [zimage_bf16]=true [zimage_small]=true
+  [krea_bf16]=false [krea_small]=false
+)
+
 # Asset locations — HuggingFace resolve URLs, hardcoded per tier (design
 # addendum; the preflight HEAD-check catches a repo restructure). Subdirs are
 # ComfyUI's model folders: diffusion_models/, text_encoders/, vae/.
@@ -312,10 +321,41 @@ print_gate() {
   fi
 }
 
+# D78: per-model recommendation (MODEL_TRANSLATE_RECOMMENDED); bare Enter
+# and --defaults take it. A re-run re-asks, so a model switch rewrites the
+# key — a stale value never survives.
+translate_prompt="true"
+choose_translate_prompt() {
+  local rec="${MODEL_TRANSLATE_RECOMMENDED[$model]:-true}"
+  if [[ "$defaults" -eq 1 ]]; then
+    translate_prompt="$rec"
+    echo "taking translation recommendation for $model: translate-prompt=$rec"
+    return 0
+  fi
+  local choice
+  read -rp "Translate /image prompts to English before generation? (yes|no) [$rec]: " choice
+  choice="${choice:-$rec}"
+  case "$choice" in
+    yes|y|true) translate_prompt="true" ;;
+    no|n|false) translate_prompt="false" ;;
+    *) echo "FAIL: translation choice must be yes or no (got '$choice')." >&2; exit 1 ;;
+  esac
+}
+
+print_translate_recommendations() {
+  echo "infochat.image.translate-prompt recommendation per model (D78):"
+  local m
+  for m in $MODEL_OPTIONS; do
+    echo "  $m: translate-prompt=${MODEL_TRANSLATE_RECOMMENDED[$m]:-true}"
+  done
+}
+
 if [[ "$dryrun" -eq 1 ]]; then
   print_gate
   echo
   print_picker
+  echo
+  print_translate_recommendations
   exit 0
 fi
 
@@ -782,6 +822,7 @@ case "$mode" in
       choose_krea_decode
       print_krea_asset_licences
     fi
+    choose_translate_prompt
 
     # Hardware gate for the LOCAL path: an AMD ROCm GPU is required. This is
     # the ROCm-only scope the picker states — fail before any download on a
@@ -849,6 +890,7 @@ case "$mode" in
     set_prop infochat.image.workflow-file "$WORKFLOW_FILE_IN_CONTAINER"
     set_prop infochat.image.steady-state-seconds "$eta_seconds"
     set_prop infochat.image.model "$model"
+    set_prop infochat.image.translate-prompt "$translate_prompt"
     echo "local /image backend ready: model $model via $BASE_URL_LOCAL"
     echo "ETA constant (probe mean of the written template): ${eta_seconds} s"
     ;;
@@ -858,6 +900,7 @@ case "$mode" in
     if [[ "$model" == krea_* ]]; then
       choose_krea_decode
     fi
+    choose_translate_prompt
     echo
     # D77 two-box firewall disclosure, printed BEFORE the operator commits to
     # the URL (the 4-llm.sh disclosure-before-commit shape).
@@ -902,6 +945,7 @@ case "$mode" in
     set_prop infochat.image.base-url "$remote_url"
     set_prop infochat.image.workflow-file "$WORKFLOW_FILE_IN_CONTAINER"
     set_prop infochat.image.model "$model"
+    set_prop infochat.image.translate-prompt "$translate_prompt"
     echo "remote /image backend ready: model $model via $remote_url"
     ;;
 

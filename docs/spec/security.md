@@ -2228,12 +2228,20 @@ sources). Application code uses the soft-delete column.
   promotion).** For a scope on a non-English `/lang`, the `/image`
   prompt — user-authored private text, D75's message-content class —
   is translated to English by `ModelTask.TRANSLATOR` before the image
-  backend runs, so under remote routing the prompt reaches the remote
-  provider exactly as the M1-746 query-anchoring leg's text does. The
-  image backend itself is always local or operator-owned (D77); this
-  leg is the ONLY path by which an `/image` prompt can leave the
-  deployment, and the disclosure texts must name it. An `en` scope is
-  a strict no-op, as with query anchoring.
+  backend runs, unless the deployment carries the image
+  translation-skip setting (an operator property the setup wizard
+  recommends per image model; the operator owns the final value), in
+  which case the native-language prompt goes only to the image backend
+  and this leg does not run. When the leg runs it follows the
+  deployment's `translator` routing, so under remote routing the
+  prompt reaches the remote provider exactly as the M1-746
+  query-anchoring leg's text does. The image backend itself is always
+  local or operator-owned (D77); the leg, when it runs, is the ONLY
+  path by which an `/image` prompt can leave the deployment, and the
+  disclosure texts must name it — a deployment that skips the leg
+  shrinks that exposure to nothing: an `/image` prompt then never
+  leaves the operator's infrastructure. An `en` scope is a strict
+  no-op in both modes, as with query anchoring.
   The enumeration above covers every production call site reaching
   `ModelTask.TRANSLATOR` as of M1-758 plus the `/image` leg added by
   the D73–D77 promotion. It is a snapshot, not a

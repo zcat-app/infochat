@@ -163,8 +163,9 @@ class ImageWizardStepTest {
         // skip explicitly on hosts without the AMD ROCm device nodes (r1 finding 1).
         Assumptions.assumeTrue(Files.exists(Path.of("/dev/kfd")) && Files.exists(Path.of("/dev/dri")),
                 "local-install drive requires the AMD ROCm device nodes (/dev/kfd + /dev/dri)");
-        // Krea local path: mode=local, model=5 (krea_bf16), decode=1 (spacepxl 2x).
-        WizardRun run = drive(tmp, "", "local\n5\n1\n");
+        // Krea local path: mode=local, model=5 (krea_bf16), decode=1 (spacepxl 2x),
+        // translate=\n (bare Enter — the per-model recommendation, D78).
+        WizardRun run = drive(tmp, "", "local\n5\n1\n\n");
         assertEquals(0, run.rc, "the Krea local drive must exit 0:\n" + run.output);
 
         int head = run.output.indexOf("+ HEAD");
@@ -206,7 +207,7 @@ class ImageWizardStepTest {
         // in the disk-check line, which must be identical across the two runs.
         // The default drive's written config is deleted before the --verbose drive
         // so the second run sees a fresh install (no re-run prompt).
-        String stdin = "local\n1\n"; // mode=local, model=1 (mage_bf16) — no Krea prompts
+        String stdin = "local\n1\n\n"; // mode=local, model=1 (mage_bf16), translate=\n (recommendation, D78)
         WizardRun def = drive(tmp, "", stdin);
         Map<String, String> defaultProps = parseProps(runtimeDir(tmp).resolve("application.properties"));
         Files.delete(runtimeDir(tmp).resolve("application.properties"));

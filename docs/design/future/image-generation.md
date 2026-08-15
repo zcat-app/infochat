@@ -229,6 +229,7 @@ profile-driven in `application.properties`:
 | `infochat.image.max-output-pixels` | 5000000 | 5000000 | output pixel ceiling — bounds the parser's `--resolution` check and the strip's IHDR check on every output |
 | `infochat.image.min-output-pixels` | 16384 | 16384 | output pixel floor — bounds the parser's `--resolution` check |
 | `infochat.image.steady-state-seconds` | unset | unset | per-model steady-state seconds the setup wizard seeds from the container re-measurement; unset → position shown without an ETA |
+| `infochat.image.translate-prompt` | true | true | operator choice whether non-English prompts are translated first; the setup wizard recommends per model (false for Krea, true otherwise) and re-asks on every run |
 
 The cooldown is a 1-token bucket whose window IS the cooldown, reusing
 the refill/sweep/fixed-clock mechanics; the two credit buckets and the
@@ -312,9 +313,15 @@ scored on red bicycle / blue door / wicker basket on handlebar / yellow lemons
 Mage-Flow and Z-Image degrade hard outside en/es (cs worst), exactly as the
 caption-distribution argument predicts — translate-to-English is **required**
 for them. Krea 2 (Qwen3-VL encoder) is language-robust and would not need it.
-The pipeline stays uniform: translate whenever the scope language is not `en`,
-echo the English prompt — one code path, no per-model special-casing, and the
-echo keeps the translation transparent.
+
+The pipeline is no longer uniform: `infochat.image.translate-prompt`
+(default true) is an operator choice the setup wizard recommends per model —
+skip for Krea (its encoder holds non-English prompts directly, confirmed by
+the per-tier prompt-holding campaign), translate for Mage-Flow and Z-Image.
+The handler branches on that one key; the Provider stays model-agnostic, and
+the echo names the prompt actually submitted — the translated English when
+the leg ran, the native prompt when it was skipped — so the translation
+stays transparent either way.
 
 ## Content liability
 

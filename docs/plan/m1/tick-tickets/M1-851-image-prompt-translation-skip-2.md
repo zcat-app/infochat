@@ -1,19 +1,23 @@
 ---
 id: M1-851
 title: "Per-model image-prompt translation skip: flag + amendment"
-status: pending
+status: done
 created: 2026-08-14
-last_updated: 2026-08-14
+last_updated: 2026-08-15
 flow: tick
 reproduction: >-
-  to-be-written: ImageCommandHandlerTest.skipFlagOffSendsTheNativePromptUntranslated —
-  the intended test sets the flag off on a cs scope and asserts the native
-  prompt reaches the backend untranslated; it cannot compile today because
-  no skip flag exists (grep-verified: `grep -rn
-  'translate-prompt\|skip-prompt' --include='*.java' --include='*.properties'
-  --include='*.sh' .` returns nothing; the leg at ImageCommandHandler.java:238-244
-  translates unconditionally whenever the scope language is not en).
-  `start` writes the test and runs it RED before any fix code (workflow §0).
+  ImageCommandHandlerTest.skipFlagOffSendsTheNativePromptUntranslated —
+  written and run RED at start (2026-08-15: test-compile fails, cannot
+  find symbol translatePrompt, exactly the documented gap): with the flag
+  off on a cs scope, the StubTranslator is NEVER invoked (lastQuery stays
+  null), `client.lastPrompt` equals the native prompt 'červené kolo'
+  byte-for-byte, the completed echo carries it, and
+  `notifier.publishedStages()` does NOT contain ProgressStage.TRANSLATING
+  (P2 stage half — a published TRANSLATING would claim a leg that never
+  ran). The leg at ImageCommandHandler.java:238-244 translates
+  unconditionally whenever the scope language is not en (verified
+  in-tree at start; grep for 'translate-prompt' over main sources
+  returns nothing).
 analysis_ref: docs/plan/m1/tick-analysis/image-prompt-translation-skip.md
 blocked_by: [M1-850]
 files_scope:
@@ -41,10 +45,14 @@ out_of_scope:
     constraint: per-MODEL/operator, wizard-baked; no command, no
     scope_preferences column, no bundle surface for users).
   - >-
-    Baking the skip for Mage-Flow or Z-Image (§D6 keeps the leg mandatory
-    for them; the wizard table's skip rows are seeded ONLY from M1-850's
-    PASS cells, which this ticket reads, never re-decides) and never for a
-    tier whose encoder variant M1-850 did not measure.
+    Removing the translate recommendation for Mage-Flow or Z-Image in
+    the wizard's table (refined 2026-08-15: §D6's "mandatory" becomes
+    RECOMMENDED — the wizard still writes true for them, and an operator
+    override to false is a contemplated, disclosed posture, never a
+    violation; the original PASS-cells-only seeding rule is superseded
+    by the recorded krea_bf16 cs FAIL override: user judgment,
+    2026-08-15). A model M1-850 did not measure still gets translate
+    recommended (default true).
   - >-
     The chat-pipeline translation switch family (M1-844..849 — different
     pipeline, different spec surface; this ticket's decisions row and
@@ -66,8 +74,8 @@ acceptance:
   - "Spec amendment, rule-text only, user-approved BEFORE any code lands (P3, §12 — the M1-803 item-7 shape; the exact wording goes to the user): docs/spec/commands.md §Content's /image paragraph (:623-635) gains the per-model conditional — a non-English scope's prompt is translated first UNLESS the deployment's image model carries the operator-baked translation-skip property, in which case the native prompt reaches the backend unmodified — and the echo rule becomes the prompt ACTUALLY SUBMITTED (English when the leg ran, the native prompt when it was skipped; the E1-vs-E2 'not translated' note fork is decided with the wording, analysis option E) — Verify: `grep -n 'skip\\|actually' docs/spec/commands.md` shows the amended sentences inside the /image entry, and `git diff docs/spec/` carries no dates, ticket IDs, or report citations in spec prose (§12)."
   - "docs/spec/decisions.md gains the per-model skip row (next free D-number — D78 as of draft; M1-845 may claim it first, the grep finds whichever): the flag as a per-model operator property baked by the setup wizard with the D73 capability-gating rationale (P5, §7), the measurement gate (the wizard table seeded only from a committed per-(tier,language) PASS matrix), the D75 echo resolution (the durable record is the echoed prompt actually submitted, either language), and the D77 exposure note (a skipping model shrinks the translator-leg qualified exposure; the /image leg then never leaves the deployment) — Verify: `grep -n '^| D7[89]\\|^| D8[0-9]' docs/spec/decisions.md` shows the new row."
   - "docs/spec/security.md §Secrets handling's /image bullet (:2223-2232) gains the conditional (the leg fires for a non-en scope only when the deployment's image model does NOT carry the skip property) and the exposure-shrink sentence, per the section's own propagation rule (:2233-2239, P8) — Verify: `grep -n -A6 'carries .image. prompts' docs/spec/security.md` shows the conditional wording."
-  - "Wizard baking (P5/P6, M1-798's pattern): prod/scripts/4b-image.sh gains a per-model skip constant table beside the existing MODEL_* tables (:52-84) whose rows are seeded ONLY from M1-850's PASS cells (a tier M1-850 did not measure is never a skip row), and writes `infochat.image.translate-prompt` on the local path (beside :836-839) and the remote path AFTER clear_image_props (:888-892) — probes: `grep -n 'translate-prompt' prod/scripts/4b-image.sh` hits the table and both set_prop lines; a krea pick writes false and a mage/zimage pick writes true on --dry-run. FAILURE-MODE: a krea→mage model SWITCH rewrites the key to true — probe: after switching, `grep -c '^infochat.image.translate-prompt=true' prod/runtime/application.properties` prints 1 (a stale false from the previous krea install must not survive)."
-  - "Disclosure texts and doc gates (P8/P10): SETUP_GUIDE.md's translator leg list (:689-693) gains the conditional clause and its step-4b section documents the flag, the per-model default, and the re-run adoption note for existing installs; prod/switch-llm.sh and prod/scripts/4-llm.sh are VERIFIED to carry no per-leg list needing an edit (Census); docs/design/future/image-generation.md gains the key's gate-values table row (:222-231) and its Translation paragraph (:315-317 'one code path, no per-model special-casing') is updated to the flag's reality — Verify: the Census greps, and mvn verify is green with DocumentedConfigKeyParityTest passing (the key is real AND documented in the same diff, so no exemptions-file entry — the M1-708 rule)."
+  - "Wizard baking (P5/P6, M1-798's pattern, refined 2026-08-15): prod/scripts/4b-image.sh gains a per-model recommendation constant table beside the existing MODEL_* tables (:52-84) whose rows carry the operator-facing recommendation (krea both tiers → skip; the krea_bf16 cs FAIL cell overridden by user judgment 2026-08-15; mage/zimage → translate; a model M1-850 did not measure → translate, default true the safe posture), asks translate-on/off after the model pick with the recommendation as default (bare Enter and --defaults take the recommendation non-interactively), and writes `infochat.image.translate-prompt` on the local path (beside :836-839) and the remote path AFTER clear_image_props (:888-892) — probes: `grep -n 'translate-prompt' prod/scripts/4b-image.sh` hits the table and both set_prop lines; a krea pick writes false and a mage/zimage pick writes true on --dry-run; re-running 4b re-asks (the reset path). FAILURE-MODE: a krea→mage model SWITCH rewrites the key to true — probe: after switching, `grep -c '^infochat.image.translate-prompt=true' prod/runtime/application.properties` prints 1 (a stale false from the previous krea install must not survive)."
+  - "Disclosure texts and doc gates (P8/P10, refined 2026-08-15): SETUP_GUIDE.md's translator leg list (:689-693, now :719-723) gains the conditional clause and its step-4b section documents the flag, the per-model recommendation and the operator override (the value the wizard writes and where to change it), and the re-run adoption note for existing installs (an existing krea install that never re-runs 4b keeps true — it pays ~1 s of translator latency per non-en prompt and loses nothing); prod/switch-llm.sh and prod/scripts/4-llm.sh are VERIFIED to carry no per-leg list needing an edit (Census); docs/design/future/image-generation.md gains the key's gate-values table row (:222-231) and its Translation paragraph (:315-317 'one code path, no per-model special-casing') is updated to the flag's reality — Verify: the Census greps, and mvn verify is green with DocumentedConfigKeyParityTest passing (the key is real AND documented in the same diff, so no exemptions-file entry — the M1-708 rule)."
   - "Bundle discipline (P4 fork): under E1 (recommended) NO new bundle key lands and `image.reply.echo` is reused unchanged; if the user picks E2 (native + note) at wording approval, the new key lands in ALL FIVE shipped bundles (en, cs, tr, es, ru — D43) enforced by BundleLoaderTest.everyBundleKeysConstantHasNonEmptyOwnValueInEveryShippedBundle — Verify: `git diff --stat infochat-provider/src/main/resources/bundles/` matches the chosen variant exactly."
   - "mvn verify from repo root is green."
 test_plan:
@@ -107,11 +115,29 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "11 files, +237/-58"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-851-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  2026-08-15: >-
+    User refine at start, after reading M1-850's matrix: the wizard skip
+    table becomes a per-model RECOMMENDATION the operator owns — krea
+    (both tiers) skip recommended, the krea_bf16 cs FAIL cell overridden
+    by user judgment as noise; mage/zimage translate recommended; a
+    model M1-850 did not measure translate recommended (default true,
+    the safe posture). Echo fork decided: E1 (the native prompt actually
+    submitted; image.reply.echo reused unchanged). Wizard shape decided:
+    an interactive ask at model pick with the recommendation as default
+    (bare Enter and --defaults take it); re-running 4b re-asks (the
+    reset path). Spec wording approved with four adjustments, applied.
 escalation_reason:
 ---
 
@@ -161,13 +187,19 @@ P6 (wizard half), P8, P9, P10, P11, P12.
   (recommended E1: the native prompt actually submitted; `image.reply.echo`'s
   "Prompt used: {0}" stays literally true); an echo suppressed in skip mode
   deletes the durable record and the failure explainer — rejected.
-- P5: shape and §7 — per-model/operator, wizard-baked, never per-user; the
-  D73 capability-gating rationale is recorded in the decisions row.
-- P6 (wizard half): the skip table's rows come ONLY from M1-850's PASS
-  cells, per tier — krea_small's fp8-scaled encoder is a distinct artifact;
-  an unmeasured tier is never a row. The operator hand-edit residual is
-  stated in the amendment (bounded: quality-only, echo truthful, exposure
-  only shrinks; D73 operator model-choice authority).
+- P5: shape and §7 — per-model recommendation, operator-owned, never
+  per-user (refined 2026-08-15: the wizard recommends, the operator
+  decides); the D73 capability-gating rationale is recorded in the
+  decisions row.
+- P6 (wizard half, refined 2026-08-15): the wizard's per-model table is a
+  RECOMMENDATION the operator may override at the prompt and afterward —
+  krea (both tiers) → skip recommended (the krea_bf16 cs FAIL cell is
+  overridden by user judgment: noise; krea_small's fp8-scaled encoder
+  remains a distinct measured artifact), mage/zimage → translate
+  recommended, and a model M1-850 did not measure → translate recommended
+  (default true, the safe posture). The override residual is stated in
+  the amendment (bounded: quality-only, echo truthful, exposure only
+  shrinks; D73 operator model-choice authority).
 - P8: disclosure texts track the conditional leg — SETUP_GUIDE.md:689-693
   states it unconditionally today; security.md:2233-2239's propagation rule
   makes the enumeration the authority (see Census).
@@ -207,10 +239,13 @@ P6 (wizard half), P8, P9, P10, P11, P12.
      leg branch; the echo path is byte-identical.
   4. Tests: the RED reproduction first (workflow §0), then the en-no-op and
      skip-mode-sanitized-echo methods, plus the authorized fixture line.
-  5. Wizard (P5, P6): the per-model skip table (seeded from step 1's
-     matrix) and the set_prop writes on the local and remote paths, after
-     the remote path's clear_image_props; the switch path rewrites the key
-     per the new model.
+   5. Wizard (P5, P6, refined 2026-08-15): the per-model recommendation
+      table (seeded from step 1's matrix, krea_bf16 cs FAIL overridden by
+      the recorded user judgment), the translate-on/off ask after the
+      model pick (recommendation as default; --defaults takes it
+      non-interactively), and the set_prop writes on the local and remote
+      paths, after the remote path's clear_image_props; the switch path
+      re-asks and rewrites the key per the new pick.
   6. Docs (P8, P10): SETUP_GUIDE leg-list clause + step-4b flag section;
      the design-doc gate-values row and the Translation paragraph update;
      verify switch-llm.sh / 4-llm.sh need no edit (Census).

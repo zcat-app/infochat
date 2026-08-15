@@ -31,7 +31,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-843 — SimpleX codec: image-typed sends with inline preview (complexity: medium, risk: medium)
 - M1-844 — Measure grounded in-language chat with the tool loop (complexity: high, risk: medium)
 - M1-847 — Add a streaming generate shape to the LlmProvider SPI (complexity: high, risk: medium)
-- M1-851 — Per-model image-prompt translation skip: flag + amendment (complexity: medium, risk: medium)
 
 ---
 
@@ -70,6 +69,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-851 | Per-model image-prompt translation skip: flag + amendment | 2026-08-15 | round 1 APPROVE |
 | M1-850 | Measure Krea native-prompt holding vs the translation leg | 2026-08-15 | round 2 APPROVE |
 | M1-842 | Outbound preview generation + SPI preview field | 2026-08-15 | round 1 APPROVE-WITH-FIXES |
 | M1-841 | Probe SimpleX image-type composed-message surface | 2026-08-15 | round 1 APPROVE |
@@ -179,5 +179,5 @@ M1-844 (pending) ← runnable
 M1-847 (pending) ← runnable
   └── M1-849 (pending) [see above]
 M1-850 (done)
-  └── M1-851 (pending) ← runnable
+  └── M1-851 (done)
 ```
