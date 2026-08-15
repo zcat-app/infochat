@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 7 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 62 |
+| done | 63 |
 | deferred | 0 |
 | abandoned | 0 |
 | **total** | **69** |
@@ -26,7 +26,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-844 — Measure grounded in-language chat with the tool loop (complexity: high, risk: medium)
-- M1-852 — Observe streaming usage opt-in across the LLM fleet (complexity: medium, risk: medium)
+- M1-853 — Land the observed streaming usage opt-in request shape (complexity: low, risk: medium)
 
 ---
 
@@ -47,7 +47,6 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-846 — blocked_by: M1-845 (pending)
 - M1-848 — blocked_by: M1-845 (pending)
 - M1-849 — blocked_by: M1-846 (pending), M1-847 (done), M1-848 (pending), M1-853 (pending)
-- M1-853 — blocked_by: M1-852 (pending)
 
 ---
 
@@ -66,6 +65,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-852 | Observe streaming usage opt-in across the LLM fleet | 2026-08-15 | round 1 APPROVE |
 | M1-851 | Per-model image-prompt translation skip: flag + amendment | 2026-08-15 | round 1 APPROVE |
 | M1-850 | Measure Krea native-prompt holding vs the translation leg | 2026-08-15 | round 2 APPROVE |
 | M1-847 | Add a streaming generate shape to the LlmProvider SPI | 2026-08-15 | round 1 APPROVE |
@@ -75,7 +75,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-840 | Re-verify SimpleX XFTP attachment surface on CLI v7.0.0 | 2026-08-15 | round 1 APPROVE |
 | M1-839 | Re-verify SimpleX text/group wire forms on CLI v7.0.0 | 2026-08-15 | round 1 APPROVE-WITH-FIXES |
 | M1-838 | Bundle simplex-chat v7.0.0; re-verify launch surface | 2026-08-15 | round 1 APPROVE |
-| M1-836 | /asset-enable admin command to reset a failed asset pair | 2026-08-15 | round 1 APPROVE |
 
 ---
 
@@ -176,7 +175,7 @@ M1-847 (done)
   └── M1-849 (pending) [see above]
 M1-850 (done)
   └── M1-851 (done)
-M1-852 (pending) ← runnable
-  └── M1-853 (pending)
+M1-852 (done)
+  └── M1-853 (pending) ← runnable
         └── M1-849 (pending) [see above]
 ```

@@ -1,7 +1,7 @@
 ---
 id: M1-852
 title: "Observe streaming usage opt-in across the LLM fleet"
-status: pending
+status: done
 created: 2026-08-15
 last_updated: 2026-08-15
 flow: tick
@@ -81,11 +81,47 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY NOT-APPLICABLE, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "3 files changed, 247 insertions(+), 9 deletions(-) (docs-only: measurement record + STATUS-TICK.md + ticket file)"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-852-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-15
+  result: >-
+    Pass. Lint clean after copying the gitignored
+    tick-analysis/streaming-usage-optin.md into this worktree (the
+    M1-844/M1-847 pattern). Citations spot-checked and hold:
+    OpenAiCompatibleProvider.java:28-31 (one bean, fleet javadoc), :49-54
+    (single-string usage-in-body), :275-277 (stream branch adds only
+    stream:true), DeepSeekProvider.java:26-32 (unknown-field 400 record),
+    AnthropicProvider.java:220-222 (stream-only), both streaming-test
+    fakes always emit usage, M1-849 ticket :64 (host probe item),
+    M1-847 r1 review :76-97 (RECOMMENDED-NEW-TICKET + DECIDE-BEFORE),
+    translator-slot.md:69-71 (commit pin). Census re-run: the only
+    include_usage/stream_options hits are the planning docs themselves
+    (this pair + the analysis); zero hits in code, tests, or
+    docs/measurement/ — the reproduction's "nothing" claim predates its
+    own filing, expected self-referential drift. Pitfalls P1(evidence
+    half)/P3/P4 present; P2/P5-P10 correctly live in M1-853 or the
+    driver sequencing per the decomposition. replaces: empty; no
+    worktree holds a superseded attempt at this surface. blocked_by
+    empty so no prior-ticket test enumeration. Start-time runnability
+    (recorded, not assumed): llama-server binary present under
+    .bench/llama-b10221/ with chat GGUFs in .models/ (llama.cpp cell
+    runnable); Ollama /v1 up on 11434 serving nomic-embed-text only
+    (chat cell needs a chat model provisioned); ZERO LLM-provider
+    credentials on this box (.bench/lang-quality/secrets.env holds only
+    DEEPL_API_KEY) so OpenAI/DeepSeek/OpenRouter/NanoGPT cells and the
+    Anthropic control leg are NOT-OBSERVED-with-reason unless the user
+    supplies keys — no STOP clause (>=1 cell runnable), flagged to the
+    user at start. No blocking ambiguity.
 escalation_reason:
 ---
 
