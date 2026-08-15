@@ -3,7 +3,7 @@ id: M1-849
 title: "Stream sanitized chat replies over SimpleX live messages"
 status: pending
 created: 2026-08-14
-last_updated: 2026-08-14
+last_updated: 2026-08-15
 flow: tick
 reproduction: >-
   to-be-written: StageProgressNotifierLiveTextTest#aLiveTextTurnStreamsSanitizedPrefixesThenFinalizes
@@ -16,7 +16,7 @@ reproduction: >-
   so the live-text mode the M1-846 amendment defines has no implementation:
   no publisher path, no capability flag consumer, no ChatAgent wiring.
 analysis_ref: docs/plan/m1/tick-analysis/streaming-translation-switch.md
-blocked_by: [M1-846, M1-847, M1-848]
+blocked_by: [M1-846, M1-847, M1-848, M1-853]
 files_scope:
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/CapabilityFlags.java
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapter.java
