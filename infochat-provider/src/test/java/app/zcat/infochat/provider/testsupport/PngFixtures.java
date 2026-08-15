@@ -1,5 +1,11 @@
 package app.zcat.infochat.provider.testsupport;
 
+import javax.imageio.ImageIO;
+import java.awt.Color;
+import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.zip.CRC32;
@@ -13,6 +19,42 @@ public final class PngFixtures {
             (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
 
     private PngFixtures() {
+    }
+
+    /** An ImageIO-encoded RGBA PNG — actually decodable, unlike
+     * {@link #minimalPng} (whose IDAT exists only for chunk-level shape). */
+    public static byte[] realPng(int width, int height) {
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D graphics = image.createGraphics();
+        try {
+            graphics.setColor(Color.MAGENTA);
+            graphics.fillRect(0, 0, width, height);
+            graphics.setColor(Color.GREEN);
+            graphics.drawLine(0, 0, width - 1, height - 1);
+            graphics.setColor(Color.BLUE);
+            graphics.drawOval(0, 0, width - 1, height - 1);
+        } finally {
+            graphics.dispose();
+        }
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try {
+            ImageIO.write(image, "png", out);
+        } catch (IOException e) {
+            throw new IllegalStateException("fixture PNG encode failed", e);
+        }
+        return out.toByteArray();
+    }
+
+    /** {@code png} with a prompt-carrying tEXt chunk inserted after IHDR —
+     * the workflow-metadata shape the strip drops (D75). */
+    public static byte[] withPromptChunk(byte[] png, String prompt) {
+        byte[] textChunk = chunk("tEXt",
+                ("prompt\0" + prompt).getBytes(StandardCharsets.ISO_8859_1));
+        byte[] out = new byte[png.length + textChunk.length];
+        System.arraycopy(png, 0, out, 0, 33);
+        System.arraycopy(textChunk, 0, out, 33, textChunk.length);
+        System.arraycopy(png, 33, out, 33 + textChunk.length, png.length - 33);
+        return out;
     }
 
     public static byte[] minimalPng(int width, int height) {

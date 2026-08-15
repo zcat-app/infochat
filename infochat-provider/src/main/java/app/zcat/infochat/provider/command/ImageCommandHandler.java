@@ -15,6 +15,7 @@ import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.InFlightTracker;
 import app.zcat.infochat.provider.chat.tool.QueryAnchorTranslator;
 import app.zcat.infochat.provider.image.ComfyUIClient;
+import app.zcat.infochat.provider.image.ImagePreviewGenerator;
 import app.zcat.infochat.provider.image.ImageSpool;
 import app.zcat.infochat.provider.image.PngMetadataStrip;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
@@ -76,6 +77,9 @@ public class ImageCommandHandler implements CommandHandler {
 
     @Inject
     ImageSpool imageSpool;
+
+    @Inject
+    ImagePreviewGenerator imagePreviewGenerator;
 
     @Inject
     OutboundDelivery outboundDelivery;
@@ -334,6 +338,12 @@ public class ImageCommandHandler implements CommandHandler {
                 return null;
             }
 
+            // M1-842 P2: the decode input is the STRIPPED bytes — the
+            // strip's IHDR pixel bound is what bounds the preview raster.
+            // M1-842 P10: a null preview degrades to the plain file form,
+            // never a failure.
+            String imagePreview = imagePreviewGenerator.generate(stripped, maxOutputPixels);
+
             String fileName = "image-" + UUID.randomUUID() + ".png";
             Path spoolFile;
             try {
@@ -360,7 +370,7 @@ public class ImageCommandHandler implements CommandHandler {
 
             OutboundAttachment attachment = new OutboundAttachment(
                     scope, spoolFile.toString(), "image/png", fileName,
-                    UUID.randomUUID().toString());
+                    UUID.randomUUID().toString(), imagePreview);
             if (!outboundDelivery.deliverAttachment(adapter, attachment, imageSpool, groupId)) {
                 writeAuditRow(actorId, scopeId, outcome);
                 progressNotifier.complete(scope,

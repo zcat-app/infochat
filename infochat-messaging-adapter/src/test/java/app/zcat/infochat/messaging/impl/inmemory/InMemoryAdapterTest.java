@@ -152,7 +152,8 @@ class InMemoryAdapterTest {
                 "/tmp/test-image.png",
                 "image/png",
                 "test-image.png",
-                "corr-att-1");
+                "corr-att-1",
+                null);
 
         // Completion signal per the SPI javadoc: the call returns on
         // delivery completion; a classified failure would throw instead.
@@ -161,5 +162,28 @@ class InMemoryAdapterTest {
         List<OutboundAttachment> recorded = adapter.sentAttachments();
         assertEquals(1, recorded.size());
         assertEquals(attachment, recorded.get(0));
+    }
+
+    /** M1-842 item 4: the recording covers the preview component, so
+     * Provider-side preview-carrying paths stay testable against the
+     * double. */
+    @Test
+    void sendAttachmentRecordsThePreviewValue() throws MessagingException {
+        InMemoryAdapter adapter = new InMemoryAdapter();
+        OutboundAttachment attachment = new OutboundAttachment(
+                new ScopeRef.Dm("alice"),
+                "/tmp/test-image.png",
+                "image/png",
+                "test-image.png",
+                "corr-att-2",
+                "data:image/png;base64,iVBORw0KGgo=");
+
+        adapter.sendAttachment(attachment);
+
+        List<OutboundAttachment> recorded = adapter.sentAttachments();
+        assertEquals(1, recorded.size());
+        assertEquals("data:image/png;base64,iVBORw0KGgo=",
+                recorded.get(0).imagePreview(),
+                "the recorded payload tuple carries the preview value handed in");
     }
 }

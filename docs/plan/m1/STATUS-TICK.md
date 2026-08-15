@@ -28,7 +28,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-836 — /asset-enable admin command to reset a failed asset pair (complexity: medium, risk: medium)
 - M1-839 — Re-verify SimpleX text/group wire forms on CLI v7.0.0 (complexity: high, risk: medium)
 - M1-840 — Re-verify SimpleX XFTP attachment surface on CLI v7.0.0 (complexity: high, risk: high)
-- M1-842 — Outbound preview generation + SPI preview field (complexity: high, risk: medium)
+- M1-843 — SimpleX codec: image-typed sends with inline preview (complexity: medium, risk: medium)
 - M1-844 — Measure grounded in-language chat with the tool loop (complexity: high, risk: medium)
 - M1-847 — Add a streaming generate shape to the LlmProvider SPI (complexity: high, risk: medium)
 - M1-851 — Per-model image-prompt translation skip: flag + amendment (complexity: medium, risk: medium)
@@ -48,7 +48,6 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-843 — blocked_by: M1-842 (pending)
 - M1-845 — blocked_by: M1-844 (pending)
 - M1-846 — blocked_by: M1-845 (pending)
 - M1-848 — blocked_by: M1-845 (pending)
@@ -72,6 +71,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-850 | Measure Krea native-prompt holding vs the translation leg | 2026-08-15 | round 2 APPROVE |
+| M1-842 | Outbound preview generation + SPI preview field | 2026-08-15 | round 1 APPROVE-WITH-FIXES |
 | M1-841 | Probe SimpleX image-type composed-message surface | 2026-08-15 | round 1 APPROVE |
 | M1-838 | Bundle simplex-chat v7.0.0; re-verify launch surface | 2026-08-15 | round 1 APPROVE |
 | M1-835 | Truthful boot signal for unresolvable LLM endpoints | 2026-08-15 | round 2 APPROVE |
@@ -80,7 +80,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-832 | Full-stack lifecycle verb prod/scripts/stack.sh | 2026-08-15 | round 1 APPROVE |
 | M1-831 | Doctor fails rootless Docker hosts without linger | 2026-08-15 | round 1 APPROVE |
 | M1-830 | Port prod restart-policy drift into docker-compose.yml | 2026-08-15 | round 1 APPROVE |
-| M1-829 | Split 4b-image.sh picker into decision view + --verbose detail | 2026-08-15 | round 2 APPROVE |
 
 ---
 
@@ -169,8 +168,8 @@ M1-838 (done)
   ├── M1-839 (pending) ← runnable
   └── M1-840 (pending) ← runnable
 M1-841 (done)
-  └── M1-842 (pending) ← runnable
-        └── M1-843 (pending)
+  └── M1-842 (done)
+        └── M1-843 (pending) ← runnable
 M1-844 (pending) ← runnable
   └── M1-845 (pending)
         ├── M1-846 (pending)

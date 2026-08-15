@@ -20,7 +20,8 @@ class MessagingAdapterAttachmentSpiTest {
                 "/tmp/image.png",
                 "image/png",
                 "image.png",
-                "corr-att");
+                "corr-att",
+                null);
     }
 
     /**

@@ -1,5 +1,7 @@
 package app.zcat.infochat.messaging;
 
+import org.jspecify.annotations.Nullable;
+
 
 /**
  * One outbound binary attachment Provider hands to a
@@ -14,6 +16,9 @@ package app.zcat.infochat.messaging;
  * the adapter for the whole transmit, and the adapter MUST NOT retain
  * or copy the payload beyond delivery.</p>
  *
+ * <p>{@code imagePreview} is image-derived data under the same
+ * no-retention posture: memory and this record only (§6.2.4).</p>
+ *
  * <p>{@code correlationId} carries the same non-null-only contract as
  * {@link OutboundMessage#correlationId()}: it ties the send back to
  * its trigger for logging and handle bookkeeping, and it is not stable
@@ -26,5 +31,6 @@ public record OutboundAttachment(
         String filePath,
         String mimeType,
         String displayFileName,
-        String correlationId) {
+        String correlationId,
+        @Nullable String imagePreview) {
 }

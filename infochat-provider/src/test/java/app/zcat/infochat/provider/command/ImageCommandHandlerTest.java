@@ -20,7 +20,9 @@ import app.zcat.infochat.provider.chat.InFlightTracker;
 import app.zcat.infochat.provider.chat.tool.QueryAnchorTranslator;
 import app.zcat.infochat.provider.group.GroupRepository;
 import app.zcat.infochat.provider.image.ComfyUIClient;
+import app.zcat.infochat.provider.image.ImagePreviewGenerator;
 import app.zcat.infochat.provider.image.ImageSpool;
+import app.zcat.infochat.provider.image.PngMetadataStrip;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.messaging.AdapterRegistry;
 import app.zcat.infochat.provider.messaging.HelpCommandHandler;
@@ -68,8 +70,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static app.zcat.infochat.provider.testsupport.TranslationFixtures.newRealBundleLoader;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -124,6 +128,7 @@ class ImageCommandHandlerTest {
         handler.auditLogWriter = auditWriter;
         handler.progressNotifier = notifier;
         handler.imageSpool = spool;
+        handler.imagePreviewGenerator = new ImagePreviewGenerator(65_536L, 14_822);
         handler.inFlightTracker = new InFlightTracker();
         handler.adapterRegistry = registryOver(adapter);
         handler.outboundDelivery = new OutboundDelivery(
@@ -422,6 +427,62 @@ class ImageCommandHandlerTest {
             assertEquals(0, entries.count(),
                     "the spool file is reclaimed once delivery completes");
         }
+    }
+
+    /** M1-842 P2: the generator decodes exactly the STRIPPED bytes (the
+     * strip's IHDR bound is what bounds the preview raster), and the
+     * preview rides the delivery record. */
+    @Test
+    void previewIsGeneratedFromTheStrippedBytesAndRidesTheRecord() throws Exception {
+        byte[] original = PngFixtures.withPromptChunk(
+                PngFixtures.realPng(400, 200), "a canary prompt");
+        client.generateResult = original;
+        RecordingPreviewGenerator generator = new RecordingPreviewGenerator(65_536L, 14_822);
+        handler.imagePreviewGenerator = generator;
+
+        assertNull(handler.handle(new ScopeRef.Dm("alice"), "/image a cat"));
+
+        assertArrayEquals(PngMetadataStrip.strip(original, 2_000_000L), generator.lastInput,
+                "the generator never sees pre-strip bytes");
+        assertEquals(1, adapter.attachmentSends.get());
+        assertNotNull(adapter.lastAttachment.imagePreview(), "the generated preview rides the record");
+        assertTrue(adapter.lastAttachment.imagePreview().startsWith("data:image/png;base64,"),
+                "the recorded preview carries the recorded form");
+    }
+
+    /** M1-842 P10 (item 5): a preview-generation failure degrades to the
+     * file form — delivery completes, the success outcome stands, no new
+     * failure mode, no D76 refund interaction. */
+    @Test
+    void previewGenerationFailureDegradesToFileDelivery() {
+        handler.imagePreviewGenerator = new RecordingPreviewGenerator(65_536L, 1);
+        client.generateResult = PngFixtures.realPng(32, 32);
+
+        assertNull(handler.handle(new ScopeRef.Dm("alice"), "/image a cat"));
+
+        assertEquals(1, adapter.attachmentSends.get(), "the delivery still completes");
+        assertNull(adapter.lastAttachment.imagePreview(),
+                "a degraded preview rides the record as null");
+        List<RedactionHook.AuditRow> rows = auditWriter.rowsFor(AuditAction.IMAGE_GENERATE);
+        assertEquals(1, rows.size());
+        assertEquals("{\"outcome\":\"delivered\"}", rows.get(0).detailsJson(),
+                "the degrade writes no failure audit outcome");
+    }
+
+    /** M1-842 P2: bytes that fail strip validation never reach the preview
+     * decoder — the strip refusal arm completes before the generator runs. */
+    @Test
+    void stripRefusalNeverInvokesThePreviewGenerator() {
+        client.generateResult = PngFixtures.minimalPng(1500, 1500);
+        RecordingPreviewGenerator generator = new RecordingPreviewGenerator(65_536L, 14_822);
+        handler.imagePreviewGenerator = generator;
+
+        assertNull(handler.handle(new ScopeRef.Dm("alice"), "/image a cat"));
+
+        assertEquals(0, generator.calls.get(),
+                "strip-failing bytes never reach the preview decoder");
+        assertEquals(bundleLoader.get(BundleKeys.IMAGE_ERROR_GENERATION_FAILED),
+                notifier.completedText());
     }
 
     @Test
@@ -965,6 +1026,24 @@ class ImageCommandHandlerTest {
         }
     }
 
+    /** Records the generate() input and delegates — pins the P2 stripped-
+     * bytes ordering at the wiring seam. */
+    private static final class RecordingPreviewGenerator extends ImagePreviewGenerator {
+        final AtomicInteger calls = new AtomicInteger();
+        volatile byte[] lastInput;
+
+        RecordingPreviewGenerator(long previewMaxPixels, int previewMaxChars) {
+            super(previewMaxPixels, previewMaxChars);
+        }
+
+        @Override
+        public String generate(byte[] strippedPng, long maxOutputPixels) {
+            calls.incrementAndGet();
+            lastInput = strippedPng;
+            return super.generate(strippedPng, maxOutputPixels);
+        }
+    }
+
     private static final class StubTranslator extends QueryAnchorTranslator {
         volatile String translation = "translated";
         volatile String lastQuery = null;
@@ -1046,6 +1125,7 @@ class ImageCommandHandlerTest {
         volatile boolean supportsAttachments;
         volatile int maxAttachmentBytes;
         volatile FailureCategory failAttachmentsWith = null;
+        volatile OutboundAttachment lastAttachment;
         final AtomicInteger attachmentSends = new AtomicInteger();
 
         StubImageAdapter(boolean supportsAttachments, int maxAttachmentBytes) {
@@ -1079,6 +1159,7 @@ class ImageCommandHandlerTest {
             if (failAttachmentsWith != null) {
                 throw new MessagingException(failAttachmentsWith, "simulated attachment failure");
             }
+            lastAttachment = attachment;
             attachmentSends.incrementAndGet();
         }
 

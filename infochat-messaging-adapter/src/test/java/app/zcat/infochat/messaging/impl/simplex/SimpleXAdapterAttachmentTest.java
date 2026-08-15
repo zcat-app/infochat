@@ -241,7 +241,7 @@ class SimpleXAdapterAttachmentTest {
 
     private static OutboundAttachment attachment(Path path) {
         return new OutboundAttachment(new ScopeRef.Dm("contact-abc"),
-                path.toString(), "image/png", path.getFileName().toString(), "corr-att");
+                path.toString(), "image/png", path.getFileName().toString(), "corr-att", null);
     }
 
     private static String fileCompletionFrame(String chatItemId) {

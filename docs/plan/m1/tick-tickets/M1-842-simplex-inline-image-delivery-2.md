@@ -1,22 +1,40 @@
 ---
 id: M1-842
 title: "Outbound preview generation + SPI preview field"
-status: pending
+status: done
 created: 2026-08-11
-last_updated: 2026-08-11
+last_updated: 2026-08-15
+clarity_check: >-
+  2026-08-15: no blocking ambiguity. Lint clean after restoring the
+  gitignored analysis doc into the worktree (private artifact, absent
+  in fresh worktrees). Citations verified: record components
+  OutboundAttachment.java:24-29 + no-retain javadoc :11-15, handler
+  strip/spool/send :322-364 with the constructor site :361, census
+  grep re-run — exactly the six ticket sites, provider/image holds
+  only the four named classes, SimpleXAdapter.java:864 metadata-only
+  line, PngMetadataStrip.java:24-25 no-IDAT-inflation. M1-841 (only
+  blocked_by) added no tests (adds: [], docs-only diff) — nothing to
+  trace. P3 constants from 06-messaging.md §6.2.4: form
+  data:image/png;base64 data URI; char ceiling 14,822 accepted /
+  16,500 refused (maxEncodedMsgLength 15,602 minus wrapper). Execution
+  judgments: preview char budget defaults to the recorded 14,822
+  accept boundary; the dimension budget (preview-max-pixels, default
+  65536) is a downscale knob derived from the byte ceiling and
+  documented with its derivation in 06-messaging.md; the post-strip
+  discriminator is pinned at the handler seam (captured generator
+  input == strip output) because pixels are identical pre/post strip
+  at the generator level.
 flow: tick
 reproduction: >-
-  to-be-written: ImagePreviewGeneratorTest.generatesABoundedPreviewFromStrippedPng —
-  the intended test strips a prompt-carrying PNG (PngMetadataStrip first),
-  generates the inline preview from the stripped bytes, and asserts the
-  preview carries the M1-841-recorded form, stays within the
-  M1-841-recorded byte limit, and was produced from POST-strip bytes. It
-  cannot compile today: no preview generator exists under
-  infochat-provider/src/main (grep-verified: provider/image contains only
-  ComfyUIClient, ImageSpool, ImageSpoolSweeper, PngMetadataStrip) and
-  OutboundAttachment (OutboundAttachment.java:24-29) has no preview
-  component. `start` writes the test and runs it RED before any fix code
-  (workflow §0).
+  ImagePreviewGeneratorTest.generatesABoundedPreviewFromStrippedPng
+  (written at start and run RED as a compile failure — no preview
+  generator existed under infochat-provider/src/main, grep-verified;
+  log .scratch/tick-red-M1-842.log): the intended test strips a
+  prompt-carrying PNG (PngMetadataStrip first), generates the inline
+  preview from the stripped bytes, and asserts the preview carries the
+  M1-841-recorded form, stays within the M1-841-recorded byte limit,
+  and was produced from POST-strip bytes (the handler seam pins the
+  ordering). Turning green is the ticket's contract.
 analysis_ref: docs/plan/m1/tick-analysis/simplex-inline-image-delivery.md
 blocked_by: [M1-841]
 files_scope:
@@ -72,6 +90,15 @@ decision_refs:
   - D74
   - D75
   - D76
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: APPROVE-WITH-FIXES
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY WARN, SCOPE PASS"
+    diff_stats: "15 files changed, 548 insertions(+), 27 deletions(-) (r1 diff vs merge-base f140de81; fixes added 5 insertions(+), 4 deletions(-), comment-only)"
+    findings: "1 low (MAINTAINABILITY) — two new comments used bare pitfall/acceptance references (\"P2\", \"P10\", \"Acceptance item 6\") unresolvable without the ticket ID; both were prefixed with M1-842 with zero executable-line changes."
+    fix_probes: "Fix hunks verified comment-only (git diff vs round-1 tree 5eac6b68: only // and /** lines in ImageCommandHandler.java + OutboundDeliveryAttachmentTest.java; no docs/spec, docs/design, or root-level *.md touched). Literal EVALUATED-AS probes mis-specified: probe 1's regex `(^|[/( ])P[0-9]+:` matches the prescribed fix's own 'M1-842 P2:' via its space alternative and two pre-existing comments predating the merge-base (ImageCommandHandler.java:165, OutboundDeliveryAttachmentTest.java:82), so it cannot return no lines; probe 2 returned 2, not 1, because the fix wraps 'M1-842 P2'/'M1-842 P10' across two lines. Intent-preserving probe run instead: every P-reference in the round's added lines is ticket-ID-prefixed (bare-ref grep over added lines finds only 'M1-842 Pn:' forms), and 'M1-842 item 6' present at OutboundDeliveryAttachmentTest.java:50. ./mvnw -B -pl infochat-messaging-adapter,infochat-provider -am test-compile BUILD SUCCESS (14:49:27). Fixed-tree snapshot .scratch/tick-fixes-M1-842.tree = ae848297cf5c299a0151899a584d69162ff87b98; round-1 green log remains .scratch/tick-test-M1-842-r1.log (mirror target/tick-test-M1-842-r1.log)."
+    verdict_file: .scratch/tick-review-M1-842-r1.txt
 ---
 
 # M1-842: Outbound preview generation + SPI preview field

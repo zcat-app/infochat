@@ -535,6 +535,8 @@
   | `infochat.image.spool.capacity-bytes` | `1073741824` | spool capacity; over-capacity writes are refused (tmpfs exhaustion is host memory exhaustion) |
   | `infochat.image.spool.max-age` | `PT1H` | age bound for the sweeper's eviction |
   | `infochat.image.spool.sweep-interval` | `15m` | the sweeper's cadence (@Scheduled expression default) |
+  | `infochat.image.preview-max-pixels` | `65536` | inline-preview downscale budget (total pixels); sized so an encoded preview fits the char ceiling with margin for typical image content |
+  | `infochat.image.preview-max-chars` | `14822` | inline-preview data-URI length ceiling — the probed accept boundary (14,822 accepted / 16,500 refused against `maxEncodedMsgLength` 15,602 minus the message wrapper, above); an over-limit preview degrades to the plain file form |
 
   The sweeper reads the injected app-wide `Clock` for its eviction
   decision (engineering-rules §9; M1-444 pattern) — the same seam the
