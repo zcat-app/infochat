@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 16 |
+| pending | 15 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 51 |
+| done | 52 |
 | deferred | 0 |
 | abandoned | 0 |
 | **total** | **67** |
@@ -28,7 +28,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-822 — restore.sh surfaces inherited failed asset pairs and sources (complexity: low, risk: low)
 - M1-836 — /asset-enable admin command to reset a failed asset pair (complexity: medium, risk: medium)
 - M1-838 — Bundle simplex-chat v7.0.0; re-verify launch surface (complexity: medium, risk: high)
-- M1-841 — Probe SimpleX image-type composed-message surface (complexity: medium, risk: medium)
+- M1-842 — Outbound preview generation + SPI preview field (complexity: high, risk: medium)
 - M1-844 — Measure grounded in-language chat with the tool loop (complexity: high, risk: medium)
 - M1-847 — Add a streaming generate shape to the LlmProvider SPI (complexity: high, risk: medium)
 - M1-850 — Measure Krea native-prompt holding vs the translation leg (complexity: high, risk: medium)
@@ -50,7 +50,6 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-839 — blocked_by: M1-838 (pending)
 - M1-840 — blocked_by: M1-838 (pending)
-- M1-842 — blocked_by: M1-841 (pending)
 - M1-843 — blocked_by: M1-842 (pending)
 - M1-845 — blocked_by: M1-844 (pending)
 - M1-846 — blocked_by: M1-845 (pending)
@@ -75,6 +74,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-841 | Probe SimpleX image-type composed-message surface | 2026-08-15 | round 1 APPROVE |
 | M1-835 | Truthful boot signal for unresolvable LLM endpoints | 2026-08-15 | round 2 APPROVE |
 | M1-834 | Admin-notify on LLM circuit-breaker open transitions | 2026-08-15 | round 2 APPROVE |
 | M1-833 | Document reboot resilience in guides and design notes | 2026-08-15 | round 1 APPROVE |
@@ -84,7 +84,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-829 | Split 4b-image.sh picker into decision view + --verbose detail | 2026-08-15 | round 2 APPROVE |
 | M1-828 | Document post-setup tool boundaries (profile vs switch-llm vs wizard) | 2026-08-15 | round 1 APPROVE |
 | M1-827 | Fail loud when the GPU container would see no device | 2026-08-15 | round 2 APPROVE |
-| M1-826 | Probe GPU capability and own the llamacpp overlay decision | 2026-08-15 | round 1 APPROVE |
 
 ---
 
@@ -172,8 +171,8 @@ M1-836 (pending) ← runnable
 M1-838 (pending) ← runnable
   ├── M1-839 (pending)
   └── M1-840 (pending)
-M1-841 (pending) ← runnable
-  └── M1-842 (pending)
+M1-841 (done)
+  └── M1-842 (pending) ← runnable
         └── M1-843 (pending)
 M1-844 (pending) ← runnable
   └── M1-845 (pending)

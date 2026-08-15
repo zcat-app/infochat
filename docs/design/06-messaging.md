@@ -407,6 +407,86 @@
   profile-creation welcome never arrives), so the ready-contact
   completion frame itself is source-verified, not live-captured.
 
+  **Image-typed composed messages (M1-841, probed against the bundled
+  simplex-chat v6.5.4 — the `SIMPLEX_CHAT_VERSION` Dockerfile.jvm pin;
+  probe evidence under `.scratch/m1841-probe/`).** SimpleX apps send
+  images as `MCImage` messages: an image-typed `msgContent` carrying a
+  small inline preview beside the same `filePath` full-res upload. The
+  bundled CLI accepts that form on `/_send <target> json`, in both DM
+  and group scope, with the identical completion contract as the plain
+  file send.
+
+  - *Upstream source at the v6.5.4 pin (simplexmq `b981dcb7` /
+    simplex-chat tag `v6.5.4`).* The image constructor is
+    `MsgContent`'s `MCImage {text, image}` with wire tag `"image"`
+    (`src/Simplex/Chat/Protocol.hs:704-713`, tag table `:612-645`); its
+    JSON shape is `{"type":"image","text":"…","image":"…"}` where
+    `image` is a raw JSON string — `newtype ImageData Text`
+    (`src/Simplex/Chat/Types.hs:837-846`). The composed-message parser
+    accepts `filePath` (plain `CryptoFile`) beside ANY `msgContent`,
+    image included (`FromJSON ComposedMessage`,
+    `src/Simplex/Chat/Controller.hs:1769-1778`). The size law: the
+    whole encoded chat message must fit `maxEncodedMsgLength = 15602`
+    bytes (`Protocol.hs:876-880`); an over-limit message fails the send
+    with store error `largeMsg` — `ECMLarge → SELargeMsg` on the send
+    path, which has no compression fallback
+    (`src/Simplex/Chat/Store/Messages.hs:224-228`). Preview encoding:
+    upstream's own inline images are `data:image/png;base64,…` /
+    `data:image/jpg;base64,…` data URIs of 338 chars
+    (`Library/Commands.hs:156`) and 12,202 chars
+    (`Library/Internal.hs:2821`).
+  - *Live probe (two-identity throwaway harness: the sha256-verified
+    pinned binary, both identities on the public SMP/XFTP servers,
+    frames captured on both sides).* DM send of
+    `{"filePath":"/…/img.png","msgContent":{"type":"image","text":"…","image":"data:image/png;base64,…"}}`
+    (199-byte PNG file, 154-char preview): ACCEPTED — the ack is the
+    same `newChatItems` (item content `sndMsgContent` wrapping
+    `MCImage`, `file` member `{fileId, fileName, fileSize,
+    fileSource, fileStatus: sndStored, fileProtocol: "xftp"}`); the
+    async sequence is `sndFileProgressXFTP` (sent/totalSize) ×2 →
+    **`sndFileCompleteXFTP`** — the identical completion tag the
+    adapter's `sndFileCompleteXFTP`-or-PERMANENT mapping
+    (SimpleXMessageCodec.java:356-363) already enforces for file
+    sends; no new ack or completion tag appears. The recipient's
+    frames: `rcvMsgContent` carrying the image `msgContent` with the
+    preview, then `rcvFileDescrReady` + `rcvInvitation` for the XFTP
+    file. A not-ready contact still degrades the upload to
+    `sndStandaloneFileComplete` (observed; same degradation as the
+    file form, above).
+  - *Group scope.* The same send via `/_send #<group> json` with a
+    joined member: ACCEPTED — identical frame sequence
+    (`sndFileProgressXFTP` ×2 → `sndFileCompleteXFTP`, status ladder
+    sndNew → sndStored/sndSent/sndRcvd → sndComplete); the member
+    receives it in-group (`groupRcv` item with the image
+    `rcvMsgContent` + `rcvFileDescrReady`/`rcvInvitation`). A
+    member still at `invited` (not joined) does not block the send or
+    its completion on the sender.
+  - *Refusal arm (limits are measured, not assumed).* A preview whose
+    data URI is 16,500 chars — over `maxEncodedMsgLength` once
+    wrapped — is REFUSED with `chatCmdError → errorStore →
+    largeMsg` before any message is sent. Boundary: a 14,822-char
+    preview is ACCEPTED (`sndFileCompleteXFTP`), so the practical
+    preview ceiling is `maxEncodedMsgLength` (15,602) minus the
+    message wrapper (~500-700 bytes of envelope, file member, text).
+    **Operational nuance:** on the refused over-limit send the
+    `filePath` file still uploaded and completed standalone
+    (`sndStandaloneFileComplete`) — the preview must be bounded BEFORE
+    the send or the recipient gets a stray standalone file beside the
+    refused message (M1-842's generator enforces the recorded bound).
+  - *Scope of these claims.* Parser acceptance, wire content, frame
+    sequences, and the recipient-side receipt events are what the bot
+    controls and what this record asserts; how a given client renders
+    the preview is recipient-side and out of scope (spec
+    messaging.md §Required SPI surface keeps the same promise
+    boundary).
+
+  VERDICT: CONTINUE — the bundled v6.5.4 CLI accepts image-typed
+  composed messages with an inline preview in DM and group scope, the
+  completion contract is unchanged (`sndFileCompleteXFTP`), and the
+  measured preview ceiling (14,822 accepted / 16,500 refused, source
+  limit 15,602 minus wrapper) plus the standalone-upload nuance are
+  the recorded inputs M1-842/M1-843 build on.
+
   **Provider-side spool lifecycle** (M1-801; the D75 privacy posture).
   Provider owns the file lifecycle for D74's file-path payload: the
   backend's bytes are spooled in a tmpfs directory, handed to the

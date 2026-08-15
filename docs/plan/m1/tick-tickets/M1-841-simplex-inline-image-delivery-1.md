@@ -1,9 +1,20 @@
 ---
 id: M1-841
 title: "Probe SimpleX image-type composed-message surface"
-status: pending
+status: done
 created: 2026-08-11
-last_updated: 2026-08-11
+last_updated: 2026-08-15
+clarity_check: >-
+  2026-08-15: no blocking ambiguity. Citations verified (codec
+  :276-286/:356-363, Dockerfile.jvm:47 pin v6.5.4, §6.2.4 at :322).
+  One execution judgment recorded: the live probe ran on a standalone
+  two-identity throwaway harness of the sha256-verified pinned binary
+  (public SMP/XFTP servers) instead of the prod provider's WS API —
+  v6.5.4's chat server (apps/simplex-chat/Server.hs:118-121) races
+  every connected WS client on one shared outputQ, so a second probe
+  connection against prod can steal the adapter's async frames. Same
+  bundled-CLI + live-contact + live-group evidence value, no prod
+  interference.
 flow: tick
 reproduction: >-
   Probe-style (a diff mvn verify cannot cover): the only SimpleX attachment
@@ -51,6 +62,14 @@ spec_refs:
   - docs/spec/messaging.md §Required SPI surface
 decision_refs:
   - D74
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY NOT-APPLICABLE, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "3 files, +98/-9"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-841-r1.txt
 ---
 
 # M1-841: Probe SimpleX image-type composed-message surface
