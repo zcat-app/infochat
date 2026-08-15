@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 23 |
+| pending | 22 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 44 |
+| done | 45 |
 | deferred | 0 |
 | abandoned | 0 |
 | **total** | **67** |
@@ -28,7 +28,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-821 — restore.sh failure paths print verify steps + exact commands (complexity: low, risk: low)
 - M1-825 — Disclose the no-refetch status of locally-staged GGUFs (complexity: low, risk: low)
 - M1-827 — Fail loud when the GPU container would see no device (complexity: medium, risk: medium)
-- M1-832 — Full-stack lifecycle verb prod/scripts/stack.sh (complexity: medium, risk: low)
+- M1-833 — Document reboot resilience in guides and design notes (complexity: low, risk: low)
 - M1-834 — Admin-notify on LLM circuit-breaker open transitions (complexity: medium, risk: medium)
 - M1-835 — Truthful boot signal for unresolvable LLM endpoints (complexity: medium, risk: medium)
 - M1-836 — /asset-enable admin command to reset a failed asset pair (complexity: medium, risk: medium)
@@ -54,7 +54,6 @@ _(none)_
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-822 — blocked_by: M1-821 (pending)
-- M1-833 — blocked_by: M1-830 (done), M1-831 (done), M1-832 (pending)
 - M1-839 — blocked_by: M1-838 (pending)
 - M1-840 — blocked_by: M1-838 (pending)
 - M1-842 — blocked_by: M1-841 (pending)
@@ -82,6 +81,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-832 | Full-stack lifecycle verb prod/scripts/stack.sh | 2026-08-15 | round 1 APPROVE |
 | M1-831 | Doctor fails rootless Docker hosts without linger | 2026-08-15 | round 1 APPROVE |
 | M1-830 | Port prod restart-policy drift into docker-compose.yml | 2026-08-15 | round 1 APPROVE |
 | M1-829 | Split 4b-image.sh picker into decision view + --verbose detail | 2026-08-15 | round 2 APPROVE |
@@ -91,7 +91,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-823 | Hard-fail malformed GGUF URLs in the download preflight | 2026-08-15 | round 2 APPROVE |
 | M1-820 | Lint that applied Flyway migrations are content-immutable | 2026-08-15 | round 1 APPROVE |
 | M1-819 | restore.sh pre-validates restored Flyway history vs checkout | 2026-08-15 | round 1 APPROVE |
-| M1-818 | Surface absent embedding backend on readiness + verify | 2026-08-11 | round 1 APPROVE-WITH-FIXES |
 
 ---
 
@@ -168,10 +167,10 @@ M1-826 (done)
 M1-828 (done)
 M1-829 (done)
 M1-830 (done)
-  └── M1-833 (pending)
+  └── M1-833 (pending) ← runnable
 M1-831 (done)
   └── M1-833 (pending) [see above]
-M1-832 (pending) ← runnable
+M1-832 (done)
   └── M1-833 (pending) [see above]
 M1-834 (pending) ← runnable
 M1-835 (pending) ← runnable

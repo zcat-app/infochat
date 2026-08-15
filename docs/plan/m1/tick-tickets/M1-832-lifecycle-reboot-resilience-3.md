@@ -1,9 +1,9 @@
 ---
 id: M1-832
 title: "Full-stack lifecycle verb prod/scripts/stack.sh"
-status: pending
+status: done
 created: 2026-08-13
-last_updated: 2026-08-13
+last_updated: 2026-08-15
 flow: tick
 reproduction: >-
   Probe (RED on main): `ls prod/scripts/stack.sh` — no such file
@@ -15,10 +15,10 @@ reproduction: >-
   overlay + `--env-file` (the only place that assembly exists is
   setup.sh's do_reset, :156-180); the 2026-08-13 incident (setup-hurdles.md
   item 13 addendum) is what hand-assembly gets wrong — the stack came back
-  without `--profile ollama`. Test:
+  without `--profile ollama`.   Test:
   StackScriptWiringTest.fullStackStopAssemblesProfilesOverlaysAndEnvFile
-  (to-be-written — `start` writes the class and runs it RED on main before
-  any fix code, workflow §0).
+  (written at start; RED on main verified — all five drives failed before
+  stack.sh existed, workflow §0).
 analysis_ref: docs/plan/m1/tick-analysis/lifecycle-reboot-resilience.md
 blocked_by: []
 files_scope:
@@ -45,7 +45,7 @@ out_of_scope:
   - The 2026-08-13 ollama/circuit-breaker surfacing addendum (batch E) and
     restore.sh (batch A).
 acceptance:
-  - "REPRODUCTION, now passing: StackScriptWiringTest.fullStackStopAssemblesProfilesOverlaysAndEnvFile (to-be-written at start; new, infochat-provider wiring package; controlled-PATH fake-docker harness of DoctorWiringTest.java:161-194, fake records its argv) — `stack.sh stop` with a secrets.env present asserts the invocation carries `-f docker-compose.yml`, `-f docker-compose.comfyui.yml`, `--env-file <runtime>/secrets.env`, all four profiles (prod, ollama, llamacpp, llamacpp-embeddings), and the `stop` verb — and does NOT carry `-f docker-compose.gpu.yml` (FAILURE-MODE: dropping the comfyui overlay fails the test — that is the M1-395 leaves-comfyui-running trap setup.sh:174-176 disposes for teardown; adding the gpu overlay fails it — the GPU-less-host create break, analysis P5)."
+  - "REPRODUCTION, now passing: StackScriptWiringTest.fullStackStopAssemblesProfilesOverlaysAndEnvFile   (new, infochat-provider wiring package; controlled-PATH fake-docker harness of DoctorWiringTest.java:161-194, fake records its argv) — `stack.sh stop` with a secrets.env present asserts the invocation carries `-f docker-compose.yml`, `-f docker-compose.comfyui.yml`, `--env-file <runtime>/secrets.env`, all four profiles (prod, ollama, llamacpp, llamacpp-embeddings), and the `stop` verb — and does NOT carry `-f docker-compose.gpu.yml` (FAILURE-MODE: dropping the comfyui overlay fails the test — that is the M1-395 leaves-comfyui-running trap setup.sh:174-176 disposes for teardown; adding the gpu overlay fails it — the GPU-less-host create break, analysis P5)."
   - "FAILURE-MODE (analysis P4): StackScriptWiringTest.startNeverRecreates — `stack.sh start` invokes `docker compose start` (resume existing stopped containers) and NEVER `up` — the argv contains `start` and no `up`; a bare `up -d` over the four-profile assembly would create BOTH LLM backends plus unprofiled comfyui regardless of the deployment's chosen D49 shape, and would recreate drifted containers."
   - "FAILURE-MODE: StackScriptWiringTest.startWithNoContainersFailsWithSetupPointer — fake `compose ps -aq` returns empty: `start` exits non-zero with guidance naming `./prod/setup.sh` (a stack that was never created cannot be resumed; the operator gets the setup pointer, not a cryptic compose error or a silent no-op)."
   - "M1-389 env-file discipline (analysis P6): StackScriptWiringTest.missingSecretsFileOmitsTheEnvFileFlag — with secrets.env absent, every verb still runs and no `--env-file` flag is passed (apps.sh:56 precedent: compose's ${VAR:-} defaults keep stop/ps/start functional; secrets are never shell-sourced)."
@@ -67,11 +67,32 @@ spec_refs:
   - docs/design/07-deployment.md §7.7.2 First-run setup wizard
 decision_refs:
   - D49
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY WARN (informational), SCOPE PASS"
+    diff_stats: "6 files changed, 331 insertions(+), 15 deletions(-)"
+    findings: "0 rework items; 0 critical/high; 3 candidate findings falsified-and-dropped (empty-array expansion under set -u — in-repo precedent apps.sh:57/setup.sh:180 + green missingSecretsFileOmitsTheEnvFileFlag drive; usage-synopsis -h phrasing — style parity with apps.sh:41; start non-zero on missing dependency — unreachable via stack.sh's own verbs, probe record documents fail-loud intent); 0 RECOMMENDED-NEW-TICKET; MAINTAINABILITY WARN is the comment-cap note (4-line class javadoc vs 3-line cap, StackScriptWiringTest.java:20-23, each clause maps to a drive)"
+    verdict_file: .scratch/tick-review-M1-832-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  lint: "0 findings, 0 BLOCKERs (after copying the gitignored tick-analysis/ doc into the worktree)"
+  result: pass
+  notes: >-
+    Citations spot-checked green: apps.sh:38/:31/:54-58, setup.sh:156-180
+    (profiles :167, env-file guard :156-157, comfyui-overlay merge),
+    upgrade.sh:92, docker-compose.yml:266 profile-match comment, gpu-overlay
+    header devices: trap, 07-deployment.md:696-707 table + script shape.
+    Census re-run returned six further --profile sites without rows
+    (switch-llm.sh, pack.sh, 6b-simplex-provision.sh, 7-apps.sh, 8-verify.sh,
+    3-postgres.sh) — verified all are single-service or app-scoped verbs that
+    need no full-stack assembly; same disposition class as the 4-llm.sh row.
+    DoctorWiringTest harness citation :161-194 shifted under the landed M1-831
+    drives (controlled-PATH harness now :252-289; pattern unchanged).
+    blocked_by empty — no sibling tests to trace. Analysis P4/P5/P6 all landed.
 ---
 
 # M1-832: Full-stack lifecycle verb prod/scripts/stack.sh

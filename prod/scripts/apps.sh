@@ -11,7 +11,7 @@
 # running — they are heavy (model load) and long-lived, so leaving them up
 # keeps `start` fast and the database continuously available. To stop the
 # WHOLE stack, use `setup.sh --reset` (a plain `docker compose down`) or
-# `docker compose stop` directly.
+# `stack.sh stop` (this directory), which carries the full profile assembly.
 #
 # `stop` preserves the containers and the named data volumes (infochat-pgdata
 # et al.), so no posts, users, or migrations are lost across a stop/start cycle
