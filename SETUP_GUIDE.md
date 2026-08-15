@@ -516,6 +516,34 @@ summary, you're done.
   Run `restart` after you edit a setting in `prod/runtime/application.properties`
   or one of the bootstrap files — a config change is only picked up when the
   container restarts, so editing the file alone does nothing until you do.
+- **To stop and start the whole stack when the machine itself is going down or
+  coming back up** (a reboot, a shutdown, or host maintenance), use the
+  full-stack helper. It controls every infochat service — the database and the
+  AI model included — not just the bot:
+
+  ```bash
+  ./prod/scripts/stack.sh stop     # stop everything (data kept)
+  ./prod/scripts/stack.sh start    # start everything again
+  ./prod/scripts/stack.sh status   # is everything running?
+  ```
+
+  `stack.sh` is for machine-level cycles; `apps.sh` above is for quick
+  bot-only restarts (say, after a settings edit). Both stop without wiping
+  anything — your posts and settings survive.
+- **On a "rootless" Docker setup, logging out of the desktop session stops
+  the bot.** Rootless Docker (the setup wizard's step 0 health check knows
+  whether your machine uses it) runs inside your user session rather than as
+  a system service, so the whole stack dies when you log out of the desktop —
+  silently, until you log back in. Make the stack survive logouts by letting
+  the account stay active invisibly; run this once on the machine that runs
+  the bot:
+
+  ```bash
+  loginctl enable-linger
+  ```
+
+  The wizard's step 0 health check verifies this (it only matters on
+  rootless setups) and names this command if it is missing.
 - **To upgrade the bot to the latest code**, run:
 
   ```bash

@@ -1026,6 +1026,12 @@ echo 'KERNEL=="kfd", RUN+="/usr/bin/setfacl -m u:<user>:rw /dev/kfd"' | sudo tee
 sudo udevadm control --reload
 ```
 
+**Reboot resilience (restart policies + rootless lingering).** Every long-running service in the Compose files carries `restart: unless-stopped`, so a daemon bounce (host reboot, rootless dockerd restart) brings the stack back without operator action. The policy is deliberately `unless-stopped`, never `always`: `always` would resurrect containers the operator deliberately stopped (`stack.sh stop` / `compose stop`). Ordering note: `depends_on: service_healthy` orders compose-`up` starts only — it does NOT order daemon-driven restarts, where each container starts independently as dockerd recovers; the retry envelope is the ordering (Quarkus fails fast, Docker's restart backoff retries until Postgres answers — how the prod host verified the fix). On a ROOTLESS host the whole stack additionally dies with the desktop user session unless lingering is enabled: `Linger=no` means logout SIGKILLs rootless dockerd and every container with it. The remedy is one command (usually no sudo; otherwise `sudo` it), and the §7.7.2 wizard's step-0 doctor check fails on a rootless host until it is set — a rootful daemon survives logout, so those hosts skip the check:
+
+```bash
+loginctl enable-linger <user>
+```
+
 **ComfyUI (ROCm) overlay — opt-in.** The `/image` backend (D73/D77) runs as a purpose-built ComfyUI service that exists only when `docker-compose.comfyui.yml` is applied as a second `-f` file — the same shape as the Vulkan overlay above, for the same reason: the service needs `/dev/kfd` + `/dev/dri` passed through, and a `devices:` entry in the base file would break every host without an AMD GPU.
 
 ```bash

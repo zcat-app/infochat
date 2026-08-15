@@ -1,9 +1,9 @@
 ---
 id: M1-833
 title: "Document reboot resilience in guides and design notes"
-status: pending
+status: done
 created: 2026-08-13
-last_updated: 2026-08-13
+last_updated: 2026-08-15
 flow: tick
 reproduction: >-
   Probes (RED on main; documentation surface, no mvn coverage): (a)
@@ -55,7 +55,14 @@ spec_refs:
   - docs/design/07-deployment.md §7.8.7 Host resource hardening (swap, container caps, build isolation)
   - docs/design/07-deployment.md §7.7.2 First-run setup wizard
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-15
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY NOT-APPLICABLE (docs-only), MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "5 files changed, 55 insertions(+), 10 deletions(-) — the 3 docs files plus STATUS-TICK.md regen and this ticket's frontmatter"
+    findings: "0 rework items; 0 critical/high; 5 candidate findings falsified-and-dropped (unless-stopped universality — all six base services + comfyui overlay carry it, no restart: always anywhere; doctor linger-check name pinned — prod/scripts/0-doctor.sh:88-107 landed via M1-831; 'stop without wiping' — both scripts run compose stop; P7 digest-recovery wording — no catch-up/recover claim in the diff; section placement — all probes land in the acceptance-named sections); 0 RECOMMENDED-NEW-TICKET"
+    verdict_file: .scratch/tick-review-M1-833-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []

@@ -451,6 +451,19 @@ Run it only on a deployment you have already set up. The per-step detail and the
 single-host rolling-restart caveat are in the [Setup Guide](SETUP_GUIDE.md) and
 [docs/design/07-deployment.md](docs/design/07-deployment.md) §7.11.
 
+Before **host-level maintenance** — a reboot, a shutdown, or a Docker daemon
+restart — stop and later restart the **whole** stack (database and AI model
+included) with the full-stack helper, not `apps.sh` (which covers only the two
+app services):
+
+```bash
+./prod/scripts/stack.sh stop     # stop everything (data preserved)
+./prod/scripts/stack.sh start    # resume once the host is back
+```
+
+`apps.sh` remains the quick app-only lifecycle for config changes; `stack.sh`
+is the machine-level cycle around host maintenance.
+
 ### Full references
 
 - Command catalogue (every command, every flag, exact argument grammar):
