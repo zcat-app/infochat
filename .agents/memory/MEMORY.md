@@ -53,7 +53,7 @@ and this store is the shared one both worlds read.
 
 ## Build, test and CI mechanics
 
-- [Rootless docker port-split](rootless-docker-port-split.md) — random "address already in use" IT deaths = host ephemeral range overlapping rootless docker's fixed ~40000-60999 publish band; fix is the HOST sysctl at 32768-39999 (daemon-netns sysctl is a proven no-op; trust only the `docker run -P` draw probe, never sysctl reads).
+- [Rootless docker port-split](rootless-docker-port-split.md) — random "address already in use" IT deaths = host ephemeral range overlapping rootless docker's fixed ~40000-60999 publish band; fix is the HOST sysctl at 32768-39999 (daemon-netns sysctl is a proven no-op; trust only the `docker run -P` draw probe, never sysctl reads). SECOND signature, same class: `BindException` on `bind(0)` in test JVMs = a userspace squatter holding the host band (`ss -tlnp` shows thousands of LISTENs on one pid — kill it; never "drain-hold" ports). verify-serialized.sh guards both.
 
 - [mvn -Dtest filtering is blocked by a tripwire](mvn-dtest-filter-blocked-by-tripwire.md) — cross-module `-Dtest` always fails (parent POM `failIfNoTests=true`); IT-only filtering IS legal (`-Dit.test` + `-Dfailsafe.failIfNoSpecifiedTests=false`, never `-Dtest`), otherwise module-scoped and UNFILTERED.
 - [Comment-cap: point-edit comment blocks, never rewrap](comment-cap-point-edit-comment-blocks.md) — tick-comment-cap counts runs of ADDED comment lines and removed lines don't break a run, so rewrapping a 4+ line javadoc/comment block trips the cap; keep untouched lines byte-identical as context.
