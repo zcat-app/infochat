@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 14 |
+| pending | 13 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 73 |
+| done | 74 |
 | deferred | 0 |
 | abandoned | 2 |
 | **total** | **89** |
@@ -26,7 +26,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-848 — Wire the pivot/direct switch into the chat reply path (complexity: high, risk: high)
-- M1-858 — Re-measure the tool loop with the levers landed (complexity: high, risk: medium)
 - M1-863 — Run the prefix A/B; record the adopt-or-drop number (complexity: medium, risk: low)
 - M1-864 — Measure the tag-tree leaf vocabulary on the local model (complexity: high, risk: low)
 - M1-865 — Tag tree schema and deterministic leaf resolution (complexity: medium, risk: medium)
@@ -75,6 +74,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 |---|---|---|---|
 | M1-862 | A/B rig: raw vs prefixed vectors on the deployment embedder | 2026-08-16 | round 1 APPROVE |
 | M1-859 | Harness: real vector retrieval for the tool-loop campaign | 2026-08-16 | round 2 APPROVE |
+| M1-858 | Re-measure the tool loop with the levers landed | 2026-08-16 | round 3 APPROVE |
 | M1-857 | Citation-discipline wording on grounded and tool-result turns | 2026-08-16 | round 1 APPROVE-WITH-FIXES |
 | M1-856 | Tool prompt: worked example + native-dialect bridge | 2026-08-16 | round 1 APPROVE-WITH-FIXES |
 | M1-855 | SimpleX v7 completion contract on the live bot path | 2026-08-16 | round 1 APPROVE |
@@ -82,7 +82,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-846 | Spec: live-text streaming display policy | 2026-08-16 | round 2 APPROVE |
 | M1-845 | Spec: switchable translation pipeline (translate vs native) | 2026-08-16 | round 1 APPROVE |
 | M1-844 | Measure grounded in-language chat with the tool loop | 2026-08-16 | round 2 APPROVE |
-| M1-853 | Land the observed streaming usage opt-in request shape | 2026-08-15 | round 1 APPROVE |
 
 ---
 
@@ -191,11 +190,11 @@ M1-852 (done)
 M1-854 (done)
 M1-855 (done)
 M1-856 (done)
-  └── M1-858 (pending) ← runnable
+  └── M1-858 (done)
 M1-857 (done)
-  └── M1-858 (pending) [see above]
+  └── M1-858 (done) [see above]
 M1-859 (done)
-  ├── M1-858 (pending) [see above]
+  ├── M1-858 (done) [see above]
   └── M1-862 (done)
         └── M1-863 (pending) ← runnable
 M1-860 (abandoned)

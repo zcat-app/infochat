@@ -1,7 +1,7 @@
 ---
 id: M1-858
 title: "Re-measure the tool loop with the levers landed"
-status: pending
+status: done
 created: 2026-08-16
 last_updated: 2026-08-16
 flow: tick
@@ -93,7 +93,31 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-16
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY NOT-APPLICABLE, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "tracked: 3 files +276/-9 (record append +269/-1, board regen, ticket frontmatter); campaign working data under gitignored .bench/ (harness upgrades, 2x2x5 arm runs, judge/reviewer/adjudication files)"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-858-r1.txt
+    note: >-
+      run by the implementation session itself with a substituted reviewer
+      model — untrusted, superseded by round 2
+  - round: 2
+    date: 2026-08-16
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS FAIL, SECURITY PASS, TEST-ADEQUACY NOT-APPLICABLE, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "full branch diff re-review: 3 files +284/-9"
+    rework_items: 4
+    verdict_file: .scratch/tick-review-M1-858-r2.txt
+  - round: 3
+    date: 2026-08-16
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY NOT-APPLICABLE, MAINTAINABILITY PASS, SCOPE PASS (all 4 round-2 items SATISFIED)"
+    diff_stats: "fix hunks: 3 files +54/-16 (record corrections 19 +/-, board regen, ticket bookkeeping); verify log r3 exit 0"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-858-r3.txt
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -225,3 +249,39 @@ follow-up is a new ticket, not a mid-campaign edit.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-858-toolloop-remeasure.md
 ```
+
+## Round 2 rework
+
+1. Finding 1: correct the t06 residual row and closing sentence
+   (docs/measurement/direct-chat-e2e.md:509, :512-514) to record the
+   expected-lookup miss the data shows, judging-fact stated separately,
+   plus a DECISIONS.md correction entry — evaluated via
+   grep -n 't06' docs/measurement/direct-chat-e2e.md (row no longer claims
+   the calling behavior cleared; asserts gemma 0/5) and
+   grep '"id": "t06"' .bench/direct-chat-e2e/results/remeasure-2026-08-16/toolloop/gemma/*.jsonl
+   | grep -c '"n_iterations": 0' → 10.
+2. Finding 2: change "D=3" to "D=2" at docs/measurement/direct-chat-e2e.md:524
+   (and decision 25) — evaluated via grep -n 'D=3'
+   docs/measurement/direct-chat-e2e.md → no match.
+3. Finding 3: change "class A (19 rows" to "class A (17 rows" at
+   docs/measurement/direct-chat-e2e.md:435 (and decision 24) — evaluated
+   via grep -c '"agree":false'
+   .bench/direct-chat-e2e/results/remeasure-2026-08-16/judge/review-codex.jsonl
+   → 25 = 17+5+3.
+4. Finding 4: replace the two Wilson intervals at
+   docs/measurement/direct-chat-e2e.md:453-454 with [0.640, 0.965] (14/16)
+   and [0.717, 0.989] (15/16), or drop the sentence, logging the
+   derivation in DECISIONS.md — evaluated via
+   grep -n '0.616\|0.698' docs/measurement/direct-chat-e2e.md → no match.
+
+## Review observations
+
+- (round 2, RECOMMENDED-NEW-TICKET, TOUCHED-BY-THIS-DIFF: no) The t06
+  fixture cannot see the defect it names: its must_convey items grade only
+  the honesty of the not-in-feed wording, so a reply asserting "the search
+  came back empty" with zero recorded calls passes judgement while the
+  expect_tools record misses — the judged layer is structurally unable to
+  detect check-before-claiming-absence failures (and the incumbent's
+  replies assert a search ran when none did, which no gate scores).
+  Relevant to any future epistemic-stance lever ticket and to
+  M1-845/M1-848's reading of this record. Filing is the user's call.

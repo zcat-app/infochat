@@ -294,3 +294,277 @@ review: cs; es/ru/tr per the DeepL round-trip protocol (decisions 11-13).
 All arms, judge, reviewer, adjudication, and this record executed against
 repo commit `244fcf66` (P20 census in the ticket); corpus snapshot sha256
 `5807…39d6`; gemma weights = the deployment's own GGUF (see Pins above).
+
+---
+
+# Re-measure campaign (M1-858): the levers landed — LOCKED pre-registration
+
+Status: this section's bar was LOCKED in the commit that added it, before
+any re-measure arm ran; every results commit of this campaign postdates it
+(git log --follow this file). Append-only per the record's terminal-evidence
+rule: the 244fcf66 section above is byte-intact.
+
+## What this campaign measures (the named delta)
+
+The levers landed after the 244fcf66 campaign, each on a measured surface:
+
+- M1-856 (c284d974): TOOL_INSTRUCTIONS now carries a worked example and a
+  tool-plane language sentence (ChatAgent.java:78-106 at the pin); a second
+  accepted emission dialect — the native opener `<|tool_call>` with
+  `call:NAME {…}` and a balanced-brace scan, no closer required
+  (NATIVE_TOOL_CALL_PATTERN, ChatAgent.java:70-72) — dispatched through the
+  unchanged ChatToolDispatcher boundary on earliest-match precedence
+  (earliestToolCallMatch, :1094-1106); stripToolCalls covers both dialects
+  (balanced removed exactly, unbalanced through end-of-text, a native opener
+  without an args brace is prose and preserved; :1113-1159).
+- M1-857 (0ffea3c5): the framing citation sentence now demands every relied
+  post cited by its bare source URL "copied exactly as it appears in the
+  retrieved post or tool result; never invent, modify, or guess a URL"
+  (CHAT_SYSTEM_PROMPT_TEMPLATE, ChatPromptBuilder.java:41-64 at the pin),
+  and the post-tool-result instruction line carries the same demand
+  (POST_TOOL_RESULT_INSTRUCTION, ChatAgent.java:111-114).
+- M1-859 (64400886): the harness models production retrieval — real cosine
+  over deployment-embedder vectors (nomic-embed-text-v1.5, the deployment's
+  GGUF, floor-check server shape), the production 0.40 distance floor
+  (admit similarity ≥ 0.60), the semantic arm's deterministic order, and
+  queries anchored per M1-746 for non-English scopes (live greedy remote
+  translator, append-only memoised cache, counted fallbacks — zero in this
+  campaign so far).
+
+The harness's G6 tool-protocol gate is EXTENDED to the two accepted
+emission dialects: a bridged native emission is protocol-adherent, not a
+collapse; and a matchable protocol fragment surviving in DELIVERED text
+(impossible in production — the loop dispatches it or the strip removes it)
+is a G6 defect. Both legs run the production tool-loop shape (the grounded
+leg is no longer a single call without tool instructions — every chat turn
+carries the 856/857 surfaces, as production does).
+
+## Bar (LOCKED, restated — same as above, never re-negotiated)
+
+Identical to the 2026-08-15 lock: cell = (model × language × leg); models
+gemma-4-26b-a4b (candidate) and DeepSeek-V4-Flash (incumbent reference);
+languages en, cs, es, ru, tr; L0 gates G1/G3/G4/G5/G6/G7 with the G7 title
+exemption (decision 15); zero-defect conjunct — quality never launders
+hygiene; decision bar = one-sided exact binomial tie test over discordant
+pairs (α=0.05, the locked rejection table above: D=5→L≥5, 6→6, 7→7, 8→7,
+9→8, 10→9, 11→9, 12→10, 13→10, 14→11, 15→12, 16→12; D<5 never rejects)
+AND zero L0 defects; Wilson 95% CIs reported, power caveat logged; judgement
+layer = blind DeepSeek-V4-Flash temp 0 judge, codex (GPT) reviewer over the
+full blind set, user adjudication of disputes (decisions 17-19); t07
+no-unnecessary-call control (zero false calls per arm per language; a false
+call is a recorded cell defect, never averaged). No free variable: same
+fixtures, same n (GROUNDED=16, TOOL-LOOP=8 per language), zero voids
+re-verified, no new thresholds, no new knobs.
+
+## Pins (start-time census, P20)
+
+- Repo commit: `02ca356c` — postdates the landings of M1-856 (c284d974),
+  M1-857 (0ffea3c5) and M1-859 (64400886), mechanically verified
+  (merge-base ancestry). Census of pending tickets touching chat
+  prompt/tool surfaces at start: none landed after this pin before any arm;
+  M1-848 (pending) touches the chat reply path but nothing of it is landed,
+  and M1-862/863 (pending) touch retrieval vectors only — both named here,
+  neither changes the measured surfaces.
+- Prompt surfaces byte-cited at the pin: CHAT_SYSTEM_PROMPT_TEMPLATE
+  (ChatPromptBuilder.java:41-64, wordTarget 461), TOOL_INSTRUCTIONS
+  (ChatAgent.java:78-106), POST_TOOL_RESULT_INSTRUCTION (:111-114),
+  NATIVE_TOOL_CALL_PATTERN (:70-72), earliestToolCallMatch (:1094-1106),
+  stripToolCalls (:1113-1159), REPLY_LANGUAGE_DIRECTIVE (:221-226),
+  CLARIFY/AFFORDANCE (:169-188), tool-loop assembly + iteration cap 10
+  (:803-865), tool result JSON shapes (SemanticSearchTool.java:298-302,
+  GetPostTool.java:81-90). Harness copies byte-verified by pin_check.py.
+- Corpus snapshot: re-used, NOT re-extracted — 11,789 READY posts, sha256
+  `580706dd522d88f9144e4de71e5f91bab7e11fe9a180094d67424a768806ef7e`;
+  embeddings per the M1-859 manifest (GGUF sha256 ed3a84b5…, dimension 768).
+- gemma-4-26b-a4b weights: the deployment's own
+  `gemma-4-26B-A4B-it-UD-Q6_K_XL.gguf` (23,295,391,456 bytes), campaign
+  llama-server b10221 pinned binary, greedy, flags per the record's Pins.
+  Incumbent arm: remote DeepSeek-V4-Flash (thinking disabled), METERED.
+- Fixtures: the SAME committed scenario sets (16 grounded + 8 tool-loop per
+  language, zero voided), working data under `.bench/direct-chat-e2e/`
+  (gitignored) in the new campaign results tree; this record is the only
+  committed artifact.
+
+## Scope (settled legs are NOT re-litigated)
+
+Re-run: GROUNDED-EN-context and TOOL-LOOP for both models, all five
+languages. NOT re-run: the X-context arm (the EN-context inheritance
+verdict is final), the parametric legs, LATENCY (data-only, no bar), and
+the refusal re-check (optional color only — zero-refusal is unchanged
+surface). G5 citation columns are recorded per cell for BOTH arms beside
+the headline; the epistemic-stance residual (t05/t06/t08) is recorded as
+defect rows wherever it persists, never dropped, never prompt-engineered
+mid-campaign (P8: the English-plane sentence is anchor agreement, not a
+calling lever — no arm re-tests the ab negative).
+
+## Remaining harness divergences from production (enumerated, never silent)
+
+1. The sanitizer pass is not modeled: fixtures are injection-free and the
+   harness's strip runs on raw model text (production strips sanitized
+   bytes; sanitize can assemble fragments — not reachable from clean
+   fixtures). 2. The `[REFUSAL:` prefix intercept degrade is not modeled —
+   refusal tokens are recorded raw in transcripts and defect under G3.
+   3. No translation display leg (the pre-registered direct-mode shape,
+   decision 3: the model writes in-language). 4. Deterministic help-delivery
+   probes (topic/command) are not modeled. 5. Delimiter ids are fixed
+   (bench-*) where production uses random per-call UUIDs. 6. Memory
+   pre-fetch block unused (no prior memory in fixtures). 7. Retrieval-side
+   residuals per the M1-859 README: lexical+RRF fusion deliberately
+   unbuilt; serving GGUF via the pinned llama-server vs Ollama
+   (±0.01 similarity noise, M1-748); posts >1200 chars embed the 800-char
+   body fallback where production embeds LLM summaries (59.3% of the
+   snapshot); uid-ASC tie-break; 8 KiB budgets on searchPosts/getReferences;
+   one declared scope per driver run; the embedding server co-resides on
+   the GPU and starts lazily. 8. Audit rows, persistence, and session
+   compression are outside the transcript surface.
+
+## Working data (gitignored)
+
+Results under `.bench/direct-chat-e2e/results/remeasure-2026-08-16/`
+(gen.py `--root`); campaign decisions continue in DECISIONS.md (decisions
+22+); the corpus/query-anchor-cache.jsonl is append-only and
+scope-partitioned as production's.
+
+## Results
+
+(2026-08-16, all arms + judge + reviewer + adjudication complete. Arms:
+gemma-4-26b-a4b (deployment GGUF, greedy, pinned llama-server) vs
+DeepSeek-V4-Flash (incumbent reference, remote, thinking disabled, metered).
+Judgement: blind DeepSeek judge temp 0 → codex (GPT) reviewer over the full
+240-transcript blind set → 25 disagreements, user-adjudicated by class
+ruling (campaign decision 24): class A (17 rows, tool-call items — the
+mechanical iteration record shows no call; judge over-credited) → codex;
+class B (5 rows, g06 numbers — G4 mechanically passed) → codex; class C
+(3 rows, g12 announcement framing — the replies keep the preview/soon
+distinction the fixture trap demands) → codex. The 25% per-cell
+disagreement trigger fired on seven toolloop cells; all seven are covered
+and discharged by these class rulings. The adjudicated judgement file is
+`judgements-adjudicated.jsonl` under the new campaign's results tree.)
+
+### GROUNDED per-language cells (judgement pass-rate vs L0 defects)
+
+| arm/lang | en | cs | es | ru | tr |
+|---|---|---|---|---|---|
+| gemma EN-ctx pass | 14/16 | 14/16 | 14/16 | 14/16 | 14/16 |
+| gemma EN-ctx L0 | 1 | 0 | 2 | 0 | 0 |
+| incumbent EN-ctx pass | 15/16 | 14/16 | 14/16 | 14/16 | 14/16 |
+| incumbent EN-ctx L0 | 5 | 4 | 6 | 0 | 1 |
+
+Wilson 95% CIs (gemma, all five cells): 14/16 → [0.640, 0.965]; incumbent
+en 15/16 → [0.717, 0.989] (score interval, z=1.96, derivation logged as
+campaign decision 26). Language holding (G1): zero HARD defects either
+arm, any cell. No-bleed (G7): zero both arms.
+
+### G5 citation columns per cell (the actual bar blocker)
+
+Expected-citation misses (single-cell events, adjudicated record):
+
+| arm/lang | en | cs | es | ru | tr |
+|---|---|---|---|---|---|
+| gemma grounded | g16 | – | g09, g16 | – | – |
+| incumbent grounded | g01, g12, g13, g16 | g04, g07, g15, g16 | g01, g02, g07, g09, g15, g16 | – | g03 |
+
+URL-outside-set events: zero for gemma in any cell (the old tr g12
+mutated-URL cluster is gone); incumbent ru t05 tool-loop URL outside the
+permitted set (techtransparencyproject.org) — same class as 244fcf66.
+
+### TOOL-LOOP leg (protocol adherence, judgement, tie vs L0)
+
+| arm/lang | en | cs | es | ru | tr |
+|---|---|---|---|---|---|
+| gemma expected-call hit | 1/7 | 0/7 | 0/7 | 0/7 | 1/7 |
+| gemma mean iterations | 0.10 | 0.00 | 0.00 | 0.00 | 0.10 |
+| gemma judgement pass (n=8) | 1/8 | 1/8 | 2/8 | 2/8 | 2/8 |
+| deepseek expected-call hit | 2/7 | 2/7 | 1/7 | 3/7 | 2/7 |
+| deepseek mean iterations | 0.20 | 0.30 | 0.10 | 0.40 | 0.20 |
+| deepseek judgement pass (n=8) | 2/8 | 1/8 | 1/8 | 4/8 | 2/8 |
+| discordant pairs (D, L) | 1, 1 | 0, 0 | 1, 0 | 2, 2 | 2, 1 |
+
+Denominators: n=8 counts every scenario per language; the expected-call
+rows are /7 because t08's sibling t07 is the no-unnecessary-call control.
+
+The t07 no-unnecessary-call control HOLDs: zero false tool calls per arm
+per language — t07 emissions in every (arm × language) cell are 0 (gemma:
+0/5 cells any call; incumbent: 0/5). The levers did not buy calling with
+false positives.
+
+The M1-856 bridge works on the deployment model in the campaign: the
+worked example + bridge converted the old tr t02 collapse — gemma's native
+`<|tool_call>call:searchPosts {…}` (the observed `<tool_call|>` closer
+shape) now dispatches through the harness's earliest-match bridge in BOTH
+en t02 and tr t02, and the delivered replies are grounded, in-language,
+protocol-clean answers. Zero protocol fragments reached any delivered
+reply (G6: the extended gate is CLEAN in every gemma cell; the 244fcf66
+tr t02 G1-HARD+G6 collapse class has no occurrence).
+
+Gemma tool-loop L0: CLEAN in all five languages (244fcf66: tr FAIL L0=1 on
+that collapse). Incumbent tool-loop L0: cs t05 one wrong-refusal token
+(G3 — a `[REFUSAL: …]` on an injection-free fixture) and ru t05 one G5
+url-not-in-set (above).
+
+### Epistemic-stance residual (recorded per scenario, never dropped)
+
+| scenario | gemma | incumbent |
+|---|---|---|
+| t05 chained semanticSearch→getPost | still-zero in every language (0/5) | still-zero in every language (0/5) |
+| t06 check-before-claiming-absence | expected semanticSearch still absent (0/5 cells) | expected call absent on turn 1 in all five (cs turn 2 only) |
+| t08 two-fetch comparison | still-zero in every language (0/5) | still-zero in every language (0/5) |
+
+The epistemic-stance class has NO lever (P8) and stays recorded in its
+cells: t05/t08 remain the tool-loop leg's residual; the expected
+semanticSearch before an absence claim is still absent (gemma 0/5 cells;
+incumbent turn-1 absent in all five, one cs turn-2 call only). The judged
+honesty items (honest not-in-feed wording) pass 5/5 for both arms — a
+fixture property (the t06 must_convey items never demand the call), not a
+behavior change (correction logged as campaign decision 26).
+
+### Refusal re-check (optional color)
+
+One `[REFUSAL:` token across all 240 transcripts: incumbent cs t05
+(recorded as its cell's G3 defect). Zero for gemma in any cell. The
+incumbent's 244fcf66 zero-refusal result does not reproduce here.
+
+### Tie test (one-sided sign, locked table)
+
+Tie HOLDS in every cell — the largest discordancy is D=2 (gemma tool-loop
+ru L=2, W=0) and every D is below the locked D<5 never-reject bound, so
+candidate inferiority is not demonstrated in any (leg, language) cell.
+n=8 on the tool-loop leg and n=16 on the grounded leg; the power caveat is
+unchanged from 244fcf66: at D ≤ 3 the test is weak, so "tie holds" means
+"no demonstrated inferiority", not "proven equality". (D=1 grounded en:
+gemma loses one discordant pair, g16.)
+
+### Defect characterization (gemma, re-measured surfaces)
+
+The gemma grounded residual is the same narrow class the 244fcf66 NOTE
+identified — citation omission, now down to THREE cells: en g16 (the
+wordy-register scenario), es g09 and g16 (same class). Every other gemma
+cell is L0-clean on both legs, including zero G5 events in cs/ru/tr. The
+mutated-URL cluster is gone. Judgement quality is not the differentiator
+anywhere: the incumbent's grounded cells carry the SAME citation class at
+1-6 events per cell (its ru cell is clean), and its cs t05 refusal is new.
+
+### Bar-clearing matrix — restated from the new cells
+
+| (model, language) | GROUNDED EN-ctx | TOOL-LOOP | PAIR |
+|---|---|---|---|
+| gemma × en | FAIL (L0=1) | PASS | **FAIL** |
+| gemma × cs | PASS | PASS | **PASS** |
+| gemma × es | FAIL (L0=2) | PASS | **FAIL** |
+| gemma × ru | PASS | PASS | **PASS** |
+| gemma × tr | PASS | PASS | **PASS** |
+
+Derivation: each PASS = tie not rejected AND zero L0 on the leg (the
+matrix rule of 244fcf66, unchanged). Three of five pairs now clear the
+bar. The artifact this matrix updates — M1-848's registry seed — reads
+these cells as-is per the record's own rule; the two FAIL cells (en, es)
+trace to three named citation misses.
+
+### Commit pin
+
+All arms, judge, reviewer, adjudication, and this section executed against
+repo commit `02ca356c` (census in the lock above); corpus snapshot sha256
+`580706dd522d88f9144e4de71e5f91bab7e11fe9a180094d67424a768806ef7e`
+(re-used, not re-extracted); gemma weights = the deployment's own GGUF;
+every corrected or derived number is logged in the campaign DECISIONS.md
+(decisions 22+).
