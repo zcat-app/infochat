@@ -157,6 +157,7 @@ public class HelpCommandHandler implements CommandHandler {
             new CommandHelp("follow-tag", BundleKeys.HELP_CMD_FOLLOW_TAG_SHORT, BundleKeys.HELP_CMD_FOLLOW_TAG_USAGE, BundleKeys.HELP_CMD_FOLLOW_TAG_EXAMPLES, HelpTier.USER_OR_GROUP_ADMIN),
             new CommandHelp("unfollow-tag", BundleKeys.HELP_CMD_UNFOLLOW_TAG_SHORT, BundleKeys.HELP_CMD_UNFOLLOW_TAG_USAGE, BundleKeys.HELP_CMD_UNFOLLOW_TAG_EXAMPLES, HelpTier.USER_OR_GROUP_ADMIN),
             new CommandHelp("lang", BundleKeys.HELP_CMD_LANG_SHORT, BundleKeys.HELP_CMD_LANG_USAGE, BundleKeys.HELP_CMD_LANG_EXAMPLES, HelpTier.USER_OR_GROUP_ADMIN),
+            new CommandHelp("reply-mode", BundleKeys.HELP_CMD_REPLY_MODE_SHORT, BundleKeys.HELP_CMD_REPLY_MODE_USAGE, BundleKeys.HELP_CMD_REPLY_MODE_EXAMPLES, HelpTier.USER_OR_GROUP_ADMIN),
             new CommandHelp("clear", BundleKeys.HELP_CMD_CLEAR_SHORT, BundleKeys.HELP_CMD_CLEAR_USAGE, BundleKeys.HELP_CMD_CLEAR_EXAMPLES, HelpTier.USER),
             new CommandHelp("compress", BundleKeys.HELP_CMD_COMPRESS_SHORT, BundleKeys.HELP_CMD_COMPRESS_USAGE, BundleKeys.HELP_CMD_COMPRESS_EXAMPLES, HelpTier.USER),
             new CommandHelp("forget", BundleKeys.HELP_CMD_FORGET_SHORT, BundleKeys.HELP_CMD_FORGET_USAGE, BundleKeys.HELP_CMD_FORGET_EXAMPLES, HelpTier.USER),

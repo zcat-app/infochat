@@ -61,6 +61,7 @@ public class CommandPermissions {
             "export",
             "forget",
             "lang",
+            "reply-mode",
             "stop");
 
     private final AssetCommandFamilyOracle assetCommandFamilyOracle;

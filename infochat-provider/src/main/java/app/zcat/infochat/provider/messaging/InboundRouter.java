@@ -15,6 +15,8 @@ import app.zcat.infochat.messaging.metrics.AdapterMetrics;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.chat.ChatAgent;
+import app.zcat.infochat.provider.chat.ChatReplyMode;
+import app.zcat.infochat.provider.chat.ChatReplyModeResolver;
 import app.zcat.infochat.provider.chat.InFlightTracker;
 import app.zcat.infochat.provider.chat.LlmRateCap;
 import app.zcat.infochat.provider.chat.SummaryAnchorRepository;
@@ -302,15 +304,21 @@ public class InboundRouter {
      * Effective scope language per D43 — same resolution semantics as
      * {@code ChatAgent.readScopeLanguage} and the digest path's
      * {@code GROUP_META_SQL} COALESCE: a missing row means {@code en}.
+     * Reads the {@code reply_mode} override on the SAME row so a dispatch
+     * still runs exactly one scope_preferences SELECT (D79 reply-mode
+     * resolution rides this lookup — see {@link #lookupScopeLanguage}).
      */
     private static final String SELECT_SCOPE_LANGUAGE_SQL =
-            "SELECT language FROM scope_preferences WHERE scope_kind = ? AND scope_id = ?";
+            "SELECT language, reply_mode FROM scope_preferences WHERE scope_kind = ? AND scope_id = ?";
 
     @Inject
     Instance<CommandHandler> commandHandlers;
 
     @Inject
     InboundContext inboundContext;
+
+    @Inject
+    ChatReplyModeResolver replyModeResolver;
 
     @Inject
     RateCapBucket rateCapBucket;
@@ -1061,6 +1069,10 @@ public class InboundRouter {
             // one more plain captured String.
             String turnId = UUID.randomUUID().toString();
             String turnScopeKind = chatModeScopeKindOf(scope);
+            // D79: the reply mode resolved at intake crosses the hop as one
+            // more plain captured value (the M1-634 pattern); the worker's
+            // fresh context is re-seeded with it in runSeededDispatchStage.
+            ChatReplyMode resolvedReplyMode = inboundContext.replyMode();
             inFlightTracker.registerQueued(actorId, turnScopeKind, stageScopeId, turnId);
             // M1-635: when every worker is occupied the submit below will
             // queue, and nothing would reach the sender until a worker frees
@@ -1080,6 +1092,7 @@ public class InboundRouter {
                         inboundContext.effectiveLanguage(),
                         () -> runSeededDispatchStage(
                                 turnId, scope, normalized, actorId, stageScopeId,
+                                resolvedReplyMode,
                                 body -> progressNotifier.complete(scope, body)));
                 return;
             }
@@ -1089,6 +1102,7 @@ public class InboundRouter {
                     inboundContext.effectiveLanguage(),
                     () -> runSeededDispatchStage(
                             turnId, scope, normalized, actorId, stageScopeId,
+                            resolvedReplyMode,
                             body -> sendReply(scope, body, adapterName)));
             return;
         }
@@ -1143,8 +1157,10 @@ public class InboundRouter {
      */
     private void runSeededDispatchStage(String operationId, ScopeRef scope, String normalized,
                                         UUID actorId, UUID dispatchScopeId,
+                                        ChatReplyMode resolvedReplyMode,
                                         Consumer<String> replySink) {
         inboundContext.setOperationId(operationId);
+        inboundContext.setReplyMode(resolvedReplyMode);
         String scopeKind = chatModeScopeKindOf(scope);
         try {
             if (inFlightTracker.consumeIfCancelled(actorId, scopeKind, dispatchScopeId,
@@ -1905,15 +1921,34 @@ public class InboundRouter {
             ps.setString(1, scopeKind);
             ps.setObject(2, scopeId);
             try (ResultSet rs = ps.executeQuery()) {
+                String language;
+                String replyModeOverride;
                 if (!rs.next()) {
-                    return "en";
+                    language = "en";
+                    replyModeOverride = null;
+                } else {
+                    language = rs.getString("language");
+                    replyModeOverride = rs.getString("reply_mode");
                 }
-                return rs.getString("language");
+                resolveReplyMode(replyModeOverride, language, scopeKind, scopeId);
+                return language;
             }
         } catch (SQLException e) {
             throw new IllegalStateException(
                     "InboundRouter.lookupScopeLanguage failed for scope_kind=" + scopeKind, e);
         }
+    }
+
+    // D79: resolve the reply mode once per dispatch and cache it on the
+    // context so it never flips mid-turn. Guarded for unit tests that wire
+    // the router by hand and leave the resolver/context unset.
+    private void resolveReplyMode(@Nullable String replyModeOverride, String language,
+                                  String scopeKind, UUID scopeId) {
+        if (replyModeResolver == null || inboundContext == null) {
+            return;
+        }
+        inboundContext.setReplyMode(
+                replyModeResolver.resolve(replyModeOverride, language, scopeKind, scopeId));
     }
 
     private void ensureGroupMembership(DispatchDb db, UUID groupId, UUID userId) {

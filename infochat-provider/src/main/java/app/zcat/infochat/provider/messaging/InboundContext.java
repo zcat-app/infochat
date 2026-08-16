@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.messaging;
 
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.chat.ChatAgent;
+import app.zcat.infochat.provider.chat.ChatReplyMode;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.RequestScoped;
 import org.jspecify.annotations.Nullable;
@@ -63,6 +64,10 @@ public class InboundContext {
     // legitimately fire before any language is resolvable — see
     // effectiveLanguage().
     private String effectiveLanguage = "en";
+    // The RESOLVED chat-reply pipeline mode for this dispatch (D79), cached
+    // at intake so it never flips mid-turn; ChatAgent reads it like
+    // effectiveLanguage. Eagerly TRANSLATE (the deployment default).
+    private ChatReplyMode replyMode = ChatReplyMode.TRANSLATE;
 
     // The chat turn's deferred persistence step, stashed by the chat
     // dispatch (InboundRouter.dispatchChat) and run by onMessage ONLY
@@ -161,6 +166,15 @@ public class InboundContext {
 
     public void setEffectiveLanguage(String effectiveLanguage) {
         this.effectiveLanguage = effectiveLanguage;
+    }
+
+    /** The resolved chat-reply pipeline mode for this dispatch (D79), set once at intake by {@link InboundRouter#onMessage}. */
+    public ChatReplyMode replyMode() {
+        return replyMode;
+    }
+
+    public void setReplyMode(ChatReplyMode replyMode) {
+        this.replyMode = replyMode;
     }
 
     /**

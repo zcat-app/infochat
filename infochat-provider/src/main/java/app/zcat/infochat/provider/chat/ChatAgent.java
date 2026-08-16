@@ -228,6 +228,24 @@ public class ChatAgent {
           + "user's own language is applied after you, by the translation "
           + "pipeline; never switch language to match the user.";
 
+    // Native mode (D79): the scope's declared language is the contract and
+    // no display leg follows; the retrieved context stays English — the
+    // M1-844 EN-context arm — only the reply is written in the scope language.
+    static String nativeReplyDirective(String scopeLanguage) {
+        String name = LANGUAGE_NAMES.getOrDefault(scopeLanguage, scopeLanguage);
+        return "\n\nAlways write your reply in " + name + ", whatever language the "
+             + "user writes in. The retrieved posts stay in English — read them as "
+             + "they are and never rewrite or translate them; only your own reply "
+             + "is written in " + name + ". Never switch language to match the user.";
+    }
+
+    private static final Map<String, String> LANGUAGE_NAMES = Map.of(
+            "en", "English",
+            "cs", "Czech",
+            "es", "Spanish",
+            "ru", "Russian",
+            "tr", "Turkish");
+
     private final InFlightTracker inFlightTracker;
     private final ChatPromptBuilder promptBuilder;
     private final ChatToolDispatcher toolDispatcher;
@@ -549,10 +567,18 @@ public class ChatAgent {
         // 4. Resolve LLM provider for chat task
         LlmProvider provider = llmRouter.forTask(ModelTask.CHAT_AGENT, scopeLanguage);
 
+        // The reply pipeline mode, resolved once at intake and cached on the
+        // context (D79): translate pins English + display leg; native generates
+        // in the scope language and skips the leg. Never flips mid-turn.
+        ChatReplyMode replyMode = inboundContext.replyMode();
+
         // 5. Run multi-turn tool loop. The language pin rides the BASE
         // prompt so both the tool-loop turns and the iteration-cap final
         // call (which is handed baseSystemPrompt alone) inherit it.
-        String baseSystemPrompt = prompt.systemPrompt() + REPLY_LANGUAGE_DIRECTIVE;
+        String languageDirective = replyMode == ChatReplyMode.NATIVE
+                ? nativeReplyDirective(scopeLanguage)
+                : REPLY_LANGUAGE_DIRECTIVE;
+        String baseSystemPrompt = prompt.systemPrompt() + languageDirective;
         String augmentedSystemPrompt = baseSystemPrompt + TOOL_INSTRUCTIONS;
         String finalText = runToolLoop(provider, augmentedSystemPrompt, baseSystemPrompt,
                 prompt.userPrompt() + semanticBlock + turnDirective,
@@ -583,14 +609,14 @@ public class ChatAgent {
         int userTokens = ChatSessionRepository.estimateTokens(userMessage);
         int assistantTokens = ChatSessionRepository.estimateTokens(approved);
 
-        // 9. Translate if scope language is non-en. The persisted assistant
-        // turn is the untranslated `approved` text (chat memory is
-        // English-canonical, like source post bodies); only the delivered
-        // reply is translated.
+        // 9. Translate mode only: the display leg translates the English reply for a
+        // non-en scope; native's generated text IS the delivered text (D79). Persist
+        // keeps the generated text in both modes; canonicity rides the compressor (D79).
         String reply;
         // A blank operand never reaches TranslationPipeline; only a
         // non-blank reply is a translation candidate.
-        if (!"en".equals(scopeLanguage) && !approved.isBlank()) {
+        if (replyMode == ChatReplyMode.TRANSLATE
+                && !"en".equals(scopeLanguage) && !approved.isBlank()) {
             reply = translationPipeline.run(approved, scopeLanguage);
         } else {
             reply = approved;

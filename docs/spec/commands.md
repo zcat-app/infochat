@@ -233,6 +233,7 @@ them to the marked region — doing so would red the build.
 /recover-pool
 /reject-group
 /remove-source
+/reply-mode
 /retry
 /revoke-admin
 /save

@@ -81,6 +81,9 @@ public final class BundleKeys {
     /** Short-help line for {@code /lang}. */
     public static final String HELP_CMD_LANG_SHORT = "help.cmd.lang.short";
 
+    /** Short-help line for {@code /reply-mode}. */
+    public static final String HELP_CMD_REPLY_MODE_SHORT = "help.cmd.reply-mode.short";
+
     /** Short-help line for {@code /clear}. */
     public static final String HELP_CMD_CLEAR_SHORT = "help.cmd.clear.short";
 
@@ -327,6 +330,12 @@ public final class BundleKeys {
 
     /** {@code /lang} examples. */
     public static final String HELP_CMD_LANG_EXAMPLES = "help.cmd.lang.examples";
+
+    /** {@code /reply-mode} usage detail. */
+    public static final String HELP_CMD_REPLY_MODE_USAGE = "help.cmd.reply-mode.usage";
+
+    /** {@code /reply-mode} examples. */
+    public static final String HELP_CMD_REPLY_MODE_EXAMPLES = "help.cmd.reply-mode.examples";
 
     /** {@code /clear} usage detail. */
     public static final String HELP_CMD_CLEAR_USAGE = "help.cmd.clear.usage";
@@ -1397,6 +1406,21 @@ public final class BundleKeys {
      */
     public static final String REPLY_LANG_SUCCESS = "reply.lang.success";
 
+    /** {@code /reply-mode} confirmation for a setting that takes effect; token {@code {0}} = the written mode. */
+    public static final String REPLY_MODE_SUCCESS = "reply.mode.success";
+
+    /** {@code /reply-mode native} confirmation when the (model, language) pair is not cleared: stored either way, resolves translate meanwhile (D79). */
+    public static final String REPLY_MODE_SUCCESS_UNCLEARED = "reply.mode.success.uncleared";
+
+    /** Bare {@code /reply-mode} status read for a stored setting in effect; token {@code {0}} = the stored mode. */
+    public static final String REPLY_MODE_STATUS = "reply.mode.status";
+
+    /** Bare {@code /reply-mode} status read naming a stored native setting the registry does not clear (stored but inactive). */
+    public static final String REPLY_MODE_STATUS_UNCLEARED = "reply.mode.status.uncleared";
+
+    /** Bare {@code /reply-mode} status read for an unset scope; token {@code {0}} = the inherited deployment default. */
+    public static final String REPLY_MODE_STATUS_DEFAULT = "reply.mode.status.default";
+
     /**
      * {@code /lang <code>} unsupported-code reply per spec §Conversation
      * control: "An unsupported code produces a friendly error that lists
@@ -1407,6 +1431,12 @@ public final class BundleKeys {
      * set, not the loaded bundles.
      */
     public static final String ERROR_LANG_UNSUPPORTED_CODE = "error.lang.unsupported_code";
+
+    /** {@code /reply-mode} unsupported-value reply: a friendly error listing {@code translate} and {@code native}, never a silent no-op. */
+    public static final String ERROR_REPLY_MODE_UNSUPPORTED = "error.reply_mode.unsupported";
+
+    /** {@code /reply-mode} in group scope by a caller who is neither a group admin nor the bot admin. */
+    public static final String ERROR_REPLY_MODE_GROUP_ADMIN = "error.reply_mode.group_admin";
 
     /**
      * {@code /lang} in group scope: short-circuit per the M1-054

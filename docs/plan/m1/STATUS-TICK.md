@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 11 |
+| pending | 10 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 76 |
+| done | 77 |
 | deferred | 0 |
 | abandoned | 2 |
 | **total** | **89** |
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-848 — Wire the pivot/direct switch into the chat reply path (complexity: high, risk: high)
+- M1-849 — Stream sanitized chat replies over SimpleX live messages (complexity: high, risk: high)
 - M1-864 — Measure the tag-tree leaf vocabulary on the local model (complexity: high, risk: low)
 - M1-865 — Tag tree schema and deterministic leaf resolution (complexity: medium, risk: medium)
 - M1-871 — Single-source tool catalog for prompts and transports (complexity: medium, risk: medium)
@@ -46,7 +46,6 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-849 — blocked_by: M1-846 (done), M1-847 (done), M1-848 (pending), M1-853 (done)
 - M1-866 — blocked_by: M1-864 (pending), M1-865 (pending), M1-868 (pending)
 - M1-867 — blocked_by: M1-865 (pending), M1-866 (pending)
 - M1-868 — blocked_by: M1-865 (pending)
@@ -79,7 +78,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-856 | Tool prompt: worked example + native-dialect bridge | 2026-08-16 | round 1 APPROVE-WITH-FIXES |
 | M1-855 | SimpleX v7 completion contract on the live bot path | 2026-08-16 | round 1 APPROVE |
 | M1-854 | Recalibrate image preview to real generator output | 2026-08-16 | round 2 APPROVE |
-| M1-846 | Spec: live-text streaming display policy | 2026-08-16 | round 2 APPROVE |
+| M1-848 | Wire the translate/native switch into the chat reply path | 2026-08-16 | round 2 APPROVE-WITH-FIXES |
 
 ---
 
@@ -175,8 +174,8 @@ M1-841 (done)
 M1-844 (done)
   └── M1-845 (done)
         ├── M1-846 (done)
-        │     └── M1-849 (pending)
-        └── M1-848 (pending) ← runnable
+        │     └── M1-849 (pending) ← runnable
+        └── M1-848 (done)
               └── M1-849 (pending) [see above]
 M1-847 (done)
   └── M1-849 (pending) [see above]

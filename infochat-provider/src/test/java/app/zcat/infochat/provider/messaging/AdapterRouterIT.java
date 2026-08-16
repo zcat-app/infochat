@@ -191,6 +191,7 @@ class AdapterRouterIT {
                 + "\n" + bundleLoader.get(BundleKeys.HELP_CMD_SAVED_SHORT)
                 + "\n" + bundleLoader.get(BundleKeys.HELP_CMD_EXPORT_SHORT)
                 + "\n" + bundleLoader.get(BundleKeys.HELP_CMD_LANG_SHORT)
+                + "\n" + bundleLoader.get(BundleKeys.HELP_CMD_REPLY_MODE_SHORT)
                 + "\n" + bundleLoader.get(BundleKeys.HELP_CMD_FORGET_SHORT)
                 + "\n" + bundleLoader.get(BundleKeys.HELP_CMD_STOP_SHORT)
                 + "\n" + bundleLoader.get(BundleKeys.HELP_FOOTER_PROBATION);

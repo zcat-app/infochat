@@ -76,8 +76,9 @@ public class CompressCommandHandler implements CommandHandler {
                     + "AND seq <= ?";
 
     static final String COMPRESS_SYSTEM_PROMPT =
-            "Compress the following conversation into a memory entry. "
-          + "Output EXACTLY in this format with no other text:\n"
+            "Compress the following conversation into a memory entry. Write the "
+          + "summary and keywords in English, whatever language the conversation "
+          + "is in. Output EXACTLY in this format with no other text:\n"
           + "SUMMARY: <brief summary of the conversation in 1-3 sentences>\n"
           + "KEYWORDS: <comma-separated keywords, max 12>\n"
           + "REFERENCES: <comma-separated post UIDs mentioned in the conversation, or NONE>";
