@@ -1,23 +1,21 @@
 ---
 id: M1-871
 title: "Single-source tool catalog for prompts and transports"
-status: pending
+status: done
 created: 2026-08-16
-last_updated: 2026-08-16
+last_updated: 2026-08-17
 flow: tick
 reproduction: >-
   ChatToolCatalogTest#catalogMatchesRegistryNamesAndInstructionLines
-  (to-be-written: child of a 2+ decomposition, analysis
-  docs/plan/m1/tick-analysis/tool-transport-model-independence.md —
-  /tick start converts the marker by writing the test and running it
-  RED before any fix code, workflow §0; it runs red as the M1-847
-  compile-failure shape — the catalog type does not exist). Probe of
+  (converted at /tick start 2026-08-16: test written and run RED as the
+  M1-847 compile-failure shape — the catalog type did not exist).
+  Probe of
   today's wrong posture: nothing
   mechanically forces the tool descriptions to have ONE source — the
-  instruction text is a hand-maintained string (ChatAgent.java:78-106)
+  instruction text is a hand-maintained string (ChatAgent.java:82-110)
   guarded by four hand-written param tests covering 4 of the 7 tools
-  (ChatAgentTest.java:919-960) plus a name-only walk
-  (everyRegisteredToolIsAdvertised, :972-982). The M1-070 drift class
+  (ChatAgentTest.java:988-1029) plus a name-only walk
+  (everyRegisteredToolIsAdvertised, :1042-1051). The M1-070 drift class
   (instructions naming parameters the tools ignore made the surface
   non-functional) is still open: a future arg rename that updates the
   tool but not the string passes every pin today except by accident, and
@@ -53,7 +51,7 @@ out_of_scope:
     assembly changes here.
   - >-
     The worked example line, the tool-plane English sentence, and every
-    non-tool-table region of TOOL_INSTRUCTIONS (ChatAgent.java:79-106) —
+    non-tool-table region of TOOL_INSTRUCTIONS (ChatAgent.java:82-110) —
     only the per-tool lines are rendered from the catalog, byte-identically
     (P2's stop-and-escalate rule).
   - >-
@@ -89,11 +87,23 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-17
+    verdict: APPROVE-WITH-FIXES
+    checks: {spec-truthness: PASS, security: PASS, test-adequacy: PASS, maintainability: WARN, scope: PASS}
+    diff_stats: "7 files, +265/-36 (vs merge-base 37a2294d)"
+    fix_items: 1 (comment-only, applied)
+    probes: "grep 'pre-M1-871' ChatToolCatalog.java -> no match; ./mvnw -B -pl infochat-provider -am test-compile -> SUCCESS"
+    fixed_tree: 97278f1817d1af25d5238e92ccaad45fb00b2668
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-16
+  verdict: PASS
+  warnings: []
+  blockers: []
 escalation_reason:
 ---
 
@@ -102,7 +112,7 @@ escalation_reason:
 ## Context
 
 The chat tool surface describes its seven tools in ONE place only: the
-hand-maintained `TOOL_INSTRUCTIONS` string (ChatAgent.java:78-106). Its
+hand-maintained `TOOL_INSTRUCTIONS` string (ChatAgent.java:82-110). Its
 guards are four hand-written param tests (4 of 7 tools) plus a name-only
 advertising walk — exactly the shape inside which M1-070 shipped
 instructions naming `{query}`/`{limit}` for tools that read
@@ -116,7 +126,7 @@ single-source catalog. Shared analysis: `analysis_ref:`.
 ## Root cause
 
 Verified: no single source exists. The instruction string is literals;
-the parity pins are partial (ChatAgentTest.java:919-982); the M1-664 walk
+the parity pins are partial (ChatAgentTest.java:988-1051); the M1-664 walk
 checks NAMES only, not arg shapes; and nothing links either to a
 machine-readable declaration a wire transport could render. The drift
 class (instruction/tool mismatch) is therefore guarded by review
@@ -226,6 +236,19 @@ The guarded class is "every tool description site". Enumeration:
 | ChatToolRegistry.TOOL_NAMES | guarded — byte-parity test added (item 1) |
 | security.md §Prompt-injection defenses table | out-of-scope — spec surface, unchanged (spec-level parity already CI-gated per verification.md §Security) |
 | ChatToolDispatcher map / tool impls | out-of-scope — runtime boundary, unchanged |
+
+## Review observations
+
+Round-1 reviewer recommendation (recorded, not filed — filing is the
+user's call): the new arg-shape guard pins the catalog against a frozen
+transcription of the tools' parsing, not against the parsing itself —
+renaming the `window` key inside SearchPostsTool.execute to "timeframe"
+would fail nothing in the suite. Natural seam: when M1-872 touches the
+tool-arg parse side, have each tool expose its accepted arg names/types
+as constants and assert the catalog against those constants. The tool
+implementations were out_of_scope for THIS ticket and every mutation of
+the catalog itself is caught, so this is a boundary residual, not a
+missed acceptance.
 
 ## Pre-flight self-check (author-side)
 

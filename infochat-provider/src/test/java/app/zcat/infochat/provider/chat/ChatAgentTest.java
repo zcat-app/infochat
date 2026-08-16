@@ -1050,6 +1050,28 @@ class ChatAgentTest {
         }
     }
 
+    @Test
+    void renderedInstructionTableIsByteIdentical() {
+        String expected = "- searchPosts {\"tags\": [\"tag1\"], \"window\": \"P7D\", \"limit\": 10}"
+                + " — search posts by tags within a time window\n"
+                + "- semanticSearch {\"query\": \"free-text topic\", \"limit\": 10}"
+                + " — find posts semantically or by keyword related to a free-text query\n"
+                + "- getPost {\"uid\": \"post-uid\"} — retrieve a single post by UID\n"
+                + "- getReferences {\"uid\": \"post-uid\"} — get references for a post\n"
+                + "- recallMemory {\"keywords\": [\"keyword1\", \"keyword2\"]}"
+                + " — recall conversation memories by keyword\n"
+                + "- listSaves {\"tags\": [\"tag1\"], \"window\": \"P7D\"}"
+                + " — list saved posts filtered by personal tags within a time window\n"
+                + "- helpLookup {\"query\": \"free-text intent in the user's language\"}"
+                + " — resolve a free-text command intent to a command name plus its one-line"
+                + " description. Use this when the user asks how to do something the commands"
+                + " cover. NEVER restate command syntax from memory; always direct the user to"
+                + " /help <name> for usage and examples. If the tool returns no command, say"
+                + " you do not know and point at /help — do not invent commands.\n\n";
+        assertEquals(expected, ChatToolCatalog.renderInstructionTable(),
+                "the rendered tool table must match the pinned instruction lines byte-for-byte");
+    }
+
     // --- M1-664 / M1-665 boundary pin: no MODEL-ELECTED tool-derived text
     // reaches the delivered reply. The M1-648 r2 redteam regression (medium
     // INJECTION: post-sanitize, model-elected append of privileged command

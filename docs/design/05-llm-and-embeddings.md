@@ -769,6 +769,19 @@ exactly with the following prose preserved, and a native opener with
 neither an argument brace nor `call:` after it is quoted prose and
 preserved.
 
+**Single-source tool catalog (M1-871).** `ChatToolCatalog` is the single
+source for the seven tools' descriptions: `TOOL_INSTRUCTIONS`' per-tool
+table renders from it (pinned byte-identical to the pre-catalog lines by
+`ChatAgentTest`), and each tool carries a JSON-Schema-shaped parameters
+declaration — name, ordered arg types, requiredness — the data a
+tools-bearing wire request renders its declarations from. Name parity
+with the registry allowlist is mechanical in both directions, and each
+tool's declared arg shape is pinned against what the tool actually
+parses, closing the instruction/tool drift class (M1-070). The catalog
+is description tier only: the closed allowlist stays registry-owned
+(security.md §Prompt-injection defenses) and every runtime boundary
+stays in `ChatToolDispatcher`.
+
 ### 5.4.7 /compress (long-term memory)                                                                                                                                                                                                                    
                                                                                  
 prompts/compress.md:                                                                                                                                                                                                                                  
