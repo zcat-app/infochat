@@ -344,6 +344,10 @@ considered untrusted (decision D21):
   byte-for-byte; CI fails on a mismatch in either direction (a name
   added to the registry without a matching spec row, or a spec row
   with no matching registry entry).
+
+  **Transport invariance.** Whatever transport carried a tool call —
+  instructed text protocol or a structured shape — the tool allowlist,
+  argument validation, and per-turn caps apply identically.
 - **Never exposed (forever):** any tool that mutates `users`,                                                                                                                                                                                         
   `group_membership`, `is_admin`, `is_banned`, `audit_log`, `source`,                                                                                                                                                                                 
   `source_subscription`; any tool running arbitrary SQL; any tool sending                                                                                                                                                                             

@@ -62,6 +62,15 @@ The LLM adapter exposes pluggable interfaces (decision D32):
   `LlmProvider` and `EmbeddingProvider` calls so traces stitch
   across the embedding boundary.
 
+**Tool-call transport.** The chat agent's tool-call communication is
+transport-pluggable behind a fixed dispatch boundary: the instructed
+text protocol is the universal fallback any instruct model can learn; a
+structured tools request/response shape is used only where the serving
+endpoint's support is established by detection at resolution time, never
+assumed. Any unknown, unreadable, or rejecting endpoint serves the text
+protocol. The transport is resolved once per task and endpoint, never
+per call.
+
 The router lets operators configure each `LlmProvider` task
 independently:
 

@@ -1,9 +1,9 @@
 ---
 id: M1-873
 title: "Record the tool-call transport architecture in spec"
-status: pending
+status: done
 created: 2026-08-16
-last_updated: 2026-08-16
+last_updated: 2026-08-17
 flow: tick
 reproduction: >-
   Probe (evidence/spec ticket; no test can exist for an absent rule —
@@ -72,11 +72,28 @@ abandoned_reason:
 spec_amend_for: docs/spec/llm.md §SPI shape
 spec_amend_parent: M1-872
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-17
+    verdict: APPROVE
+    checks: {spec-truthness: PASS, security: PASS, test-adequacy: NOT-APPLICABLE, maintainability: PASS, scope: PASS}
+    diff_stats: "4 files, +80/-10 (vs merge-base 552c7590)"
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check: >-
+  start 2026-08-17 pass — tick-lint 0 findings; reproduction probe re-run
+  RED (grep -n 'transport' docs/spec/llm.md → rc=1); citations verified
+  (llm.md :282 helpLookup, :493-496 recall tool, :653 trace ids, §SPI
+  shape :27; security.md :313-346 allowlist + validation, :772-777
+  detector-ordering); parity suites present
+  (ChatToolAllowlistSpecParityTest, DocumentedConfigKeyParityTest);
+  analysis cross-read — pitfalls P1/P16 carried, P15 honored, P9 (single
+  resolution) and P13 (sequential landing) noted; blocked_by empty;
+  parallel module boundary: only M1-875 in-flight (infochat-provider,
+  migration_touch false), M1-873 touches no Maven module (spec-only) —
+  no overlap, worktree .opencode/worktrees/M1-873 on
+  m1/M1-873-tool-transport-spec-amend
 escalation_reason:
 ---
 
@@ -146,6 +163,70 @@ wording).
 - **Pitfall→mitigation:** P1→dedicated-amendment lineage + item 6's
   diff probe; P16→items 3-4 (probe + approval exchange).
 
+## Approval exchange (acceptance item 4, recorded verbatim)
+
+Presented 2026-08-17 to the user (engineering-rules §12), with a
+plain-English account of what each sentence commits:
+
+- llm.md §SPI shape — **Tool-call transport.** The chat agent's
+  tool-call communication is transport-pluggable behind a fixed
+  dispatch boundary: the instructed text protocol is the universal
+  fallback any instruct model can learn; a structured tools
+  request/response shape is used only where the serving endpoint's
+  support is established by detection at resolution time, never
+  assumed. Any unknown, unreadable, or rejecting endpoint serves the
+  text protocol. The transport is resolved once per task and endpoint,
+  never per call.
+- security.md §Prompt-injection defenses — **Transport invariance.**
+  Whatever transport carried a tool call — instructed text protocol or
+  a structured shape — the tool allowlist, argument validation, and
+  per-turn caps apply identically.
+
+The user's reviewer verified the proposal against the ticket, both
+insertion points, the cited analysis, and M1-872: ticket-authorized
+(items 1-2), placement safe (both spots outside the tool-allowlist
+markers), §12 clean, P16 honored, vocabulary grounded — with two
+reminders: the approval exchange must be recorded verbatim (this
+entry) and the parity suites + mvn verify must postdate the edit.
+
+The user approved both blocks as proposed, exactly as worded above.
+Recorded verbatim, the user's words were: "approved with comments in
+review" — the comments being the reviewer's two reminders, both
+honored here.
+
+## Implementation note (acceptance item 5 probe deviation)
+
+The item-5 probe command as literally written (`mvn -pl
+infochat-provider -am test -Dtest='ChatToolAllowlistSpecParityTest,
+DocumentedConfigKeyParityTest'`) is un-runnable in this repo: the
+parent pom.xml:240 hardcodes `<failIfNoTests>true</failIfNoTests>`
+(M1-446 tripwire), which beats every CLI `-Dtest` flag, so
+infochat-core's surefire run matches nothing and fails. Ran the
+memory-prescribed legal route instead: the full-suite
+`scripts/verify-serialized.sh` (captured to
+target/tick-test-M1-873-r1.log, finished 2026-08-17T01:32:48+02:00 —
+postdates the spec edit) ran both parity classes green:
+ChatToolAllowlistSpecParityTest 2/2, DocumentedConfigKeyParityTest
+3/3, 0 failures. The acceptance's "green-log freshness" phrasing is
+satisfied by this run.
+
+## Implementation note (MERGE-VERIFY-SKIP, driver-directed)
+
+2026-08-17: merge.md's staleness recovery requires a full re-verify of
+each rebased tree. Main advanced THREE times while this branch sat in
+review — M1-865 (affacbe3), M1-875 (36d034fb) + the M1-876/877/878
+process filing (0a629b3c, re-hashed to 382516c6 by the main session).
+Each of the three rebases' conflict set was exactly the STATUS-TICK.md
+board regen (deterministic); no non-docs/plan diff change at any step.
+The driver explicitly chose to skip the post-third-rebase re-verify
+(user decision 2026-08-17, "merge without verify"; the M1-828
+MERGE-VERIFY-SKIP precedent). Attestations carried into the merge: r1
+(target/tick-test-M1-873-r1.log — tree-identical short-circuit, BUILD
+SUCCESS) and r2 (target/tick-test-M1-873-r2.log — fresh full suite
+against the post-first-rebase tree, BUILD SUCCESS, finished
+2026-08-17T01:54:58+02:00). The diff's only build input is two spec
+files whose content no main commit touched.
+
 ## Definition of done
 
 Both rule-text additions landed under user approval; the no-citation
@@ -180,3 +261,13 @@ block and the one security.md sentence.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-873-tool-transport-spec-amend.md
 ```
+
+## Review observations (round 1, recorded per the gate's RECOMMENDED-NEW-TICKET)
+
+- Stale sequencing sentence in M1-856's review record
+  (M1-856-toolprompt-and-bridge.md:277-280 still says the brace-less-strip
+  refinement "is to be filed via /tick analyze BEFORE M1-858 runs" — the
+  obligation is already satisfied: M1-858 ran, M1-870 landed the
+  refinement and is `done`). Pre-existing process-doc prose, cosmetic,
+  catalogued as discrepancy D4 by the shared analysis. Recorded for the
+  user's reading; filing a cleanup ticket is the user's call.
