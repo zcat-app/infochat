@@ -45,6 +45,18 @@ sudo sysctl -w net.ipv4.ip_local_port_range="32768 39999"
 - `verify-serialized.sh`'s original premise (header + Jul 30 split file)
   was that the daemon honors its netns port range and only the split
   direction mattered; on rootless docker that premise is false.
+- "Drain-holding" a port band with a userspace squatter (burned
+  2026-08-16, `/tmp/opencode/drain-ports.py`): an agent bound+listened
+  ALL 7,232 ports of the host's 32768-39999 band to "steer rootlesskit's
+  draws up" — but rootlesskit already draws 40000+ and never touches the
+  low band. What DOES live in the low band is the host kernel's ephemeral
+  allocation for `bind(0)` — test mock servers (`SseMockServer`),
+  Testcontainers clients, everything. Result: total ephemeral exhaustion;
+  every port-0 bind in the verify JVMs died `BindException: Address
+  already in use` (10 tests, infochat-llm-adapter, failure BEFORE any
+  test logic — same environment-failure class as the Ryuk collision,
+  different mechanism). Diagnosis: `ss -tlnp` shows thousands of LISTEN
+  sockets held by one pid. Fix: kill the squatter; never "hold" ports.
 
 **The only trustworthy probe — ask docker itself** (the allocator is what
 matters, not any sysctl's opinion):

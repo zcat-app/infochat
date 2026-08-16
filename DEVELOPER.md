@@ -313,7 +313,11 @@ docker rm -f "$id"
 Durable fix: `/etc/sysctl.d/99-docker-port-split.conf` must carry the SAME
 direction (`32768 39999`) — its original `40000 60999` direction re-arms the
 race at reboot. `scripts/verify-serialized.sh` warns at verify start when the
-host band overlaps the docker publish band.
+host band overlaps the docker publish band, and fails fast when the host band
+itself is saturated by LISTEN sockets (2026-08-16: an agent's userspace
+"drain-ports" squatter held all 7,232 host ports and every `bind(0)` in the
+test JVMs died with `BindException` — same environment class, different
+mechanism; the guard names the offending pid so you can kill it and re-run).
 
 ### Known flaky integration tests
 

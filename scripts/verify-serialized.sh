@@ -13,7 +13,8 @@
 # they overlap by default (both 32768-60999) and rootlesskit's real
 # host-side bind then loses to a test JVM that already holds the port —
 # `RootlessKit PortManager.AddPort(): bind: address already in use`.
-# Split them (host side moved to 40000-60999 in
+# Split them (host side moved to 32768-39999 — rootlesskit's publish band
+# is fixed at ~40000-60999 and NOT sysctl-steerable — in
 # /etc/sysctl.d/99-docker-port-split.conf) before raising SLOT_COUNT.
 #
 # The slot lockfiles live in the git common dir, which every worktree of
@@ -71,8 +72,31 @@ common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
 # .agents/memory/rootless-docker-port-split.md, DEVELOPER.md §Troubleshooting.
 host_lo="$(awk '{print $1}' /proc/sys/net/ipv4/ip_local_port_range 2>/dev/null || true)"
 host_hi="$(awk '{print $2}' /proc/sys/net/ipv4/ip_local_port_range 2>/dev/null || true)"
-if [ -n "$host_lo" ] && [ -n "$host_hi" ] && [ "$host_lo" -ge 40000 ]; then
+if [ -n "$host_lo" ] && [ -n "$host_hi" ] && [ "$host_hi" -ge 40000 ]; then
     echo "verify-serialized: WARNING: host ephemeral port range ($host_lo-$host_hi) overlaps rootless docker's fixed publish band (~40000-60999) — container publishes will race outbound sockets (random 'address already in use' IT failures). Live fix (sudo): sysctl -w net.ipv4.ip_local_port_range=\"32768 39999\" — and align /etc/sysctl.d/99-docker-port-split.conf (its original direction is inverted for rootless docker; see the memory entry)." >&2
+fi
+
+# Host-band saturation check (2026-08-16 incident): a userspace squatter
+# (an agent's "drain-ports" experiment) bound+listened the ENTIRE host
+# ephemeral band 32768-39999, so every bind(0) in the test JVMs failed
+# with BindException — 10 surefire errors, suite red 2 minutes in. The
+# split only protects docker's publish side; nothing protects the host
+# band itself from a process squatting it. Legit daemons listen on fixed
+# well-known ports, so a large count of LISTEN sockets inside the
+# ephemeral band is unambiguous breakage. Fail fast (exit 1) naming the
+# top offenders — a verify under a saturated band is guaranteed-red and
+# the warning would just scroll by in the log. Threshold 25% of the band:
+# normal hosts show single digits, the 2026-08-16 squatter held ~7000.
+if [ -n "$host_lo" ] && [ -n "$host_hi" ] && command -v ss >/dev/null 2>&1; then
+    held="$(ss -tlnH 2>/dev/null | awk -v lo="$host_lo" -v hi="$host_hi" '{p=$4; sub(/.*:/,"",p); if (p+0>=lo && p+0<=hi) c++} END {print c+0}')"
+    band_size=$((host_hi - host_lo + 1))
+    if [ "$((held * 4))" -gt "$band_size" ]; then
+        echo "verify-serialized: ERROR: $held of $band_size host ephemeral ports ($host_lo-$host_hi) are held by LISTEN sockets — bind(0) will fail and the suite is guaranteed-red. Top holders:" >&2
+        ss -tlnpH 2>/dev/null | awk -v lo="$host_lo" -v hi="$host_hi" '{p=$4; sub(/.*:/,"",p); if (p+0>=lo && p+0<=hi) print}' \
+            | grep -oE '"[^"]+",pid=[0-9]+' | sort | uniq -c | sort -rn | head -3 >&2 || true
+        echo "verify-serialized: kill the squatter (2026-08-16's was an agent's /tmp drain-ports.py — see .agents/memory/rootless-docker-port-split.md), then re-run." >&2
+        exit 1
+    fi
 fi
 
 # One lockfile per slot, each on its own descriptor. The descriptors stay
