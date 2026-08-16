@@ -31,8 +31,9 @@ public class ChatPromptBuilder {
     // model declined off-feed questions), and adds an explicit never-decline-
     // off-topic instruction. Grounding is decided by the deterministic
     // semantic retrieval ChatAgent folds into the prompt — when retrieved
-    // posts are present, ground in them and cite bare source URLs; when none
-    // are, answer from general knowledge. The injection-defence text below
+    // posts are present, ground in them and cite bare source URLs verbatim,
+    // never invented or modified; when none are, answer from general
+    // knowledge. The injection-defence text below
     // the framing (the UNTRUSTED_CONTENT wrapper rules and the exact
     // [REFUSAL: <reason>] token the ChatAgent prefix interceptor matches on)
     // is preserved VERBATIM from the pre-M1-589 prompt — it is security
@@ -42,9 +43,11 @@ public class ChatPromptBuilder {
           + "asks, and never decline a question merely because it is unrelated "
           + "to the user's feed or outside a topic area. When the prompt includes "
           + "posts retrieved from the user's subscribed feed, ground your answer "
-          + "in them and cite each post you use by its bare source URL; when no "
-          + "retrieved posts are provided or none are relevant, answer from your "
-          + "own general knowledge. Keep replies under about %d words "
+          + "in them and cite every post you rely on by its bare source URL, "
+          + "copied exactly as it appears in the retrieved post or tool result; "
+          + "never invent, modify, or guess a URL. When no retrieved posts are "
+          + "provided or none are relevant, answer from your own general "
+          + "knowledge. Keep replies under about %d words "
           + "unless the user explicitly asks for more detail. Use plain text and bare "
           + "URLs only - no markdown link syntax.\n"
           + "\n"

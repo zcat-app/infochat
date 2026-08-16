@@ -1,12 +1,12 @@
 ---
 id: M1-857
 title: "Citation-discipline wording on grounded and tool-result turns"
-status: pending
+status: done
 created: 2026-08-16
 last_updated: 2026-08-16
 flow: tick
 reproduction: >-
-  to-be-written: ChatAgentTest#aToolResultTurnCarriesTheCitationDemand
+  ChatAgentTest#aToolResultTurnCarriesTheCitationDemand
   (child of a 2+ decomposition, analysis
   docs/plan/m1/tick-analysis/tool-loop-hardening.md). Probe of today's
   wrong behavior: grep -n 'G5\|citation'
@@ -17,7 +17,7 @@ reproduction: >-
   while the framing's existing "cite each post you use by its bare
   source URL" (ChatPromptBuilder.java:44-46) demonstrably does not
   produce citations, and the loop's post-result instruction line
-  (ChatAgent.java:835) demands none.
+  (ChatAgent.java:835) demands none. Written and run RED at start.
 analysis_ref: docs/plan/m1/tick-analysis/tool-loop-hardening.md
 blocked_by: []
 files_scope:
@@ -88,7 +88,14 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-16
+    verdict: APPROVE-WITH-FIXES
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY WARN, SCOPE PASS"
+    diff_stats: "7 files changed, 124 insertions(+), 16 deletions(-) as reviewed; 125 insertions after the applied comment-only fix"
+    findings: "0 rework items; 0 critical/high; 1 low MAINTAINABILITY (comment line at ChatPromptBuilder.java:35 un-wrapped to 113 cols) — applied as the verdict's FIX ITEM: re-wrapped into two ~80-col comment lines. Probe `grep -nE '^.{101,}$' ChatPromptBuilder.java` returns no matches; `./mvnw -B -pl infochat-provider -am test-compile` BUILD SUCCESS. 3 candidate findings falsified-and-dropped (missing fifth test — defeated by acceptance items 1-5 naming exactly four new tests; URL-copy injection — defeated by write-boundary allowlist + pre-existing framing; article-led test names — pinned verbatim by reproduction contract). Fixes tree snapshot: .scratch/tick-fixes-M1-857.tree (6bbfdb0)"
+    verdict_file: .scratch/tick-review-M1-857-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []

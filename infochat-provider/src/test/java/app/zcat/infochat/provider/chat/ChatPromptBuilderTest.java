@@ -90,6 +90,28 @@ class ChatPromptBuilderTest {
                 "the restrictive tag-only news-bot framing must be gone");
     }
 
+    // The strengthened framing: a bare-URL citation for EVERY relied-on
+    // post, verbatim from the retrieved post or tool result, and an explicit
+    // ban on constructing or altering URLs.
+    @Test
+    void strengthenedFramingDemandsVerbatimBareUrlCitations() {
+        ChatPromptBuilder builder = new ChatPromptBuilder(
+                noOpPreFetcher(), emptyRepository(), TOKEN_BUDGET, DEFAULT_MAX_TOKENS);
+
+        ChatPromptBuilder.BuiltPrompt prompt =
+                builder.build(USER_ID, "dm", USER_ID, "test");
+
+        String sp = prompt.systemPrompt();
+        assertTrue(sp.contains("cite every post you rely on by its bare source URL"),
+                "the framing must demand a bare-URL citation for every relied-on post");
+        assertTrue(sp.contains(
+                        "copied exactly as it appears in the retrieved post or tool result"),
+                "the framing must bind cited URLs verbatim to the retrieved post "
+                        + "or tool result");
+        assertTrue(sp.contains("never invent, modify, or guess a URL"),
+                "the framing must forbid constructing or altering a URL");
+    }
+
     // M1-690: the framing must no longer declare a topic scope a model can
     // read as a restriction, and must explicitly tell the model not to
     // decline merely because a question is off-feed. Pinned so the behavior

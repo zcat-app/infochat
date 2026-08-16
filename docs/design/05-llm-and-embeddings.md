@@ -734,6 +734,24 @@ chat output and routes through the normal sanitize + per-scope translate
 path like any other reply — so it is translation-safe without a new
 en/cs bundle key (D43's bilateral-keyset rule has nothing new to cover).
 
+**Citation-discipline wording (M1-857).** Two prompt sites, both FIXED bot
+instructions in the trusted region, demand that a relied-on post is cited
+by its bare source URL and that URLs are never invented or modified:
+(1) the framing sentence in `ChatPromptBuilder.CHAT_SYSTEM_PROMPT_TEMPLATE`
+demands a bare-URL citation for every post the answer relies on, copied
+exactly as it appears in the retrieved post or tool result, and forbids
+inventing, modifying, or guessing a URL; (2)
+`ChatAgent.POST_TOOL_RESULT_INSTRUCTION` — the post-tool-result
+instruction line that closes every model-initiated tool turn — repeats the
+demand bound to the tool-returned set ("exactly as the tool result
+provided it"). Both refer to posts abstractly and embed no feed-derived
+literal (the CLARIFY/AFFORDANCE hygiene posture above); neither duplicates
+`REPLY_LANGUAGE_DIRECTIVE` (the single source). A
+marginal-grounding clarify turn asks a narrowing question, so no citation
+demand fires on its per-turn prompt; the framing's demand is conditional
+on the answer relying on posts. The wording's effect on the G5 citation
+metric is the tool-loop re-measure campaign's subject, not asserted here.
+
 ### 5.4.7 /compress (long-term memory)                                                                                                                                                                                                                    
                                                                                  
 prompts/compress.md:                                                                                                                                                                                                                                  

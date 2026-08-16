@@ -282,6 +282,66 @@ class ChatAgentTest {
                 "Tool result must be wrapped in UNTRUSTED_CONTENT close delimiter");
     }
 
+    @Test
+    void aToolResultTurnCarriesTheCitationDemand() {
+        // Reproduction (M1-857): a model tool-call turn's post-tool-result
+        // prompt — the last instruction the model sees before answering —
+        // must carry the citation demand.
+        llmProvider.responses.add(
+                new LlmResponse("TOOL_CALL: getPost {\"uid\": \"abc\"}"));
+        llmProvider.responses.add(
+                new LlmResponse("Here is the post summary."));
+
+        agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "what did that post say");
+
+        String postResultPrompt = llmProvider.lastUserPrompt;
+        assertTrue(postResultPrompt.contains("Cite each post you rely on by its bare source URL"),
+                "the post-tool-result prompt must demand a bare-URL citation "
+                        + "for each relied-on post");
+        assertTrue(postResultPrompt.contains("exactly as the tool result provided it"),
+                "the demand must bind cited URLs verbatim to the tool-returned set");
+        assertTrue(postResultPrompt.contains("never invent or modify a URL"),
+                "the demand must forbid inventing or modifying URLs");
+        int demandStart = postResultPrompt.indexOf("Cite each post you rely on");
+        int wrapperClose = postResultPrompt.lastIndexOf("<<<END id=\"");
+        assertTrue(demandStart > wrapperClose,
+                "the citation demand rides the trusted region, after the "
+                        + "untrusted tool-result wrapper");
+    }
+
+    @Test
+    void aClarifyTurnCarriesNoCitationDemand() {
+        // A marginal-grounding CLARIFY turn (0.62 < 0.65) asks a narrowing
+        // question that cites nothing; its per-turn prompt must not carry
+        // the citation demand.
+        semanticSearchResult =
+                "[{\"uid\":\"p1\",\"title\":\"A\",\"url\":\"https://e.x/1\",\"similarity\":0.62}]";
+        llmProvider.responses.add(new LlmResponse("Did you mean X or Y?"));
+
+        agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "tell me about it");
+
+        assertTrue(llmProvider.lastUserPrompt.contains(ChatAgent.CLARIFY_DIRECTIVE),
+                "the turn must be a marginal-grounding clarify turn");
+        assertFalse(llmProvider.lastUserPrompt.contains(
+                        ChatAgent.POST_TOOL_RESULT_INSTRUCTION),
+                "a clarify turn's per-turn prompt must not carry the citation demand");
+    }
+
+    @Test
+    void citationWordingNeverQuotesPostContent() {
+        // The citation wording is trusted-region prose: it refers to posts
+        // abstractly and never embeds a feed-derived literal, so no untrusted
+        // post body can ride the instruction itself.
+        String framing = ChatPromptBuilder.CHAT_SYSTEM_PROMPT_TEMPLATE;
+        String postResult = ChatAgent.POST_TOOL_RESULT_INSTRUCTION;
+        for (String wording : List.of(framing, postResult)) {
+            assertFalse(wording.contains("://"),
+                    "the citation wording must embed no URL literal: " + wording);
+            assertFalse(wording.contains("http"),
+                    "the citation wording must embed no URL scheme: " + wording);
+        }
+    }
+
     // --- M1-589: digest-first semantic retrieval, dispatched
     // deterministically on EVERY turn (the D28 pre-fetch pattern) — never
     // left to the model to choose. ---

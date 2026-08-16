@@ -93,6 +93,14 @@ public class ChatAgent {
           + "your final answer as plain text. Do NOT call a tool and provide a "
           + "final answer in the same response.";
 
+    // Last trusted instruction before the answer on every model-initiated
+    // tool turn: the citation demand binds cited URLs verbatim to the
+    // tool-returned set and forbids invention or modification.
+    static final String POST_TOOL_RESULT_INSTRUCTION =
+            "Please provide your response based on the tool result above. "
+          + "Cite each post you rely on by its bare source URL exactly as "
+          + "the tool result provided it, and never invent or modify a URL.";
+
     // M1-618 conversational-refinement: the similarity (1 - cosine distance)
     // a retrieved post's strongest match must reach for the grounding to
     // count as CONFIDENT. Below it the best match is only marginally related,
@@ -832,7 +840,7 @@ public class ChatAgent {
             conversation.append("\n\nAssistant: ").append(text);
             conversation.append("\n\nTool result for ").append(toolName).append(":\n");
             conversation.append(wrappedResult);
-            conversation.append("\n\nPlease provide your response based on the tool result above.");
+            conversation.append("\n\n").append(POST_TOOL_RESULT_INSTRUCTION);
         }
 
         // Exceeded iteration cap — final call uses base system prompt (without
