@@ -915,6 +915,39 @@ forces a paired sanitizer update; this makes "admin commands
 never leak through LLM output" a structural property of the
 codebase rather than a discipline.
 
+**Streamed surfaces.** When a chat-mode reply is revealed progressively
+(live-text streaming, `messaging.md` §Progress notifications), the
+regime above extends to the streamed surface unchanged in strength:
+
+- Every transmitted live update is the sanitizer's output over the FULL
+  generated prefix — never an incrementally transformed delta. Pass
+  ordering and deletion-join coverage therefore hold on-stream by
+  construction: a token assembled across chunk boundaries is seen whole
+  by the closed-list pass before the update ships, and every update
+  inherits the canonical-form match set and the `](`-free outbound
+  property.
+- The first live update is held back until the trimmed generated prefix
+  either matches the structured-refusal marker — the refusal degrade
+  fires and nothing was displayed — or is provably past it. Fail-closed:
+  while the question is undecided, nothing is published.
+- Tool-protocol text is never transmitted: an iteration that ends in a
+  tool call never leaves its text displayed; the display reverts to the
+  localized stage label and the next iteration streams from empty.
+- The audit commitment aggregates per TURN, not per update: one row per
+  distinct token carrying the exact occurrence count — counted, never
+  throttled — aggregated into a single row-set per turn, covering the
+  final text PLUS any token matched only in a transient update. An
+  audit-write failure aborts the stream to the failure terminal; a live
+  update never ships without its audit trail.
+- Accepted residuals of the streamed surface, stated explicitly: a
+  transient sanitized intermediate text may differ from the final
+  delivered text; a redaction can appear in an early update while the
+  final text redacts differently; screenshots capture transient states;
+  and streamed display shows text the emptied-reply degrade has not yet
+  judged. The terminal finalize carries the full post-pipeline text
+  (`messaging.md` §Progress notifications), so the FINAL delivered
+  bytes carry every gate.
+
 ## Authorization model
 
 Two admin tiers (decision D9):

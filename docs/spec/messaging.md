@@ -183,6 +183,12 @@ Every adapter implements:
 - `supportsMessageEdit` — required for in-place progress updates.
 - `minEditInterval` — adapter-imposed floor between edits on the same                                                                                                                                                                                 
   message; the progress notifier honors `max(adapterMin, system floor)`.
+- `supportsLiveText` — true when the adapter can reveal an in-flight
+  message body progressively through the same in-place update channel
+  (SimpleX live messages). The progress notifier's live-text publisher
+  mode gates on it (§Progress notifications). SimpleX declares true;
+  Signal declares false; an unknown flag defaults to not-supported
+  (this section's own rule).
 - `supportsTypingIndicator` — drives the typing-on/off pulses around
   long-running requests.
 - `supportsMentionByContactId` — true when the adapter's protocol
@@ -272,6 +278,41 @@ Constraints:
   `send` of the completed text. Business logic does not change. The                                                                                                                                                                                   
   caller does not know which transport it has.
 - Short, deterministic SQL commands bypass the notifier entirely.
+
+**Live-text publisher mode.** When live-text streaming is enabled, the
+chat-agent reply is revealed progressively in its placeholder instead
+of stage labels alone. Eligibility — every condition must hold:
+
+- the operator enable key `infochat.chat.live-text` is on (default
+  off);
+- the adapter declares `supportsLiveText`;
+- the scope is a DM;
+- the reply's generated language is its delivered language — every
+  `en` scope, and non-`en` scopes resolved to native mode (`llm.md`
+  §Translation flow).
+
+Cadence: live updates ride the existing coalescing —
+`max(adapterMin, system floor)` — and chunked updates on the order of
+one second are the ceiling; token-level smoothness is never promised.
+Each live update is a full message at the transport layer, drawing the
+same budget as any other outbound message, so the cadence honors the
+transport's economics, not the generator's token rate.
+
+Terminal rule: the finalize carries the FULL post-pipeline text —
+sanitizer, tool-protocol strip, refusal intercept, the translate-mode
+display leg where it applies, the deterministic help-block and
+emptied-reply degrade, and the provenance append — byte-identical to
+the non-streaming path for the same generated text. The finalize is
+never the last streamed prefix.
+
+Collapse: any eligibility condition failing degrades the scope to the
+stage-label behavior above, exactly; business logic does not change
+and the caller does not know which transport it has.
+
+The enable key is a capability gate on the D73 precedent, not a
+feature flag: off is today's behavior exactly and remains a supported
+deployment posture; streaming is SimpleX-only and DM-first (Signal
+declares no live-text capability; group scopes are not eligible).
 
 The exact event names, edit interval floor, and localization-bundle
 structure live in design notes.
