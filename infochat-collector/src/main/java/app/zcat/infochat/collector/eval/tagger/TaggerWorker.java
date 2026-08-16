@@ -253,6 +253,12 @@ public class TaggerWorker {
     NoTagsRateMonitor noTagsRateMonitor;
 
     @Inject
+    MiscShareMonitor miscShareMonitor;
+
+    @Inject
+    TagTreeResolver tagTreeResolver;
+
+    @Inject
     PartitionScan partitionScan;
 
     // The scan-window floor is computed in Java from the injected Clock and
@@ -401,6 +407,12 @@ public class TaggerWorker {
         // bootstrap fallback already alarms under its own error class.
         noTagsRateMonitor.record(
             outcome.outcome() == Outcome.LLM && outcome.tags().isEmpty());
+        // Same post-write discipline as the no-tags rate above; a
+        // bootstrap fallback counts as NOT misc (it alarms under its own
+        // class). The misc share is decision 5's vocabulary-growth trigger.
+        miscShareMonitor.record(
+            outcome.outcome() == Outcome.LLM
+                && outcome.tags().equals(List.of(MiscShareMonitor.MISC_LEAF)));
     }
 
     /**
@@ -416,7 +428,7 @@ public class TaggerWorker {
         AttemptResult first = tryOnce(provider, row, primaryPromptTemplate, /* attempt */ 1);
 
         if (isAnswered(first.kind())) {
-            return new TaggerOutcome(Outcome.LLM, first.validTags());
+            return llmOutcome(first.validTags());
         }
 
         // Decide the retry shape from the first-attempt failure mode.
@@ -449,7 +461,7 @@ public class TaggerWorker {
         }
 
         if (isAnswered(second.kind())) {
-            return new TaggerOutcome(Outcome.LLM, second.validTags());
+            return llmOutcome(second.validTags());
         }
 
         // Second failure on any path → bootstrap-fallback audit log +
@@ -463,7 +475,14 @@ public class TaggerWorker {
             ERROR_CLASS_TAGGER_FALLBACK,
             "Tagger fallback to bootstrap_tags for post_id=" + row.id()
                 + " (first=" + first.kind() + " second=" + second.kind() + ")");
-        return new TaggerOutcome(Outcome.BOOTSTRAP, row.bootstrapTags());
+        return new TaggerOutcome(Outcome.BOOTSTRAP, row.bootstrapTags(), List.of());
+    }
+
+    /** LLM terminal: resolve the validated, capped set to ONE stored leaf (identity passthrough pre-seed, M1-865 P6); losers ride the record for M1-868 — dropped until then. The bootstrap path never resolves. */
+    private TaggerOutcome llmOutcome(List<String> validTags) {
+        TagTreeResolver.Resolution resolution =
+            tagTreeResolver.resolve(validTags, tagVocabulary.tree());
+        return new TaggerOutcome(Outcome.LLM, resolution.stored(), resolution.losers());
     }
 
     /**
@@ -919,9 +938,11 @@ public class TaggerWorker {
      * Result of the three-surface fallback chain. {@link Outcome#LLM}
      * means the LLM produced a usable tag set; {@link Outcome#BOOTSTRAP}
      * means both attempts failed and the source's bootstrap tags are
-     * the audit-fallback set.
+     * the audit-fallback set. {@code losers} carries the resolution's
+     * losing leaves for the Tier-2 candidate array (M1-868); always
+     * empty for BOOTSTRAP, whose tags never pass through the resolver.
      */
-    private record TaggerOutcome(Outcome outcome, List<String> tags) {
+    private record TaggerOutcome(Outcome outcome, List<String> tags, List<String> losers) {
     }
 
     private enum Outcome { LLM, BOOTSTRAP }

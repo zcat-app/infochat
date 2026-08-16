@@ -23,7 +23,7 @@ analysis_ref: docs/plan/m1/tick-analysis/tag-tree-taxonomy-v2.md
 blocked_by:
   - M1-865
 files_scope:
-  - infochat-core/src/main/resources/db/migration/V82__post_tag_candidates.sql
+  - infochat-core/src/main/resources/db/migration/V83__post_tag_candidates.sql
   - infochat-collector/src/main/java/app/zcat/infochat/collector/eval/tagger/TaggerWorker.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/tagger/TagCandidatesCaptureTest.java
 complexity: low
@@ -52,7 +52,7 @@ out_of_scope:
     tags/tagger flags are unaffected); test_plan.modifies is empty.
 acceptance:
   - "TagCandidatesCaptureTest.resolutionLosersLandInTagCandidates (the converted reproduction) passes: a stubbed LLM reply whose validated proposals span multiple tops (e.g. football+europe) persists the resolved winner in post.tags AND the losing leaves in the new post.tag_candidates array — captured from the SAME reply with zero additional LLM calls (decision 1: the losers already exist in model output) (spec: docs/spec/schema.md §Posts and derivatives as amended by M1-869; decision D5 Tier-1/Tier-2 pattern)."
-  - "V82 (next free number at start; after M1-865's V81) adds post.tag_candidates TEXT[] NOT NULL DEFAULT '{}' via ALTER on the partitioned parent (the V66 precedent — columns propagate to every child partition; no GRANT change: post's existing per-role grants cover it) — pinned by a @QuarkusTest on the Flyway-migrated schema asserting the column, its DEFAULT, and that the GIN index strategy mirrors idx_post_tags_gin only if a query needs it (no index without a reader — engineering-rules §7, no machinery ahead of need) (analysis P15)."
+  - "V83 (next free number at start; M1-848 landed V81, M1-865 landed V82) adds post.tag_candidates TEXT[] NOT NULL DEFAULT '{}' via ALTER on the partitioned parent (the V66 precedent — columns propagate to every child partition; no GRANT change: post's existing per-role grants cover it) — pinned by a @QuarkusTest on the Flyway-migrated schema asserting the column, its DEFAULT, and that the GIN index strategy mirrors idx_post_tags_gin only if a query needs it (no index without a reader — engineering-rules §7, no machinery ahead of need) (analysis P15)."
   - "The write rides the SAME atomic cursor UPDATE as tags + tagger_done + tagger_fallback (TaggerWorker.persistCursor's single statement, the Invariant-5 discipline — M1-034a/M1-726): a crash can never leave candidates written without the cursor, or vice versa; the sweep path (processOne reuse) writes candidates identically on re-tagged posts — pinned by a test asserting one statement moves all four fields and by the existing TaggerWorkerIT suite staying green (spec: docs/spec/llm.md §Failure handling (recap))."
   - "Bounded (M1-328 discipline re-derived for the new unit), pinned by TagCandidatesCaptureTest.capOverflowKeepsFirstEmittedLosersAndLogsDropCount: the array holds at most MAX_TAGS_PER_POST distinct losing leaves, in emission order, duplicates-after-normalization dropped; overflow is counted and logged on the existing tagger_partial_valid line's pattern (observable, not silent) — the failure-mode test stubs a reply proposing the winner plus > cap distinct valid losers, asserts exactly cap candidates persist in emission order, and asserts the drop count is logged (analysis P15)."
   - "Outcome-map pinned: LLM empty-proposal (NO_TAGS) writes candidates='{}' (nothing was proposed); BOOTSTRAP fallback writes candidates from the failed attempts' validated losers if any, else '{}' — pinned by tests for both paths, asserting the array never contains the Tier-1 winner or any non-leaf (analysis P15)."
@@ -124,12 +124,12 @@ resolution time and is discarded.
 
 ## Approach
 
-- **Files to touch:** V82 migration (the column), TaggerWorker
+- **Files to touch:** V83 migration (the column), TaggerWorker
   (candidates into the cursor UPDATE; outcome map), the new test class.
 - **Steps, in order:**
   1. Convert the reproduction marker: write
      `resolutionLosersLandInTagCandidates`, run RED (no column).
-  2. V82: ALTER post ADD COLUMN tag_candidates TEXT[] NOT NULL DEFAULT
+  2. V83: ALTER post ADD COLUMN tag_candidates TEXT[] NOT NULL DEFAULT
      '{}' (parent ALTER, V66 precedent; no index — no reader exists).
   3. TaggerWorker: thread M1-865's losers into persistCursor's single
      UPDATE; cap + drop-count logging; NO_TAGS/BOOTSTRAP outcome map.
@@ -144,7 +144,7 @@ resolution time and is discarded.
 ## Definition of done
 
 Every acceptance item holds: the converted reproduction passes (losers
-persist alongside the winner, zero extra LLM calls); V82 column with
+persist alongside the winner, zero extra LLM calls); V83 column with
 DEFAULT and no premature index; the single-statement atomic write; the
 cap with logged overflow; the NO_TAGS/BOOTSTRAP outcome map; the
 internal-only grep returns zero; `mvn verify` green.

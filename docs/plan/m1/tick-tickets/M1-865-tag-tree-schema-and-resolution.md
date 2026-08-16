@@ -1,14 +1,15 @@
 ---
 id: M1-865
 title: "Tag tree schema and deterministic leaf resolution"
-status: pending
+status: done
 created: 2026-08-16
-last_updated: 2026-08-16
+last_updated: 2026-08-17
 flow: tick
 reproduction: >-
-  to-be-written TagTreeResolutionTest.crossTopProposalResolvesToASingleBranch
-  (child of a 2+ decomposition — the tree schema this test reads does not
-  exist at filing time; `start` converts the marker per workflow §0).
+  TagTreeResolutionTest.crossTopProposalResolvesToASingleBranch — converted
+  from the to-be-written marker at start (2026-08-16): written against the
+  not-yet-existing TagTreeResolver and run RED (test-compile fails on the
+  missing resolver, the tree schema not existing at filing time).
   Intended wrong behavior it states: TaggerWorker.validate
   (TaggerWorker.java:642-661) accepts every vocabulary-valid proposal and
   the worker stores the whole set — a post the model tags {football,
@@ -113,11 +114,35 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-17
+    verdict: APPROVE-WITH-FIXES
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY WARN, SCOPE PASS"
+    diff_stats: "14 files changed, 1133 insertions(+), 57 deletions(-)"
+    verdict_file: .scratch/tick-review-M1-865-r1.txt
+    note: >-
+      One low comment-only fix (FINDING 1: V81 grants parenthetical said
+      Provider SELECT only; V31 grants Provider INSERT on tag). Applied
+      in-band: V81__tag_tree.sql:17 now "Provider SELECT+INSERT — V6,
+      V31". Probes pass — grep -c "V31" V81__tag_tree.sql == 1; SELECT-only
+      wording absent; ./mvnw -B -pl infochat-core -am test-compile exit 0.
+      Fixed-tree snapshot .scratch/tick-fixes-M1-865.tree (26616fd6); fix
+      diff vs reviewed tree = 1 file, +1/-1, comment-only. Green log of
+      record: .scratch/verify-M1-865-r2.log (unchanged — zero executable
+      lines changed). Mechanical report: .scratch/tick-mech-M1-865-r1.txt.
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  result: "no blocking ambiguity; start 2026-08-16. Lint clean after
+    copying the gitignored analysis doc into the worktree. Code citations
+    spot-checked OK (TaggerWorker.validate :642-661, persistCursor
+    :679-696, MAX_TAGS_PER_POST :224, renderPrompt :540, sweepFingerprint
+    :872; TagVocabulary load :126-150; V6 tag table :74-84; migration
+    head V80). One citation-path imprecision noted (non-blocking):
+    .bench/tag-tree-showcase/calls.jsonl lives at
+    arms/leaf/run1/calls.jsonl."
 escalation_reason:
 ---
 

@@ -10,6 +10,7 @@ import app.zcat.infochat.llm.LlmResponse;
 import app.zcat.infochat.llm.routing.LlmRouter;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -21,6 +22,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -75,6 +77,9 @@ class TaggerWorkerTest {
 
     @Inject
     NoTagsRateMonitor noTagsRateMonitor;
+
+    @Inject
+    TagTreeResolver tagTreeResolver;
 
     private StubLlmProvider stub() {
         return (StubLlmProvider) llmProvider;
@@ -310,6 +315,90 @@ class TaggerWorkerTest {
                 + "not before the opener where it would read as instructions");
     }
 
+    // ---------- M1-865: tree resolution through the worker ----------
+
+    @Test
+    void crossTopProposalStoresExactlyOneResolvedLeaf() throws Exception {
+        // A validated cross-top proposal stores exactly ONE leaf — the
+        // branch whose top ranks first (Sport over News), regardless of
+        // the proposal's emission order.
+        clearFallbackNotifierState();
+        seedTreeFixture();
+        stub().setNextResponse("{\"tags\":[\"europe\",\"football\"]}");
+        SeededPost post = seedPost("cross-top", List.of("ai", "java"));
+
+        taggerWorker.processOne(rowFor(post, List.of("ai", "java")));
+
+        assertPostState(post.id, true, false, Set.of("football"));
+        assertEquals(1, stub().callCount(), "a valid proposal answers on the first attempt");
+        var state = throttledAdminNotifier.getState(TaggerWorker.ERROR_CLASS_TAGGER_FALLBACK);
+        assertTrue(state.isEmpty(), "a resolved cross-top proposal is not a failure");
+    }
+
+    @Test
+    void topNameProposalCountsAsInvalid() throws Exception {
+        // Acceptance 6: a drifting model proposing top names changes
+        // nothing structurally — tops are not in the leaf vocabulary, so
+        // they count invalid exactly like out-of-vocabulary garbage.
+        clearFallbackNotifierState();
+        seedTreeFixture();
+        stub().setNextResponse("{\"tags\":[\"sport\",\"football\"]}");
+        SeededPost mixed = seedPost("top-mixed", List.of("ai", "java"));
+
+        taggerWorker.processOne(rowFor(mixed, List.of("ai", "java")));
+
+        assertPostState(mixed.id, true, false, Set.of("football"));
+
+        // A reply of ONLY top/garbage names takes the existing zero-valid
+        // chain: one retry, then the bootstrap fallback.
+        try {
+            stub().setNextResponses(
+                "{\"tags\":[\"sport\",\"news\"]}", "{\"tags\":[\"still-not-a-leaf\"]}");
+            SeededPost only = seedPost("top-only", List.of("ai", "java"));
+
+            taggerWorker.processOne(rowFor(only, List.of("ai", "java")));
+
+            // 1 (the mixed post above) + 2 (zero-valid retries once) —
+            // callCount spans the whole test, reset only in @BeforeEach.
+            assertEquals(3, stub().callCount(), "a tops-only reply is zero-valid — it retries once");
+            assertPostState(only.id, true, true, Set.of("ai", "java"));
+            var state = throttledAdminNotifier.getState(TaggerWorker.ERROR_CLASS_TAGGER_FALLBACK);
+            assertTrue(state.isPresent(), "zero-valid after retry falls back to bootstrap tags");
+        } finally {
+            clearFallbackNotifierState();
+        }
+    }
+
+    @Test
+    void parentlessVocabularyKeepsTodaysStoredSets() throws Exception {
+        // P6 / acceptance 3: no tops seeded, so every vocabulary row is a
+        // parentless leaf and resolution is the identity — a multi-leaf
+        // proposal stores the whole set exactly as the flat vocabulary did.
+        stub().setNextResponse("{\"tags\":[\"security\",\"news\",\"finance\"]}");
+        SeededPost post = seedPost("identity", List.of("ai", "java"));
+
+        taggerWorker.processOne(rowFor(post, List.of("ai", "java")));
+
+        assertPostState(post.id, true, false, Set.of("security", "news", "finance"));
+    }
+
+    @Test
+    void renderedPromptContainsLeafNamesOnly() throws Exception {
+        // P8 / acceptance 9: tops and the priority order are Java-side
+        // only — the render carries leaf names, never top names.
+        seedTreeFixture();
+        String template = TaggerWorker.loadResource(TaggerWorker.PRIMARY_PROMPT_RESOURCE);
+        TaggerWorker.PostRow row = new TaggerWorker.PostRow(
+            UUID.fromString("00000000-0000-0000-0000-000000000002"),
+            Instant.EPOCH, "title", "body", List.of());
+
+        String rendered = taggerWorker.renderPrompt(template, "DELIM-TOKEN-2", row);
+
+        assertTrue(rendered.contains("\n- football\n"), "leaf names render into the {#tags} block");
+        assertFalse(rendered.contains("\n- sport\n"), "a top name must never render");
+        assertFalse(rendered.contains("\n- news\n"), "a flipped-to-top name must stop rendering");
+    }
+
     // ---------- M1-735: aggregate no-tags rate detector ----------
 
     @Test
@@ -406,6 +495,98 @@ class TaggerWorkerTest {
 
     // ---------- helpers ----------
 
+    /** Tag names the tree-resolution fixtures insert or flip (news overlaps the leaf seeds). */
+    private static final List<String> TREE_TOUCHED = List.of("sport", "news", "football", "europe");
+
+    /** Pre-fixture {@code [node_kind, parent_name]} per touched name; absent = the row did not exist. */
+    private final Map<String, String[]> treeSnapshot = new HashMap<>();
+
+    /** Seed the minimal cross-top tree the M1-865 cases resolve against and republish the vocabulary; rows are snapshot-restored per test (the tag table is shared across the Quarkus test instance). */
+    private void seedTreeFixture() throws Exception {
+        snapshotTreeRows();
+        upsertTreeTag("sport", "top", null);
+        upsertTreeTag("news", "top", null);
+        upsertTreeTag("football", "leaf", "sport");
+        upsertTreeTag("europe", "leaf", "news");
+        tagVocabulary.load();
+    }
+
+    private void snapshotTreeRows() throws Exception {
+        treeSnapshot.clear();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT name, node_kind, parent_name FROM tag WHERE name = ANY(?)")) {
+            ps.setArray(1, conn.createArrayOf("text", TREE_TOUCHED.toArray(new String[0])));
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    treeSnapshot.put(rs.getString(1), new String[]{rs.getString(2), rs.getString(3)});
+                }
+            }
+        }
+    }
+
+    @AfterEach
+    void restoreTreeFixture() throws Exception {
+        if (treeSnapshot.isEmpty()) {
+            return;
+        }
+        try (Connection conn = dataSource.getConnection()) {
+            String[] touched = TREE_TOUCHED.toArray(new String[0]);
+            // Detach parent links first: deleting or re-flipping a top while
+            // a touched leaf still references it violates the self-FK.
+            try (PreparedStatement detach = conn.prepareStatement(
+                    "UPDATE tag SET parent_name = NULL WHERE name = ANY(?)")) {
+                detach.setArray(1, conn.createArrayOf("text", touched));
+                detach.executeUpdate();
+            }
+            try (PreparedStatement del = conn.prepareStatement(
+                    "DELETE FROM tag WHERE name = ANY(?) AND NOT (name = ANY(?))")) {
+                del.setArray(1, conn.createArrayOf("text", touched));
+                del.setArray(2, conn.createArrayOf("text", treeSnapshot.keySet().toArray(new String[0])));
+                del.executeUpdate();
+            }
+            try (PreparedStatement upd = conn.prepareStatement(
+                    "UPDATE tag SET node_kind = ?, parent_name = ? WHERE name = ?")) {
+                for (Map.Entry<String, String[]> e : treeSnapshot.entrySet()) {
+                    upd.setString(1, e.getValue()[0]);
+                    upd.setString(2, e.getValue()[1]);
+                    upd.setString(3, e.getKey());
+                    upd.addBatch();
+                }
+                upd.executeBatch();
+            }
+        }
+        treeSnapshot.clear();
+        // Re-sync the shared bean so no tree shape lingers for later tests.
+        tagVocabulary.load();
+    }
+
+    private void upsertTreeTag(String name, String nodeKind, String parent) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO tag (name, display, source_origin, node_kind, parent_name) "
+                     + "VALUES (?, ?, 'bootstrap', ?, ?) "
+                     + "ON CONFLICT (name) DO UPDATE SET node_kind = EXCLUDED.node_kind, "
+                     + "parent_name = EXCLUDED.parent_name")) {
+            ps.setString(1, name);
+            ps.setString(2, name);
+            ps.setString(3, nodeKind);
+            ps.setString(4, parent);
+            ps.executeUpdate();
+        }
+    }
+
+    /** Hand-wired {@link MiscShareMonitor} with production parameters; these scenarios never reach its sample floor. */
+    private MiscShareMonitor smallMiscMonitor() {
+        MiscShareMonitor monitor = new MiscShareMonitor();
+        monitor.throttledAdminNotifier = throttledAdminNotifier;
+        monitor.windowSize = 50;
+        monitor.minSample = 20;
+        monitor.threshold = 0.10;
+        monitor.init();
+        return monitor;
+    }
+
     /**
      * A hand-wired {@link NoTagsRateMonitor} with explicit window
      * parameters, so window-semantics tests do not need to drive the
@@ -450,6 +631,11 @@ class TaggerWorkerTest {
         worker.throttledAdminNotifier = throttledAdminNotifier;
         worker.retryBackoff = retryBackoff;
         worker.noTagsRateMonitor = monitor;
+        // Hand-wired workers resolve through the real CDI resolver over the
+        // shared vocabulary's tree, and record into a fresh misc monitor
+        // with production parameters — silent at these tests' sample sizes.
+        worker.tagTreeResolver = tagTreeResolver;
+        worker.miscShareMonitor = smallMiscMonitor();
         worker.partitionScan = partitionScan;
         worker.maxConcurrency = 1;
         // Hand-wired workers only ever call processOne — the sweep tail

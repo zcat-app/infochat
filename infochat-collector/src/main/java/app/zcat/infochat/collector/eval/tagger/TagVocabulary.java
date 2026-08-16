@@ -8,6 +8,7 @@ import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -15,16 +16,20 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Set;
 
 /**
- * Controlled-vocabulary cache for the Tagger pipeline. Loads
- * {@code SELECT name FROM tag} at startup into an immutable
- * {@link Set} so per-post tagger validation is an O(1) hash lookup
- * rather than a per-call DB round-trip, then refreshes the set on a
+ * Controlled-vocabulary cache for the Tagger pipeline. Loads the {@code
+ * tag} table at startup so per-post tagger validation is an O(1) hash
+ * lookup rather than a per-call DB round-trip, then refreshes on a
  * schedule so a tag added at runtime (e.g. via {@code /add-source})
  * becomes visible to the tagger without a Collector restart.
+ * <p>The published vocabulary is LEAVES ONLY ({@code node_kind='leaf'}, V82):
+ * tops and the priority order never reach the prompt render (M1-865 analysis
+ * P7/P8); the full row set rides along as the resolver's tree snapshot.
  *
  * <h2>Normalization rule (load-bearing)</h2>
  *
@@ -83,17 +88,25 @@ public class TagVocabulary {
     @Inject
     DataSource dataSource;
 
-    // volatile: the scheduled refresh swaps the (immutable) set from the
-    // scheduler thread while tagger worker threads read it; each reader
-    // sees either the old or the new complete set, never a partial one.
-    private volatile Set<String> names = Set.of();
+    /** One tag row as the resolver sees it: the node-kind discriminator + normalized parent link (null = root). */
+    public record TagNode(boolean top, @Nullable String parent) {
+    }
+
+    /** The atomically-swapped load result: leaf-only names (query order) plus the full tree map — one field, never a mix. */
+    record Snapshot(Set<String> names, Map<String, TagNode> tree) {
+    }
+
+    // volatile: the scheduled refresh swaps the (immutable) snapshot from
+    // the scheduler thread while tagger worker threads read it; each
+    // reader sees either the old or the new complete one, never a mix.
+    private volatile Snapshot snapshot = new Snapshot(Set.of(), Map.of());
 
     @PostConstruct
     void load() {
         // Startup load failure is fatal (the tagger must never run with
         // an empty vocabulary it would interpret as "reject everything").
-        this.names = loadFromDatabase();
-        LOG.infof("TagVocabulary: loaded %d controlled-vocabulary tags", names.size());
+        this.snapshot = loadFromDatabase();
+        LOG.infof("TagVocabulary: loaded %d controlled-vocabulary tags", snapshot.names().size());
     }
 
     /**
@@ -106,67 +119,71 @@ public class TagVocabulary {
     @Scheduled(every = "{infochat.tagger.vocabulary-refresh-interval:5m}",
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     void refresh() {
-        Set<String> reloaded;
+        Snapshot reloaded;
         try {
             reloaded = loadFromDatabase();
         } catch (IllegalStateException e) {
             Throwable cause = e.getCause();
             Throwable rootCause = cause != null ? cause : e;
             LOG.warnf("TagVocabulary: refresh failed (%s); keeping previous %d-tag vocabulary",
-                rootCause.getClass().getName(), names.size());
+                rootCause.getClass().getName(), snapshot.names().size());
             return;
         }
-        if (reloaded.size() != names.size()) {
+        if (reloaded.names().size() != snapshot.names().size()) {
             LOG.infof("TagVocabulary: refreshed vocabulary, %d -> %d tags",
-                names.size(), reloaded.size());
+                snapshot.names().size(), reloaded.names().size());
         }
-        this.names = reloaded;
+        this.snapshot = reloaded;
     }
 
-    private Set<String> loadFromDatabase() {
-        Set<String> loaded = new LinkedHashSet<>();
+    private Snapshot loadFromDatabase() {
+        Set<String> leaves = new LinkedHashSet<>();
+        Map<String, TagNode> tree = new LinkedHashMap<>();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                 "SELECT name FROM tag ORDER BY name");
+                 "SELECT name, node_kind, parent_name FROM tag ORDER BY name");
              ResultSet rs = ps.executeQuery()) {
             while (rs.next()) {
-                String raw = rs.getString(1);
-                String normalized = TagNormalizer.normalize(raw);
-                if (normalized != null) {
-                    loaded.add(normalized);
+                String name = TagNormalizer.normalize(rs.getString(1));
+                if (name == null) {
+                    continue;
+                }
+                boolean top = "top".equals(rs.getString(2));
+                tree.put(name, new TagNode(top, TagNormalizer.normalize(rs.getString(3))));
+                if (!top) {
+                    leaves.add(name);
                 }
             }
         } catch (SQLException e) {
             throw new IllegalStateException(
                 "TagVocabulary: failed to load tag table", e);
         }
-        // Publish the LinkedHashSet's insertion order — the query's ORDER BY
-        // name — rather than Set.copyOf's per-JVM-salted hash order; see the
-        // class javadoc for why the order reaches the model and must be
-        // stable. `loaded` never escapes this method, so the unmodifiable
-        // view is effectively immutable, and the volatile `names` field
-        // supplies the safe publication that Set.copyOf's final fields did.
-        return Collections.unmodifiableSet(loaded);
+        // Publish insertion order (the query's ORDER BY name), not Set.copyOf's
+        // salted hash order — the class javadoc has the why. Local-only copies +
+        // unmodifiable wrappers + the volatile snapshot supply safe publication.
+        return new Snapshot(
+            Collections.unmodifiableSet(leaves), Collections.unmodifiableMap(tree));
     }
 
     /**
-     * The full, immutable vocabulary set, iterating in the load query's
-     * {@code ORDER BY name} order — see the class javadoc's
+     * The full, immutable vocabulary set — LEAVES ONLY — iterating in the
+     * load query's {@code ORDER BY name} order; see the class javadoc's
      * <i>Iteration order</i> section for why that order is load-bearing.
      * Used by the tagger prompt builders that iterate the vocabulary into
      * a Qute template.
      */
     public Set<String> names() {
-        return names;
+        return snapshot.names();
     }
 
-    /**
-     * Byte-equal membership check against the normalized vocabulary.
-     * The caller is responsible for normalizing the input tag with
-     * the same rule (see {@link TaggerWorker#normalizeTag(String)}).
-     */
+    /** Byte-equal membership check against the normalized leaf vocabulary; callers normalize first. */
     public boolean contains(String normalized) {
-        return names.contains(normalized);
+        return snapshot.names().contains(normalized);
+    }
+
+    /** The full tree (tops included) the resolver walks; swapped atomically with {@link #names()}. */
+    public Map<String, TagNode> tree() {
+        return snapshot.tree();
     }
 
 }

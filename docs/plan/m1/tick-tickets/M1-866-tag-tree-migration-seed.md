@@ -20,14 +20,14 @@ reproduction: >-
   flat names with no branch, so the M1-865 resolver runs in identity
   mode forever and no consumer can go tree-aware (verified ground state:
   grep '^INSERT INTO' over infochat-core/src/main/resources/db/migration
-  returns no tag seed; V81 lands columns only, M1-865 acceptance 8).
+  returns no tag seed; V82 lands columns only, M1-865 acceptance 8).
 analysis_ref: docs/plan/m1/tick-analysis/tag-tree-taxonomy-v2.md
 blocked_by:
   - M1-864
   - M1-865
   - M1-868
 files_scope:
-  - infochat-core/src/main/resources/db/migration/V83__tag_tree_seed_and_migration.sql
+  - infochat-core/src/main/resources/db/migration/V84__tag_tree_seed_and_migration.sql
   - infochat-collector/src/main/java/app/zcat/infochat/collector/bootstrap/BootstrapLoader.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/bootstrap/BootstrapLoaderIT.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/source/SourceUpsertService.java
@@ -72,7 +72,7 @@ acceptance:
   - "post.tags arrays are rewritten deterministically and zero-LLM: each element maps via the same lookup (entity names like claude additionally land in that post's tag_candidates array — M1-868's column — preserving search continuity per decision 6); a test seeds posts carrying the flat names, runs the migration, and asserts every post.tags element is a tree leaf and every mapped-away entity name appears in tag_candidates (analysis P10; spec: docs/spec/schema.md §Posts and derivatives as amended by M1-869)."
   - "source.bootstrap_tags arrays are rewritten via the same lookup — pinned by a test that then drives the tagger's three-surface FALLBACK path (TaggerWorker.java:466 writes bootstrap_tags into post.tags unvalidated) and asserts the stored fallback tags are leaves; this is what keeps the fallback and the /unfollow-tag seed (UnfollowTagCommandHandler.java:97-110 joins bootstrap_tags names against tag.name) functional post-migration (analysis P10)."
   - "scope_tag rows remap without orphans: rows pointing at superseded v1 tag rows are re-pointed at the mapped node's row (INSERT new + DELETE old, ON CONFLICT DO NOTHING), a followed 'ai' row keeps resolving, and after the migration no scope_tag.tag_id references a retired row — pinned by a test asserting zero orphaned FKs and a surviving follow; operator-owned rows are never deleted, only re-targeted (analysis P12)."
-  - "V83 (next free number at start, after M1-865's and M1-868's migrations) header states the sweep interaction as current-truth behavior: the vocabulary change bumps the M1-736 sweep generation, re-tagging previously tags='{}' posts within the existing caps (batch-size, max-attempts) — bounded, one-time, expected; mapped non-empty historical tags are NOT re-tagged (eligibility is tags='{}' only) — probe: grep -n 'sweep' V83__*.sql (analysis P13; spec: docs/spec/llm.md §Failure handling (recap))."
+  - "V84 (next free number at start; M1-848 landed V81, M1-865 landed V82, M1-868 landed V83) header states the sweep interaction as current-truth behavior: the vocabulary change bumps the M1-736 sweep generation, re-tagging previously tags='{}' posts within the existing caps (batch-size, max-attempts) — bounded, one-time, expected; mapped non-empty historical tags are NOT re-tagged (eligibility is tags='{}' only) — probe: grep -n 'sweep' V84__*.sql (analysis P13; spec: docs/spec/llm.md §Failure handling (recap))."
   - "The /add-source growth gate: SourceUpsertService.upsertTagVocab (SourceUpsertService.java:108-111) unions ONLY names that already exist as tree nodes (top or leaf); an unknown name rejects the command with the existing friendly fuzzy-suggestion shape with NO partial write — SourceUpsertServiceIT.addNodeGateRejectsUnknownTagNameWithNoPartialWrite (failure mode: /add-source with --tags kimiai2, an unconstrained coinage from the measured 0.52-Jaccard failure class, returns the friendly error and asserts no tag row, no source row, and no subscription was written) (analysis P11; spec: docs/spec/commands.md §Source management as amended by M1-869, decision D14 as amended)."
   - "The bootstrap-loader growth gate: BootstrapLoader fails fast at startup on a bootstrap-sources.json tags[] name that is not an existing tree node, with a message naming the offending name (the M1-077 fail-fast shape extended from character-class to node-membership) — pinned by a BootstrapLoaderIT case (analysis P11; spec: docs/spec/deployment.md §Bootstrap behavior on startup)."
   - "No consumer hardcodes vocabulary members: grep for each seeded leaf name over **/src/main/java returns zero matches — the digest/search/sweep surfaces stay name-agnostic (M1-860 analysis P10 posture, re-asserted for the v2 list)."
@@ -177,14 +177,14 @@ this ticket is blocked_by M1-868.
 
 ## Approach
 
-- **Files to touch:** V83 migration (seed + array rewrites + scope_tag
+- **Files to touch:** V84 migration (seed + array rewrites + scope_tag
   remap + retirement), `BootstrapLoader` (node-membership fail-fast),
   `SourceUpsertService` (node-gated union + friendly rejection), the
   three test files.
 - **Steps, in order:**
   1. Convert the reproduction marker: write
      `legacyVocabularyIsMappedOntoTreeLeaves`, run RED (no seed exists).
-  2. Author V83: header (purpose + the sweep statement, P13); seed tops
+  2. Author V84: header (purpose + the sweep statement, P13); seed tops
      + leaves from M1-864's frozen list ('bootstrap', display=name, ON
      CONFLICT DO NOTHING — P20); the exhaustive name→node lookup (as
      JOINs over a VALUES table, not procedural code); post.tags :=
@@ -196,7 +196,7 @@ this ticket is blocked_by M1-868.
   3. Stored-form + collision tests (the M1-861 salvage, verbatim shape).
   4. Growth gates: SourceUpsertService node-gated union + rejection
      error; BootstrapLoader fail-fast (P11).
-  5. Probes: grep sweep in V83; grep seeded names over **/src/main/java
+  5. Probes: grep sweep in V84; grep seeded names over **/src/main/java
      (expect zero).
 - **Controls to preserve (engineering-rules §10):** the migration rides
   the existing per-role grants (no GRANT change; provider already

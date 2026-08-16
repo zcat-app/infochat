@@ -28,6 +28,8 @@ app.zcat.infochat.collector.eval.reeval.PerSourceUnknownTrackerTest
 app.zcat.infochat.collector.eval.reeval.ReEvaluationJobCooldownTest
 app.zcat.infochat.collector.eval.reeval.ReEvaluationJobTest
 app.zcat.infochat.collector.eval.reeval.ReEvaluationJobWindowTest
+app.zcat.infochat.collector.eval.tagger.MiscShareMonitorTest
+app.zcat.infochat.collector.eval.tagger.TagTreeResolutionTest
 app.zcat.infochat.collector.eval.tagger.TaggerWorkerBackoffTest
 app.zcat.infochat.collector.eval.tagger.TaggerWorkerTest
 app.zcat.infochat.collector.eval.tagger.TagVocabularyRefreshTest
