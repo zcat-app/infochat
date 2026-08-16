@@ -1,13 +1,13 @@
 ---
 id: M1-856
 title: "Tool prompt: worked example + native-dialect bridge"
-status: pending
+status: done
 created: 2026-08-16
 last_updated: 2026-08-16
 flow: tick
 reproduction: >-
-  to-be-written: ChatAgentTest#aNativeToolCallEmissionIsBridgedIntoDispatch
-  (child of a 2+ decomposition, analysis
+  ChatAgentTest#aNativeToolCallEmissionIsBridgedIntoDispatch (written and
+  run RED at start; child of a 2+ decomposition, analysis
   docs/plan/m1/tick-analysis/tool-loop-hardening.md). Probe of today's
   wrong behavior: grep -n 'TOOL_CALL_PATTERN'
   infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java
@@ -93,11 +93,23 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-16
+    verdict: APPROVE-WITH-FIXES
+    checks: {SPEC-TRUTHNESS: PASS, SECURITY: PASS, TEST-ADEQUACY: PASS, MAINTAINABILITY: WARN, SCOPE: PASS}
+    diff_stats: "5 files, +257/-22 (ChatAgent.java +70, ChatAgentTest.java +170, design 05 +15)"
+    fix: "comment-only reword of the stale iteration-cap comment (ChatAgent.java:850-851)"
+    fix_probes: "grep 'cannot emit tool-call patterns' → no match; grep 'spontaneous native-dialect' → :852; mvnw -pl infochat-provider -am test-compile → BUILD SUCCESS"
+    fixes_tree: 281e8a1820d7eee8d007ce41249878331b4c2478
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-16
+  verdict: PASS
+  warnings: []
+  blockers: []
 escalation_reason:
 ---
 
@@ -247,3 +259,25 @@ existing test appears to conflict, escalate — do not edit it.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-856-toolprompt-and-bridge.md
 ```
+
+## Review observations
+
+- Round 1 (recorded, TOUCHED-BY-THIS-DIFF, no DECIDE-BEFORE): the worked
+  example teaches `searchPosts {"tags": ["zcash"], …}`, but "zcash" is not
+  in the shipped bootstrap vocabulary (prod/config/bootstrap-sources.json
+  seeds AI/Development/Claude/Security/Java/Video/Nostr;
+  SearchPostsTool.validateTagsKnown rejects unknown tags with a typed
+  error). On a fresh deployment whose tagger never added "zcash", the
+  model's first copied example call returns "Error: Unknown tag: zcash"
+  instead of results. One-line version carried into the commit body.
+- Round 1 DECIDE-BEFORE disposition (user, 2026-08-16): the brace-less
+  native-call residual (final reply carrying
+  `<|tool_call>call:NAME` with no argument brace anywhere is delivered
+  verbatim, marker included) is NOT accepted as a residual — the user
+  wants the strip. Disposition: a refinement ticket (strip
+  opener+`call:`+name while preserving a bare opener in prose) is to be
+  filed via /tick analyze BEFORE M1-858 runs, so M1-858's G6 gate
+  definition sees the decided shape. The user additionally raised the
+  structured-communication idea (predefined schemas / native LLM
+  tool-calling instead of a text protocol) as a candidate for its own
+  analysis.

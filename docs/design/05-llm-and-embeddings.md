@@ -752,6 +752,21 @@ demand fires on its per-turn prompt; the framing's demand is conditional
 on the answer relying on posts. The wording's effect on the G5 citation
 metric is the tool-loop re-measure campaign's subject, not asserted here.
 
+**Two accepted tool-call dialects.** The tool loop recognizes two emission
+dialects. The shipped one is the `TOOL_CALL: toolName {json}` line the tool
+instructions teach. The second is the model-native shape
+`<|tool_call>call:NAME {json}`: its closer is unreliable in observed data
+(absent, `<tool_call|>`, or a spoofed harness delimiter), so the grammar
+anchors on the opener plus the balanced-brace argument scan and requires no
+closer. Precedence across the two is earliest-match-position wins; a reply
+matching neither dialect is returned byte-identical. A bridged call becomes
+(name, args) into the same ChatToolDispatcher boundary as the shipped
+dialect — allowlist, clamps, per-turn cache and call cap all apply
+unchanged. Final replies strip residual fragments of both dialects
+post-sanitize: balanced fragments are removed exactly, unbalanced ones
+through end-of-text, and a native opener with no argument brace is quoted
+prose and preserved.
+
 ### 5.4.7 /compress (long-term memory)                                                                                                                                                                                                                    
                                                                                  
 prompts/compress.md:                                                                                                                                                                                                                                  

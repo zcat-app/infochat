@@ -64,6 +64,13 @@ public class ChatAgent {
     static final Pattern TOOL_CALL_PATTERN = Pattern.compile(
             "TOOL_CALL:\\s*(\\w+)\\s*(\\{)");
 
+    // Second accepted dialect: the model-native emission shape whose closer
+    // is unreliable in observed data — anchor on the opener plus a balanced
+    // brace scan, require no closer. Same group layout as TOOL_CALL_PATTERN.
+    static final String NATIVE_TOOL_CALL_OPENER = "<|tool_call>";
+    static final Pattern NATIVE_TOOL_CALL_PATTERN = Pattern.compile(
+            "<\\|tool_call>\\s*call:(\\w+)\\s*(\\{)");
+
     private static final ObjectMapper TOOL_ARGS_MAPPER = new ObjectMapper();
 
     static final int MAX_TOOL_ITERATIONS = 10;
@@ -72,6 +79,11 @@ public class ChatAgent {
             "\n\nYou have the following tools. To call a tool, output EXACTLY "
           + "one line per call in this format (no surrounding prose on the same line):\n"
           + "TOOL_CALL: toolName {\"param\": \"value\"}\n\n"
+          + "Example:\n"
+          + "TOOL_CALL: searchPosts {\"tags\": [\"zcash\"], \"window\": \"P7D\"}\n\n"
+          + "Tool arguments (queries, tags) are always written in English, and "
+          + "tool results come back in English, whatever language the "
+          + "conversation is in.\n\n"
           + "Available tools:\n"
           + "- searchPosts {\"tags\": [\"tag1\"], \"window\": \"P7D\", \"limit\": 10}"
           + " — search posts by tags within a time window\n"
@@ -800,8 +812,8 @@ public class ChatAgent {
                     ModelTask.CHAT_AGENT, systemPrompt, conversation.toString());
             String text = response.text();
 
-            Matcher matcher = TOOL_CALL_PATTERN.matcher(text);
-            if (!matcher.find()) {
+            Matcher matcher = earliestToolCallMatch(text);
+            if (matcher == null) {
                 return text;
             }
 
@@ -843,8 +855,10 @@ public class ChatAgent {
             conversation.append("\n\n").append(POST_TOOL_RESULT_INSTRUCTION);
         }
 
-        // Exceeded iteration cap — final call uses base system prompt (without
-        // tool instructions) so the LLM cannot emit tool-call patterns
+        // Exceeded iteration cap — final call uses the base system prompt
+        // (without tool instructions) so the LLM is not prompted toward the
+        // shipped format; spontaneous native-dialect emissions can still
+        // occur here and are removed by the post-sanitize strip (step 7).
         LlmResponse finalResponse = provider.generate(
                 ModelTask.CHAT_AGENT, baseSystemPrompt, conversation.toString());
         return finalResponse.text();
@@ -1074,19 +1088,46 @@ public class ChatAgent {
         };
     }
 
+    // Dual-dialect precedence: the earliest match position across both
+    // accepted grammars wins; null when neither matches, and the caller
+    // returns the text byte-identical.
+    private static @Nullable Matcher earliestToolCallMatch(String text) {
+        Matcher shipped = TOOL_CALL_PATTERN.matcher(text);
+        Matcher nativeDialect = NATIVE_TOOL_CALL_PATTERN.matcher(text);
+        boolean hasShipped = shipped.find();
+        boolean hasNative = nativeDialect.find();
+        if (hasShipped && hasNative) {
+            return shipped.start() <= nativeDialect.start() ? shipped : nativeDialect;
+        }
+        if (hasShipped) {
+            return shipped;
+        }
+        return hasNative ? nativeDialect : null;
+    }
+
     /**
-     * Strips every residual TOOL_CALL fragment from final text. A fragment
-     * whose JSON args have balanced braces is removed exactly (text before
-     * and after it is preserved); a fragment with no brace or unbalanced
-     * braces is removed through end-of-text, because a malformed multi-line
-     * call has no reliable terminator and must not leak the internal
-     * protocol to the user.
+     * Strips residual tool-call fragments of both accepted dialects: balanced
+     * removed exactly, unbalanced through end-of-text; a native opener with
+     * no args brace is quoted prose and preserved.
      */
     static String stripToolCalls(String text) {
         StringBuilder result = new StringBuilder();
         int cursor = 0;
         while (cursor < text.length()) {
-            int marker = text.indexOf("TOOL_CALL:", cursor);
+            int shipped = text.indexOf("TOOL_CALL:", cursor);
+            int nativeOpener = text.indexOf(NATIVE_TOOL_CALL_OPENER, cursor);
+            int marker;
+            boolean nativeDialect;
+            if (shipped < 0) {
+                marker = nativeOpener;
+                nativeDialect = true;
+            } else if (nativeOpener < 0) {
+                marker = shipped;
+                nativeDialect = false;
+            } else {
+                nativeDialect = nativeOpener < shipped;
+                marker = nativeDialect ? nativeOpener : shipped;
+            }
             if (marker < 0) {
                 result.append(text, cursor, text.length());
                 return result.toString();
@@ -1095,14 +1136,23 @@ public class ChatAgent {
 
             int brace = text.indexOf('{', marker);
             int lineEnd = text.indexOf('\n', marker);
-            if (brace >= 0 && (lineEnd < 0 || brace < lineEnd)) {
+            if (brace >= 0 && (nativeDialect || lineEnd < 0 || brace < lineEnd)) {
                 int close = matchBrace(text, brace);
                 if (close >= 0) {
                     cursor = close + 1;
                     continue;
                 }
+                // Unbalanced fragment: drop through end-of-text.
+                return result.toString();
             }
-            // Partial or unbalanced fragment: drop through end-of-text.
+            if (nativeDialect) {
+                // Opener without an args fragment: prose quoting the dialect,
+                // not a call — keep it and scan on.
+                result.append(NATIVE_TOOL_CALL_OPENER);
+                cursor = marker + NATIVE_TOOL_CALL_OPENER.length();
+                continue;
+            }
+            // Partial shipped fragment: drop through end-of-text.
             return result.toString();
         }
         return result.toString();

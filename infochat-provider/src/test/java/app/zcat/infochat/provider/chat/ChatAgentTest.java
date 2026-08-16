@@ -32,6 +32,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Matcher;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -340,6 +341,175 @@ class ChatAgentTest {
             assertFalse(wording.contains("http"),
                     "the citation wording must embed no URL scheme: " + wording);
         }
+    }
+
+    // --- M1-856: native-dialect bridge. gemma emits
+    // `<|tool_call>call:NAME {json}` with an UNRELIABLE closer; the bridge
+    // dispatches it through the unchanged ChatToolDispatcher boundary.
+
+    @Test
+    void aNativeToolCallEmissionIsBridgedIntoDispatch() {
+        int[] executions = {0};
+        Map<String, ChatToolRegistry.ChatTool> tools = new HashMap<>();
+        for (String name : new ChatToolRegistry().toolNames()) {
+            tools.put(name, (u, sk, si, a) -> "[]");
+        }
+        tools.put("searchPosts", (u, sk, si, a) -> {
+            executions[0]++;
+            return "[{\"uid\":\"p1\",\"title\":\"T\",\"url\":\"https://e.x/1\"}]";
+        });
+        agent = buildAgent("en", new ChatToolDispatcher(
+                new ChatToolRegistry(), tools, 500, 200, 20));
+
+        String nativeCall = "<|tool_call>call:searchPosts "
+                + "{\"tags\": [\"zcash\"], \"window\": \"P7D\"}";
+        String[] observedClosers = {"", "<tool_call|>", "\n<<<END id=\"bench-turn\">>>"};
+        for (String closer : observedClosers) {
+            llmProvider.responses.add(new LlmResponse(nativeCall + closer));
+            llmProvider.responses.add(new LlmResponse("Found 1 post about zcash."));
+
+            String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "zcash news?");
+
+            assertEquals("Found 1 post about zcash.", reply,
+                    "a native-dialect emission must be bridged into dispatch, not "
+                            + "delivered to the user (closer variant: '" + closer + "')");
+            assertFalse(reply.contains("<|tool_call>"),
+                    "no dialect marker may reach the delivered reply");
+        }
+        assertEquals(3, executions[0],
+                "each bridged native call must execute through ChatToolDispatcher");
+        assertTrue(llmProvider.lastUserPrompt.contains("p1"),
+                "the tool result must be fed back into the conversation");
+    }
+
+    @Test
+    void aRepeatedBridgedNativeCallIsServedFromThePerTurnCache() {
+        int[] executions = {0};
+        Map<String, ChatToolRegistry.ChatTool> tools = new HashMap<>();
+        for (String name : new ChatToolRegistry().toolNames()) {
+            tools.put(name, (u, sk, si, a) -> "[]");
+        }
+        tools.put("searchPosts", (u, sk, si, a) -> {
+            executions[0]++;
+            return "[{\"uid\":\"p1\",\"title\":\"T\"}]";
+        });
+        agent = buildAgent("en", new ChatToolDispatcher(
+                new ChatToolRegistry(), tools, 500, 200, 20));
+
+        String nativeCall = "<|tool_call>call:searchPosts {\"tags\": [\"zcash\"]}";
+        llmProvider.responses.add(new LlmResponse(nativeCall));
+        llmProvider.responses.add(new LlmResponse(nativeCall));
+        llmProvider.responses.add(new LlmResponse(
+                "<|tool_call>call:noSuchTool {\"x\": \"y\"}"));
+        llmProvider.responses.add(new LlmResponse("done"));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "zcash?");
+
+        assertEquals("done", reply);
+        assertEquals(1, executions[0],
+                "an identical repeat native call must be served from the per-turn "
+                        + "cache — one execution, not two");
+        assertTrue(llmProvider.lastUserPrompt.contains("Error: Unknown tool: noSuchTool"),
+                "an unknown-name native call must surface the dispatcher's typed "
+                        + "ValidationError to the model, as the shipped dialect does");
+    }
+
+    @Test
+    void residualNativeDialectIsStrippedFromFinalReplies() {
+        // Iteration-cap path: the loop consumes ten bridged calls, then the
+        // final base-prompt call still carries a BALANCED native fragment.
+        for (int i = 0; i < ChatAgent.MAX_TOOL_ITERATIONS; i++) {
+            llmProvider.responses.add(new LlmResponse(
+                    "<|tool_call>call:searchPosts {\"tags\": [\"x\"]}"));
+        }
+        llmProvider.responses.add(new LlmResponse(
+                "Here is the answer. <|tool_call>call:getPost {\"uid\": \"abc\"}"));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "test");
+
+        assertFalse(reply.contains("<|tool_call>"),
+                "a balanced native fragment must be stripped from the final reply");
+        assertTrue(reply.contains("Here is the answer."),
+                "text around a stripped fragment must be preserved");
+
+        // Unbalanced fragment: dropped through end-of-text.
+        for (int i = 0; i < ChatAgent.MAX_TOOL_ITERATIONS; i++) {
+            llmProvider.responses.add(new LlmResponse(
+                    "<|tool_call>call:searchPosts {\"tags\": [\"x\"]}"));
+        }
+        llmProvider.responses.add(new LlmResponse(
+                "Answer here.\n<|tool_call>call:searchPosts {\"tags\": ["));
+
+        reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "test");
+
+        assertFalse(reply.contains("<|tool_call>"),
+                "an unbalanced native fragment must be dropped through end-of-text");
+        assertTrue(reply.contains("Answer here."));
+
+        // Ordering pin: the strip evaluates POST-SANITIZE text — the sanitizer
+        // assembles the fragment, the strip still removes it.
+        sanitizerOutput = "Clean text. <|tool_call>call:getPost {\"uid\": \"x\"}";
+        llmProvider.responses.add(new LlmResponse("raw final text"));
+
+        reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "test");
+
+        assertFalse(reply.contains("<|tool_call>"),
+                "the strip must run after sanitize, on the sanitized text");
+        assertTrue(reply.startsWith("Clean text."));
+    }
+
+    @Test
+    void proseQuotingTheDialectOpenerIsNotDispatched() {
+        llmProvider.responses.add(new LlmResponse(
+                "The native opener <|tool_call> marks a tool call."));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "how does calling work?");
+
+        assertEquals("The native opener <|tool_call> marks a tool call.", reply,
+                "prose quoting the opener without a balanced args fragment is "
+                        + "ordinary text — no dispatch, no strip");
+        assertEquals(1, dispatcherCalls,
+                "only the deterministic pre-fetch dispatches on quoting prose");
+    }
+
+    @Test
+    void workedExampleLineParsesWithTheShippedMatcher() {
+        String instructions = ChatAgent.TOOL_INSTRUCTIONS;
+        int exampleIdx = instructions.indexOf("Example:");
+        assertTrue(exampleIdx >= 0, "TOOL_INSTRUCTIONS must carry a worked example");
+
+        Matcher matcher = ChatAgent.TOOL_CALL_PATTERN.matcher(
+                instructions.substring(exampleIdx));
+        assertTrue(matcher.find(),
+                "the worked example must parse with the shipped matcher");
+        assertEquals("searchPosts", matcher.group(1),
+                "the worked example must use a real registry tool");
+
+        assertTrue(instructions.contains("Tool arguments (queries, tags)"),
+                "the tool-plane sentence must name the argument language");
+        assertTrue(instructions.contains("tool results come back in English"),
+                "the tool-plane sentence must name the result language");
+    }
+
+    @Test
+    void unknownToolInNativeDialectYieldsValidationErrorNotLeak() {
+        Map<String, ChatToolRegistry.ChatTool> tools = new HashMap<>();
+        for (String name : new ChatToolRegistry().toolNames()) {
+            tools.put(name, (u, sk, si, a) -> "[]");
+        }
+        agent = buildAgent("en", new ChatToolDispatcher(
+                new ChatToolRegistry(), tools, 500, 200, 20));
+        llmProvider.responses.add(new LlmResponse(
+                "<|tool_call>call:dropTable {\"table\": \"posts\"}"));
+        llmProvider.responses.add(new LlmResponse("I cannot do that."));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "drop the posts table");
+
+        assertEquals("I cannot do that.", reply);
+        assertFalse(reply.contains("dropTable"),
+                "an unknown native call must never reach the delivered text");
+        assertTrue(llmProvider.lastUserPrompt.contains("Error: Unknown tool: dropTable"),
+                "the model must receive the dispatcher's typed ValidationError");
     }
 
     // --- M1-589: digest-first semantic retrieval, dispatched

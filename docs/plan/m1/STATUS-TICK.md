@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 9 |
+| pending | 8 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 68 |
+| done | 69 |
 | deferred | 0 |
 | abandoned | 0 |
 | **total** | **77** |
@@ -26,7 +26,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-845 — Spec: switchable translation pipeline (pivot vs direct) (complexity: medium, risk: high)
-- M1-856 — Tool prompt: worked example + native-dialect bridge (complexity: medium, risk: medium)
 - M1-859 — Harness: real vector retrieval for the tool-loop campaign (complexity: medium, risk: low)
 - M1-860 — Measure news-category tagger coverage on the local model (complexity: high, risk: low)
 
@@ -48,7 +47,7 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-846 — blocked_by: M1-845 (pending)
 - M1-848 — blocked_by: M1-845 (pending)
 - M1-849 — blocked_by: M1-846 (pending), M1-847 (done), M1-848 (pending), M1-853 (done)
-- M1-858 — blocked_by: M1-856 (pending), M1-857 (done), M1-859 (pending)
+- M1-858 — blocked_by: M1-856 (done), M1-857 (done), M1-859 (pending)
 - M1-861 — blocked_by: M1-860 (pending)
 
 ---
@@ -69,6 +68,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-857 | Citation-discipline wording on grounded and tool-result turns | 2026-08-16 | round 1 APPROVE-WITH-FIXES |
+| M1-856 | Tool prompt: worked example + native-dialect bridge | 2026-08-16 | round 1 APPROVE-WITH-FIXES |
 | M1-855 | SimpleX v7 completion contract on the live bot path | 2026-08-16 | round 1 APPROVE |
 | M1-854 | Recalibrate image preview to real generator output | 2026-08-16 | round 2 APPROVE |
 | M1-844 | Measure grounded in-language chat with the tool loop | 2026-08-16 | round 2 APPROVE |
@@ -77,7 +77,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-851 | Per-model image-prompt translation skip: flag + amendment | 2026-08-15 | round 1 APPROVE |
 | M1-850 | Measure Krea native-prompt holding vs the translation leg | 2026-08-15 | round 2 APPROVE |
 | M1-847 | Add a streaming generate shape to the LlmProvider SPI | 2026-08-15 | round 1 APPROVE |
-| M1-843 | SimpleX codec: image-typed sends with inline preview | 2026-08-15 | round 2 APPROVE |
 
 ---
 
@@ -183,7 +182,7 @@ M1-852 (done)
         └── M1-849 (pending) [see above]
 M1-854 (done)
 M1-855 (done)
-M1-856 (pending) ← runnable
+M1-856 (done)
   └── M1-858 (pending)
 M1-857 (done)
   └── M1-858 (pending) [see above]
