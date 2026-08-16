@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 9 |
+| pending | 10 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 78 |
 | deferred | 0 |
 | abandoned | 2 |
-| **total** | **89** |
+| **total** | **90** |
 
 ---
 
@@ -29,6 +29,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-864 — Measure the tag-tree leaf vocabulary on the local model (complexity: high, risk: low)
 - M1-865 — Tag tree schema and deterministic leaf resolution (complexity: medium, risk: medium)
 - M1-873 — Record the tool-call transport architecture in spec (complexity: low, risk: low)
+- M1-875 — Stop the strip from assembling tool-call markers (complexity: low, risk: medium)
 
 ---
 
@@ -212,4 +213,5 @@ M1-871 (done)
   └── M1-872 (pending)
 M1-873 (pending) ← runnable
   └── M1-872 (pending) [see above]
+M1-875 (pending) ← runnable
 ```
