@@ -627,7 +627,7 @@
   | `infochat.image.spool.capacity-bytes` | `1073741824` | spool capacity; over-capacity writes are refused (tmpfs exhaustion is host memory exhaustion) |
   | `infochat.image.spool.max-age` | `PT1H` | age bound for the sweeper's eviction |
   | `infochat.image.spool.sweep-interval` | `15m` | the sweeper's cadence (@Scheduled expression default) |
-  | `infochat.image.preview-max-pixels` | `65536` | inline-preview downscale budget (total pixels); sized so an encoded preview fits the char ceiling with margin for typical image content |
+  | `infochat.image.preview-max-pixels` | `8192` | inline-preview initial downscale budget (total pixels), probe-anchored (a real 1792×1344 generator output at 8192 px encodes to ~10,668 chars, ~28% headroom under the char ceiling); on char overflow the generator halves the budget and re-encodes until the preview fits — the recorded char ceiling is the binding constraint — so degrade-to-file remains only for genuinely undecodable input or an unreachable ceiling |
   | `infochat.image.preview-max-chars` | `14822` | inline-preview data-URI length ceiling — the probed accept boundary (14,822 accepted / 16,500 refused against `maxEncodedMsgLength` 15,602 minus the message wrapper, above); an over-limit preview degrades to the plain file form |
 
   The sweeper reads the injected app-wide `Clock` for its eviction

@@ -1,14 +1,38 @@
 ---
 id: M1-854
 title: "Recalibrate image preview to real generator output"
-status: pending
+status: done
 created: 2026-08-16
 last_updated: 2026-08-16
+reviews:
+  - round: 1
+    date: 2026-08-16
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS FAIL, SECURITY PASS, TEST-ADEQUACY WARN, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "6 files changed, 163 insertions(+), 29 deletions(-)"
+    rework_items: 1
+    verdict_file: .scratch/tick-review-M1-854-r1.txt
+  - round: 2
+    date: 2026-08-16
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "fix hunks: 4 files changed, 51 insertions(+), 3 deletions(-) (full diff since merge-base: 6 files, 212 insertions(+), 30 deletions(-))"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-854-r2.txt
+clarity_check: >-
+  2026-08-16: lint green (analysis doc copied into the worktree — tick-analysis/
+  is gitignored, worktrees do not inherit it); every file:line citation in Root
+  cause/Approach spot-checked against the tree and true; analysis P1-P5 all
+  landed in Pitfalls/acceptance; blocked_by empty; M1-842 suite traced under
+  the planned change (ceiling-10 case terminates via the no-progress floor —
+  halving below the raster's own pixel count cannot shrink it further); no
+  ambiguity blocking implementation.
 flow: tick
 reproduction: >-
   ImagePreviewGeneratorTest.photographicScaleOutputCarriesAnInCeilingPreviewAtShippedDefaults
-  (to-be-written at start, run RED before any fix code; expected RED shape:
-  generate() returns null): a deterministic high-entropy raster at /image
+  (RED confirmed 2026-08-16 at shipped defaults 65536/14822: generate() returns
+  null — .scratch/m1-854-red-run.log, the only failure among 1867 provider
+  unit tests): a deterministic high-entropy raster at /image
   generation resolution (1792×1344) — strip-validated, within the configured
   max-output-pixels bound (default 5,000,000, ImageCommandHandler.java:116) —
   is pushed through ImagePreviewGenerator at the SHIPPED defaults read from
@@ -62,7 +86,7 @@ acceptance:
   - "mvn verify from repo root is green."
 test_plan:
   adds:
-    - infochat-provider/src/test/java/app/zcat/infochat/provider/image/ImagePreviewGeneratorTest.java (photographicScaleOutputCarriesAnInCeilingPreviewAtShippedDefaults; the shrink-to-fit and termination tests; the exceed-at-initial-budget test)
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/image/ImagePreviewGeneratorTest.java (photographicScaleOutputCarriesAnInCeilingPreviewAtShippedDefaults; the shrink-to-fit and termination tests; the exceed-at-initial-budget test; r2-rework underBudgetOverCeilingRasterStillShrinksToFit)
   modifies:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/image/ImagePreviewGeneratorTest.java (constructor budget values to the recalibrated default — pre-authorized by acceptance item 4)
   preserves:
@@ -200,3 +224,48 @@ ComfyUI/handler internals, and JPEG/WebP preview encoding (needs its own
 live probe of the jpg form; analysis Option D records it as a future knob).
 One pre-existing test file is modified — ImagePreviewGeneratorTest —
 pre-authorized in acceptance item 4; no other pre-existing test is touched.
+
+## Live evidence (acceptance item 7)
+
+Test instance `/home/infochat/infochat-test` (never prod). Provider image
+rebuilt from this branch; the running image's
+`infochat-provider-1.1.0-SNAPSHOT.jar` was extracted and confirmed to carry
+both the shrink-to-fit generator (`shrinkToFit`) and the baked defaults
+`preview-max-pixels=8192` / `preview-max-chars=14822`. One `/image` run,
+2026-08-16 02:28 local, probe-v7 client registered, transcript
+`prod/runtime/test-clients/probe-v7/m1-854-liveverify-1.log`:
+
+    @Admin-Reno /image a small red cube on white background
+    Admin-Reno> Working on it...
+    Admin-Reno> sends file image-4e0df95c-....png (2.0 MiB / 2075636 bytes)
+
+The bot's own chat DB (`prod/runtime/simplex/simplex_v1_chat.db`, chat item
+1657, `item_sent=1`) stores the sent item as an image message carrying the
+inline preview member — the M1-843 image branch fired:
+
+    {"sndMsgContent":{"msgContent":{"type":"image","text":"",
+      "image":"data:image/png;base64,iVBORw0KGgo..."}}}
+
+- `msgContent.type` = `image` (the inline form); pre-fix runs on this stack
+  stored `type=file` (the defect — analysis §Problem, probe-v7-image3.log).
+- Preview data-URI length 10,166 chars — within the 14,822 shipped ceiling.
+- Sidecar live read (`WsProbe` `/tail @ProbeV7` against the subprocess WS
+  :5225) returns the same `"type":"image",...,"image":"data:image/png;
+  base64,..."` msgContent.
+- Recipient (probe-v7) chat DB chat item 34: `msg_content_tag=image`.
+
+## Round 1 rework
+
+REWORK ITEMS (verbatim from .scratch/tick-review-M1-854-r1.txt):
+
+1. FINDING 1: In ImagePreviewGenerator.shrinkToFit (infochat-provider/src/main/java/
+   app/zcat/infochat/provider/image/ImagePreviewGenerator.java:78-81), replace the
+   `downscaled.pixels <= halved` no-progress exit with a minimal-raster exit
+   (`halved < 1 || (downscaled.getWidth() == 1 && downscaled.getHeight() == 1)`) so
+   under-budget over-ceiling rasters still shrink to fit; add the
+   `underBudgetOverCeilingRasterStillShrinksToFit` test to ImagePreviewGeneratorTest
+   as specified in EVALUATED-AS (RED on the current code, GREEN after the fix), and
+   re-run `mvn verify` from the repo root green with the existing
+   `unreachableCeilingExhaustsTheShrinkLadderToNull`,
+   `refusesOrDegradesHostileInput`, and `photographicScaleOutputCarriesAnInCeilingPreviewAtShippedDefaults`
+   unchanged and passing.

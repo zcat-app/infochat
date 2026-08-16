@@ -37,8 +37,8 @@ public class ImagePreviewGenerator {
     }
 
     /** A PNG data-URI preview of {@code strippedPng}, or {@code null} when
-     * the input is undecodable, over the pixel bound, or the encoded
-     * preview still exceeds the char ceiling after downscale. */
+     * the input is undecodable, over the pixel bound, or no raster of it
+     * can meet the char ceiling (design 06-messaging.md §6.2.4). */
     public @Nullable String generate(byte[] strippedPng, long maxOutputPixels) {
         try (ImageInputStream input =
                      ImageIO.createImageInputStream(new ByteArrayInputStream(strippedPng))) {
@@ -55,9 +55,7 @@ public class ImagePreviewGenerator {
                 if ((long) reader.getWidth(0) * reader.getHeight(0) > maxOutputPixels) {
                     return null;
                 }
-                BufferedImage downscaled = downscale(reader.read(0));
-                String dataUri = DATA_URI_PREFIX + encodeAsPng(downscaled);
-                return dataUri.length() <= previewMaxChars ? dataUri : null;
+                return shrinkToFit(reader.read(0));
             } finally {
                 reader.dispose();
             }
@@ -66,12 +64,31 @@ public class ImagePreviewGenerator {
         }
     }
 
-    private BufferedImage downscale(BufferedImage image) {
+    /** The char ceiling is the binding constraint; the pixel budget is only
+     * the initial downscale target — on overflow the budget halves until the
+     * preview fits, and exhaustion degrades to null (the plain file form). */
+    private @Nullable String shrinkToFit(BufferedImage source) throws IOException {
+        long budget = previewMaxPixels;
+        while (true) {
+            BufferedImage downscaled = downscale(source, budget);
+            String dataUri = DATA_URI_PREFIX + encodeAsPng(downscaled);
+            if (dataUri.length() <= previewMaxChars) {
+                return dataUri;
+            }
+            long halved = budget / 2;
+            if (halved < 1 || (downscaled.getWidth() == 1 && downscaled.getHeight() == 1)) {
+                return null;
+            }
+            budget = halved;
+        }
+    }
+
+    private BufferedImage downscale(BufferedImage image, long budget) {
         long pixels = (long) image.getWidth() * image.getHeight();
-        if (pixels <= previewMaxPixels) {
+        if (pixels <= budget) {
             return image;
         }
-        double scale = Math.sqrt((double) previewMaxPixels / pixels);
+        double scale = Math.sqrt((double) budget / pixels);
         int width = Math.max(1, (int) Math.floor(image.getWidth() * scale));
         int height = Math.max(1, (int) Math.floor(image.getHeight() * scale));
         BufferedImage preview = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
