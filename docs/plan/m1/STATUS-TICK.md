@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 6 |
+| pending | 12 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 65 |
 | deferred | 0 |
 | abandoned | 0 |
-| **total** | **71** |
+| **total** | **77** |
 
 ---
 
@@ -28,6 +28,10 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-845 — Spec: switchable translation pipeline (pivot vs direct) (complexity: medium, risk: high)
 - M1-854 — Recalibrate image preview to real generator output (complexity: medium, risk: medium)
 - M1-855 — SimpleX v7 completion contract on the live bot path (complexity: high, risk: medium)
+- M1-856 — Tool prompt: worked example + native-dialect bridge (complexity: medium, risk: medium)
+- M1-857 — Citation-discipline wording on grounded and tool-result turns (complexity: low, risk: low)
+- M1-859 — Harness: real vector retrieval for the tool-loop campaign (complexity: medium, risk: low)
+- M1-860 — Measure news-category tagger coverage on the local model (complexity: high, risk: low)
 
 ---
 
@@ -47,6 +51,8 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-846 — blocked_by: M1-845 (pending)
 - M1-848 — blocked_by: M1-845 (pending)
 - M1-849 — blocked_by: M1-846 (pending), M1-847 (done), M1-848 (pending), M1-853 (done)
+- M1-858 — blocked_by: M1-856 (pending), M1-857 (pending), M1-859 (pending)
+- M1-861 — blocked_by: M1-860 (pending)
 
 ---
 
@@ -180,4 +186,12 @@ M1-852 (done)
         └── M1-849 (pending) [see above]
 M1-854 (pending) ← runnable
 M1-855 (pending) ← runnable
+M1-856 (pending) ← runnable
+  └── M1-858 (pending)
+M1-857 (pending) ← runnable
+  └── M1-858 (pending) [see above]
+M1-859 (pending) ← runnable
+  └── M1-858 (pending) [see above]
+M1-860 (pending) ← runnable
+  └── M1-861 (pending)
 ```
