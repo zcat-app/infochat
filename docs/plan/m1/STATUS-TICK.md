@@ -11,7 +11,7 @@
 | Status | Count |
 |---|---|
 | pending | 12 |
-| in-progress | 0 |
+| in-progress | 1 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 75 |
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-848 — Wire the pivot/direct switch into the chat reply path (complexity: high, risk: high)
 - M1-864 — Measure the tag-tree leaf vocabulary on the local model (complexity: high, risk: low)
 - M1-865 — Tag tree schema and deterministic leaf resolution (complexity: medium, risk: medium)
-- M1-870 — Strip brace-less native tool-call markers from final replies (complexity: low, risk: medium)
 - M1-871 — Single-source tool catalog for prompts and transports (complexity: medium, risk: medium)
 - M1-873 — Record the tool-call transport architecture in spec (complexity: low, risk: low)
 
@@ -38,8 +37,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 | ID | Title | Status | Last review |
 |---|---|---|---|
-
-_(none)_
+| M1-870 | Strip brace-less native tool-call markers from final replies | in-progress | (none) |
 
 ---
 
@@ -210,7 +208,7 @@ M1-865 (pending) ← runnable
   │     ├── M1-866 (pending) [see above]
   │     └── M1-869 (pending) [see above]
   └── M1-869 (pending) [see above]
-M1-870 (pending) ← runnable
+M1-870 (in-progress)
 M1-871 (pending) ← runnable
   └── M1-872 (pending)
 M1-873 (pending) ← runnable

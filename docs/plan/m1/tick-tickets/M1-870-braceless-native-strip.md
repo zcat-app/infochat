@@ -1,7 +1,7 @@
 ---
 id: M1-870
 title: "Strip brace-less native tool-call markers from final replies"
-status: pending
+status: in-progress
 created: 2026-08-16
 last_updated: 2026-08-16
 flow: tick
