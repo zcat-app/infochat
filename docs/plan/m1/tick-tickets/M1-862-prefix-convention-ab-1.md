@@ -1,7 +1,7 @@
 ---
 id: M1-862
 title: "A/B rig: raw vs prefixed vectors on the deployment embedder"
-status: pending
+status: done
 created: 2026-08-16
 last_updated: 2026-08-16
 flow: tick
@@ -100,11 +100,21 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-16
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "tracked: 2 files +11/-9 (STATUS-TICK board + ticket start notes); rig deliverables under gitignored .bench/prefix-ab/ in the main checkout (manifest.json, embed_docs.py, embed_queries.py, coverage.py, selfcheck.py, README.md, probe-inputs.log, docs-raw/prefixed + queries-raw/prefixed stores with manifests, coverage.json + coverage-queries.json); mvn verify BUILD SUCCESS tick-test-M1-862-r1b.log"
+    verdict_file: .scratch/tick-review-M1-862-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-16
+  verdict: PASS
+  warnings: []
+  blockers: []
 escalation_reason:
 ---
 

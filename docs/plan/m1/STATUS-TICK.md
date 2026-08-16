@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 11 |
+| pending | 10 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 72 |
+| done | 73 |
 | deferred | 0 |
 | abandoned | 2 |
 | **total** | **85** |
@@ -27,7 +27,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-848 — Wire the pivot/direct switch into the chat reply path (complexity: high, risk: high)
 - M1-858 — Re-measure the tool loop with the levers landed (complexity: high, risk: medium)
-- M1-862 — A/B rig: raw vs prefixed vectors on the deployment embedder (complexity: medium, risk: low)
+- M1-863 — Run the prefix A/B; record the adopt-or-drop number (complexity: medium, risk: low)
 - M1-864 — Measure the tag-tree leaf vocabulary on the local model (complexity: high, risk: low)
 - M1-865 — Tag tree schema and deterministic leaf resolution (complexity: medium, risk: medium)
 
@@ -47,7 +47,6 @@ _(none)_
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-849 — blocked_by: M1-846 (done), M1-847 (done), M1-848 (pending), M1-853 (done)
-- M1-863 — blocked_by: M1-862 (pending)
 - M1-866 — blocked_by: M1-864 (pending), M1-865 (pending), M1-868 (pending)
 - M1-867 — blocked_by: M1-865 (pending), M1-866 (pending)
 - M1-868 — blocked_by: M1-865 (pending)
@@ -70,6 +69,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-862 | A/B rig: raw vs prefixed vectors on the deployment embedder | 2026-08-16 | round 1 APPROVE |
 | M1-859 | Harness: real vector retrieval for the tool-loop campaign | 2026-08-16 | round 2 APPROVE |
 | M1-857 | Citation-discipline wording on grounded and tool-result turns | 2026-08-16 | round 1 APPROVE-WITH-FIXES |
 | M1-856 | Tool prompt: worked example + native-dialect bridge | 2026-08-16 | round 1 APPROVE-WITH-FIXES |
@@ -79,7 +79,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-845 | Spec: switchable translation pipeline (translate vs native) | 2026-08-16 | round 1 APPROVE |
 | M1-844 | Measure grounded in-language chat with the tool loop | 2026-08-16 | round 2 APPROVE |
 | M1-853 | Land the observed streaming usage opt-in request shape | 2026-08-15 | round 1 APPROVE |
-| M1-852 | Observe streaming usage opt-in across the LLM fleet | 2026-08-15 | round 1 APPROVE |
 
 ---
 
@@ -193,8 +192,8 @@ M1-857 (done)
   └── M1-858 (pending) [see above]
 M1-859 (done)
   ├── M1-858 (pending) [see above]
-  └── M1-862 (pending) ← runnable
-        └── M1-863 (pending)
+  └── M1-862 (done)
+        └── M1-863 (pending) ← runnable
 M1-860 (abandoned)
   └── M1-861 (abandoned)
 M1-864 (pending) ← runnable
