@@ -1,9 +1,9 @@
 ---
 id: M1-864
 title: "Measure the tag-tree leaf vocabulary on the local model"
-status: pending
+status: done
 created: 2026-08-16
-last_updated: 2026-08-16
+last_updated: 2026-08-17
 flow: tick
 reproduction: >-
   Probe (evidence gap, verified 2026-08-16): (1) grep -rl
@@ -99,11 +99,37 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-17
+    verdict: REWORK
+    checks: {SPEC-TRUTHNESS-CHECK: FAIL, SECURITY-CHECK: PASS, TEST-ADEQUACY-CHECK: PASS, MAINTAINABILITY-CHECK: PASS, SCOPE-CHECK: PASS}
+    diff_stats: "3 files changed, 489 insertions(+), 9 deletions(-)"
+  - round: 2
+    date: 2026-08-17
+    verdict: APPROVE-WITH-FIXES
+    checks: {SPEC-TRUTHNESS-CHECK: WARN, SECURITY-CHECK: PASS, TEST-ADEQUACY-CHECK: PASS, MAINTAINABILITY-CHECK: PASS, SCOPE-CHECK: PASS}
+    diff_stats: "fix diff 3 files, 55 insertions(+), 18 deletions(-) (record +21/-9; remainder round bookkeeping); both round-1 REWORK items dispositioned SATISFIED"
+    fix_probes: "grep 'all 28' record → no matches; grep '159 expected-top' record → line 329; ./mvnw -B test-compile exit 0 (3.1 s, incremental); fixed tree f016f1d2 (.scratch/tick-fixes-M1-864.tree)"
+    test_log: .scratch/tick-test-M1-864-r2.log (BUILD SUCCESS 2026-08-17 00:15)
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-16
+  verdict: PASS
+  warnings: []
+  blockers: []
+  notes: >-
+    Lint clean after syncing the gitignored analysis doc into the worktree
+    (tick-analysis/ is untracked by design, .gitignore:64). Reproduction
+    probes re-verified live: no tag-tree measurement file under
+    docs/measurement/; tag-vocabulary.md absent; score.json noise_floor
+    0.9006/0.7509, b3 politics 0.8333, b5 marginal — all match ticket
+    citations; showcase score-showcase.py:127-128 barless note confirmed;
+    pinned GGUF path exists; M1-860 harness and
+    track-a/verify-against-java.py present. Pitfalls P1-P5+P20 all landed
+    in the ticket.
 escalation_reason:
 ---
 
@@ -244,3 +270,33 @@ engineering-rules §8 change.
 Not class-scoped: a measurement campaign, not a fix guarding a class of
 defect sites. (The no-hardcoded-vocabulary-names property is probed in
 M1-866.)
+
+## Round 1 rework
+
+1. Finding 1: correct the record's corpus accounting and floor cell —
+   78 news-expected rows / 26 fixtures / 18 leaf-news in the
+   News-distribution finding and the Cycle-5 note; Results noise-floor
+   table prints the binding final floor 0.9266/0.8092 (0.9259/0.8153
+   moves to the earlier-measurements parenthetical); one sentence
+   reconciling the per-top sums (159 expected-top triples; the 7
+   injection fixtures carry no expected top) — evaluated via `grep -n
+   '84 news-expected\|21 leaf-news\|28 news-expected'
+   docs/measurement/tag-tree-taxonomy.md` (must return nothing) plus
+   `grep -n '0\.9266'` showing the consistent floor.
+2. Finding 2: disclose the post-results bar-rule scope edit — a
+   Registration-updates bullet naming ac3e6424 (post-results,
+   scope-only, no bar number moved, no verdict flips under either
+   reading) and the results-commit pin repointed to 7666cc83 —
+    evaluated via `grep -n 'ac3e6424\|7666cc83'
+    docs/measurement/tag-tree-taxonomy.md`; the acceptance-1
+    `git log --follow` probe must stay green.
+
+## Review observations
+
+- Round 2 recommended-new-ticket (recorded, TOUCHED-BY-THIS-DIFF: no,
+  no DECIDE-BEFORE — user reads, no decision requested here): the
+  leaf-stability row prints "92/95 single-leaf triples" with no sentence
+  defining which 95 of the 166 fixtures count as single-leaf triples.
+  Commit-body one-liner: "review note (M1-864): leaf-stability
+  denominator 95 single-leaf triples undefined in the record — candidate
+  one-line record follow-up."
