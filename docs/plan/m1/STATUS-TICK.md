@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 8 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 71 |
 | deferred | 0 |
-| abandoned | 0 |
+| abandoned | 2 |
 | **total** | **79** |
 
 ---
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-846 — Spec: live-text streaming display policy (complexity: medium, risk: high)
 - M1-848 — Wire the pivot/direct switch into the chat reply path (complexity: high, risk: high)
 - M1-858 — Re-measure the tool loop with the levers landed (complexity: high, risk: medium)
-- M1-860 — Measure news-category tagger coverage on the local model (complexity: high, risk: low)
 - M1-862 — A/B rig: raw vs prefixed vectors on the deployment embedder (complexity: medium, risk: low)
 
 ---
@@ -47,7 +46,6 @@ _(none)_
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-849 — blocked_by: M1-846 (pending), M1-847 (done), M1-848 (pending), M1-853 (done)
-- M1-861 — blocked_by: M1-860 (pending)
 - M1-863 — blocked_by: M1-862 (pending)
 
 ---
@@ -90,7 +88,9 @@ _(none)_
 
 Tickets decided against — not implemented as this ticket. Terminal: not reopenable via the driver's `reopen`. `abandoned_reason` records why (`decomposed` = split into shipped children; `superseded` = absorbed by another ticket; `obsoleted-by-spec-amend` = a spec change dropped the requirement; `wont-do-infeasible` = evaluated and judged not worth building). See `docs/process/workflow.md` §Status values.
 
-_(none)_
+### superseded (2)
+- M1-860 — Measure news-category tagger coverage on the local model
+- M1-861 — Seed validated news categories into the tag vocabulary
 
 ---
 
@@ -190,6 +190,6 @@ M1-859 (done)
   ├── M1-858 (pending) [see above]
   └── M1-862 (pending) ← runnable
         └── M1-863 (pending)
-M1-860 (pending) ← runnable
-  └── M1-861 (pending)
+M1-860 (abandoned)
+  └── M1-861 (abandoned)
 ```

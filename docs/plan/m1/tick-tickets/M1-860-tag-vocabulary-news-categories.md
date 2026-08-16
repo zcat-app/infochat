@@ -1,7 +1,7 @@
 ---
 id: M1-860
 title: "Measure news-category tagger coverage on the local model"
-status: pending
+status: abandoned
 created: 2026-08-16
 last_updated: 2026-08-16
 flow: tick
@@ -91,19 +91,44 @@ replaces:
 replaced_by:
 deferred_on:
 deferred_reason:
-abandoned_reason:
+abandoned_reason: superseded
 spec_amend_for:
 spec_amend_parent:
 remediates:
 reviews: []
 overrides: []
-aborted_attempts: []
+aborted_attempts:
+  - >-
+    2026-08-16 campaign RAN to completion and a decisive rejection on branch
+    m1/M1-860-tag-vocabulary-news-categories (branch deleted at abandonment;
+    its two commits were thresholds-only — pre-registration 342e022f,
+    noise-floor re-registration db1e311b — no results commit was ever made).
+    Verdict: all 8 candidates rejected. B3 adversarial FAIL (politics
+    proposed on 83.3% of AI-policy fixtures vs 0.063-relative/0.15-absolute
+    ceilings; ai/security coverage 1.0 -> 0.8889), B2 NO-DRIFT FAIL (20/24
+    tags below the 0.92 bar, per-tag Jaccard 0.52-0.96, additive leakage:
+    crypto post gains business, video post gains politics), B5 marginal
+    FAIL (enlarged 3 vs floor 2 violating injection calls). B1 PASS 8/8 at
+    1.0, B4 PASS (bytes +4.9%, 0 schema violations in 546 attempt-1 calls)
+    — the model applies supplied names perfectly; the flat candidate LIST
+    is the defect. Working data: .bench/tag-vocab/ (gitignored, survives);
+    method statement salvaged to .scratch/m1-860-measurement-doc-salvage.md.
 reopens: []
 clarity_check: {}
 escalation_reason:
 ---
 
 # M1-860: measure news-category tagger coverage on the local model
+
+> **ABANDONED 2026-08-16 — superseded.** The campaign ran to completion
+> and rejected every candidate (see `aborted_attempts` for the numbers);
+> the user ruled the flat-append approach dead. Replacement: a v2
+> hierarchical tree taxonomy (disjoint tops, depth-2 leaves, deterministic
+> depth/top-priority resolution in Java, News-geographic lowest-priority
+> fallback, bounded Others) to be decomposed by a fresh `/tick analyze`
+> from the v2 brief. The M1-860 harness (fixtures methodology, noise-floor
+> design, B1-B5 legs, depth-decomposed bars) is the validation tool for
+> the v2 vocabulary candidates — reuse it, do not re-run M1-860 phases.
 
 ## Context
 

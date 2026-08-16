@@ -1,7 +1,7 @@
 ---
 id: M1-861
 title: "Seed validated news categories into the tag vocabulary"
-status: pending
+status: abandoned
 created: 2026-08-16
 last_updated: 2026-08-16
 flow: tick
@@ -88,7 +88,7 @@ replaces:
 replaced_by:
 deferred_on:
 deferred_reason:
-abandoned_reason:
+abandoned_reason: superseded
 spec_amend_for:
 spec_amend_parent:
 remediates:
@@ -101,6 +101,13 @@ escalation_reason:
 ---
 
 # M1-861: seed validated news categories into the tag vocabulary
+
+> **ABANDONED 2026-08-16 — superseded.** Premise died with M1-860's
+> rejection: there is no winning flat list to seed. The v2 tree-taxonomy
+> redesign replaces it; when its analysis lands, the V81-migration shape
+> (append-only ON CONFLICT seed, TagNormalizer stored-form test, collision
+> test, schema.md lifecycle amendment v1->v2, sweep-generation statement)
+> is salvageable mechanics for the v2's own seed/migration ticket.
 
 ## Context
 
