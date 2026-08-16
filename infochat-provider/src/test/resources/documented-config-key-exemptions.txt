@@ -80,3 +80,4 @@ infochat.llm.summarizer.max-concurrency | GAP: docs/design/05-llm-and-embeddings
 infochat.summary.workers | GAP: docs/design/05-llm-and-embeddings.md §5.7 marks "no such key" — summary/digest work has no per-profile worker-count bound.
 infochat.user.display-name-max-chars | GAP (audit §A2, docs/design/04-security.md §Display-name sanitization): the whole sanitizer is deferred by decision and the doc states this is not a real key.
 infochat.asset.<asset>.<sub_verb>.refresh-interval | GAP: docs/design/01-architecture.md §1.6 commits to per-(asset, sub_verb) cadence; what ships is the coarser per-HOST infochat.assets.refresh.<host>. The granularity, not just the name, is what is owed.
+infochat.chat.reply-mode | GAP: docs/spec/decisions.md (D79) and docs/spec/llm.md §Translation flow name the deployment-default pipeline-mode key; the key ships with the switch wiring (M1-848), and this entry comes out with that ticket.

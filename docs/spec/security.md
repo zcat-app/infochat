@@ -2209,13 +2209,20 @@ sources). Application code uses the soft-delete column.
   so they are unbudgeted on a user-initiated path as well.
 - **`translator` also carries the bot's own REPLY prose (pre-existing;
   enumerated by M1-758).** For a scope on a non-English `/lang` the
-  chat-mode reply is translated before delivery, so the reply text —
-  which quotes and paraphrases the user's private message — reaches
+  chat-mode reply is translated before delivery when the chat-reply
+  pipeline runs in translate mode (decision D79); in native mode the
+  leg does not run. When it runs, the reply text — which quotes and
+  paraphrases the user's private message — reaches
   `ModelTask.TRANSLATOR`. This is the ORIGINAL translator leg, older
   than every entry above; it is enumerated here because a section that
   lists the newer legs and omits the oldest reads as complete while
-  understating the surface. Chat memory stays English-canonical: only
-  the delivered reply is translated.
+  understating the surface. The `chat_memory` checkpoint stays
+  English-canonical in both pipeline modes (decision D79): in translate
+  mode only the delivered reply is translated, and the persisted
+  assistant turn is the English original; in native mode the delivered
+  reply is the scope language and the assistant turn persists raw —
+  exactly as the user's own turns persist raw in both modes — and the
+  compressor writes the checkpoint in English in both modes.
 - **`translator` ALSO runs on a leg that NO scope's `/lang` gates
   (pre-existing; enumerated by M1-758).** The Collector's ingest
   translation worker translates fetched posts to the D29 corpus anchor

@@ -297,8 +297,38 @@ Adding a fallback chain is a v2 candidate.
 
 - The default scope language is English (decision D29).
 - A scope can opt in via `/lang <code>` (`scope_preferences.language`).
-- For each user-visible reply, if the scope language is `'en'` the raw                                                                                                                                                                                
-  text is sent unchanged. Otherwise it goes through `TranslationProvider`.
+- The chat-reply pipeline is switchable between two modes (decision D79).
+  **Translate mode** is the deployment default and today's behavior
+  exactly: the reply is generated in English, and for each user-visible
+  chat reply, if the scope language is `'en'` the raw text is sent
+  unchanged; otherwise it goes through `TranslationProvider` (the
+  display leg). **Native mode** generates the reply in the scope's
+  declared `/lang` language and skips the display leg. The deployment
+  default is set by the operator key `infochat.chat.reply-mode` (default
+  `translate`) — a capability-gating posture on the D73 precedent, not a
+  feature flag: translate mode IS today's behavior and remains a
+  supported deployment posture. A scope resolves native only when the
+  deployment's chat model and the scope language form a (model,
+  language) pair with a committed bar-clearing measurement record — a
+  code-constant registry, never an operator key (decision D79); an
+  uncleared pair resolves translate mode at resolution time, logged,
+  and the mode never flips mid-turn.
+- The reply-language contract is mode-conditional: in translate mode the
+  model writes English and the display leg translates; in native mode
+  the model writes the scope's language. In both modes the language is
+  DECLARED by the channel (`/lang`), never inferred from the text
+  (decision D29). Native mode carries no mechanical language net — the
+  sanity checks below backstop the display legs, and native mode has
+  none, so a whole-turn collapse in native mode delivers the wrong
+  language with no note; the accepted residual's controls are the
+  registry gate and the measurement record it cites, not a runtime
+  check.
+- Query anchoring is mode-independent: the X→EN query translation
+  (decision D58) runs in both modes because the embedding store is
+  English; only the chat-reply display leg is conditional.
+- Every other display leg stays unconditional: digest prose, `/summary`,
+  `/saved` and headline rendering translate as today, the summarizer's
+  language-aware shortcut is untouched, and the ingest leg is untouched.
 - For models that can natively generate the target language, the                                                                                                                                                                                      
   summarizer is invoked with `target_language` directly to save a round                                                                                                                                                                               
   trip. The summarizer exposes a "language-aware" capability so the                                                                                                                                                                                   
@@ -397,7 +427,10 @@ For LLM-authored output, the order from generation to delivery is:
 1. LLM prose (summarizer, chat agent, digest writer).
 2. **LLM output sanitizer** (`security.md` §LLM output sanitizer) —
    strips admin command strings.
-3. `TranslationProvider` — skipped if the scope language is English.
+3. `TranslationProvider` — skipped if the scope language is English. A
+   chat-agent reply in native mode (decision D79, §Translation flow)
+   skips steps 3–5 entirely: its generated text is already the
+   delivered language.
 4. **LLM output sanitizer (re-run on translated text)** — the
    translator is itself an LLM and can introduce admin-command-shaped
    strings, so the sanitizer runs again on the translated output.
