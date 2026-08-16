@@ -38,6 +38,7 @@ import java.sql.SQLException;
 import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -78,6 +79,10 @@ public class ChatAgent {
     private static final ObjectMapper TOOL_ARGS_MAPPER = new ObjectMapper();
 
     static final int MAX_TOOL_ITERATIONS = 10;
+
+    // Fixpoint loop bound: passes only delete, so a pass that removes
+    // nothing is done; the cap backstops adversarial assembly chains.
+    static final int MAX_STRIP_PASSES = 64;
 
     static final String TOOL_INSTRUCTIONS =
             "\n\nYou have the following tools. To call a tool, output EXACTLY "
@@ -1124,10 +1129,38 @@ public class ChatAgent {
      * Strips residual tool-call fragments of both accepted dialects: balanced
      * removed exactly, unbalanced through end-of-text; a brace-less native
      * opener+call:+name token stripped exactly with following prose
-     * preserved; a bare opener stays quoted prose.
+     * preserved; a bare opener stays quoted prose. Runs to a fixpoint
+     * across {@value #MAX_STRIP_PASSES} passes — a deletion can join the
+     * bytes around a removed span into a fresh marker (M1-875).
      */
     static String stripToolCalls(String text) {
+        String current = text;
+        Set<Integer> protectedOpeners = Set.of();
+        int passes = 0;
+        while (passes < MAX_STRIP_PASSES) {
+            StripPass pass = stripToolCallsSinglePass(current, protectedOpeners);
+            // Deletion-only: a pass that removes nothing returns its input
+            // byte-identical, so equal length means the fixpoint is reached.
+            if (pass.text().length() == current.length()) {
+                return current;
+            }
+            current = pass.text();
+            protectedOpeners = new HashSet<>(pass.keptOpenerPositions());
+            passes++;
+        }
+        return current;
+    }
+
+    /** One pass's output plus the kept bare openers' output positions. */
+    record StripPass(String text, List<Integer> keptOpenerPositions) {}
+
+    // Single left-to-right scan over the ORIGINAL text: a deletion-join is
+    // invisible to the pass that makes it, so the wrapper re-scans the
+    // output while a kept bare opener carries its prose ruling forward.
+    private static StripPass stripToolCallsSinglePass(String text,
+            Set<Integer> protectedOpeners) {
         StringBuilder result = new StringBuilder();
+        List<Integer> keptOpeners = new ArrayList<>();
         int cursor = 0;
         while (cursor < text.length()) {
             int shipped = text.indexOf("TOOL_CALL:", cursor);
@@ -1146,11 +1179,19 @@ public class ChatAgent {
             }
             if (marker < 0) {
                 result.append(text, cursor, text.length());
-                return result.toString();
+                break;
             }
             result.append(text, cursor, marker);
 
             if (nativeDialect) {
+                if (protectedOpeners.contains(marker)) {
+                    // A bare opener ruled prose in an earlier pass: the
+                    // ruling survives the re-scan (M1-875 over-strip pin).
+                    keptOpeners.add(result.length());
+                    result.append(NATIVE_TOOL_CALL_OPENER);
+                    cursor = marker + NATIVE_TOOL_CALL_OPENER.length();
+                    continue;
+                }
                 // The args brace counts only where the grammar admits it —
                 // after the name, whitespace only. A brace outside the window
                 // does not start a fragment (M1-870 P6).
@@ -1162,7 +1203,7 @@ public class ChatAgent {
                         continue;
                     }
                     // Unbalanced fragment: drop through end-of-text.
-                    return result.toString();
+                    return new StripPass(result.toString(), keptOpeners);
                 }
                 // Brace-less call attempt: strip exactly the opener plus
                 // 'call:' plus the name, then scan on.
@@ -1173,6 +1214,7 @@ public class ChatAgent {
                 }
                 // Opener with neither an args brace nor 'call:' after it:
                 // prose quoting the dialect — keep it and scan on.
+                keptOpeners.add(result.length());
                 result.append(NATIVE_TOOL_CALL_OPENER);
                 cursor = marker + NATIVE_TOOL_CALL_OPENER.length();
                 continue;
@@ -1186,11 +1228,11 @@ public class ChatAgent {
                     continue;
                 }
                 // Partial shipped fragment: drop through end-of-text.
-                return result.toString();
+                return new StripPass(result.toString(), keptOpeners);
             }
-            return result.toString();
+            return new StripPass(result.toString(), keptOpeners);
         }
-        return result.toString();
+        return new StripPass(result.toString(), keptOpeners);
     }
 
     // Returns the index of the '}' that balances the '{' at openIndex, or

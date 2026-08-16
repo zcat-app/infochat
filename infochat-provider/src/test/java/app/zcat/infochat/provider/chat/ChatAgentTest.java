@@ -528,6 +528,86 @@ class ChatAgentTest {
     }
 
     @Test
+    void deletionJoinCannotAssembleToolCallMarkers() {
+        // M1-875 reproduction: the strip's deletion-join assembled the exact
+        // shipped-dialect marker it exists to remove, on text the pre-join
+        // sanitize pass never saw.
+        String joinedShipped = ChatAgent.stripToolCalls(
+                "TOOL_" + "<|tool_call>call:x{old}" + "CALL: y {}");
+        assertEquals("", joinedShipped,
+                "the joined span must not ship as a shipped-dialect marker");
+        assertFalse(joinedShipped.contains("TOOL_CALL:"));
+        assertFalse(joinedShipped.contains("<|tool_call>"));
+
+        String joinedNative = ChatAgent.stripToolCalls(
+                "<|tool_" + "TOOL_CALL: x {old}" + "call>call:z");
+        assertEquals("", joinedNative,
+                "the joined span must not ship as a native marker");
+        assertFalse(joinedNative.contains("<|tool_call>"));
+        assertFalse(joinedNative.contains("TOOL_CALL:"));
+
+        String joinedClosedListToken = ChatAgent.stripToolCalls(
+                "TOOL" + "<|tool_call>call:a{old}" + "_"
+                        + "<|tool_call>call:b{old}" + "CALL: y {}");
+        assertEquals("", joinedClosedListToken,
+                "a marker joined across two deletions must not ship");
+        assertFalse(joinedClosedListToken.contains("TOOL_CALL:"));
+    }
+
+    @Test
+    void deletionJoinInADropThroughPassIsStillReScanned() {
+        // An unbalanced fragment ends its pass by dropping through
+        // end-of-text; the wrapper must still re-scan that truncated
+        // output, where the deletion-join already lives (M1-875 rework).
+        String joinedInDropThrough = ChatAgent.stripToolCalls("TOOL_"
+                + "<|tool_call>call:a{old}" + "CALL: q {}"
+                + "<|tool_call>call:b{unbalanced");
+        assertEquals("", joinedInDropThrough,
+                "a marker assembled before a drop-through return must not "
+                        + "ship in the truncated output");
+
+        String keptOpenerThroughDropThrough = ChatAgent.stripToolCalls(
+                "Quote <|tool_call><|tool_call>call:x{old}"
+                        + "call:y TOOL_CALL: {unbalanced");
+        assertEquals("Quote <|tool_call>call:y ", keptOpenerThroughDropThrough,
+                "a bare opener ruled prose keeps its ruling when the pass "
+                        + "ends in a drop-through");
+    }
+
+    @Test
+    void stripReScanTerminatesOnAdversarialNestedInput() {
+        // 24 nested layers: pass 1 strips the fragments, each later pass
+        // peels one assembled shipped marker — 25 removing passes, under
+        // the cap (fragments carry a brace so \w* stops at the boundary).
+        int layers = 24;
+        StringBuilder nested = new StringBuilder();
+        for (int i = 0; i < layers; i++) {
+            nested.append("TOOL_").append("<|tool_call>call:x{old}");
+        }
+        nested.append("CALL: y {}".repeat(layers));
+        String stripped = ChatAgent.stripToolCalls(nested.toString());
+        assertEquals("", stripped,
+                "the re-scan must reach the fixpoint, not stop at the cap");
+        assertFalse(stripped.contains("TOOL_CALL:"));
+        assertFalse(stripped.contains("<|tool_call>"));
+
+        // 50 quoted bare openers ahead of one fragment: each pass re-rules
+        // them prose and the loop settles instead of spinning.
+        String spin = "<|tool_call>".repeat(50) + "call:x{old}";
+        assertEquals("<|tool_call>".repeat(49), ChatAgent.stripToolCalls(spin),
+                "bare openers stay quoted prose across passes");
+    }
+
+    @Test
+    void bareOpenerRulingSurvivesTheReScan() {
+        String stripped = ChatAgent.stripToolCalls(
+                "Quote <|tool_call><|tool_call>call:x{old}call:y");
+        assertEquals("Quote <|tool_call>call:y", stripped,
+                "an opener ruled quoted prose must not be stripped when a "
+                        + "removed span makes it look like a marker");
+    }
+
+    @Test
     void proseQuotingTheDialectOpenerIsNotDispatched() {
         llmProvider.responses.add(new LlmResponse(
                 "The native opener <|tool_call> marks a tool call."));

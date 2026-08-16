@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 8 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 80 |
+| done | 81 |
 | deferred | 0 |
 | abandoned | 2 |
 | **total** | **90** |
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-849 — Stream sanitized chat replies over SimpleX live messages (complexity: high, risk: high)
 - M1-868 — Store losing tag proposals as a Tier-2 search array (complexity: low, risk: low)
 - M1-873 — Record the tool-call transport architecture in spec (complexity: low, risk: low)
-- M1-875 — Stop the strip from assembling tool-call markers (complexity: low, risk: medium)
 
 ---
 
@@ -67,6 +66,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-875 | Stop the strip from assembling tool-call markers | 2026-08-17 | round 2 APPROVE |
 | M1-871 | Single-source tool catalog for prompts and transports | 2026-08-17 | round 1 APPROVE-WITH-FIXES |
 | M1-865 | Tag tree schema and deterministic leaf resolution | 2026-08-17 | round 1 APPROVE-WITH-FIXES |
 | M1-864 | Measure the tag-tree leaf vocabulary on the local model | 2026-08-17 | round 2 APPROVE-WITH-FIXES |
@@ -76,7 +76,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-859 | Harness: real vector retrieval for the tool-loop campaign | 2026-08-16 | round 2 APPROVE |
 | M1-858 | Re-measure the tool loop with the levers landed | 2026-08-16 | round 3 APPROVE |
 | M1-857 | Citation-discipline wording on grounded and tool-result turns | 2026-08-16 | round 1 APPROVE-WITH-FIXES |
-| M1-856 | Tool prompt: worked example + native-dialect bridge | 2026-08-16 | round 1 APPROVE-WITH-FIXES |
 
 ---
 
@@ -211,5 +210,5 @@ M1-871 (done)
   └── M1-872 (pending)
 M1-873 (pending) ← runnable
   └── M1-872 (pending) [see above]
-M1-875 (pending) ← runnable
+M1-875 (done)
 ```

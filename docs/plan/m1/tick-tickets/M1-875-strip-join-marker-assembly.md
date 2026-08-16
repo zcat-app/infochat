@@ -1,7 +1,7 @@
 ---
 id: M1-875
 title: "Stop the strip from assembling tool-call markers"
-status: pending
+status: done
 created: 2026-08-17
 last_updated: 2026-08-17
 flow: tick
@@ -73,7 +73,12 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 2
+    date: 2026-08-17
+    verdict: APPROVE
+    checks: {spec-truthness: PASS, security: PASS, test-adequacy: PASS, maintainability: PASS, scope: PASS}
+    diff_stats: "r1 full: 5 files +117/-14; r2 fix: 3 files +50/-2 (test +20, bookkeeping +30/-2)"
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -167,3 +172,26 @@ call site at ChatAgent.java:580). The census grep from M1-870
 (`grep -rn '\[REFUSAL:\|TOOL_CALL\|tool_call' infochat-provider/src/main/java infochat-collector/src/main/java`)
 stays re-runnable; no other deletion site feeds delivery text
 without its own boundary.
+
+## Round 1 rework
+
+REWORK ITEMS (verbatim from .scratch/tick-review-M1-875-r1.txt):
+
+1. Finding 1: add the two drop-through re-scan assertions to ChatAgentTest
+   (join-in-drop-through returns ""; kept bare opener survives a
+   drop-through), evaluated via EVALUATED-AS: both assertions green on
+   current code and red under the short-circuit mutation, in a full
+   `mvn verify` from the repo root.
+
+## Review observations
+
+Round-1 recommended-new-ticket (TOUCHED-BY-THIS-DIFF: no — pre-existing
+single-pass joining; filing is the user's call): the strip's own deletions
+can assemble a privileged command token that the upstream sanitize pass
+never saw joined. LLM final text `"/ba<|tool_call>call:x{old}n"` → sanitize
+finds no contiguous `/ban` → the strip removes the balanced native fragment
+→ delivered reply `"/ban"` with no `[redacted command]`, no
+LLM_OUTPUT_SANITIZED audit row. Expected: closed-list match re-runs over
+the strip's output, or the strip's deletion does not join fragments across
+a removed span. Residual bounded today by dispatch requiring is_admin=true
+(same bound security.md accepts for the across-fields split).

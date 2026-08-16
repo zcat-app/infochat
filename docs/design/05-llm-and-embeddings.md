@@ -777,7 +777,10 @@ post-sanitize: balanced fragments are removed exactly, unbalanced ones
 through end-of-text, a brace-less opener+`call:`+name token is stripped
 exactly with the following prose preserved, and a native opener with
 neither an argument brace nor `call:` after it is quoted prose and
-preserved.
+preserved. The strip then re-scans its own output to a fixpoint (M1-875):
+a deletion can join the bytes around a removed span into a fresh marker,
+so passes repeat while a pass removes anything, bounded by a fixed pass
+cap; a bare opener kept as prose carries its ruling across passes.
 
 **Single-source tool catalog (M1-871).** `ChatToolCatalog` is the single
 source for the seven tools' descriptions: `TOOL_INSTRUCTIONS`' per-tool
