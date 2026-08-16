@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 12 |
-| in-progress | 1 |
+| pending | 11 |
+| in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 75 |
+| done | 76 |
 | deferred | 0 |
 | abandoned | 2 |
 | **total** | **89** |
@@ -37,7 +37,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 | ID | Title | Status | Last review |
 |---|---|---|---|
-| M1-870 | Strip brace-less native tool-call markers from final replies | in-progress | (none) |
+
+_(none)_
 
 ---
 
@@ -69,6 +70,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-870 | Strip brace-less native tool-call markers from final replies | 2026-08-16 | round 1 APPROVE |
 | M1-863 | Run the prefix A/B; record the adopt-or-drop number | 2026-08-16 | round 1 APPROVE-WITH-FIXES |
 | M1-862 | A/B rig: raw vs prefixed vectors on the deployment embedder | 2026-08-16 | round 1 APPROVE |
 | M1-859 | Harness: real vector retrieval for the tool-loop campaign | 2026-08-16 | round 2 APPROVE |
@@ -78,7 +80,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-855 | SimpleX v7 completion contract on the live bot path | 2026-08-16 | round 1 APPROVE |
 | M1-854 | Recalibrate image preview to real generator output | 2026-08-16 | round 2 APPROVE |
 | M1-846 | Spec: live-text streaming display policy | 2026-08-16 | round 2 APPROVE |
-| M1-845 | Spec: switchable translation pipeline (translate vs native) | 2026-08-16 | round 1 APPROVE |
 
 ---
 
@@ -208,7 +209,7 @@ M1-865 (pending) ← runnable
   │     ├── M1-866 (pending) [see above]
   │     └── M1-869 (pending) [see above]
   └── M1-869 (pending) [see above]
-M1-870 (in-progress)
+M1-870 (done)
 M1-871 (pending) ← runnable
   └── M1-872 (pending)
 M1-873 (pending) ← runnable

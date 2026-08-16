@@ -1,16 +1,15 @@
 ---
 id: M1-870
 title: "Strip brace-less native tool-call markers from final replies"
-status: in-progress
+status: done
 created: 2026-08-16
 last_updated: 2026-08-16
 flow: tick
 reproduction: >-
   ChatAgentTest#bracelessNativeCallMarkerIsStrippedFromFinalReplies
-  (to-be-written: child of a 2+ decomposition, analysis
-  docs/plan/m1/tick-analysis/tool-transport-model-independence.md —
-  /tick start converts the marker by writing the test and running it
-  RED before any fix code, workflow §0). Probe of today's wrong
+  (written and run RED at start; child of a 2+ decomposition, analysis
+  docs/plan/m1/tick-analysis/tool-transport-model-independence.md).
+  Probe of today's wrong
   behavior: feed the
   delivery path the review-observed final-reply shape
   "Here you go.\n<|tool_call>call:searchPosts" (no '{' anywhere — the
@@ -89,7 +88,14 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-16
+    verdict: APPROVE
+    checks: {SPEC-TRUTHNESS: PASS, SECURITY: PASS, TEST-ADEQUACY: PASS, MAINTAINABILITY: PASS, SCOPE: PASS}
+    diff_stats: "4 files, +114/-20 (ChatAgent.java +50-arm rework, ChatAgentTest.java +69 five new cases, design 05 +6, ticket bookkeeping)"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-870-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -250,6 +256,20 @@ fragment shape". Re-runnable enumeration (the M1-791 census grep):
 | ChatAgent.java:64-72 (the two dispatch patterns) | out-of-scope — dispatch grammar requires the brace by design |
 | ChatPromptBuilder.java (instruction literals) | out-of-scope — the prompt teaches, the strip guards |
 | Stage1RegexSet.java (collector ingest catalogue) | out-of-scope — different surface, own boundary (§Ingest pipeline; M1-791 disposed) |
+
+## Review observations
+
+Round-1 reviewer recommendation (RECOMMENDED-NEW-TICKET, TOUCHED-BY-THIS-DIFF:
+no — pre-existing class, not a defect of this diff; filing is the user's
+call): the final-reply strip can manufacture the marker class it exists to
+remove — deleting a strippable span concatenates the bytes on either side
+and the result is never re-scanned (stripToolCalls, ChatAgent.java:1118-1183;
+e.g. "TOOL_" + stripped span + "CALL: y {}" delivers "TOOL_CALL: y {}"; a
+joined privileged command would ship unredacted since the closed-list pass
+ran before the strip, ChatAgent.java:561-569). Identical reachability on the
+pre-diff code. Fix shape: re-scan the strip's own output for assemblable
+markers, or record the deletion-join residual as accepted in the design
+note next to the canonicalization residuals.
 
 ## Pre-flight self-check (author-side)
 

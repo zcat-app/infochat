@@ -70,6 +70,10 @@ public class ChatAgent {
     static final String NATIVE_TOOL_CALL_OPENER = "<|tool_call>";
     static final Pattern NATIVE_TOOL_CALL_PATTERN = Pattern.compile(
             "<\\|tool_call>\\s*call:(\\w+)\\s*(\\{)");
+    // Accepted grammar minus the brace: a call attempt with no argument
+    // brace never dispatches, so the strip recognizes and removes it exactly.
+    static final Pattern BRACELESS_NATIVE_TOOL_CALL_PATTERN = Pattern.compile(
+            "<\\|tool_call>\\s*call:\\w*");
 
     private static final ObjectMapper TOOL_ARGS_MAPPER = new ObjectMapper();
 
@@ -1107,8 +1111,9 @@ public class ChatAgent {
 
     /**
      * Strips residual tool-call fragments of both accepted dialects: balanced
-     * removed exactly, unbalanced through end-of-text; a native opener with
-     * no args brace is quoted prose and preserved.
+     * removed exactly, unbalanced through end-of-text; a brace-less native
+     * opener+call:+name token stripped exactly with following prose
+     * preserved; a bare opener stays quoted prose.
      */
     static String stripToolCalls(String text) {
         StringBuilder result = new StringBuilder();
@@ -1134,25 +1139,44 @@ public class ChatAgent {
             }
             result.append(text, cursor, marker);
 
-            int brace = text.indexOf('{', marker);
+            if (nativeDialect) {
+                // The args brace counts only where the grammar admits it —
+                // after the name, whitespace only. A brace outside the window
+                // does not start a fragment (M1-870 P6).
+                Matcher full = NATIVE_TOOL_CALL_PATTERN.matcher(text);
+                if (full.find(marker) && full.start() == marker) {
+                    int close = matchBrace(text, full.start(2));
+                    if (close >= 0) {
+                        cursor = close + 1;
+                        continue;
+                    }
+                    // Unbalanced fragment: drop through end-of-text.
+                    return result.toString();
+                }
+                // Brace-less call attempt: strip exactly the opener plus
+                // 'call:' plus the name, then scan on.
+                Matcher braceless = BRACELESS_NATIVE_TOOL_CALL_PATTERN.matcher(text);
+                if (braceless.find(marker) && braceless.start() == marker) {
+                    cursor = braceless.end();
+                    continue;
+                }
+                // Opener with neither an args brace nor 'call:' after it:
+                // prose quoting the dialect — keep it and scan on.
+                result.append(NATIVE_TOOL_CALL_OPENER);
+                cursor = marker + NATIVE_TOOL_CALL_OPENER.length();
+                continue;
+            }
             int lineEnd = text.indexOf('\n', marker);
-            if (brace >= 0 && (nativeDialect || lineEnd < 0 || brace < lineEnd)) {
+            int brace = text.indexOf('{', marker);
+            if (brace >= 0 && (lineEnd < 0 || brace < lineEnd)) {
                 int close = matchBrace(text, brace);
                 if (close >= 0) {
                     cursor = close + 1;
                     continue;
                 }
-                // Unbalanced fragment: drop through end-of-text.
+                // Partial shipped fragment: drop through end-of-text.
                 return result.toString();
             }
-            if (nativeDialect) {
-                // Opener without an args fragment: prose quoting the dialect,
-                // not a call — keep it and scan on.
-                result.append(NATIVE_TOOL_CALL_OPENER);
-                cursor = marker + NATIVE_TOOL_CALL_OPENER.length();
-                continue;
-            }
-            // Partial shipped fragment: drop through end-of-text.
             return result.toString();
         }
         return result.toString();

@@ -764,8 +764,10 @@ matching neither dialect is returned byte-identical. A bridged call becomes
 dialect — allowlist, clamps, per-turn cache and call cap all apply
 unchanged. Final replies strip residual fragments of both dialects
 post-sanitize: balanced fragments are removed exactly, unbalanced ones
-through end-of-text, and a native opener with no argument brace is quoted
-prose and preserved.
+through end-of-text, a brace-less opener+`call:`+name token is stripped
+exactly with the following prose preserved, and a native opener with
+neither an argument brace nor `call:` after it is quoted prose and
+preserved.
 
 ### 5.4.7 /compress (long-term memory)                                                                                                                                                                                                                    
                                                                                  

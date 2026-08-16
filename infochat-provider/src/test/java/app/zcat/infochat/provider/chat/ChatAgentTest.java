@@ -459,6 +459,75 @@ class ChatAgentTest {
     }
 
     @Test
+    void bracelessNativeCallMarkerIsStrippedFromFinalReplies() {
+        // The M1-870 reproduction: opener + call: + name with no brace
+        // anywhere delivers the marker verbatim today (stripToolCalls'
+        // native no-brace arm appends the opener and scans on).
+        llmProvider.responses.add(new LlmResponse(
+                "Here you go.\n<|tool_call>call:searchPosts"));
+
+        ChatAgent.ChatTurnResult result = agent.handleTurn(
+                USER_ID, SCOPE_KIND, SCOPE_ID, "test");
+        result.pendingCommit().commit();
+
+        assertEquals("Here you go.\n", result.reply(),
+                "the delivered reply must carry neither opener, call: nor name");
+        assertEquals(2, persistedTexts.size());
+        assertEquals("Here you go.\n", persistedTexts.get(1),
+                "the persisted assistant turn must be the stripped text, "
+                        + "marker-free like the delivered reply");
+    }
+
+    @Test
+    void bracelessTokenStripRemovesExactlyOpenerCallAndName() {
+        String stripped = ChatAgent.stripToolCalls(
+                "Answer.\n<|tool_call>call:searchPosts\nMore prose here.");
+        assertEquals("Answer.\n\nMore prose here.", stripped,
+                "the strip span is exactly opener + optional whitespace + "
+                        + "call: + name chars — the following prose survives");
+
+        assertEquals("", ChatAgent.stripToolCalls("<|tool_call>call:"),
+                "the truncated form (opener + call: + empty name) strips too — "
+                        + "the carve-out keys on NO call: after the opener");
+    }
+
+    @Test
+    void bareOpenerInProseStaysByteIdentical() {
+        llmProvider.responses.add(new LlmResponse(
+                "The opener <|tool_call> is a marker."));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "test");
+
+        assertEquals("The opener <|tool_call> is a marker.", reply,
+                "prose quoting the opener with no call: after it round-trips "
+                        + "byte-identical — no dispatch, no strip");
+    }
+
+    @Test
+    void bracelessTokenDoesNotSwallowALaterUnrelatedBrace() {
+        String stripped = ChatAgent.stripToolCalls(
+                "A <|tool_call>call:searchPosts then {json} later");
+        assertEquals("A  then {json} later", stripped,
+                "a brace outside the grammar's own window must not start a "
+                        + "fragment — the token is brace-less and the prose "
+                        + "after it survives");
+    }
+
+    @Test
+    void bracelessTokenAssembledBySanitizationIsStripped() {
+        // Canonical-form route: the sanitizer assembles the brace-less token,
+        // the strip still removes it (sanitize -> strip ordering).
+        sanitizerOutput = "Clean text. <|tool_call>call:searchPosts";
+        llmProvider.responses.add(new LlmResponse("raw final text"));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "test");
+
+        assertEquals("Clean text. ", reply,
+                "a brace-less token present only in the sanitized text is "
+                        + "stripped, like every protocol-token detector");
+    }
+
+    @Test
     void proseQuotingTheDialectOpenerIsNotDispatched() {
         llmProvider.responses.add(new LlmResponse(
                 "The native opener <|tool_call> marks a tool call."));
