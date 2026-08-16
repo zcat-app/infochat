@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 12 |
+| pending | 11 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 65 |
+| done | 66 |
 | deferred | 0 |
 | abandoned | 0 |
 | **total** | **77** |
@@ -27,7 +27,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-845 — Spec: switchable translation pipeline (pivot vs direct) (complexity: medium, risk: high)
 - M1-854 — Recalibrate image preview to real generator output (complexity: medium, risk: medium)
-- M1-855 — SimpleX v7 completion contract on the live bot path (complexity: high, risk: medium)
 - M1-856 — Tool prompt: worked example + native-dialect bridge (complexity: medium, risk: medium)
 - M1-857 — Citation-discipline wording on grounded and tool-result turns (complexity: low, risk: low)
 - M1-859 — Harness: real vector retrieval for the tool-loop campaign (complexity: medium, risk: low)
@@ -71,6 +70,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-855 | SimpleX v7 completion contract on the live bot path | 2026-08-16 | round 1 APPROVE |
 | M1-844 | Measure grounded in-language chat with the tool loop | 2026-08-16 | round 2 APPROVE |
 | M1-853 | Land the observed streaming usage opt-in request shape | 2026-08-15 | round 1 APPROVE |
 | M1-852 | Observe streaming usage opt-in across the LLM fleet | 2026-08-15 | round 1 APPROVE |
@@ -80,7 +80,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-843 | SimpleX codec: image-typed sends with inline preview | 2026-08-15 | round 2 APPROVE |
 | M1-842 | Outbound preview generation + SPI preview field | 2026-08-15 | round 1 APPROVE-WITH-FIXES |
 | M1-841 | Probe SimpleX image-type composed-message surface | 2026-08-15 | round 1 APPROVE |
-| M1-840 | Re-verify SimpleX XFTP attachment surface on CLI v7.0.0 | 2026-08-15 | round 1 APPROVE |
 
 ---
 
@@ -185,7 +184,7 @@ M1-852 (done)
   └── M1-853 (done)
         └── M1-849 (pending) [see above]
 M1-854 (pending) ← runnable
-M1-855 (pending) ← runnable
+M1-855 (done)
 M1-856 (pending) ← runnable
   └── M1-858 (pending)
 M1-857 (pending) ← runnable

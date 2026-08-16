@@ -9,8 +9,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import app.zcat.infochat.messaging.FailureCategory;
+import app.zcat.infochat.messaging.MessageHandle;
 import app.zcat.infochat.messaging.MessagingException;
 import app.zcat.infochat.messaging.OutboundAttachment;
+import app.zcat.infochat.messaging.OutboundMessage;
 import app.zcat.infochat.messaging.ScopeRef;
 
 import org.junit.jupiter.api.Test;
@@ -19,6 +21,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
@@ -289,6 +292,89 @@ class SimpleXAdapterAttachmentTest {
         return new OutboundAttachment(new ScopeRef.Dm("contact-abc"),
                 path.toString(), "image/png", path.getFileName().toString(), "corr-att",
                 "data:image/png;base64,aGVsbG8=");
+    }
+
+    @Test
+    void capturedV7BotPathEditAckReleasesTheFinalizeEdit() throws Exception {
+        // M1-855 live capture (2026-08-15): v7 answers the live=off finalize
+        // edit with a corrId'd chatItemUpdated — the frame the 30-s ack wait
+        // starved on while the edit had already landed.
+        try (FakeSimpleXProcess fake = new FakeSimpleXProcess()) {
+            fake.start();
+            SimpleXAdapter adapter = SimpleXTestHarness.newAdapter(fake, dataDir);
+            adapter.rebuildWebSocket();
+            try {
+                fake.awaitClient(WAIT);
+                Thread responder = Thread.ofVirtual().start(() -> {
+                    try {
+                        String send = fake.awaitFrame(WAIT);
+                        fake.sendFrame(SimpleXTestHarness.ackFrame(
+                                MAPPER.readTree(send).get("corrId").asText(), 1));
+                        String edit = fake.awaitFrame(WAIT);
+                        fake.sendFrame(botPathEditAckFrame(
+                                MAPPER.readTree(edit).get("corrId").asText()));
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+
+                MessageHandle handle = adapter.send(new OutboundMessage(
+                        new ScopeRef.Dm("contact-abc"), "working…",
+                        Instant.now(), "corr-edit-1"));
+                AtomicBoolean returned = new AtomicBoolean();
+                AtomicReference<Exception> failure = new AtomicReference<>();
+                Thread finalizer = Thread.ofVirtual().start(() -> {
+                    try {
+                        adapter.finalizeMessage(handle, "final body");
+                        returned.set(true);
+                    } catch (Exception e) {
+                        failure.set(e);
+                    }
+                });
+                finalizer.join(WAIT.toMillis());
+                assertTrue(returned.get(),
+                        "the captured v7 bot-path chatItemUpdated ack releases the"
+                                + " finalize edit instead of timing out: " + failure.get());
+                responder.join(WAIT.toMillis());
+            } finally {
+                adapter.close();
+            }
+        }
+    }
+
+    private static String botPathEditAckFrame(String corrId) {
+        // Minimized from the 2026-08-15 bot-path capture (probe-v7-capture-1):
+        // resp.chatItem.chatItem.meta.itemId is the id placement.
+        return """
+                {
+                  "corrId": "%s",
+                  "resp": {
+                    "type": "chatItemUpdated",
+                    "user": {"userId": 1},
+                    "chatItem": {
+                      "chatInfo": {
+                        "type": "direct",
+                        "contact": {"contactId": 3, "localDisplayName": "v7probe-user"}
+                      },
+                      "chatItem": {
+                        "chatDir": {"type": "directSnd"},
+                        "meta": {
+                          "itemId": 17,
+                          "itemText": "v7 bot path edit canary",
+                          "itemStatus": {"type": "sndRcvd"},
+                          "itemEdited": true
+                        },
+                        "content": {
+                          "type": "sndMsgContent",
+                          "msgContent": {"type": "text", "text": "v7 bot path edit canary"}
+                        },
+                        "mentions": {},
+                        "reactions": []
+                      }
+                    }
+                  }
+                }
+                """.formatted(corrId);
     }
 
     private static String fileCompletionFrame(String chatItemId) {

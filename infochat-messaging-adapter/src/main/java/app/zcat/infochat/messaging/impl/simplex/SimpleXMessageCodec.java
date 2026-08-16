@@ -367,6 +367,10 @@ final class SimpleXMessageCodec {
             case "sentMessage", "apiSendMessageResponse" -> decodeSendAck(corrId, resp);
             case "userContactLink" -> decodeUserContactLink(corrId, resp);
             case "chatCmdError", "chatItemUpdateError" -> decodeError(corrId, resp);
+            // v7's ack to an edit command — chatItemUpdated on first
+            // application, chatItemNotChanged when a ladder retry re-applies
+            // identical content (M1-855 live bot-path capture).
+            case "chatItemUpdated", "chatItemNotChanged" -> decodeEditAck(corrId, resp);
             // File-send completion/failure events (D74, design §6.2.4): only
             // sndFileCompleteXFTP releases the waiting sendAttachment; every other
             // completion on our chat item (legacy tag, standalone) fails it PERMANENT.
@@ -394,6 +398,20 @@ final class SimpleXMessageCodec {
             return new Ignored("newChatItem-without-chatItem");
         }
         return decodeChatItemEntry(chatItem);
+    }
+
+    /**
+     * The edit ack ({@code /_update}): item id at the file events' placement (v7.0.0 bot-path capture, M1-855); a corrId-less frame is an async echo, never an ack (M1-508 routing).
+     */
+    private static DecodedFrame decodeEditAck(@Nullable String corrId, JsonNode resp) {
+        if (corrId == null) {
+            return new Ignored("chatItem-update-without-corrId");
+        }
+        String chatItemId = chatEventChatItemId(resp);
+        if (chatItemId == null) {
+            return new Ignored("chatItem-update-without-chatItemId");
+        }
+        return new SendAck(corrId, chatItemId);
     }
 
     /**
@@ -989,7 +1007,7 @@ final class SimpleXMessageCodec {
      * The {@code sndFileCompleteXFTP} completion event (design §6.2.4) — the only tag that releases the send; the chat-item id is read at the same known AChatItem {@code meta.itemId} place as the plural ack.
      */
     private static DecodedFrame decodeFileSendCompletion(JsonNode resp) {
-        String chatItemId = fileEventChatItemId(resp);
+        String chatItemId = chatEventChatItemId(resp);
         if (chatItemId == null) {
             return new Ignored("file-completion-without-chatItemId");
         }
@@ -1000,14 +1018,14 @@ final class SimpleXMessageCodec {
      * A failed / cancelled transfer — and, per design §6.2.4, any non-XFTP completion on our chat item — carrying a chat item; the free-form {@code errorMessage} is deliberately not decoded (it can carry transport prose — security.md §User content in exceptions).
      */
     private static DecodedFrame decodeFileSendFailure(JsonNode resp) {
-        String chatItemId = fileEventChatItemId(resp);
+        String chatItemId = chatEventChatItemId(resp);
         if (chatItemId == null) {
             return new Ignored("file-failure-without-chatItem");
         }
         return new FileSendFailed(chatItemId);
     }
 
-    private static @Nullable String fileEventChatItemId(JsonNode resp) {
+    private static @Nullable String chatEventChatItemId(JsonNode resp) {
         return firstScalarText(
                 resp.path("chatItem").path("chatItem").path("meta").get("itemId"));
     }

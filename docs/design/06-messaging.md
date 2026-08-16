@@ -440,6 +440,58 @@
   completes the handshake (deterministic acceptance via
   `/auto_accept on`) and captures the completion frame live.
 
+  **v7.0.0 live bot path trail (M1-855, capture 2026-08-15, bundled
+  binary v7.0.0.11).** A raw frame capture of a real `/image send`
+  through the RUNNING provider (probe-v7 client, capture log
+  `probe-v7-capture-1.log`; the recorded harness pattern — the
+  WsProbe corrId-command sidecar against the subprocess WS :5225 plus
+  temporary adapter-side raw-frame DEBUG logging, never a second WS
+  client against the chat server) names the stage that starved, and
+  it is NOT the file send: the `/_send` file command acked
+  `newChatItems` with `chatItems[0].chatItem.meta.itemId` in 20 ms
+  (placement 5 of the codec's ack chain), `sndFileProgressXFTP`
+  frames followed, and `sndFileCompleteXFTP` carrying the same
+  `itemId` at `chatItem.chatItem.meta.itemId` released the
+  `awaitFileCompletion` wait — the entire attachment contract holds
+  on the live v7 bot path. The starving wait is the **edit
+  command's ack**: v7 answers `/_update … live=on|off` with
+  `chatItemUpdated` (first application) or `chatItemNotChanged`
+  (when the retry ladder re-applies identical content), both frames
+  carrying the corrId and the edited `itemId` at the same
+  `chatItem.chatItem.meta.itemId` place the file events read — and
+  the codec had no arm for either, so every progress/finalize edit
+  starved its 30-s `sendCommand` ack wait while the edit had already
+  landed server-side (the bot's own chat DB shows the final text;
+  the retries' `chatItemNotChanged` responses prove it). The ladder
+  then re-sent the identical edit twice more (each answered
+  `chatItemNotChanged`) and escalated the delivery to PERMANENT
+  ~95 s after the file transfer completed — a false failure
+  reported to metrics, audit, and the admin notifier while the
+  image, the edit, and the file all reached the recipient (no
+  failure reply item is created on this path; the captured runs'
+  transcripts and chat DB show no user-facing failure text). The
+  fix arms the codec: corrId-carrying `chatItemUpdated` /
+  `chatItemNotChanged` decode as the edit's `SendAck`; a
+  corrId-less edit frame (the async recipient-side echo) stays
+  `Ignored("chatItem-update-without-corrId")` per the M1-508
+  routing rule and never completes a pending future. The
+  harness-vs-bot-path delta that resolves the M1-840 tension: the
+  opt-in IT verified the file tags through `LiveSimpleXClient`, a
+  test-tree client whose finalize consumed `chatItemUpdated` as a
+  harness body-path check — the production `SimpleXWebSocketClient`
+  dispatch never saw an edit ack before M1-855, which is exactly
+  the gap the live bot path exposed (and the reason the original
+  timing arithmetic — three 30-s ack waits ≈ the observed +95-115 s
+  — correctly indicted the ack wait but attributed it to the file
+  command instead of the edit). The gap stays closed by
+  `LiveSimpleXProductionDispatchIT` (opt-in, sibling of the
+  file-send IT, same `-Dinfochat.live.simplex` gate): after the
+  two-identity handshake it restarts the sender subprocess bare and
+  connects the PRODUCTION client as its sole controller, then
+  drives the production-encoded file send to
+  `sndFileCompleteXFTP` and the finalize edit — first application
+  and identical re-edit — through the production decode+dispatch.
+
   **Image-typed composed messages (M1-841, probed against the bundled
   simplex-chat v6.5.4 — the `SIMPLEX_CHAT_VERSION` Dockerfile.jvm pin;
   probe evidence under `.scratch/m1841-probe/`).** SimpleX apps send

@@ -814,6 +814,97 @@ class SimpleXMessageCodecV7WireTest {
         }
             """;
 
+    // Edit-command acks — v7.0.0-captured (2026-08-15, live bot path,
+    // M1-855): /_update answers chatItemUpdated, or chatItemNotChanged when
+    // a retry re-applies identical content; id at chatItem.chatItem.meta.itemId.
+    private static final String V7_BOT_PATH_EDIT_ACK = """
+{
+          "corrId": "c14",
+          "resp": {
+            "type": "chatItemUpdated",
+            "user": {"userId": 1},
+            "chatItem": {
+              "chatInfo": {
+                "type": "direct",
+                "contact": {
+                  "contactId": 3,
+                  "localDisplayName": "v7probe-user"
+                }
+              },
+              "chatItem": {
+                "chatDir": {
+                  "type": "directSnd"
+                },
+                "meta": {
+                  "itemId": 17,
+                  "itemTs": "2026-08-15T23:37:28.292690187Z",
+                  "itemText": "v7 bot path edit canary",
+                  "itemStatus": {
+                    "type": "sndRcvd"
+                  },
+                  "itemEdited": true,
+                  "createdAt": "2026-08-15T23:37:03.606797001Z",
+                  "updatedAt": "2026-08-15T23:37:28.292690187Z"
+                },
+                "content": {
+                  "type": "sndMsgContent",
+                  "msgContent": {
+                    "type": "text",
+                    "text": "v7 bot path edit canary"
+                  }
+                },
+                "mentions": {},
+                "reactions": []
+              }
+            }
+          }
+        }
+            """;
+
+    private static final String V7_BOT_PATH_EDIT_RETRY_ACK = """
+{
+          "corrId": "c15",
+          "resp": {
+            "type": "chatItemNotChanged",
+            "user": {"userId": 1},
+            "chatItem": {
+              "chatInfo": {
+                "type": "direct",
+                "contact": {
+                  "contactId": 3,
+                  "localDisplayName": "v7probe-user"
+                }
+              },
+              "chatItem": {
+                "chatDir": {
+                  "type": "directSnd"
+                },
+                "meta": {
+                  "itemId": 17,
+                  "itemTs": "2026-08-15T23:37:03.606797001Z",
+                  "itemText": "v7 bot path edit canary",
+                  "itemStatus": {
+                    "type": "sndRcvd"
+                  },
+                  "itemEdited": true,
+                  "createdAt": "2026-08-15T23:37:03.606797001Z",
+                  "updatedAt": "2026-08-15T23:37:28.292690187Z"
+                },
+                "content": {
+                  "type": "sndMsgContent",
+                  "msgContent": {
+                    "type": "text",
+                    "text": "v7 bot path edit canary"
+                  }
+                },
+                "mentions": {},
+                "reactions": []
+              }
+            }
+          }
+        }
+            """;
+
     @Test
     void v7CapturedDirectDmDecodesToInbound() {
         // M1-839 reproduction (ticket item 1): the v7.0.0 direct-DM frame
@@ -899,9 +990,9 @@ class SimpleXMessageCodecV7WireTest {
 
     @Test
     void v7CapturedEditFinalizeFrameIsIgnoredWithHarnessBodyPath() throws Exception {
-        // The codec has no case for item edits (the bot never consumes
-        // them): Ignored; the harness finalize body path is unchanged on v7.
-        assertEquals(new SimpleXMessageCodec.Ignored("unknown-resp-type"),
+        // The corrId-less async echo of an edit is never a command ack
+        // (M1-508 routing); the harness finalize body path is unchanged on v7.
+        assertEquals(new SimpleXMessageCodec.Ignored("chatItem-update-without-corrId"),
                 SimpleXMessageCodec.decode(V7_EDIT_FINALIZE));
         JsonNode resp = MAPPER.readTree(V7_EDIT_FINALIZE).path("resp");
         assertEquals("chatItemUpdated", resp.path("type").asText());
@@ -924,5 +1015,47 @@ class SimpleXMessageCodecV7WireTest {
                 "the free-form message must never surface in the detail");
         assertFalse(error.detail().contains("empty"),
                 "no fragment of the free-form message surfaces in the detail");
+    }
+
+    @Test
+    void v7CapturedBotPathEditAckDecodesWithCorrId() {
+        // M1-855 live capture: the finalize edit's ack on the bot path —
+        // the frame the 30-s wait starved on before this arm existed.
+        var ack = assertInstanceOf(SimpleXMessageCodec.SendAck.class,
+                SimpleXMessageCodec.decode(V7_BOT_PATH_EDIT_ACK),
+                "a v7.0.0 edit result with corrId decodes as SendAck");
+        assertEquals("c14", ack.corrId());
+        assertEquals("17", ack.chatItemId(),
+                "chat-item id is chatItem.chatItem.meta.itemId");
+    }
+
+    @Test
+    void v7CapturedBotPathEditRetryAckDecodesWithCorrId() {
+        // The identical-content ladder retry's answer is still the edit's
+        // ack — the v7.0.0 bot path answers re-applied edits with
+        // chatItemNotChanged (M1-855 capture, attempts 2 and 3).
+        var ack = assertInstanceOf(SimpleXMessageCodec.SendAck.class,
+                SimpleXMessageCodec.decode(V7_BOT_PATH_EDIT_RETRY_ACK),
+                "chatItemNotChanged with corrId decodes as SendAck");
+        assertEquals("c15", ack.corrId());
+        assertEquals("17", ack.chatItemId());
+    }
+
+    @Test
+    void botPathEditAckWithoutCorrIdStaysIgnored() {
+        // M1-508 routing: a corrId-less edit frame is not a command ack
+        // and must never complete a pending future.
+        String noCorrId = V7_BOT_PATH_EDIT_ACK.replaceFirst("\"corrId\": \"c14\",\n", "");
+        assertEquals(new SimpleXMessageCodec.Ignored("chatItem-update-without-corrId"),
+                SimpleXMessageCodec.decode(noCorrId));
+    }
+
+    @Test
+    void botPathEditAckWithoutItemIdIsIgnoredWithFixedReason() {
+        // Fixed sentinel, no transport prose (security.md §User content in
+        // exceptions) — parallel to the send-ack-without-chatItemId rule.
+        String noItemId = V7_BOT_PATH_EDIT_ACK.replace("\"itemId\": 17,", "");
+        assertEquals(new SimpleXMessageCodec.Ignored("chatItem-update-without-chatItemId"),
+                SimpleXMessageCodec.decode(noItemId));
     }
 }

@@ -1,7 +1,7 @@
 ---
 id: M1-855
 title: "SimpleX v7 completion contract on the live bot path"
-status: pending
+status: done
 created: 2026-08-16
 last_updated: 2026-08-16
 flow: tick
@@ -23,13 +23,24 @@ reproduction: >-
   FAILED — delivery reported failed while the image arrived. Timing
   arithmetic (three 30-s ACK_TIMEOUT waits + sub-second backoff ≈ 90-95 s,
   06-messaging.md:632; three 5-min FILE_COMPLETION_TIMEOUT waits ≥ 15 min)
-  indicts the ack wait — the capture this ticket takes decides. Intended
-  in-tree regression (to-be-written at start from this ticket's own
-  capture): SimpleXAdapterAttachmentTest.capturedV7BotPathFramesReleaseTheFileSend
-  — the captured ack/completion frames fed through the production
-  dispatch release sendAttachment; RED before the adaptation.
+  indicts the ack wait — the capture this ticket takes decides. CAPTURED
+  AND CORRECTED 2026-08-16 (probe-v7-capture-1.log): the starving wait is
+  the EDIT command's ack, not the file command's — v7 answers /_update
+  with chatItemUpdated (first application) / chatItemNotChanged
+  (identical-content retry), corrId-carrying, itemId at
+  chatItem.chatItem.meta.itemId; the file command acked newChatItems in
+  20 ms and sndFileCompleteXFTP released the completion wait — the whole
+  attachment contract holds live, the ladder that escalated was the
+  finalize edit's (the DB shows the edit applied; no user-facing failure
+  item exists in any captured run). In-tree regression (RED before the
+  adaptation, GREEN after): SimpleXAdapterAttachmentTest.capturedV7BotPath-
+  EditAckReleasesTheFinalizeEdit (production dispatch via FakeSimpleXProcess)
+  plus SimpleXMessageCodecV7WireTest.v7CapturedBotPathEditAckDecodesWithCorrId
+  / v7CapturedBotPathEditRetryAckDecodesWithCorrId / botPathEditAckWithout-
+  CorrIdStaysIgnored / botPathEditAckWithoutItemIdIsIgnoredWithFixedReason.
 analysis_ref: docs/plan/m1/tick-analysis/image-v7-live-probe-defects.md
 blocked_by: []
+clarity_check: "2026-08-16 start pass — tick-lint 0 findings/0 BLOCKERs (after copying the gitignored tick-analysis/image-v7-live-probe-defects.md into the worktree, the M1-844/M1-835 precedent); citations spot-checked and hold (SimpleXAdapter.java:100/:105 ACK_TIMEOUT 30 s / FILE_COMPLETION_TIMEOUT 5 min, :856-862 sendAttachment await chain, :864-877 unreadable-path guard; SimpleXWebSocketClient.java:639 SendAck completePending, :675 Ignored DEBUG; SimpleXMessageCodec.java:975-981 six-placement ack chain, :1010-1013 single-placement fileEventChatItemId, :399-434 corrId routing; OutboundDelivery.java:435-437 escalation line (provider module); 06-messaging.md §6.3.5 ~90 s arithmetic; V7WireTest.v7CapturedSendAckDecodesWithCorrId :865; the six SimpleXAdapterAttachmentTest methods incl. sendAttachmentBlocksOnCompletionEventThenReturns :54; LiveSimpleXFileSendIT present; HANDOFF:1920-1930 WsProbe pattern read; probe-v7 transcripts + client DBs on disk). §Census N/A (defect slice, none carried). Pitfalls P6-P11 all landed (analysis §Pitfalls cross-read). replaces empty; no superseded worktree of this surface (M1-841..843 merged; the stale .claude/worktrees are retired old-flow work per memory). blocked_by empty — preserves-trace enumeration vacuous. Live stack pre-conditions: infochat-test provider/collector/postgres/comfyui UP; probe-v7 artifacts present; provider DEBUG frame logging NOT yet enabled (0 'frame ignored' lines) — enabling it is Approach step 1 execution, not an ambiguity."
 files_scope:
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXMessageCodec.java
   - infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/impl/simplex/SimpleXWebSocketClient.java
@@ -79,11 +90,12 @@ acceptance:
   - "mvn verify from repo root is green."
 test_plan:
   adds:
-    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapterAttachmentTest.java (capturedV7BotPathFramesReleaseTheFileSend)
-    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXMessageCodecV7WireTest.java (captured-frame constants + per-arm decode tests)
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapterAttachmentTest.java (capturedV7BotPathEditAckReleasesTheFinalizeEdit)
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXMessageCodecV7WireTest.java (captured-frame constants + v7CapturedBotPathEditAckDecodesWithCorrId, v7CapturedBotPathEditRetryAckDecodesWithCorrId, botPathEditAckWithoutCorrIdStaysIgnored, botPathEditAckWithoutItemIdIsIgnoredWithFixedReason)
+    - infochat-provider/src/test/java/app/zcat/infochat/messaging/impl/simplex/LiveSimpleXProductionDispatchIT.java (production-dispatch sibling IT — the item-7 arm; "or a sibling opt-in IT" per the acceptance text)
   modifies:
-    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXAdapterAttachmentTest.java (fixture frames flip to captured v7 shapes ONLY on proven drift — pre-authorized by acceptance item 5)
-    - infochat-provider/src/test/java/app/zcat/infochat/provider/live/LiveSimpleXFileSendIT.java (production-dispatch arm — pre-authorized by acceptance item 7)
+    - infochat-messaging-adapter/src/test/java/app/zcat/infochat/messaging/impl/simplex/SimpleXMessageCodecV7WireTest.java (fixture flips on proven drift — pre-authorized by acceptance item 5: v7CapturedEditFinalizeFrameIsIgnoredWithHarnessBodyPath reason string unknown-resp-type → chatItem-update-without-corrId, the corrId-less echo now gated by the new arm's M1-508 rule)
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/live/LiveSimpleXFileSendIT.java (NOT modified in the end — the production-dispatch arm landed as the sibling IT in the same package, per acceptance item 7's "or a sibling opt-in IT"; the sibling needs package-private access to SimpleXWebSocketClient which the .provider.live package lacks)
   preserves:
     - all tests currently green on main
 spec_refs:
@@ -92,6 +104,15 @@ spec_refs:
 decision_refs:
   - D64
   - D74
+reviews:
+  - round: 1
+    date: 2026-08-16
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "7 files, +517/-22"
+    rework_items: 0
+    falsified_and_dropped: "5 (stale placeholder test name vs capture-corrected reproduction; remote-corrId spoof closed by D10 loopback trust model; §8-authorized reason-string flip; ticket-ID comment pointers follow file precedent; mid-verify comment-only edits proven compiled-by-final-sources via reactor order)"
+    recommended_new_ticket: "1 observation recorded under Review observations (chatItem_ underscore placement in sndFileProgressXFTP, no consumer today)"
 ---
 
 # M1-855: SimpleX v7 completion contract on the live bot path
@@ -248,3 +269,15 @@ Two pre-existing test files are modified conditionally —
 SimpleXAdapterAttachmentTest (fixtures on proven drift) and
 LiveSimpleXFileSendIT (production-dispatch arm) — both pre-authorized in
 acceptance items 5 and 7; no other pre-existing test is touched.
+
+## Review observations
+
+- Round-1 gate (2026-08-16): the v7 wire serializes the chat-item member of
+  `sndFileProgressXFTP` frames under the field name `chatItem_` (trailing
+  underscore), not `chatItem` (probe-v7-capture-1.log lines 13-17). Nothing
+  reads it today — the codec deliberately ignores progress frames — so no
+  behavior is wrong; recorded because any future consumer of progress frames
+  (progress reporting, a transfer watchdog) must use the underscore-suffixed
+  placement, and a fixture using `chatItem` would pass tests while the live
+  v7 path yields nothing. Pre-existing wire shape, first observed by this
+  ticket's capture; filing a ticket is the user's call.
