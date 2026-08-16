@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 11 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 72 |
 | deferred | 0 |
 | abandoned | 2 |
-| **total** | **79** |
+| **total** | **85** |
 
 ---
 
@@ -28,6 +28,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-848 — Wire the pivot/direct switch into the chat reply path (complexity: high, risk: high)
 - M1-858 — Re-measure the tool loop with the levers landed (complexity: high, risk: medium)
 - M1-862 — A/B rig: raw vs prefixed vectors on the deployment embedder (complexity: medium, risk: low)
+- M1-864 — Measure the tag-tree leaf vocabulary on the local model (complexity: high, risk: low)
+- M1-865 — Tag tree schema and deterministic leaf resolution (complexity: medium, risk: medium)
 
 ---
 
@@ -46,6 +48,10 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-849 — blocked_by: M1-846 (done), M1-847 (done), M1-848 (pending), M1-853 (done)
 - M1-863 — blocked_by: M1-862 (pending)
+- M1-866 — blocked_by: M1-864 (pending), M1-865 (pending), M1-868 (pending)
+- M1-867 — blocked_by: M1-865 (pending), M1-866 (pending)
+- M1-868 — blocked_by: M1-865 (pending)
+- M1-869 — blocked_by: M1-865 (pending), M1-866 (pending), M1-867 (pending), M1-868 (pending)
 
 ---
 
@@ -191,4 +197,16 @@ M1-859 (done)
         └── M1-863 (pending)
 M1-860 (abandoned)
   └── M1-861 (abandoned)
+M1-864 (pending) ← runnable
+  └── M1-866 (pending)
+        ├── M1-867 (pending)
+        │     └── M1-869 (pending)
+        └── M1-869 (pending) [see above]
+M1-865 (pending) ← runnable
+  ├── M1-866 (pending) [see above]
+  ├── M1-867 (pending) [see above]
+  ├── M1-868 (pending)
+  │     ├── M1-866 (pending) [see above]
+  │     └── M1-869 (pending) [see above]
+  └── M1-869 (pending) [see above]
 ```
