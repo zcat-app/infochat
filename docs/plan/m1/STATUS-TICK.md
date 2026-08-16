@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 10 |
+| pending | 14 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 73 |
 | deferred | 0 |
 | abandoned | 2 |
-| **total** | **85** |
+| **total** | **89** |
 
 ---
 
@@ -30,6 +30,9 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-863 — Run the prefix A/B; record the adopt-or-drop number (complexity: medium, risk: low)
 - M1-864 — Measure the tag-tree leaf vocabulary on the local model (complexity: high, risk: low)
 - M1-865 — Tag tree schema and deterministic leaf resolution (complexity: medium, risk: medium)
+- M1-870 — Strip brace-less native tool-call markers from final replies (complexity: low, risk: medium)
+- M1-871 — Single-source tool catalog for prompts and transports (complexity: medium, risk: medium)
+- M1-873 — Record the tool-call transport architecture in spec (complexity: low, risk: low)
 
 ---
 
@@ -51,6 +54,7 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-867 — blocked_by: M1-865 (pending), M1-866 (pending)
 - M1-868 — blocked_by: M1-865 (pending)
 - M1-869 — blocked_by: M1-865 (pending), M1-866 (pending), M1-867 (pending), M1-868 (pending)
+- M1-872 — blocked_by: M1-871 (pending), M1-873 (pending)
 
 ---
 
@@ -208,4 +212,9 @@ M1-865 (pending) ← runnable
   │     ├── M1-866 (pending) [see above]
   │     └── M1-869 (pending) [see above]
   └── M1-869 (pending) [see above]
+M1-870 (pending) ← runnable
+M1-871 (pending) ← runnable
+  └── M1-872 (pending)
+M1-873 (pending) ← runnable
+  └── M1-872 (pending) [see above]
 ```
