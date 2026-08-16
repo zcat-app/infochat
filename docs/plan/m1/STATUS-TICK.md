@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 9 |
+| pending | 8 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 70 |
+| done | 71 |
 | deferred | 0 |
 | abandoned | 0 |
 | **total** | **79** |
@@ -27,8 +27,9 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-846 — Spec: live-text streaming display policy (complexity: medium, risk: high)
 - M1-848 — Wire the pivot/direct switch into the chat reply path (complexity: high, risk: high)
-- M1-859 — Harness: real vector retrieval for the tool-loop campaign (complexity: medium, risk: low)
+- M1-858 — Re-measure the tool loop with the levers landed (complexity: high, risk: medium)
 - M1-860 — Measure news-category tagger coverage on the local model (complexity: high, risk: low)
+- M1-862 — A/B rig: raw vs prefixed vectors on the deployment embedder (complexity: medium, risk: low)
 
 ---
 
@@ -46,9 +47,7 @@ _(none)_
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-849 — blocked_by: M1-846 (pending), M1-847 (done), M1-848 (pending), M1-853 (done)
-- M1-858 — blocked_by: M1-856 (done), M1-857 (done), M1-859 (pending)
 - M1-861 — blocked_by: M1-860 (pending)
-- M1-862 — blocked_by: M1-859 (pending)
 - M1-863 — blocked_by: M1-862 (pending)
 
 ---
@@ -68,6 +67,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-859 | Harness: real vector retrieval for the tool-loop campaign | 2026-08-16 | round 2 APPROVE |
 | M1-857 | Citation-discipline wording on grounded and tool-result turns | 2026-08-16 | round 1 APPROVE-WITH-FIXES |
 | M1-856 | Tool prompt: worked example + native-dialect bridge | 2026-08-16 | round 1 APPROVE-WITH-FIXES |
 | M1-855 | SimpleX v7 completion contract on the live bot path | 2026-08-16 | round 1 APPROVE |
@@ -77,7 +77,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-853 | Land the observed streaming usage opt-in request shape | 2026-08-15 | round 1 APPROVE |
 | M1-852 | Observe streaming usage opt-in across the LLM fleet | 2026-08-15 | round 1 APPROVE |
 | M1-851 | Per-model image-prompt translation skip: flag + amendment | 2026-08-15 | round 1 APPROVE |
-| M1-850 | Measure Krea native-prompt holding vs the translation leg | 2026-08-15 | round 2 APPROVE |
 
 ---
 
@@ -184,12 +183,12 @@ M1-852 (done)
 M1-854 (done)
 M1-855 (done)
 M1-856 (done)
-  └── M1-858 (pending)
+  └── M1-858 (pending) ← runnable
 M1-857 (done)
   └── M1-858 (pending) [see above]
-M1-859 (pending) ← runnable
+M1-859 (done)
   ├── M1-858 (pending) [see above]
-  └── M1-862 (pending)
+  └── M1-862 (pending) ← runnable
         └── M1-863 (pending)
 M1-860 (pending) ← runnable
   └── M1-861 (pending)
