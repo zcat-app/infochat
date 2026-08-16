@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 13 |
+| pending | 12 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 74 |
+| done | 75 |
 | deferred | 0 |
 | abandoned | 2 |
 | **total** | **89** |
@@ -26,7 +26,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-848 — Wire the pivot/direct switch into the chat reply path (complexity: high, risk: high)
-- M1-863 — Run the prefix A/B; record the adopt-or-drop number (complexity: medium, risk: low)
 - M1-864 — Measure the tag-tree leaf vocabulary on the local model (complexity: high, risk: low)
 - M1-865 — Tag tree schema and deterministic leaf resolution (complexity: medium, risk: medium)
 - M1-870 — Strip brace-less native tool-call markers from final replies (complexity: low, risk: medium)
@@ -72,6 +71,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-863 | Run the prefix A/B; record the adopt-or-drop number | 2026-08-16 | round 1 APPROVE-WITH-FIXES |
 | M1-862 | A/B rig: raw vs prefixed vectors on the deployment embedder | 2026-08-16 | round 1 APPROVE |
 | M1-859 | Harness: real vector retrieval for the tool-loop campaign | 2026-08-16 | round 2 APPROVE |
 | M1-858 | Re-measure the tool loop with the levers landed | 2026-08-16 | round 3 APPROVE |
@@ -81,7 +81,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-854 | Recalibrate image preview to real generator output | 2026-08-16 | round 2 APPROVE |
 | M1-846 | Spec: live-text streaming display policy | 2026-08-16 | round 2 APPROVE |
 | M1-845 | Spec: switchable translation pipeline (translate vs native) | 2026-08-16 | round 1 APPROVE |
-| M1-844 | Measure grounded in-language chat with the tool loop | 2026-08-16 | round 2 APPROVE |
 
 ---
 
@@ -196,7 +195,7 @@ M1-857 (done)
 M1-859 (done)
   ├── M1-858 (done) [see above]
   └── M1-862 (done)
-        └── M1-863 (pending) ← runnable
+        └── M1-863 (done)
 M1-860 (abandoned)
   └── M1-861 (abandoned)
 M1-864 (pending) ← runnable

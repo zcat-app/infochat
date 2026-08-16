@@ -1,7 +1,7 @@
 ---
 id: M1-863
 title: "Run the prefix A/B; record the adopt-or-drop number"
-status: pending
+status: done
 created: 2026-08-16
 last_updated: 2026-08-16
 flow: tick
@@ -101,11 +101,30 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-16
+    verdict: APPROVE-WITH-FIXES
+    checks: {SPEC-TRUTHNESS: WARN, SECURITY: PASS, TEST-ADEQUACY: NOT-APPLICABLE, MAINTAINABILITY: PASS, SCOPE: PASS}
+    diff_stats: "4 files, +237/-8 (embedding-prefix-ab.md +216 new, README.md +1, STATUS-TICK.md, ticket file); 1 low finding — record §2 missing the three criterion-reading definitions stated in score.py; fix applied (prose-only in docs/measurement/embedding-prefix-ab.md, +16 lines after :87), probes green: grep 'full corpus|full-corpus' → :93, grep 'sorted uid tuples' → :97, grep 'zero admitted|contributes nothing' → :98. test-compile: no Maven module touched (docs-only diff, empty -pl set) — round-1 green mvn verify log (BUILD SUCCESS 2026-08-16T20:02:48) stands as log of record per the verdict. Fixed-tree snapshot: .scratch/tick-fixes-M1-863.tree (bedc003120d2389fd8fbfe3913d8bf83818a5c0a)"
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  W2-best-true-hit-reading: >-
+    Resolved at start without a blocking question: "best true-hit
+    similarity" in W2 is read full-corpus (the max similarity of any
+    label uid anywhere in the ranking, no top-8 restriction) — the
+    ticket's own 34/37 reference is the floor-check "admitted"
+    convention (full-corpus best true hit vs 0.60), and W3 uses the same
+    object, so W2 full-corpus is the internally coherent reading; the
+    definition is stated verbatim in score.py and in the record's §2.
+    Recorded, not escalated: W1 is the deciding conjunct (FAIL), so the
+    reading does not flip the decision.
+  W4-tie-handling: >-
+    Ties for the max label similarity are compared as sorted uid tuples
+    between arms; a differing set counts as a change. Stated in score.py
+    and the record.
 escalation_reason:
 ---
 
