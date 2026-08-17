@@ -42,12 +42,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * End-to-end integration test for MVP exit criterion §4 per
  * {@code docs/design/00-mvp.md} §6: a non-admin user sending
- * {@code /add-source <url> --tags news,tech} via the in-process
+ * {@code /add-source <url> --tags ai,software-development} via the in-process
  * {@code inmemory} adapter is auto-registered, the URL probe runs
  * through the SSRF-guarded HTTP client against an in-process
  * {@link com.sun.net.httpserver.HttpServer com.sun.net.httpserver.HttpServer}
  * fixture, the source row is written, the source_subscription is
- * upserted, the tag vocabulary is unioned, and exactly one outbound
+ * upserted, the supplied tree-node tags pass the node gate, and exactly one outbound
  * reply containing the fresh-insert + URL-visibility disclosure
  * bundle text is produced.
  *
@@ -61,7 +61,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * client; the rest of the dispatch path runs against the production
  * CDI graph.</p>
  *
- * <p>Test isolation: the contact id, URL, and tag values all carry
+ * <p>Test isolation: the contact id and URL carry
  * the {@code m1-036-mvp-} prefix; {@link #cleanup()} deletes only
  * those before each run so the IT does not race other tests or the
  * bootstrap-admin row.</p>
@@ -123,8 +123,6 @@ class AddSourceIT {
                     "DELETE FROM source "
                             + "WHERE identifier LIKE 'http://127.0.0.1:%/m1-036-mvp-feed.xml'");
             exec(conn,
-                    "DELETE FROM tag WHERE name IN ('m1-036-mvp-news', 'm1-036-mvp-tech')");
-            exec(conn,
                     "DELETE FROM users WHERE contact_id = 'm1-036-mvp-user-1'");
             // M1-044b: pre-seed INSERT INTO users for m1-036-mvp-user-1 with
             // registration_state='invited' — the post-step-2 successful-
@@ -161,7 +159,7 @@ class AddSourceIT {
         }
         String url = "http://127.0.0.1:" + port + "/m1-036-mvp-feed.xml";
         adapter.deliverDm("m1-036-mvp-user-1",
-                "/add-source " + url + " --tags m1-036-mvp-news,m1-036-mvp-tech");
+                "/add-source " + url + " --tags ai,software-development");
 
         // (a) exactly one outbound message whose body contains the
         // fresh-insert reply + URL-visibility disclosure.
@@ -184,15 +182,15 @@ class AddSourceIT {
         assertEquals(1L, countSubscriptions(sourceId),
                 "exactly one source_subscription row must exist for the inserted source");
 
-        // (d) bootstrap_tags = {news, tech} (in order).
+        // (d) bootstrap_tags = {ai, software-development} (in order).
         assertEquals(
-                List.of("m1-036-mvp-news", "m1-036-mvp-tech"),
+                List.of("ai", "software-development"),
                 readBootstrapTags(sourceId),
                 "bootstrap_tags must match the supplied --tags list (normalized)");
 
-        // (e) both tag rows present in the controlled vocabulary.
-        assertEquals(2L, countTags("m1-036-mvp-news", "m1-036-mvp-tech"),
-                "both supplied --tags must be unioned into the controlled vocabulary");
+        // (e) both supplied names are existing tree nodes.
+        assertEquals(2L, countTags("ai", "software-development"),
+                "both supplied --tags must be existing tag-tree nodes");
     }
 
     // --- helpers ---------------------------------------------------------

@@ -4,49 +4,49 @@
     "identifier": "https://www.artificialintelligence-news.com/feed/",
     "name": "AI News",
     "category": "news",
-    "tags": ["AI", "Development"]
+    "tags": ["ai", "software-development"]
   },
   {
     "kind": "reddit",
     "identifier": "https://www.reddit.com/r/aipromptprogramming/hot",
     "name": "aipromptprogramming (Reddit)",
     "category": "social",
-    "tags": ["AI"]
+    "tags": ["ai"]
   },
   {
     "kind": "nitter",
     "identifier": "https://nitter.net/ClaudeDevs/rss",
     "name": "ClaudeDevs (Twitter)",
     "category": "social",
-    "tags": ["AI", "Claude", "Development"]
+    "tags": ["ai", "software-development"]
   },
   {
     "kind": "odysee",
     "identifier": "https://www.odysee.com/$/rss/@NullSecurityX:0",
     "name": "NullSecX (Odysee)",
     "category": "social",
-    "tags": ["Security"]
+    "tags": ["cybersecurity"]
   },
   {
     "kind": "youtube",
     "identifier": "https://youtube.com/feeds/videos.xml?channel_id=UCCBVCTuk6uJrN3iFV_3vurg",
     "name": "Devoxx (Youtube)",
     "category": "social",
-    "tags": ["AI", "Development", "Java", "Video"]
+    "tags": ["ai", "software-development"]
   },
   {
     "kind": "bluesky",
     "identifier": "https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?actor=langchain4j.dev",
     "name": "LangChain4j (BlueSky)",
     "category": "social",
-    "tags": ["Java", "Development", "AI"]
+    "tags": ["software-development", "ai"]
   },
   {
     "kind": "nostr",
     "identifier": "{\"kinds\":[1,6],\"authors\":[\"npub1...\"]}",
     "name": "Author X notes",
     "category": "social",
-    "tags": ["Nostr", "Security"],
+    "tags": ["cybersecurity"],
     "config": {
       "relays": [
         "wss://relay.damus.io",

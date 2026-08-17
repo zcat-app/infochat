@@ -112,8 +112,8 @@ class TaggerWorkerSweepIT {
         QuarkusMock.installMockForType(
             Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
         stub().reset();
-        seedVocabularyTag("news");
-        seedVocabularyTag("security");
+        seedVocabularyTag("tagger-fixture-news");
+        seedVocabularyTag("tagger-fixture-security");
         tagVocabulary.load();
         squelchAllRows();
         resetSweepMarker();
@@ -254,17 +254,17 @@ class TaggerWorkerSweepIT {
         SeededPost live = seedPickupReadyPost("live", List.of("ai"));
         SeededPost swept = seedSweptPost("swept", FETCHED_BASE, false, List.of("ai"), List.of());
         // The stub's FIFO order is the observation: the first queued reply
-        // answers the FIRST LLM call, so whichever row carries "news" was
-        // processed first.
-        stub().setNextResponses("{\"tags\":[\"news\"]}", "{\"tags\":[\"security\"]}");
+        // answers the FIRST LLM call, so whichever row carries
+        // "tagger-fixture-news" was processed first.
+        stub().setNextResponses("{\"tags\":[\"tagger-fixture-news\"]}", "{\"tags\":[\"tagger-fixture-security\"]}");
 
         setSweepBatchSize(4);
         taggerWorker.onTick();
 
         assertEquals(2, stub().callCount());
-        assertEquals(Set.of("news"), readPost(live.id).tags,
+        assertEquals(Set.of("tagger-fixture-news"), readPost(live.id).tags,
             "first-pass pickup must be processed before sweep work");
-        assertEquals(Set.of("security"), readPost(swept.id).tags);
+        assertEquals(Set.of("tagger-fixture-security"), readPost(swept.id).tags);
         assertEquals(2, readPost(swept.id).sweptGeneration);
     }
 

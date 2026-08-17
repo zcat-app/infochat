@@ -51,7 +51,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * rejected before any dial and so can exercise {@code wss://}
  * verbatim.</p>
  *
- * <p>Test isolation: contact id, URLs, and tag values all carry the
+ * <p>Test isolation: contact id and URLs carry the
  * {@code m1-203-} prefix; {@link #cleanup()} deletes only those before
  * each run so the IT does not race other tests or the bootstrap-admin
  * row.</p>
@@ -92,7 +92,6 @@ class AddSourceNostrProbeIT {
                             + "WHERE source_id IN ("
                             + "  SELECT id FROM source WHERE identifier LIKE '%m1-203-%')");
             exec(conn, "DELETE FROM source WHERE identifier LIKE '%m1-203-%'");
-            exec(conn, "DELETE FROM tag WHERE name = 'm1-203-nostr'");
             exec(conn, "DELETE FROM users WHERE contact_id = 'm1-203-user-1'");
             // Pre-seed the caller past registration (invited) and past
             // probation (NULL) so the dispatch reaches the handler —
@@ -111,7 +110,7 @@ class AddSourceNostrProbeIT {
     void reachablePolicyAllowedRelayCreatesNostrSourceRow() throws Exception {
         String url = "ws://127.0.0.1:" + relay.port() + "/m1-203-relay";
 
-        adapter.deliverDm("m1-203-user-1", "/add-source " + url + " --tags m1-203-nostr");
+        adapter.deliverDm("m1-203-user-1", "/add-source " + url + " --tags ai");
 
         List<OutboundMessage> sent = adapter.sentMessages();
         assertEquals(1, sent.size(), "exactly one outbound reply must be produced");
@@ -134,7 +133,7 @@ class AddSourceNostrProbeIT {
         // the wss:// form is exercised verbatim.
         String url = "wss://169.254.169.254/m1-203-blocked";
 
-        adapter.deliverDm("m1-203-user-1", "/add-source " + url + " --tags m1-203-nostr");
+        adapter.deliverDm("m1-203-user-1", "/add-source " + url + " --tags ai");
 
         List<OutboundMessage> sent = adapter.sentMessages();
         assertEquals(1, sent.size(), "exactly one outbound reply must be produced");
@@ -151,7 +150,7 @@ class AddSourceNostrProbeIT {
     void unreachableRelayProducesFriendlyErrorWithoutSourceRow() throws Exception {
         String url = "ws://127.0.0.1:" + closedLoopbackPort() + "/m1-203-unreachable";
 
-        adapter.deliverDm("m1-203-user-1", "/add-source " + url + " --tags m1-203-nostr");
+        adapter.deliverDm("m1-203-user-1", "/add-source " + url + " --tags ai");
 
         List<OutboundMessage> sent = adapter.sentMessages();
         assertEquals(1, sent.size(), "exactly one outbound reply must be produced");
@@ -167,12 +166,12 @@ class AddSourceNostrProbeIT {
     @Test
     void ssrfRejectionAndUnreachabilityProduceDistinctReplies() throws Exception {
         adapter.deliverDm("m1-203-user-1",
-                "/add-source wss://169.254.169.254/m1-203-blocked --tags m1-203-nostr");
+                "/add-source wss://169.254.169.254/m1-203-blocked --tags ai");
         String blockedReply = adapter.sentMessages().get(0).text();
         adapter.reset();
         adapter.deliverDm("m1-203-user-1",
                 "/add-source ws://127.0.0.1:" + closedLoopbackPort()
-                        + "/m1-203-unreachable --tags m1-203-nostr");
+                        + "/m1-203-unreachable --tags ai");
         String unreachableReply = adapter.sentMessages().get(0).text();
 
         assertTrue(blockedReply.contains("non-public address"),

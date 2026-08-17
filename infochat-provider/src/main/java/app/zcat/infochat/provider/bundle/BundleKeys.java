@@ -561,6 +561,9 @@ public final class BundleKeys {
     /** Caller passed a URL carrying a {@code user:password@} userinfo component (M1-156); credentials in a stored, echoed source URL are refused outright rather than stripped. */
     public static final String ERROR_ADD_SOURCE_USERINFO_REJECTED = "error.add_source.userinfo_rejected";
 
+    /** {@code /add-source --tags} names a tag that is not an existing tag-tree node (the v2 growth gate, M1-866); the reply surfaces fuzzy suggestions without echoing the supplied names (M1-656). Token {@code {0}} = comma-joined suggestions. */
+    public static final String ERROR_ADD_SOURCE_UNKNOWN_TAG = "error.add_source.unknown_tag";
+
     // ----- /add-source successful replies (M1-036) ------------------------
 
     /** Branch A — fresh insert. {@code {0}} = source display name. */

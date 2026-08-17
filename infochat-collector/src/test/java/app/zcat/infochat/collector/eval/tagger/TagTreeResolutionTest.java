@@ -32,7 +32,8 @@ class TagTreeResolutionTest {
     private static final List<String> TOUCHED = List.of(
         "sport", "health", "fashion", "culture", "science", "tech", "business", "news", "others",
         "football", "esports", "gaming", "research", "ai", "europe", "world", "misc",
-        "v81-plain-leaf", "v81-top", "v81-child");
+        "v81-plain-leaf", "v81-top", "v81-child",
+        "parentless-fixture-a", "parentless-fixture-b", "parentless-fixture-c");
 
     @Inject
     @SeedDataSource
@@ -161,21 +162,24 @@ class TagTreeResolutionTest {
 
     @Test
     void parentlessVocabularyResolvesToItself() throws Exception {
-        // P6 / acceptance 3: until M1-866 seeds the tree, every row is a
-        // parentless leaf and resolution is the identity — stored sets stay
-        // byte-identical to today. Feeds the CURRENT vocabulary as loaded.
+        // P6 / acceptance 3: a parentless leaf is its own identity branch, so
+        // a parentless proposal set resolves to itself (pre-seed behavior,
+        // pinned via the real DB load path; §10 — the control travels).
+        List<String> parentless = List.of(
+            "parentless-fixture-a", "parentless-fixture-b", "parentless-fixture-c");
+        for (String name : parentless) {
+            upsertTag(name, "leaf", null);
+        }
         tagVocabulary.load();
-        List<String> current = List.copyOf(tagVocabulary.names());
-        assertTrue(current.size() > 1,
-            "fixture invalid: an identity assertion over fewer than two names cannot fail");
 
-        TagTreeResolver.Resolution all = tagTreeResolver.resolve(current, tagVocabulary.tree());
-        assertEquals(current, all.stored(), "a parentless proposal set resolves to itself");
+        TagTreeResolver.Resolution all =
+            tagTreeResolver.resolve(parentless, tagVocabulary.tree());
+        assertEquals(parentless, all.stored(), "a parentless proposal set resolves to itself");
         assertTrue(all.losers().isEmpty(), "identity passthrough has no losers");
 
         TagTreeResolver.Resolution single =
-            tagTreeResolver.resolve(List.of(current.get(0)), tagVocabulary.tree());
-        assertEquals(List.of(current.get(0)), single.stored(), "a single leaf resolves to itself");
+            tagTreeResolver.resolve(List.of(parentless.get(0)), tagVocabulary.tree());
+        assertEquals(List.of(parentless.get(0)), single.stored(), "a single leaf resolves to itself");
         assertTrue(single.losers().isEmpty());
     }
 

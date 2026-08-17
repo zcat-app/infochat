@@ -87,6 +87,29 @@ class AddSourceCommandHandlerTest {
     }
 
     @Test
+    void unknownTagGateRejectsWithFriendlySuggestionErrorAndNeverEchoes() {
+        // M1-866 growth gate: the service throws the unknown-tag rejection;
+        // the handler must turn it into the friendly fuzzy-suggestion reply
+        // without echoing the supplied name (M1-656 — never reflect inbound text).
+        dataSource.seedUser("m1-036h-gate", /* isAdmin */ false, /* isBanned */ false);
+        urlProbe.setProbe("https://example.com/m1-036h-gate.xml",
+                ProbeResult.success(200, Optional.of("application/rss+xml")));
+        sourceUpsertService.setUnknownTags(List.of("kimiai2"));
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm("m1-036h-gate"),
+                "/add-source https://example.com/m1-036h-gate.xml --tags kimiai2");
+
+        assertFalse(reply.text().contains("kimiai2"),
+                "unknown-tag reply must NOT echo the supplied tag — got: " + reply.text());
+        assertTrue(reply.text().contains("Unknown tag"),
+                "unknown-tag reply must carry the friendly gate error — got: " + reply.text());
+        assertTrue(reply.text().contains("Did you mean"),
+                "unknown-tag reply must carry the fuzzy-suggestion footer — got: "
+                        + reply.text());
+    }
+
+    @Test
     void inboundRouterDispatchesAddSourceToHandlerExactlyOnce() {
         dataSource.seedUser("m1-036h-disp", /* isAdmin */ false, /* isBanned */ false);
         urlProbe.setProbe("https://example.com/m1-036h-disp.xml",
@@ -691,9 +714,15 @@ class AddSourceCommandHandlerTest {
         private Outcome outcome = Outcome.FRESH_INSERT;
         private KindResolver.SourceKind lastKind;
         private UUID lastSourceId;
+        private List<String> unknownTags = null;
 
         void setOutcome(Outcome outcome) {
             this.outcome = outcome;
+        }
+
+        /** The gate scenario: make upsert throw the M1-866 unknown-tag rejection. */
+        void setUnknownTags(List<String> names) {
+            this.unknownTags = names;
         }
 
         /** The {@code kind} the handler resolved and passed to the upsert. */
@@ -717,6 +746,9 @@ class AddSourceCommandHandlerTest {
                                    String category,
                                    String language,
                                    List<String> tags) {
+            if (unknownTags != null) {
+                throw new SourceUpsertService.UnknownTagsException(unknownTags);
+            }
             this.lastKind = kind;
             this.lastSourceId = UUID.randomUUID();
             return new UpsertResult(outcome, lastSourceId, displayName);

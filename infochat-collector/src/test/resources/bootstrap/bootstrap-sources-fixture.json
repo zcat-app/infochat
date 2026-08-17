@@ -4,21 +4,21 @@
     "identifier": "https://www.example.com/news/feed.xml",
     "name": "Example News",
     "category": "news",
-    "tags": ["AI", "Development"]
+    "tags": ["ai", "software-development"]
   },
   {
     "kind": "bluesky",
     "identifier": "https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?actor=example.dev",
     "name": "Example Bluesky",
     "category": "social",
-    "tags": ["Java", "AI"]
+    "tags": ["software-development", "ai"]
   },
   {
     "kind": "nostr",
     "identifier": "{\"authors\":[\"npub1exampleauthor\"],\"kinds\":[1,6]}",
     "name": "Example Nostr Author",
     "category": "social",
-    "tags": ["Nostr", "Security"],
+    "tags": ["cybersecurity"],
     "config": {
       "relays": [
         "wss://relay.example.com",

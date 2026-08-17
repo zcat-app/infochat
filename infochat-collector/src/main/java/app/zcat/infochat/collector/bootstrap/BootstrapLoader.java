@@ -23,14 +23,17 @@ import java.nio.file.Paths;
 import java.sql.Array;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Reads {@code bootstrap-sources.json} at Collector startup and idempotently
@@ -132,6 +135,7 @@ public class BootstrapLoader {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
+                failFastOnNonNodeTags(conn, entries);
                 upsertSources(conn, entries, parser);
                 upsertTags(conn, entries);
                 insertAuditRow(conn, sha256, path.toString(), entries.size());
@@ -292,6 +296,46 @@ public class BootstrapLoader {
             "BootstrapLoader: " + invalidTagReports.size()
                 + " invalid source tag(s) in bootstrap-sources file — fix all of them, then restart:\n  - "
                 + String.join("\n  - ", invalidTagReports));
+    }
+
+    /** Node-membership gate (M1-866): every file tag must name an existing
+     * tag-tree node; runs before the first write so a file carrying retired
+     * v1 names (or any coinage) fails startup loudly, nothing partial (M1-077 shape). */
+    private void failFastOnNonNodeTags(Connection conn, List<BootstrapSourcesEntry> entries)
+            throws SQLException {
+        Map<String, String> uniqueTags = new LinkedHashMap<>();
+        for (BootstrapSourcesEntry entry : entries) {
+            for (String raw : Objects.requireNonNull(entry.tags())) {
+                uniqueTags.putIfAbsent(normalizeTag(raw), raw);
+            }
+        }
+        Set<String> existing = new HashSet<>();
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT name FROM tag WHERE name = ANY(?)")) {
+            ps.setArray(1, conn.createArrayOf("TEXT",
+                uniqueTags.keySet().toArray(new String[0])));
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    existing.add(rs.getString(1));
+                }
+            }
+        }
+        List<String> reports = new ArrayList<>();
+        for (BootstrapSourcesEntry entry : entries) {
+            for (String raw : Objects.requireNonNull(entry.tags())) {
+                String name = normalizeTag(raw);
+                if (!existing.contains(name)) {
+                    reports.add("source '" + entry.identifier() + "': tag '" + raw
+                        + "' — not an existing tag-tree node");
+                }
+            }
+        }
+        if (!reports.isEmpty()) {
+            throw new IllegalStateException(
+                "BootstrapLoader: " + reports.size()
+                    + " tag(s) in bootstrap-sources file are not tag-tree nodes — fix all of them, then restart:\n  - "
+                    + String.join("\n  - ", reports));
+        }
     }
 
     /**

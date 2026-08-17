@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 6 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 86 |
+| done | 87 |
 | deferred | 0 |
 | abandoned | 2 |
 | **total** | **94** |
@@ -25,8 +25,9 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-866 — Seed the tag tree and migrate the flat vocabulary (complexity: medium, risk: medium)
+- M1-867 — Tree-aware follow-tag, digest sections, and search (complexity: high, risk: medium)
 - M1-872 — Native tool-call transport behind detected capability (complexity: high, risk: medium)
+- M1-877 — Re-measure the news leg on resolved stored tags (complexity: medium, risk: low)
 - M1-879 — Strip deletions must not join privileged command tokens (complexity: low, risk: medium)
 
 ---
@@ -44,9 +45,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-867 — blocked_by: M1-865 (done), M1-866 (pending)
-- M1-869 — blocked_by: M1-865 (done), M1-866 (pending), M1-867 (pending), M1-868 (done)
-- M1-877 — blocked_by: M1-876 (done), M1-866 (pending)
+- M1-869 — blocked_by: M1-865 (done), M1-866 (done), M1-867 (pending), M1-868 (done)
 
 ---
 
@@ -71,10 +70,10 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-873 | Record the tool-call transport architecture in spec | 2026-08-17 | round 1 APPROVE |
 | M1-871 | Single-source tool catalog for prompts and transports | 2026-08-17 | round 1 APPROVE-WITH-FIXES |
 | M1-868 | Store losing tag proposals as a Tier-2 search array | 2026-08-17 | round 1 APPROVE |
+| M1-866 | Seed the tag tree and migrate the flat vocabulary | 2026-08-17 | round 2 APPROVE |
 | M1-865 | Tag tree schema and deterministic leaf resolution | 2026-08-17 | round 1 APPROVE-WITH-FIXES |
 | M1-864 | Measure the tag-tree leaf vocabulary on the local model | 2026-08-17 | round 2 APPROVE-WITH-FIXES |
 | M1-849 | Stream sanitized chat replies over SimpleX live messages | 2026-08-17 | round 2 APPROVE |
-| M1-870 | Strip brace-less native tool-call markers from final replies | 2026-08-16 | round 1 APPROVE |
 
 ---
 
@@ -193,16 +192,16 @@ M1-859 (done)
 M1-860 (abandoned)
   └── M1-861 (abandoned)
 M1-864 (done)
-  └── M1-866 (pending) ← runnable
-        ├── M1-867 (pending)
+  └── M1-866 (done)
+        ├── M1-867 (pending) ← runnable
         │     └── M1-869 (pending)
         ├── M1-869 (pending) [see above]
-        └── M1-877 (pending)
+        └── M1-877 (pending) ← runnable
 M1-865 (done)
-  ├── M1-866 (pending) [see above]
+  ├── M1-866 (done) [see above]
   ├── M1-867 (pending) [see above]
   ├── M1-868 (done)
-  │     ├── M1-866 (pending) [see above]
+  │     ├── M1-866 (done) [see above]
   │     └── M1-869 (pending) [see above]
   └── M1-869 (pending) [see above]
 M1-870 (done)

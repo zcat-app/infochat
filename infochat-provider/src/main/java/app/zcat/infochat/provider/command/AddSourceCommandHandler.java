@@ -21,6 +21,7 @@ import app.zcat.infochat.provider.source.SourceUpsertService.UpsertResult;
 import app.zcat.infochat.provider.group.GroupMembershipRepository;
 import app.zcat.infochat.provider.source.UrlProbe;
 import app.zcat.infochat.provider.source.UrlProbe.ProbeResult;
+import app.zcat.infochat.provider.summary.EligiblePostQuery;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -31,6 +32,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.text.MessageFormat;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
@@ -92,6 +95,11 @@ public class AddSourceCommandHandler implements CommandHandler {
 
     private static final String SELECT_GROUP_ID_SQL =
             "SELECT id FROM groups WHERE adapter = ? AND upstream_group_id = ?";
+
+    private static final String SELECT_VOCABULARY_SQL =
+            "SELECT name FROM tag ORDER BY name ASC";
+
+    private static final int FUZZY_SUGGESTION_MAX = 5;
 
     @Inject
     BundleLoader bundleLoader;
@@ -216,10 +224,19 @@ public class AddSourceCommandHandler implements CommandHandler {
         String displayName = SourceUpsertService.defaultDisplayName(
                 args.url().toString(), args.displayNameOverride());
 
-        UpsertResult result = sourceUpsertService.upsert(
-                user.id, user.isAdmin, scopeKind, scopeId,
-                kind, args.url().toString(),
-                displayName, args.category(), args.lang(), args.tags());
+        UpsertResult result;
+        try {
+            result = sourceUpsertService.upsert(
+                    user.id, user.isAdmin, scopeKind, scopeId,
+                    kind, args.url().toString(),
+                    displayName, args.category(), args.lang(), args.tags());
+        } catch (SourceUpsertService.UnknownTagsException e) {
+            // The v2 growth gate (M1-866): tags must name existing
+            // tag-tree nodes. Friendly fuzzy-suggestion shape, never
+            // echoing the supplied names (M1-656).
+            return reply(scope, format(BundleKeys.ERROR_ADD_SOURCE_UNKNOWN_TAG,
+                    String.join(", ", suggestionsFor(e.unknownNames().getFirst()))));
+        }
 
         return reply(scope, buildReply(result));
     }
@@ -332,6 +349,22 @@ public class AddSourceCommandHandler implements CommandHandler {
             return false;
         }
         return lower.contains("text/html");
+    }
+
+    /** Fuzzy-suggestion list over the tree-node vocabulary for the unknown-tag gate reply (the EligiblePostQuery shape). */
+    private List<String> suggestionsFor(String supplied) {
+        List<String> vocabulary = new ArrayList<>();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(SELECT_VOCABULARY_SQL);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                vocabulary.add(rs.getString(1));
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "AddSourceCommandHandler: failed to load tag vocabulary for suggestions", e);
+        }
+        return EligiblePostQuery.fuzzySuggest(supplied, vocabulary, FUZZY_SUGGESTION_MAX);
     }
 
     /** Minimal in-memory representation of the actor row we need. */

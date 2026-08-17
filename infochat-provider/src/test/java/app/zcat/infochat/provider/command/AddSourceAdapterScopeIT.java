@@ -82,7 +82,6 @@ class AddSourceAdapterScopeIT {
                     + PREFIX + "%')");
             exec(conn, "DELETE FROM source "
                     + "WHERE identifier LIKE 'https://example.com/" + PREFIX + "%'");
-            exec(conn, "DELETE FROM tag WHERE name LIKE '" + PREFIX + "%'");
             exec(conn,
                     "DELETE FROM users "
                             + "WHERE contact_id LIKE '" + PREFIX + "%' "
@@ -103,7 +102,7 @@ class AddSourceAdapterScopeIT {
                 ProbeResult.success(200, Optional.of("application/rss+xml")));
 
         adapter.deliverDm(SHARED_CONTACT_ID,
-                "/add-source " + FEED_URL + " --tags " + PREFIX + "news");
+                "/add-source " + FEED_URL + " --tags ai");
 
         assertEquals(1, adapter.sentMessages().size(),
                 "exactly one outbound reply must be produced");

@@ -88,7 +88,7 @@ public class TagVocabulary {
     @Inject
     DataSource dataSource;
 
-    /** One tag row as the resolver sees it: the node-kind discriminator + normalized parent link (null = root) + the fallback marking (false until the V84 seed lands — M1-878). */
+    /** One tag row as the resolver sees it: the node-kind discriminator + normalized parent link (null = root) + the fallback marking the V84 seed writes (world and the seven per-top residual leaves are fallback-marked). */
     public record TagNode(boolean top, @Nullable String parent, boolean fallback) {
     }
 
@@ -141,7 +141,7 @@ public class TagVocabulary {
         Map<String, TagNode> tree = new LinkedHashMap<>();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                 "SELECT name, node_kind, parent_name FROM tag ORDER BY name");
+                 "SELECT name, node_kind, parent_name, fallback FROM tag ORDER BY name");
              ResultSet rs = ps.executeQuery()) {
             while (rs.next()) {
                 String name = TagNormalizer.normalize(rs.getString(1));
@@ -149,9 +149,8 @@ public class TagVocabulary {
                     continue;
                 }
                 boolean top = "top".equals(rs.getString(2));
-                // fallback=false is the true value of every row until the
-                // V84 seed marks the fallback leaf (M1-878); no column exists before then.
-                tree.put(name, new TagNode(top, TagNormalizer.normalize(rs.getString(3)), false));
+                tree.put(name, new TagNode(top, TagNormalizer.normalize(rs.getString(3)),
+                    rs.getBoolean(4)));
                 if (!top) {
                     leaves.add(name);
                 }

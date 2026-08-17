@@ -92,9 +92,9 @@ class TaggerWorkerTest {
         // whole Quarkus test instance — same per-test slate role as
         // stub().reset().
         noTagsRateMonitor.reset();
-        seedVocabularyTag("security");
-        seedVocabularyTag("news");
-        seedVocabularyTag("finance");
+        seedVocabularyTag("tagger-fixture-security");
+        seedVocabularyTag("tagger-fixture-news");
+        seedVocabularyTag("tagger-fixture-finance");
         tagVocabulary.load();
     }
 
@@ -102,12 +102,12 @@ class TaggerWorkerTest {
     void partialValidTags_keepsValidDropsInvalid_noFallback() throws Exception {
         // LLM emits 3 valid + 1 invalid: only valid tags are kept,
         // bootstrap fallback does NOT fire.
-        stub().setNextResponse("{\"tags\":[\"security\",\"news\",\"finance\",\"INVALIDTAG\"]}");
+        stub().setNextResponse("{\"tags\":[\"tagger-fixture-security\",\"tagger-fixture-news\",\"tagger-fixture-finance\",\"INVALIDTAG\"]}");
         SeededPost post = seedPost("partial-valid", List.of("ai", "java"));
 
         taggerWorker.processOne(rowFor(post, List.of("ai", "java")));
 
-        assertPostState(post.id, true, false, Set.of("security", "news", "finance"));
+        assertPostState(post.id, true, false, Set.of("tagger-fixture-security", "tagger-fixture-news", "tagger-fixture-finance"));
         // bootstrap fallback must NOT have fired — no notification
         var state = throttledAdminNotifier.getState(TaggerWorker.ERROR_CLASS_TAGGER_FALLBACK);
         assertTrue(state.isEmpty(),
@@ -259,7 +259,7 @@ class TaggerWorkerTest {
     @Test
     void normalTagCount_belowCap_keepsAllAndReportsZeroCapped() {
         // A normal 1–4 tag response is unchanged by the cap.
-        List<String> emitted = List.of("security", "news", "finance");
+        List<String> emitted = List.of("tagger-fixture-security", "tagger-fixture-news", "tagger-fixture-finance");
 
         TaggerWorker.ValidationResult result = taggerWorker.validate(emitted);
 
@@ -274,7 +274,7 @@ class TaggerWorkerTest {
         // strict readTree rejected the fence → SCHEMA_VIOLATING → retry →
         // bootstrap fallback; now it is recovered on the first attempt
         // (callCount==1, tagger_fallback=false, LLM tags persisted).
-        stub().setNextResponse("```json\n{\"tags\":[\"security\",\"news\"]}\n```");
+        stub().setNextResponse("```json\n{\"tags\":[\"tagger-fixture-security\",\"tagger-fixture-news\"]}\n```");
         SeededPost post = seedPost("fenced", List.of("ai", "java"));
 
         taggerWorker.processOne(rowFor(post, List.of("ai", "java")));
@@ -284,7 +284,7 @@ class TaggerWorkerTest {
         // the bootstrap fallback. (Asserting on the shared ThrottledAdminNotifier
         // state would be order-dependent — zeroValidTags... leaves the same
         // error-class present — so the per-post state is the reliable proof.)
-        assertPostState(post.id, true, false, Set.of("security", "news"));
+        assertPostState(post.id, true, false, Set.of("tagger-fixture-security", "tagger-fixture-news"));
         assertEquals(1, stub().callCount(),
             "fenced-but-valid reply parses on the first attempt — no schema-violating retry");
     }
@@ -371,15 +371,15 @@ class TaggerWorkerTest {
 
     @Test
     void parentlessVocabularyKeepsTodaysStoredSets() throws Exception {
-        // P6 / acceptance 3: no tops seeded, so every vocabulary row is a
-        // parentless leaf and resolution is the identity — a multi-leaf
-        // proposal stores the whole set exactly as the flat vocabulary did.
-        stub().setNextResponse("{\"tags\":[\"security\",\"news\",\"finance\"]}");
+        // P6 / acceptance 3: the proposed tags are parentless leaves, so
+        // resolution is the identity — a multi-leaf proposal stores the
+        // whole set exactly as the flat vocabulary did.
+        stub().setNextResponse("{\"tags\":[\"tagger-fixture-security\",\"tagger-fixture-news\",\"tagger-fixture-finance\"]}");
         SeededPost post = seedPost("identity", List.of("ai", "java"));
 
         taggerWorker.processOne(rowFor(post, List.of("ai", "java")));
 
-        assertPostState(post.id, true, false, Set.of("security", "news", "finance"));
+        assertPostState(post.id, true, false, Set.of("tagger-fixture-security", "tagger-fixture-news", "tagger-fixture-finance"));
     }
 
     @Test
@@ -418,7 +418,7 @@ class TaggerWorkerTest {
         clearFallbackNotifierState();
         try {
             for (int i = 0; i < 20; i++) {
-                stub().setNextResponse(i == 6 ? "{\"tags\":[\"security\"]}" : "{\"tags\":[]}");
+                stub().setNextResponse(i == 6 ? "{\"tags\":[\"tagger-fixture-security\"]}" : "{\"tags\":[]}");
             }
             List<SeededPost> posts = new ArrayList<>();
             for (int i = 0; i < 20; i++) {
@@ -431,7 +431,7 @@ class TaggerWorkerTest {
             assertEquals(20, stub().callCount(),
                 "every empty reply is an answer — no post is retried");
             assertPostState(posts.get(0).id, true, false, Set.of());
-            assertPostState(posts.get(6).id, true, false, Set.of("security"));
+            assertPostState(posts.get(6).id, true, false, Set.of("tagger-fixture-security"));
             var state = throttledAdminNotifier.getState(NoTagsRateMonitor.ERROR_CLASS_SUSTAINED_NO_TAGS);
             assertTrue(state.isPresent(),
                 "a sustained all-empty tagger output must raise the aggregate alert");
@@ -458,7 +458,7 @@ class TaggerWorkerTest {
         List<SeededPost> posts = new ArrayList<>();
         for (int i = 0; i < 10; i++) {
             // 2 no-tags out of 10, interleaved with tagged answers.
-            stub().setNextResponse(i == 3 || i == 7 ? "{\"tags\":[]}" : "{\"tags\":[\"security\"]}");
+            stub().setNextResponse(i == 3 || i == 7 ? "{\"tags\":[]}" : "{\"tags\":[\"tagger-fixture-security\"]}");
             posts.add(seedPost("trickle-" + i, List.of("ai", "java")));
         }
         for (SeededPost post : posts) {
@@ -467,7 +467,7 @@ class TaggerWorkerTest {
 
         // The per-post outcomes are untouched: tagged posts keep their LLM
         // tags, untaggable posts persist tags='{}' with no fallback.
-        assertPostState(posts.get(0).id, true, false, Set.of("security"));
+        assertPostState(posts.get(0).id, true, false, Set.of("tagger-fixture-security"));
         assertPostState(posts.get(3).id, true, false, Set.of());
         var state = throttledAdminNotifier.getState(NoTagsRateMonitor.ERROR_CLASS_SUSTAINED_NO_TAGS);
         assertTrue(state.isEmpty(),

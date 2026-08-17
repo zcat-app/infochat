@@ -27,6 +27,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -112,7 +113,7 @@ class SourceUpsertServiceIT {
                 "https://example.com/m1-036-fresh.xml",
                 "Example Fresh Feed",
                 "news", "en",
-                List.of("m1-036-tag-a", "m1-036-tag-b"));
+                List.of("ai", "software-development"));
 
         assertEquals(Outcome.FRESH_INSERT, result.outcome(),
                 "first /add-source against (kind, identifier) must report FRESH_INSERT");
@@ -124,13 +125,14 @@ class SourceUpsertServiceIT {
         assertEquals("https://example.com/m1-036-fresh.xml", row.identifier);
         assertEquals("active", row.status);
         assertEquals("news", row.category);
-        assertEquals(List.of("m1-036-tag-a", "m1-036-tag-b"), row.bootstrapTags);
+        assertEquals(List.of("ai", "software-development"), row.bootstrapTags);
         assertTrue(row.deletedAt == null, "fresh insert must leave deleted_at NULL");
         assertEquals("user", row.sourceOrigin,
                 "an /add-source'd source is a private custom — origin must be 'user' (D59)");
 
-        assertEquals(2L, countTags("m1-036-tag-a", "m1-036-tag-b"),
-                "both supplied --tags must be unioned into the controlled vocabulary");
+        assertEquals(2L, countLeafNodes("ai", "software-development"),
+                "both supplied --tags name existing tree nodes — the node gate accepts "
+                        + "them, so the union has nothing new to add (M1-866)");
         assertEquals(1L, countSubscriptions(caller, result.sourceId()),
                 "one source_subscription row must exist for the caller's DM scope");
         assertEquals(0L, countAuditRows(result.sourceId(), caller),
@@ -161,7 +163,7 @@ class SourceUpsertServiceIT {
         UpsertResult result = service.upsert(
                 caller, false, "dm", caller, SourceKind.RSS,
                 "https://example.com/m1-036-boot.xml", "Boot Feed Re-add", "news", "en",
-                List.of("m1-036-tag-a"));
+                List.of("ai"));
 
         assertEquals(Outcome.SUBSCRIBED_EXISTING, result.outcome());
         assertEquals("bootstrap", readSource(bootstrapId).sourceOrigin,
@@ -197,13 +199,13 @@ class SourceUpsertServiceIT {
         UpsertResult first = service.upsert(
                 caller, false, "dm", caller, SourceKind.RSS,
                 "https://example.com/m1-036-repeat.xml", "Repeat Feed", "news", "en",
-                List.of("m1-036-tag-a"));
+                List.of("ai"));
         assertEquals(Outcome.FRESH_INSERT, first.outcome());
 
         UpsertResult second = service.upsert(
                 caller, false, "dm", caller, SourceKind.RSS,
                 "https://example.com/m1-036-repeat.xml", "Repeat Feed", "news", "en",
-                List.of("m1-036-tag-b"));
+                List.of("software-development"));
         assertEquals(Outcome.SUBSCRIBED_EXISTING, second.outcome(),
                 "second /add-source for the same (kind, identifier) by the same "
                         + "non-admin caller must report SUBSCRIBED_EXISTING");
@@ -211,7 +213,7 @@ class SourceUpsertServiceIT {
                 "the source id must be stable across the idempotent re-call");
 
         SourceRow row = readSource(first.sourceId());
-        assertEquals(List.of("m1-036-tag-a"), row.bootstrapTags,
+        assertEquals(List.of("ai"), row.bootstrapTags,
                 "Branch B: --tags supplied on the second call MUST be ignored — "
                         + "bootstrap_tags stays at the original Branch A value");
         assertEquals(1L, countSubscriptions(caller, first.sourceId()),
@@ -229,17 +231,17 @@ class SourceUpsertServiceIT {
         UpsertResult first = service.upsert(
                 adminInserter, true, "dm", adminInserter, SourceKind.RSS,
                 "https://example.com/m1-036-shared.xml", "Shared Feed", "news", "en",
-                List.of("m1-036-tag-a"));
+                List.of("ai"));
         assertEquals(Outcome.FRESH_INSERT, first.outcome());
 
         UpsertResult second = service.upsert(
                 nonAdminCaller, false, "dm", nonAdminCaller, SourceKind.RSS,
                 "https://example.com/m1-036-shared.xml", "Shared Feed", "news", "en",
-                List.of("m1-036-tag-b"));
+                List.of("software-development"));
         assertEquals(Outcome.SUBSCRIBED_EXISTING, second.outcome());
 
         SourceRow row = readSource(first.sourceId());
-        assertEquals(List.of("m1-036-tag-a"), row.bootstrapTags,
+        assertEquals(List.of("ai"), row.bootstrapTags,
                 "Branch B: non-admin caller's --tags MUST be ignored on the existing row");
 
         assertEquals(1L, countSubscriptions(nonAdminCaller, first.sourceId()),
@@ -259,19 +261,19 @@ class SourceUpsertServiceIT {
         UpsertResult seed = service.upsert(
                 seedAdmin, true, "dm", seedAdmin, SourceKind.RSS,
                 "https://example.com/m1-036-admin-rewrite.xml", "Rewrite Feed", "news", "en",
-                List.of("m1-036-tag-a"));
+                List.of("ai"));
         assertEquals(Outcome.FRESH_INSERT, seed.outcome());
 
         UpsertResult rewrite = service.upsert(
                 rewriteAdmin, true, "dm", rewriteAdmin, SourceKind.RSS,
                 "https://example.com/m1-036-admin-rewrite.xml", "Rewrite Feed", "news", "en",
-                List.of("m1-036-tag-b", "m1-036-tag-c"));
+                List.of("software-development", "cybersecurity"));
         assertEquals(Outcome.ADMIN_TAGS_REPLACED, rewrite.outcome());
         assertEquals(seed.sourceId(), rewrite.sourceId(),
                 "the source id must be stable across the bot-admin rewrite");
 
         SourceRow row = readSource(seed.sourceId());
-        assertEquals(List.of("m1-036-tag-b", "m1-036-tag-c"), row.bootstrapTags,
+        assertEquals(List.of("software-development", "cybersecurity"), row.bootstrapTags,
                 "Branch C: bot-admin caller's --tags REPLACE bootstrap_tags on the existing row");
 
         assertEquals(1L, countAuditRows(seed.sourceId(), rewriteAdmin),
@@ -295,7 +297,7 @@ class SourceUpsertServiceIT {
                 admin, /* actorIsBotAdmin */ true, "dm", admin, SourceKind.RSS,
                 "https://example.com/m1-036-669-removed-outcome.xml",
                 "Removed Feed", "news", "en",
-                List.of("m1-036-tag-b", "m1-036-tag-c"));
+                List.of("software-development", "cybersecurity"));
 
         assertEquals(Outcome.ADMIN_EXISTING_REMOVED, result.outcome(),
                 "a bot admin against a soft-deleted row must NOT report "
@@ -329,7 +331,7 @@ class SourceUpsertServiceIT {
                 admin, /* actorIsBotAdmin */ true, "dm", admin, SourceKind.RSS,
                 "https://example.com/m1-036-669-removed-audit.xml",
                 "Removed Feed", "news", "en",
-                List.of("m1-036-tag-b"));
+                List.of("software-development"));
 
         assertEquals(Outcome.ADMIN_EXISTING_REMOVED, result.outcome());
         assertEquals(auditRowsBefore, countAuditRows(removedId, admin),
@@ -352,7 +354,7 @@ class SourceUpsertServiceIT {
                 caller, /* actorIsBotAdmin */ false, "dm", caller, SourceKind.RSS,
                 "https://example.com/m1-036-669-removed-non-admin.xml",
                 "Removed Feed", "news", "en",
-                List.of("m1-036-tag-b"));
+                List.of("software-development"));
 
         assertEquals(Outcome.SUBSCRIBED_EXISTING_REMOVED, result.outcome(),
                 "a non-admin against a soft-deleted row must be distinguishable "
@@ -370,22 +372,63 @@ class SourceUpsertServiceIT {
     // M1-365: the tag-vocab union must be ONE round-trip for N tags, not one
     // executeUpdate per tag. Drives the package-private upsertTagVocab with a
     // Connection proxy that counts executeUpdate on the tag INSERT, then asserts
-    // exactly one execution AND that all three tags landed (the single statement
-    // still unions every supplied tag, ON CONFLICT DO NOTHING idempotency intact).
+    // exactly one execution AND that all three node names are still there (the
+    // M1-866 gate makes the names pre-existing nodes, so the union is a no-op
+    // by design; ON CONFLICT DO NOTHING idempotency intact).
     @Test
     void tagVocabUpsertIssuesOneStatementForManyTags() throws Exception {
         int[] tagSqlExecuteCount = {0};
         try (Connection real = dataSource.getConnection()) {
             Connection counting = countingTagExecuteUpdates(real, tagSqlExecuteCount);
             service.upsertTagVocab(counting,
-                    List.of("m1-036-tag-a", "m1-036-tag-b", "m1-036-tag-c"));
+                    List.of("ai", "software-development", "cybersecurity"));
         }
 
         assertEquals(1, tagSqlExecuteCount[0],
                 "the array-bind unnest upsert must issue ONE executeUpdate for N tags, "
                         + "not one per tag");
-        assertEquals(3L, countTags("m1-036-tag-a", "m1-036-tag-b", "m1-036-tag-c"),
-                "the single statement must still union all three supplied tags");
+        assertEquals(3L, countLeafNodes("ai", "software-development", "cybersecurity"),
+                "all three supplied names must be existing tree nodes after the upsert");
+    }
+
+    // M1-866 node gate (acceptance 7, failure mode): a caller-supplied tag
+    // that is not an existing tag-tree node (kimiai2 — the measured
+    // 0.52-Jaccard coinage class) rejects the upsert before any write.
+    @Test
+    void addNodeGateRejectsUnknownTagNameWithNoPartialWrite() throws Exception {
+        UUID caller = insertUser("m1-036-gate-caller", false);
+
+        SourceUpsertService.UnknownTagsException ex = assertThrows(
+                SourceUpsertService.UnknownTagsException.class,
+                () -> service.upsert(
+                        caller, /* actorIsBotAdmin */ false, "dm", caller, SourceKind.RSS,
+                        "https://example.com/m1-036-gate.xml", "Gate Feed", "news", "en",
+                        List.of("kimiai2")));
+
+        assertEquals(List.of("kimiai2"), ex.unknownNames(),
+                "the exception must carry the offending normalized name");
+        try (Connection conn = dataSource.getConnection()) {
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT COUNT(*) FROM tag WHERE name = 'kimiai2'");
+                 ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                assertEquals(0, rs.getInt(1), "no tag row may be written");
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT COUNT(*) FROM source WHERE identifier = 'https://example.com/m1-036-gate.xml'");
+                 ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                assertEquals(0, rs.getInt(1), "no source row may be written");
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT COUNT(*) FROM source_subscription WHERE scope_kind = 'dm' AND scope_id = ?")) {
+                ps.setObject(1, caller);
+                try (ResultSet rs = ps.executeQuery()) {
+                    assertTrue(rs.next());
+                    assertEquals(0, rs.getInt(1), "no subscription may be written");
+                }
+            }
+        }
     }
 
     // M1-750: the declared language round-trips into source.language on
@@ -403,7 +446,7 @@ class SourceUpsertServiceIT {
                 SourceKind.RSS,
                 "https://example.com/m1-036-750-lang.xml",
                 "Language Feed", "news", "cs",
-                List.of("m1-036-tag-a"));
+                List.of("ai"));
         assertEquals(Outcome.FRESH_INSERT, first.outcome());
         assertEquals("cs", readSource(first.sourceId()).language,
                 "the declared --lang must round-trip into source.language on insert");
@@ -412,7 +455,7 @@ class SourceUpsertServiceIT {
                 caller, false, "dm", caller, SourceKind.RSS,
                 "https://example.com/m1-036-750-lang.xml",
                 "Language Feed", "news", "en",
-                List.of("m1-036-tag-b"));
+                List.of("software-development"));
         assertEquals(Outcome.SUBSCRIBED_EXISTING, second.outcome());
         assertEquals("cs", readSource(first.sourceId()).language,
                 "the re-upsert must NOT overwrite an existing row's declared language "
@@ -528,11 +571,11 @@ class SourceUpsertServiceIT {
         }
     }
 
-    private long countTags(String... names) throws Exception {
+    private long countLeafNodes(String... names) throws Exception {
         Set<String> needle = new HashSet<>(Arrays.asList(names));
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "SELECT COUNT(*) FROM tag WHERE name = ANY (?)")) {
+                     "SELECT COUNT(*) FROM tag WHERE node_kind = 'leaf' AND name = ANY (?)")) {
             ps.setArray(1, conn.createArrayOf("TEXT", needle.toArray(new String[0])));
             try (ResultSet rs = ps.executeQuery()) {
                 assertTrue(rs.next());

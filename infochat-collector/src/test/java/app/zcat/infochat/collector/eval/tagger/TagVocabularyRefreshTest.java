@@ -114,7 +114,7 @@ class TagVocabularyRefreshTest {
 
     /**
      * The exact sequence {@code TagVocabulary.loadFromDatabase} projects —
-     * the same query, the same normalization filter, the same
+     * the same query, the same leaf and normalization filter, the same
      * insertion-ordered de-duplication — so the assertion pins the order
      * the load publishes rather than a second guess at what it should be.
      */
@@ -122,7 +122,7 @@ class TagVocabularyRefreshTest {
         Set<String> ordered = new LinkedHashSet<>();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                 "SELECT name FROM tag ORDER BY name");
+                  "SELECT name FROM tag WHERE node_kind = 'leaf' ORDER BY name");
              ResultSet rs = ps.executeQuery()) {
             while (rs.next()) {
                 String normalized = TagNormalizer.normalize(rs.getString(1));

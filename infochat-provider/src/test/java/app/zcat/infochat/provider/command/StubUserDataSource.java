@@ -74,7 +74,9 @@ class StubUserDataSource extends UnsupportedDataSource {
                     }
                     case "executeQuery" -> {
                         String contactId = params.get(2);
-                        UserRow row = rowsByContactId.get(contactId);
+                        // A parameterless SELECT (the unknown-tag gate's
+                        // vocabulary load) has no param 2 → no row → empty.
+                        UserRow row = contactId == null ? null : rowsByContactId.get(contactId);
                         yield newResultSet(row);
                     }
                     case "close" -> null;

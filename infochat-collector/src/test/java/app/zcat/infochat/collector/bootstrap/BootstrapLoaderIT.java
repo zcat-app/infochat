@@ -63,7 +63,7 @@ class BootstrapLoaderIT {
             }
 
             // (a) tag table carries the union of fixture tags.
-            // Normalized to lowercase: ai, development, java, nostr, security.
+            // Tree names (M1-866): ai, software-development, cybersecurity.
             try (ResultSet rs = st.executeQuery(
                 "SELECT name FROM tag WHERE source_origin = 'bootstrap' ORDER BY name")) {
                 java.util.List<String> names = new java.util.ArrayList<>();
@@ -71,8 +71,10 @@ class BootstrapLoaderIT {
                     names.add(rs.getString(1));
                 }
                 assertTrue(names.contains("ai"), "tags must include 'ai'; got: " + names);
-                assertTrue(names.contains("development"), "tags must include 'development'; got: " + names);
-                assertTrue(names.contains("nostr"), "tags must include 'nostr'; got: " + names);
+                assertTrue(names.contains("software-development"),
+                    "tags must include 'software-development'; got: " + names);
+                assertTrue(names.contains("cybersecurity"),
+                    "tags must include 'cybersecurity'; got: " + names);
             }
 
             // (a) Every loader-written source row is bootstrap-origin
@@ -256,6 +258,33 @@ class BootstrapLoaderIT {
                 () -> loader.runLoad());
             assertTrue(ex.getMessage().contains("machine learning"),
                 "exception message must name the invalid tag; got: " + ex.getMessage());
+        } finally {
+            unwrapped.sourcesFilePath = original;
+        }
+    }
+
+    @Test
+    @Order(6)
+    void nonNodeTagInBootstrapJsonFailsFast(@TempDir Path tempDir) throws IOException {
+        // M1-866 node gate: a valid-character-class name that is not an
+        // existing tag-tree node fails startup the same way, naming the
+        // offender — the growth gate that keeps the v1 vendor tail out.
+        Path fixture = tempDir.resolve("non-node-tags.json");
+        Files.writeString(fixture, """
+            [{"kind":"rss","identifier":"https://example.com/feed",\
+            "name":"X","category":"news","tags":["kimiai2"]}]
+            """);
+
+        BootstrapLoader unwrapped = ClientProxy.unwrap(loader);
+        String original = unwrapped.sourcesFilePath;
+        try {
+            unwrapped.sourcesFilePath = fixture.toString();
+            IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> loader.runLoad());
+            assertTrue(ex.getMessage().contains("kimiai2"),
+                "exception message must name the non-node tag; got: " + ex.getMessage());
+            assertTrue(ex.getMessage().contains("tag-tree node"),
+                "exception message must state the node-membership reason; got: " + ex.getMessage());
         } finally {
             unwrapped.sourcesFilePath = original;
         }

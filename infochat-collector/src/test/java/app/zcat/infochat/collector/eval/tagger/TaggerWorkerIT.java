@@ -49,12 +49,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <h2>Vocabulary seeding</h2>
  *
- * <p>The bootstrap fixture seeds {@code security} (among others)
+ * <p>The bootstrap fixture seeds {@code ai}/{@code software-development}
  * into the {@code tag} table at startup. This IT additionally
- * seeds {@code news} in @BeforeEach (idempotent ON CONFLICT DO
+ * seeds the unique parentless fixture names
+ * {@code tagger-fixture-security}/{@code tagger-fixture-news} in
+ * @BeforeEach (idempotent ON CONFLICT DO
  * NOTHING) and reloads the {@link TagVocabulary} cache so both
  * vocabulary members are visible to the {@link TaggerWorker}
- * regardless of test execution order.
+ * regardless of test execution order. The names are deliberately
+ * unique: the M1-866 seed owns the flat-era names these cases used
+ * before, so they pin identity-mode semantics on fresh leaves.
  */
 @QuarkusTest
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
@@ -95,8 +99,8 @@ class TaggerWorkerIT {
         QuarkusMock.installMockForType(
             Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
         stub().reset();
-        seedVocabularyTag("news");
-        seedVocabularyTag("security");
+        seedVocabularyTag("tagger-fixture-news");
+        seedVocabularyTag("tagger-fixture-security");
         // Refresh the cached vocabulary so the seeded names are
         // visible even if they were absent at first-startup.
         tagVocabulary.load();
@@ -107,14 +111,14 @@ class TaggerWorkerIT {
     @Test
     @Order(1)
     void happyPathPersistsValidVocabularyTagsAndAdvancesTaggerDone() throws Exception {
-        stub().setNextResponse("{\"tags\":[\"security\",\"news\"]}");
+        stub().setNextResponse("{\"tags\":[\"tagger-fixture-security\",\"tagger-fixture-news\"]}");
         SeededPost post = seedPickupReadyPost(
             "tagger-it-happy", "Original body", List.of("ai", "java"));
 
         taggerWorker.processOne(rowFor(post, List.of("ai", "java")));
 
         assertPostState(post.id, /* taggerDone */ true, /* fallback */ false,
-            List.of("security", "news"));
+            List.of("tagger-fixture-security", "tagger-fixture-news"));
     }
 
     // ---------- 27.2 partial-valid ----------
@@ -122,14 +126,14 @@ class TaggerWorkerIT {
     @Test
     @Order(2)
     void partialValidDropsInvalidTagsAndKeepsValidWithoutFallback() throws Exception {
-        stub().setNextResponse("{\"tags\":[\"security\",\"news\",\"NOTAVALIDTAG\"]}");
+        stub().setNextResponse("{\"tags\":[\"tagger-fixture-security\",\"tagger-fixture-news\",\"NOTAVALIDTAG\"]}");
         SeededPost post = seedPickupReadyPost(
             "tagger-it-partial", "Body", List.of("ai", "java"));
 
         taggerWorker.processOne(rowFor(post, List.of("ai", "java")));
 
         assertPostState(post.id, true, /* fallback */ false,
-            List.of("security", "news"));
+            List.of("tagger-fixture-security", "tagger-fixture-news"));
     }
 
     // ---------- 27.3 zero-valid → bootstrap ----------
@@ -163,7 +167,7 @@ class TaggerWorkerIT {
         // oriented fallback prompt): valid line-oriented reply.
         stub().setNextResponses(
             "this is not json",
-            "TAGS: security, news");
+            "TAGS: tagger-fixture-security, tagger-fixture-news");
         SeededPost post = seedPickupReadyPost(
             "tagger-it-schema-violating", "Body", List.of("ai", "java"));
 
@@ -172,7 +176,7 @@ class TaggerWorkerIT {
         assertEquals(2, stub().callCount(),
             "schema-violating path must retry once with the fallback prompt");
         assertPostState(post.id, true, /* fallback */ false,
-            List.of("security", "news"));
+            List.of("tagger-fixture-security", "tagger-fixture-news"));
     }
 
     // ---------- 27.5 total-fail → bootstrap ----------

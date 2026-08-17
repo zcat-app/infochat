@@ -17,8 +17,11 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -72,14 +75,9 @@ import java.util.UUID;
  * actually did. Reporting a replacement the CASE had skipped was the
  * M1-669 defect.</p>
  *
- * <p>The vocab union runs UNCONDITIONALLY on every call: it is an
- * append-only {@code ON CONFLICT (name) DO NOTHING} INSERT against
- * {@code tag} that is idempotent regardless of branch. Always running
- * it avoids a SELECT-then-conditional-INSERT race; the extra rows
- * inserted for Branch B (where the tags were "ignored") are merely
- * vocabulary entries — they make the tag values addressable by
- * {@code /follow-tag} but do NOT change the source row's
- * {@code bootstrap_tags}, which is what Branch B requires.</p>
+ * <p>The vocab union still runs on every call (the M1-365 one-round-trip
+ * shape) but the node gate below admits only existing tree nodes, so it
+ * is a guaranteed zero-row no-op; vocabulary entry is the V84 seed.</p>
  *
  * <p><b>GRANT note.</b> The Provider runtime connects as the weak
  * {@code infochat_provider} role. V6 starts it read-only on
@@ -95,6 +93,24 @@ import java.util.UUID;
  */
 @ApplicationScoped
 public class SourceUpsertService {
+
+    /** Thrown before any write when caller-supplied tags name no tag-tree
+     * node (the M1-866 growth gate — decision 5 / P11); the handler turns it
+     * into the friendly fuzzy-suggestion error, nothing persisted. */
+    public static final class UnknownTagsException extends RuntimeException {
+
+        private final List<String> unknownNames;
+
+        public UnknownTagsException(List<String> unknownNames) {
+            super("SourceUpsertService: tag(s) not tag-tree nodes: "
+                + String.join(", ", unknownNames));
+            this.unknownNames = List.copyOf(unknownNames);
+        }
+        /** The normalized tag names that are not existing tree nodes, in input order. */
+        public List<String> unknownNames() {
+            return unknownNames;
+        }
+    }
 
     // A display name is a single-line label rendered inline in a reply
     // sentence; 80 characters is a full terminal line, past which the value
@@ -180,12 +196,19 @@ public class SourceUpsertService {
                                boolean actorIsBotAdmin,
                                String scopeKind,
                                UUID scopeId,
-                               SourceKind kind,
+                               KindResolver.SourceKind kind,
                                String identifier,
                                String displayName,
                                String category,
                                String language,
                                List<String> tags) {
+        // Node gate (M1-866): only existing tag-tree nodes may be unioned —
+        // the free-form union is how the vendor tail grew (analysis P11).
+        // Runs before the write transaction so a rejection writes nothing.
+        List<String> unknown = unknownNodeTags(tags);
+        if (!unknown.isEmpty()) {
+            throw new UnknownTagsException(unknown);
+        }
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
@@ -249,6 +272,34 @@ public class SourceUpsertService {
             ps.setArray(1, tagArray);
             ps.executeUpdate();
         }
+    }
+
+    /** The supplied tags that name no tag-tree node, in input order (empty = all are nodes). */
+    private List<String> unknownNodeTags(List<String> tags) {
+        if (tags.isEmpty()) {
+            return List.of();
+        }
+        Set<String> nodes = new HashSet<>();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT name FROM tag WHERE name = ANY(?)")) {
+            ps.setArray(1, conn.createArrayOf("TEXT", tags.toArray(new String[0])));
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    nodes.add(rs.getString(1));
+                }
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                "SourceUpsertService: tag-node lookup failed", e);
+        }
+        List<String> unknown = new ArrayList<>();
+        for (String tag : tags) {
+            if (!nodes.contains(tag)) {
+                unknown.add(tag);
+            }
+        }
+        return unknown;
     }
 
     private SourceUpsertResultRow upsertSource(Connection conn,
