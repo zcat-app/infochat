@@ -781,6 +781,16 @@ trusted) but not for `/add-source`.
 Per-scope tag preferences continue to flow through `scope_tag` (`/follow-tag`
 / `/unfollow-tag`), not through `/add-source`.
 
+**Tree-aware tag retrieval.** Following a TOP node stores one `scope_tag`
+row (the top), and read-time subtree expansion resolves it to its leaf set
+at every matching site — searchPosts, the EXPLICIT digest filter,
+`/summary` positional and top-3 filters, and the `/unfollow-tag` seed. A
+leaf added under a followed top after the follow appears in the next digest
+with no re-follow (future leaves included by construction). Digest sections
+key at the followed level: a top-follow renders ONE aggregated section per
+top, a leaf-follow renders per-leaf sections as before. Threshold and cap
+apply at the rendered level (a top section is one section).
+
 **Reply distinguishes outcomes:**
 
 | Outcome | Reply |

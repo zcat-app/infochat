@@ -114,6 +114,13 @@ public class DigestRenderer {
     @Inject
     SystemLlmBudget systemLlmBudget = new SystemLlmBudget();
 
+    // Field-initialized so plain-JUnit constructions get identity keying
+    // (empty map); CDI overwrites with the real bean — the systemLlmBudget
+    // pattern. Null DataSource in the default returns Map.of().
+    @Inject
+    app.zcat.infochat.provider.summary.TagTreeExpansion tagTreeExpansion =
+            new app.zcat.infochat.provider.summary.TagTreeExpansion();
+
     /** Max clusters rendered per category section in FULL mode is unbounded; in the pre-M1-732 render the overflow became a localized "+N more" line. Still the cap /summary's render forms use. */
     @ConfigProperty(name = "infochat.digest.category-item-cap", defaultValue = "12")
     int categoryItemCap;
@@ -316,7 +323,8 @@ public class DigestRenderer {
                                                             DigestMode mode,
                                                             UUID groupId) {
         List<Cluster> clusters = clusterTraversal.cluster(posts);
-        List<CategorySection> allSections = digestCategorizer.categorize(clusters);
+        Map<String, String> sectionKeys = tagTreeExpansion.sectionKeyByLeaf("group", groupId);
+        List<CategorySection> allSections = digestCategorizer.categorize(clusters, Set.of(), sectionKeys);
         // M1-724 prominence ranking: score every cluster (urgent gate →
         // weighted percentile score → input-order tiebreak) and re-sort
         // WITHIN each section. Section membership stays D62 tag arithmetic —
@@ -373,7 +381,7 @@ public class DigestRenderer {
             // the very instances passed in.
             Set<Cluster> leadSet = Collections.newSetFromMap(new IdentityHashMap<>());
             leadSet.addAll(leadClusters);
-            allSections = digestCategorizer.categorize(clusters, leadSet);
+            allSections = digestCategorizer.categorize(clusters, leadSet, sectionKeys);
         }
         List<CategorySection> rankedSections = new ArrayList<>(allSections.size());
         for (CategorySection section : allSections) {
@@ -542,7 +550,14 @@ public class DigestRenderer {
      */
     public List<RenderedSection> renderSummarySections(List<ClusterProse> proseList,
                                                        String langCode) {
-        return renderSummarySections(proseList, langCode, categoryItemCap);
+        return renderSummarySections(proseList, langCode, categoryItemCap, Map.of());
+    }
+
+    /** Tree-aware default-cap overload: passes the followed-node section-key map. */
+    public List<RenderedSection> renderSummarySections(List<ClusterProse> proseList,
+                                                       String langCode,
+                                                       Map<String, String> sectionKeyByLeaf) {
+        return renderSummarySections(proseList, langCode, categoryItemCap, sectionKeyByLeaf);
     }
 
     /**
@@ -558,6 +573,15 @@ public class DigestRenderer {
     public List<RenderedSection> renderSummarySections(List<ClusterProse> proseList,
                                                        String langCode,
                                                        int effectiveCap) {
+        return renderSummarySections(proseList, langCode, effectiveCap, Map.of());
+    }
+
+    // Tree-aware overload: sectionKeyByLeaf rolls tags up to followed-node keys.
+    // Empty map = identity = today's bytes.
+    public List<RenderedSection> renderSummarySections(List<ClusterProse> proseList,
+                                                       String langCode,
+                                                       int effectiveCap,
+                                                       Map<String, String> sectionKeyByLeaf) {
         // Categorization reorders clusters into sections, so the positional
         // prose↔cluster correspondence the caller passed does not survive
         // and the prose must be looked up per section cluster.
@@ -575,7 +599,7 @@ public class DigestRenderer {
             clusters.add(cp.cluster());
             proseByCluster.put(cp.cluster(), cp);
         }
-        List<CategorySection> sections = digestCategorizer.categorize(clusters);
+        List<CategorySection> sections = digestCategorizer.categorize(clusters, Set.of(), sectionKeyByLeaf);
 
         List<RenderedSection> rendered = new ArrayList<>(sections.size());
         for (CategorySection section : sections) {
@@ -655,7 +679,13 @@ public class DigestRenderer {
      * redteam M1-700 kimi r1, M1-703).
      */
     public ShortResult renderShortBody(List<Cluster> clusters, String langCode) {
-        List<CategorySection> sections = digestCategorizer.categorize(clusters);
+        return renderShortBody(clusters, langCode, Map.of());
+    }
+
+    /** Tree-aware overload: {@code sectionKeyByLeaf} rolls cluster tags up to followed-node keys. */
+    public ShortResult renderShortBody(List<Cluster> clusters, String langCode,
+                                       Map<String, String> sectionKeyByLeaf) {
+        List<CategorySection> sections = digestCategorizer.categorize(clusters, Set.of(), sectionKeyByLeaf);
         StringBuilder out = new StringBuilder();
         int clustersTotal = 0;
         int clustersDegraded = 0;

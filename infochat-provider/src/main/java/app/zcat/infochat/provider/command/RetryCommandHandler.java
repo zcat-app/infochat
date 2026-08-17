@@ -28,6 +28,7 @@ import app.zcat.infochat.provider.summary.EligiblePostQuery;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator;
 import app.zcat.infochat.provider.summary.SummaryProseGenerator.ClusterProse;
+import app.zcat.infochat.provider.summary.TagTreeExpansion;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
 import app.zcat.infochat.provider.user.UserRepository;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -116,6 +117,12 @@ public class RetryCommandHandler implements CommandHandler {
 
     @Inject
     DigestRenderer digestRenderer;
+
+    // Field-initialized so a plain-JUnit construction carries a
+    // null-DataSource (identity-keying) expansion; CDI overwrites at
+    // runtime — the SummaryCommandHandler pattern.
+    @Inject
+    TagTreeExpansion tagTreeExpansion = new TagTreeExpansion();
 
     @Inject
     LlmOutputSanitizer llmOutputSanitizer;
@@ -272,6 +279,16 @@ public class RetryCommandHandler implements CommandHandler {
 
             String scopeLanguage = readScopeLanguage(scopeKind, scopeId);
 
+            // M1-867: the replay re-runs categorization over the frozen
+            // clusters, so it keys sections at the same followed level the
+            // anchored /summary used — the replay must not contradict it.
+            // A positional anchor ("summary football", echoed in
+            // command_name) was identity-keyed at write time, so it replays
+            // with identity keying too.
+            Map<String, String> sectionKeys = anchorHasPositionalTag(anchor.commandName())
+                    ? Map.of()
+                    : tagTreeExpansion.sectionKeyByLeaf(scopeKind, scopeId);
+
             StringBuilder out = new StringBuilder();
 
             // Prepend status-drift notice if drift exceeds threshold (applies
@@ -301,7 +318,7 @@ public class RetryCommandHandler implements CommandHandler {
             // arm fails loudly rather than silently replaying the wrong shape.
             if ("short".equals(anchor.renderForm())) {
                 DigestRenderer.ShortResult shortResult =
-                        digestRenderer.renderShortBody(clusters, scopeLanguage);
+                        digestRenderer.renderShortBody(clusters, scopeLanguage, sectionKeys);
                 // --short failure reporting (redteam M1-700 kimi r1 +
                 // M1-703 honesty): mirror the /summary --short partial-vs-
                 // total distinction on replay — emit the degraded_notice on
@@ -363,13 +380,13 @@ public class RetryCommandHandler implements CommandHandler {
                         // no 12-per-section cap), matching the /summary --full
                         // shape. The cap-skip is a render-side switch.
                         out.append(String.join("\n\n",
-                                digestRenderer.renderSummarySections(prose, scopeLanguage, Integer.MAX_VALUE).stream()
+                                digestRenderer.renderSummarySections(prose, scopeLanguage, Integer.MAX_VALUE, sectionKeys).stream()
                                         .map(RenderedSection::text)
                                         .toList()));
                     }
                     case "bare" -> {
                         out.append(String.join("\n\n",
-                                digestRenderer.renderSummarySections(prose, scopeLanguage).stream()
+                                digestRenderer.renderSummarySections(prose, scopeLanguage, sectionKeys).stream()
                                         .map(RenderedSection::text)
                                         .toList()));
                     }
@@ -672,6 +689,22 @@ public class RetryCommandHandler implements CommandHandler {
     private static boolean hasFlag(String rawText, String flag) {
         for (String part : rawText.split("\\s+")) {
             if (part.equals(flag)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * True when the anchor's command_name echoes a positional tag
+     * ("summary football [--short]"). SummaryCommandHandler writes the
+     * name as "summary" + optional tag + optional form flag, so any
+     * non-flag token after the verb is the tag. Anchors pre-dating the
+     * tag echo carry no positional token and take the followed-level map
+     * — correct for every name they can carry.
+     */
+    private static boolean anchorHasPositionalTag(String commandName) {
+        String[] tokens = commandName.split("\\s+");
+        for (int i = 1; i < tokens.length; i++) {
+            if (!tokens[i].startsWith("-")) return true;
         }
         return false;
     }

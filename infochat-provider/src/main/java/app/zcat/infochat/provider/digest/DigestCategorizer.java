@@ -86,7 +86,7 @@ public class DigestCategorizer {
      * Other last (present only when non-empty).
      */
     public List<CategorySection> categorize(List<Cluster> clusters) {
-        return categorize(clusters, Set.of());
+        return categorize(clusters, Set.of(), Map.of());
     }
 
     /**
@@ -106,93 +106,84 @@ public class DigestCategorizer {
      * method partitions the very instances passed in, and {@link Cluster}
      * carries no value equality. Only the digest render path
      * ({@code DigestRenderer.renderSections}) passes a non-empty set; the
-     * {@code /summary} forms use the 1-arg overload.
+     * {@code /summary} forms pass an empty {@code excluded} set through the
+     * 3-arg overload (via {@code DigestRenderer.renderSummarySections}).
      */
     public List<CategorySection> categorize(List<Cluster> clusters, Set<Cluster> excluded) {
-        // A cluster's tag-set is the union of its member posts' tags;
-        // categories are counted at the cluster level (the render unit),
-        // not the post level. PERSONAL clusters are excluded from the
-        // count (M1-727): they are routed away below, so counting them
-        // would let a run of personal posts sharing a tag promote that
-        // tag to a category no real cluster joins, or hold a dying
-        // category open past category-min-clusters.
+        return categorize(clusters, excluded, Map.of());
+    }
+
+    // Tree-aware overload: rolls leaf tags up to followed-node section keys.
+    // Empty map = identity keying (today's D62 bytes). Non-empty restricts
+    // the qualifying universe to leaves under followed nodes
+    // (docs/plan/m1/tick-analysis/tag-tree-taxonomy-v2.md, decision 7).
+    public List<CategorySection> categorize(List<Cluster> clusters, Set<Cluster> excluded,
+                                            Map<String, String> sectionKeyByLeaf) {
         List<Boolean> clusterPersonal = new ArrayList<>(clusters.size());
-        List<Set<String>> clusterTagSets = new ArrayList<>(clusters.size());
-        Map<String, Integer> tagClusterCounts = new HashMap<>();
+        List<Set<String>> clusterKeySets = new ArrayList<>(clusters.size());
+        Map<String, Integer> keyClusterCounts = new HashMap<>();
         for (Cluster cluster : clusters) {
             boolean personal = isPersonal(cluster);
             clusterPersonal.add(personal);
-            Set<String> tags = new TreeSet<>();
+            Set<String> keys = new TreeSet<>();
             for (Post post : cluster.posts()) {
-                tags.addAll(post.tags());
+                for (String tag : post.tags()) {
+                    String key = keyOf(tag, sectionKeyByLeaf);
+                    if (key != null) {
+                        keys.add(key);
+                    }
+                }
             }
-            clusterTagSets.add(tags);
+            clusterKeySets.add(keys);
             if (!personal) {
-                for (String tag : tags) {
-                    tagClusterCounts.merge(tag, 1, Integer::sum);
+                for (String key : keys) {
+                    keyClusterCounts.merge(key, 1, Integer::sum);
                 }
             }
         }
 
-        // First pass: assign each cluster to its highest-count qualifying
-        // tag. The TreeSet iterates alphabetically and `best` is replaced
-        // only on a strictly greater count, so equal-count ties resolve to
-        // the alphabetically first tag. A personal cluster takes no tag —
-        // it routes to Other regardless of what it carries (M1-727).
-        List<@Nullable String> chosenTags = new ArrayList<>(clusters.size());
+        List<@Nullable String> chosenKeys = new ArrayList<>(clusters.size());
         Map<String, Integer> assignedCounts = new HashMap<>();
-        for (int i = 0; i < clusterTagSets.size(); i++) {
+        for (int i = 0; i < clusterKeySets.size(); i++) {
             if (clusterPersonal.get(i)) {
-                chosenTags.add(null);
+                chosenKeys.add(null);
                 continue;
             }
             String best = null;
-            for (String tag : clusterTagSets.get(i)) {
-                if (tagClusterCounts.getOrDefault(tag, 0) < categoryMinClusters) {
+            for (String key : clusterKeySets.get(i)) {
+                if (keyClusterCounts.getOrDefault(key, 0) < categoryMinClusters) {
                     continue;
                 }
                 if (best == null
-                        || tagClusterCounts.getOrDefault(tag, 0) > tagClusterCounts.getOrDefault(best, 0)) {
-                    best = tag;
+                        || keyClusterCounts.getOrDefault(key, 0) > keyClusterCounts.getOrDefault(best, 0)) {
+                    best = key;
                 }
             }
-            chosenTags.add(best);
+            chosenKeys.add(best);
             if (best != null && !excluded.contains(clusters.get(i))) {
-                // An excluded (lead) cluster keeps its assignment but is not
-                // counted: the fold check below must see the post-removal
-                // count, so a category the lead gutted folds into Other.
                 assignedCounts.merge(best, 1, Integer::sum);
             }
         }
 
-        // Second pass: regroup in digest order, folding under-threshold
-        // categories into Other — a category can lose its clusters to a
-        // larger co-tag, and a near-empty section reads worse than Other.
-        // Single deterministic pass, no cascade: folding only grows Other,
-        // never shrinks another category below its already-final count.
-        // Other itself is a stable partition: non-personal clusters first,
-        // personal after (M1-727), the relative order inside each group
-        // unchanged — Other competes for budget like any section, and the
-        // budget must cut cat pictures before it cuts news.
-        Map<String, List<Cluster>> sectionsByTag = new HashMap<>();
+        Map<String, List<Cluster>> sectionsByKey = new HashMap<>();
         List<Cluster> otherNonPersonal = new ArrayList<>();
         List<Cluster> otherPersonal = new ArrayList<>();
         for (int i = 0; i < clusters.size(); i++) {
             if (excluded.contains(clusters.get(i))) {
                 continue;
             }
-            String tag = chosenTags.get(i);
-            if (tag == null || assignedCounts.getOrDefault(tag, 0) < categoryMinClusters) {
+            String key = chosenKeys.get(i);
+            if (key == null || assignedCounts.getOrDefault(key, 0) < categoryMinClusters) {
                 (clusterPersonal.get(i) ? otherPersonal : otherNonPersonal).add(clusters.get(i));
             } else {
-                sectionsByTag.computeIfAbsent(tag, key -> new ArrayList<>()).add(clusters.get(i));
+                sectionsByKey.computeIfAbsent(key, k -> new ArrayList<>()).add(clusters.get(i));
             }
         }
         List<Cluster> other = new ArrayList<>(otherNonPersonal.size() + otherPersonal.size());
         other.addAll(otherNonPersonal);
         other.addAll(otherPersonal);
 
-        List<CategorySection> sections = sectionsByTag.entrySet().stream()
+        List<CategorySection> sections = sectionsByKey.entrySet().stream()
                 .sorted(Comparator
                         .comparingInt((Map.Entry<String, List<Cluster>> entry) -> -entry.getValue().size())
                         .thenComparing(Map.Entry::getKey))
@@ -202,6 +193,11 @@ public class DigestCategorizer {
             sections.add(new CategorySection(null, other));
         }
         return List.copyOf(sections);
+    }
+
+    /** Empty map = identity (every tag its own key); non-empty = followed-node lookup, null if unmapped. */
+    private static @Nullable String keyOf(String tag, Map<String, String> sectionKeyByLeaf) {
+        return sectionKeyByLeaf.isEmpty() ? tag : sectionKeyByLeaf.get(tag);
     }
 
     /**

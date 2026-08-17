@@ -46,6 +46,7 @@ import java.text.MessageFormat;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -146,6 +147,10 @@ public class SummaryCommandHandler implements CommandHandler {
 
     @Inject
     EligiblePostQuery eligiblePostQuery;
+
+    @Inject
+    app.zcat.infochat.provider.summary.TagTreeExpansion tagTreeExpansion =
+            new app.zcat.infochat.provider.summary.TagTreeExpansion();
 
     @Inject
     ClusterTraversal clusterTraversal;
@@ -384,6 +389,13 @@ public class SummaryCommandHandler implements CommandHandler {
 
                 List<Cluster> clusters = clusterTraversal.cluster(result.posts());
 
+                // A positional /summary <tag> names its own level: identity
+                // keying keeps the requested tag's own section instead of
+                // folding it into Other through the followed-node map (M1-867).
+                Map<String, String> sectionKeys = args.tag().isPresent()
+                        ? Map.of()
+                        : tagTreeExpansion.sectionKeyByLeaf(scopeKind, scopeId.get());
+
                 progressNotifier.publish(scope, ProgressStage.GENERATING);
 
                 // Shared anchor inputs — the frozen post selection and
@@ -408,14 +420,14 @@ public class SummaryCommandHandler implements CommandHandler {
                         progressNotifier.publish(scope, ProgressStage.TRANSLATING);
                     }
                     DigestRenderer.ShortResult shortResult =
-                            digestRenderer.renderShortBody(clusters, scopeLanguage);
+                            digestRenderer.renderShortBody(clusters, scopeLanguage, sectionKeys);
                     // Write the summary anchor — enables /retry to replay
                     // the roll-up layer with the same frozen cluster set
                     // (D19, D36, D70). render_form='short' dispatches
                     // /retry to the CategoryRollupGenerator replay path.
                     summaryAnchorRepository.write(
                             actorId, scopeKind, scopeId.get(),
-                            "summary --short", args.form().anchorValue(),
+                            commandNameFor(args.form(), args.tag()), args.form().anchorValue(),
                             argHash, postUids, clusterMapJson);
                     // --short failure reporting (redteam M1-700 kimi r1 +
                     // M1-703 honesty): when a category's roll-up came back
@@ -455,10 +467,12 @@ public class SummaryCommandHandler implements CommandHandler {
 
                     // render_form is the typed /retry dispatch axis (M1-699,
                     // D70): each form anchors its own replay shape.
-                    // command_name remains the human-readable/audit string.
+                    // command_name echoes verb + tag + flag; the tag echo is
+                    // load-bearing — /retry reads it to replay a positional
+                    // summary with identity keying (M1-867).
                     summaryAnchorRepository.write(
                             actorId, scopeKind, scopeId.get(),
-                            commandNameFor(args.form()), args.form().anchorValue(),
+                            commandNameFor(args.form(), args.tag()), args.form().anchorValue(),
                             argHash, postUids, clusterMapJson);
 
                     // Only publish TRANSLATING when the scope actually
@@ -513,7 +527,7 @@ public class SummaryCommandHandler implements CommandHandler {
                         // overflow line. Per-section delivery like the bare
                         // form; the cap-skip is a render-side switch.
                         deliverPerSection(scope, prefixes.toString(),
-                                digestRenderer.renderSummarySections(prose, scopeLanguage, Integer.MAX_VALUE),
+                                digestRenderer.renderSummarySections(prose, scopeLanguage, Integer.MAX_VALUE, sectionKeys),
                                 /* finalizePlaceholder */ true);
                     } else {
                         // M1-695: the default (categorized) form is delivered
@@ -522,7 +536,7 @@ public class SummaryCommandHandler implements CommandHandler {
                         // (the leading prefixes ride on it), the rest go out
                         // as fresh sends in section order.
                         deliverPerSection(scope, prefixes.toString(),
-                                digestRenderer.renderSummarySections(prose, scopeLanguage),
+                                digestRenderer.renderSummarySections(prose, scopeLanguage, sectionKeys),
                                 /* finalizePlaceholder */ true);
                     }
                     delivered = true;
@@ -561,17 +575,29 @@ public class SummaryCommandHandler implements CommandHandler {
     }
 
     /**
-     * The summary_anchor.command_name audit string for a given render form.
-     * The render_form column (M1-699) is what /retry dispatches on; this
-     * string is the human-readable echo of the invocation verb + flag.
+     * The summary_anchor.command_name string for a render form + optional
+     * positional tag: "summary football --short". The render_form column
+     * (M1-699) is what /retry dispatches on, but the tag echo here is
+     * load-bearing too — RetryCommandHandler reads it to replay a
+     * positional anchor with identity keying, matching the sectioning the
+     * anchored /summary used (M1-867). Tag first, flag last.
      */
-    private static String commandNameFor(SummaryArgs.RenderForm form) {
-        return switch (form) {
+    private static String commandNameFor(SummaryArgs.RenderForm form,
+                                         Optional<String> tag) {
+        String base = switch (form) {
             case BARE  -> "summary";
             case SHORT -> "summary --short";
             case FULL  -> "summary --full";
             case FLAT  -> "summary --flat";
         };
+        if (tag.isEmpty()) {
+            return base;
+        }
+        // "summary --short" -> "summary football --short"
+        int firstFlag = base.indexOf(" --");
+        return firstFlag < 0
+                ? base + " " + tag.get()
+                : base.substring(0, firstFlag) + " " + tag.get() + base.substring(firstFlag);
     }
 
     /**

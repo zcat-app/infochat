@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 90 |
+| done | 91 |
 | deferred | 0 |
 | abandoned | 2 |
 | **total** | **95** |
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-867 — Tree-aware follow-tag, digest sections, and search (complexity: high, risk: medium)
+- M1-869 — Amend the spec for the v2 tag-tree taxonomy (complexity: low, risk: low)
 - M1-877 — Re-measure the news leg on resolved stored tags (complexity: medium, risk: low)
 
 ---
@@ -43,7 +43,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-869 — blocked_by: M1-865 (done), M1-866 (done), M1-867 (pending), M1-868 (done)
+_(none)_
 
 ---
 
@@ -64,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 |---|---|---|---|
 | M1-880 | Tag-tree cutover runbook: cleanup, migrate, verify for every pre-V84 deployment | 2026-08-18 | round 2 APPROVE |
 | M1-879 | Strip deletions must not join privileged command tokens | 2026-08-18 | round 2 APPROVE |
+| M1-867 | Tree-aware follow-tag, digest sections, and search | 2026-08-18 | round 3 APPROVE |
 | M1-878 | Coordinate the fallback seed with M1-866 and M1-869 | 2026-08-17 | round 1 APPROVE |
 | M1-876 | Rank region leaves above world within the News top | 2026-08-17 | round 1 APPROVE |
 | M1-875 | Stop the strip from assembling tool-call markers | 2026-08-17 | round 2 APPROVE |
@@ -71,7 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-872 | Native tool-call transport behind detected capability | 2026-08-17 | round 2 APPROVE |
 | M1-871 | Single-source tool catalog for prompts and transports | 2026-08-17 | round 1 APPROVE-WITH-FIXES |
 | M1-868 | Store losing tag proposals as a Tier-2 search array | 2026-08-17 | round 1 APPROVE |
-| M1-866 | Seed the tag tree and migrate the flat vocabulary | 2026-08-17 | round 2 APPROVE |
 
 ---
 
@@ -191,14 +191,14 @@ M1-860 (abandoned)
   └── M1-861 (abandoned)
 M1-864 (done)
   └── M1-866 (done)
-        ├── M1-867 (pending) ← runnable
-        │     └── M1-869 (pending)
+        ├── M1-867 (done)
+        │     └── M1-869 (pending) ← runnable
         ├── M1-869 (pending) [see above]
         ├── M1-877 (pending) ← runnable
         └── M1-880 (done)
 M1-865 (done)
   ├── M1-866 (done) [see above]
-  ├── M1-867 (pending) [see above]
+  ├── M1-867 (done) [see above]
   ├── M1-868 (done)
   │     ├── M1-866 (done) [see above]
   │     └── M1-869 (pending) [see above]

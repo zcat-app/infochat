@@ -3,6 +3,7 @@ package app.zcat.infochat.provider.chat.tool;
 import app.zcat.infochat.core.util.JsonEscaper;
 import app.zcat.infochat.provider.chat.CancellationService;
 import app.zcat.infochat.provider.chat.ChatToolRegistry;
+import app.zcat.infochat.provider.summary.TagTreeExpansion;
 import org.jspecify.annotations.Nullable;
 
 import jakarta.enterprise.context.ApplicationScoped;
@@ -82,13 +83,11 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
 
             validateTagsKnown(conn, tags);
 
-            // The scope's /follow-tag preferences intentionally do NOT apply
-            // here: tag preferences narrow the DIGEST only; chat/RAG search
-            // stays broad over the scope's whole world (D59, M1-621). Only
-            // the caller-requested tags (validated above) filter.
             Instant cutoff = clock.instant().minus(window);
 
-            return queryPosts(conn, scopeKind, scopeId, tags, cutoff, limit);
+            // Follow preferences narrow the digest only — chat search stays
+            // world-broad (D59); never wire scope_tag into queryPosts.
+            return queryPosts(conn, scopeKind, scopeId, tags, !tags.isEmpty(), cutoff, limit);
         }
     }
 
@@ -122,7 +121,8 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
     }
 
     private String queryPosts(Connection conn, String scopeKind, UUID scopeId,
-                               List<String> requestedTags, Instant cutoff,
+                               List<String> requestedTags, boolean hasTagFilter,
+                               Instant cutoff,
                                int limit) throws SQLException {
         StringBuilder sql = new StringBuilder();
         // ready_at is the window filter, and the emitted ready_at field
@@ -157,8 +157,8 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
         params.add(scopeKind);
         params.add(scopeId);
 
-        if (!requestedTags.isEmpty()) {
-            sql.append("AND p.tags && ?::TEXT[] ");
+        if (hasTagFilter) {
+            sql.append("AND p.tags && ").append(TagTreeExpansion.NAMES_EXPANSION_SQL).append(' ');
             params.add(requestedTags.toArray(new String[0]));
         }
 

@@ -68,6 +68,9 @@ public class EligiblePostQuery {
     @Inject
     CancellationService cancellationService;
 
+    @Inject
+    TagTreeExpansion tagTreeExpansion;
+
     // The /summary ready_at window cutoff is a decision-gate "now", so it
     // reads from the injected Clock to stay pinnable in tests (M1-454,
     // engineering-rules §9). Sampled once below and threaded to both
@@ -297,7 +300,7 @@ public class EligiblePostQuery {
 
     private Selection selectPosts(Connection conn, String scopeKind, UUID scopeId,
                                     Optional<String> positionalTag, Instant cutoff,
-                                    TagMode tagMode, List<String> restrictedTags) {
+                                    TagMode tagMode, List<String> restrictedTags) throws SQLException {
         // The SELECT pins:
         //   - status='READY' (exclude RAW, QUARANTINED, NEEDS_REVIEW)
         //   - ready_at >= cutoff (window filter). ready_at, not published_at:
@@ -347,19 +350,17 @@ public class EligiblePostQuery {
         params.add(scopeId);
 
         if (positionalTag.isPresent()) {
-            sql.append("   AND p.tags && ARRAY[?]::TEXT[] ");
-            params.add(positionalTag.get());
-        } else if (!restrictedTags.isEmpty()) {
-            // >5 followed tags → restrict to the top-3 set.
+            List<String> expanded = tagTreeExpansion.expandNames(conn, List.of(positionalTag.get()));
             sql.append("   AND p.tags && ?::TEXT[] ");
-            params.add(restrictedTags.toArray(new String[0]));
+            params.add(expanded.toArray(new String[0]));
+        } else if (!restrictedTags.isEmpty()) {
+            List<String> expanded = tagTreeExpansion.expandNames(conn, restrictedTags);
+            sql.append("   AND p.tags && ?::TEXT[] ");
+            params.add(expanded.toArray(new String[0]));
         } else if (tagMode == TagMode.EXPLICIT) {
-            // EXPLICIT mode + no positional tag + ≤5 followed: filter
-            // by the union of scope_tag rows for the scope.
-            sql.append("   AND p.tags && ( ")
-               .append("       SELECT COALESCE(array_agg(t.name), ARRAY[]::TEXT[]) ")
-               .append("         FROM scope_tag st JOIN tag t ON t.id = st.tag_id ")
-               .append("        WHERE st.scope_kind = ? AND st.scope_id = ? ) ");
+            sql.append("   AND p.tags && ")
+               .append(TagTreeExpansion.SCOPE_FOLLOWED_LEAVES_SQL)
+               .append(' ');
             params.add(scopeKind);
             params.add(scopeId);
         }
@@ -457,21 +458,19 @@ public class EligiblePostQuery {
      * tie-break across runs (acceptance item 6).
      */
     private List<String> topActiveFollowedTags(Connection conn, String scopeKind, UUID scopeId, Instant cutoff) {
-        // unnest(p.tags) intersected with the scope's followed tag set,
-        // counted per tag, ordered count DESC + name ASC. Posts come from
-        // the scope's D59 world (implicit bootstrap OR subscribed) — a
-        // subscription-less scope with >5 followed tags must still compute
-        // a non-empty top-3 over the bootstrap corpus (M1-621).
+        // Count per followed NODE via the recursive subtree CTE: a top counts
+        // its subtree's posts; a leaf counts itself (M1-621).
         String sql =
-                "SELECT t.name, COUNT(*) AS post_count "
+                "WITH RECURSIVE subtree(root, node, kind) AS ("
+              + " SELECT t.name, t.name, t.node_kind FROM scope_tag st JOIN tag t ON t.id = st.tag_id"
+              + " WHERE st.scope_kind = ? AND st.scope_id = ?"
+              + " UNION SELECT s.root, c.name, c.node_kind FROM tag c JOIN subtree s ON c.parent_name = s.node"
+              + ") SELECT sub.root AS name, COUNT(*) AS post_count "
               + "  FROM post p "
               + "  JOIN source s ON s.id = p.source_id "
               + " CROSS JOIN unnest(p.tags) AS tag_name "
-              + "  JOIN scope_tag st ON st.scope_kind = ? AND st.scope_id = ? "
-              + "  JOIN tag t ON t.id = st.tag_id AND t.name = tag_name "
+              + "  JOIN subtree sub ON sub.node = tag_name AND sub.kind = 'leaf' "
               + " WHERE p.status = 'READY' "
-              // Same window column as selectPosts — the top-3 restriction
-              // must be computed over the same post set it restricts.
               + "   AND p.ready_at >= ? "
               + "   AND ((s.source_origin = 'bootstrap' AND s.deleted_at IS NULL "
               + "         AND NOT EXISTS (SELECT 1 FROM source_exclusion e "
@@ -479,8 +478,8 @@ public class EligiblePostQuery {
               + "                            AND e.source_id = s.id)) "
               + "     OR p.source_id IN (SELECT source_id FROM source_subscription "
               + "                         WHERE scope_kind = ? AND scope_id = ?)) "
-              + " GROUP BY t.name "
-              + " ORDER BY post_count DESC, t.name ASC "
+              + " GROUP BY sub.root "
+              + " ORDER BY post_count DESC, sub.root ASC "
               + " LIMIT ?";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, scopeKind);

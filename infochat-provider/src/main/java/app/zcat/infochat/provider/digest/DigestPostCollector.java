@@ -16,6 +16,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import app.zcat.infochat.provider.chat.CancellationService;
 import app.zcat.infochat.provider.summary.EligiblePostQuery;
+import app.zcat.infochat.provider.summary.TagTreeExpansion;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -83,6 +84,7 @@ public class DigestPostCollector {
                 ps.setObject(idx++, groupId);
                 ps.setObject(idx++, groupId);
                 if ("EXPLICIT".equals(tagMode)) {
+                    ps.setString(idx++, "group");
                     ps.setObject(idx++, groupId);
                 }
                 ps.setInt(idx, clusterCap);
@@ -198,10 +200,7 @@ public class DigestPostCollector {
                                         AND e.source_id = s.id))
                  OR p.source_id IN (SELECT source_id FROM source_subscription
                                      WHERE scope_kind = 'group' AND scope_id = ?))
-               AND p.tags && (SELECT COALESCE(array_agg(t.name), ARRAY[]::TEXT[])
-                                FROM scope_tag st
-                                JOIN tag t ON t.id = st.tag_id
-                               WHERE st.scope_kind = 'group' AND st.scope_id = ?)
-             ORDER BY COALESCE(p.published_at, p.fetched_at) DESC, p.id DESC
-             LIMIT ?""";
+               AND p.tags && """ + TagTreeExpansion.SCOPE_FOLLOWED_LEAVES_SQL + """
+               ORDER BY COALESCE(p.published_at, p.fetched_at) DESC, p.id DESC
+              LIMIT ?""";
 }

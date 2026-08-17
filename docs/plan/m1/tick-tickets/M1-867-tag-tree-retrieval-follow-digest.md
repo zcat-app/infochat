@@ -1,12 +1,12 @@
 ---
 id: M1-867
 title: "Tree-aware follow-tag, digest sections, and search"
-status: pending
+status: done
 created: 2026-08-16
-last_updated: 2026-08-16
+last_updated: 2026-08-18
 flow: tick
 reproduction: >-
-  to-be-written FollowTopDigestIT.followTopRendersOneAggregatedSectionAndIncludesFutureLeaves
+  FollowTopDigestIT.followTopRendersOneAggregatedSectionAndIncludesFutureLeaves
   (child of a 2+ decomposition — needs M1-865's tree schema and
   M1-866's seeded vocabulary; `start` converts the marker per workflow
   §0). Intended wrong behavior it states: after the v2 migration, a
@@ -31,7 +31,9 @@ files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/summary/EligiblePostQuery.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/command/UnfollowTagCommandHandler.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/FollowTopDigestIT.java
-  - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/SearchPostsToolTopExpansionTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/SearchPostsToolTopExpansionIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/summary/EligiblePostQueryTopExpansionIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestCategorizerFollowedLevelTest.java
   - docs/design/03-commands.md
 complexity: high
 risk: medium
@@ -72,7 +74,7 @@ acceptance:
   - "FollowTopDigestIT.followTopRendersOneAggregatedSectionAndIncludesFutureLeaves (the converted reproduction) passes: a scope in EXPLICIT mode following the top node 'tech' receives a digest whose tech-subtree clusters render under ONE aggregated TECH section (not one section per leaf); the qualifying universe for an EXPLICIT digest is the leaf set under the scope's followed nodes, and threshold-3 + section-cap-8 apply at the RENDERED level (a top section is one section; a top section qualifies with >= category-min-clusters clusters whose best leaf lies under it) — and a leaf ADDED under tech AFTER the follow appears in the next digest with no re-follow (read-time expansion) (spec: docs/spec/commands.md §Per-scope tag preferences + §Periodic group digests as amended by M1-869; analysis P14; decisions D15/D59/D62/D63)."
   - "Byte-identity for the unchanged path: a digest (and /summary categorized form) over LEAF-followed or ALL-mode scopes with no followed tops renders byte-identically to the pre-change output — the existing DigestCategorizerTest/DigestRendererSectionsTest/DigestWorkerTest fixtures pass UNMODIFIED and a new test re-renders a leaf-follow fixture against golden bytes (analysis P19; spec: docs/spec/commands.md §Periodic group digests — D62 arithmetic unchanged for leaf categories)."
   - "DigestPostCollector's EXPLICIT filter expands followed nodes to their subtree leaf set at read time (the p.tags && (...) subquery at DigestPostCollector.java:201-204 resolves each followed node to itself-if-leaf or its subtree leaves); ALL-mode is untouched (no tag predicate) — pinned by an IT seeding posts under multiple tech leaves and a followed top (analysis P10/P14)."
-  - "searchPosts tree-aware expansion AFTER validation, pinned by SearchPostsToolTopExpansionTest.topNameExpandsToSubtreeLeavesForTheFilter and SearchPostsToolTopExpansionTest.expandedSearchNeverSurfacesOutOfWorldOrNonReadyPosts: validateTagsKnown (SearchPostsTool.java:103-122) still validates against the live tag table (tops are rows — accepted), and queryPosts expands requested top names to their subtree leaves before the p.tags && ?::TEXT[] filter (SearchPostsTool.java:160-163); tags=['tech'] returns leaf-tagged posts in the caller's world ONLY (failure mode: a post outside the world or not READY never surfaces through the expansion — the D59 world predicate is untouched), and an unknown name still rejects the whole call with 'Unknown tag' (spec: docs/spec/security.md §Prompt-injection defenses (LLM call sites) — the searchPosts row as amended by M1-869; analysis P14)."
+  - "searchPosts tree-aware expansion AFTER validation, pinned by SearchPostsToolTopExpansionIT.topNameExpandsToSubtreeLeavesForTheFilter and SearchPostsToolTopExpansionIT.expandedSearchNeverSurfacesOutOfWorldOrNonReadyPosts: validateTagsKnown (SearchPostsTool.java:103-122) still validates against the live tag table (tops are rows — accepted), and queryPosts expands requested top names to their subtree leaves before the p.tags && ?::TEXT[] filter (SearchPostsTool.java:160-163); tags=['tech'] returns leaf-tagged posts in the caller's world ONLY (failure mode: a post outside the world or not READY never surfaces through the expansion — the D59 world predicate is untouched), and an unknown name still rejects the whole call with 'Unknown tag' (spec: docs/spec/security.md §Prompt-injection defenses (LLM call sites) — the searchPosts row as amended by M1-869; analysis P14)."
   - "/summary <tag> positional accepts a top: EligiblePostQuery's positional/top-3 restrictions (:350, :354) expand top arguments to subtree leaves; the '+N more' steer token for a top-followed aggregated section is the top's name; /summary with a leaf renders unchanged — pinned by tests for both levels (spec: docs/spec/commands.md §Content; analysis P14)."
   - "Mixed follows key correctly: a scope following both a top and one of its leaves gets ONE section per followed node (the top aggregated, the leaf granular), section count ~= followed-node count; a cluster's section is the most specific FOLLOWED node containing its best qualifying leaf; clusters whose best leaf lies under no followed node land in Other via the existing fold pass — pinned by a mixed-follow digest test (analysis P14)."
   - "The Others-top/null-Other distinction holds: following the 'others' top renders aggregated leaf content (personal/opinion/misc) as a REAL section, never colliding with the D62 null-tag Other bucket's literal 'other' slug (DigestRenderer.java:783, DigestSectionRepository.java:146/223, DigestDelivery.java:74/199 — untouched sentinel); a cluster whose EVERY member carries the 'personal' INGEST classification still routes to the null-tag Other bucket per M1-727 and never enters the followed-others section (the tag leaf and the classification label stay different axes) — failure-mode test: a digest containing a followed-others section, an all-personal cluster, and null-tag Other content renders three distinct outcomes with distinct slugs (analysis P14b, P14c)."
@@ -83,10 +85,15 @@ acceptance:
 test_plan:
   adds:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/FollowTopDigestIT.java
-    - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/SearchPostsToolTopExpansionTest.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/SearchPostsToolTopExpansionIT.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/summary/EligiblePostQueryTopExpansionIT.java
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestCategorizerFollowedLevelTest.java
     - >-
-      Expansion + section-keying cases alongside the existing digest
-      tests (new methods or a new test class — implementer's choice);
+      (Class names are *IT / *Test per the integration-test naming guard
+      (docs/design/08-verification.md §8.2, M1-495): a @QuarkusTest with a
+      DataSource inject belongs in failsafe.)
+      Expansion + section-keying cases alongside the existing digest tests
+      (new methods or a new test class — implementer's choice);
       mixed-follow, others-top/slug-distinction, byte-identity golden,
       /summary top-positional cases.
   modifies: []
@@ -116,11 +123,44 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-18
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS FAIL, SECURITY PASS, TEST-ADEQUACY FAIL, MAINTAINABILITY FAIL, SCOPE PASS"
+    diff_stats: "14 files changed, 1401 insertions(+), 107 deletions(-)"
+    rework_items: 5
+    verdict_file: .scratch/tick-review-M1-867-r1.txt
+  - round: 2
+    date: 2026-08-18
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY WARN, SCOPE PASS; all 5 round-1 items SATISFIED"
+    diff_stats: "fix hunks: 10 files, +618/-12"
+    verdict_file: .scratch/tick-review-M1-867-r2.txt
+  - round: 3
+    date: 2026-08-18
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY WARN, SCOPE PASS; user-mandated in-band fix of the round-2 /retry-positional observation"
+    diff_stats: "fix hunks: 5 files, +119/-16"
+    verdict_file: .scratch/tick-review-M1-867-r3.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  checked: 2026-08-17
+  result: clear
+  notes: >-
+    All file:line citations spot-verified against the code. Census grep
+    re-run clean (family sites match acceptance 9; ExportDataCollector /
+    GetTagsCommandHandler / personal_tags sites are non-family rows for
+    the review table). M1-865/866 added only collector-module tests —
+    no seam conflicts. Design point resolved without ambiguity: the
+    followed-node key map enters DigestCategorizer as an overload
+    parameter (empty map = identity keying = today's bytes); DigestRenderer
+    loads it via a FollowedTagTree helper keyed by groupId; renderSummarySections
+    and renderShortBody gain map-parameter overloads whose legacy
+    signatures delegate with the empty map, keeping the unmodified-test
+    contract.
 escalation_reason:
 ---
 
@@ -253,3 +293,66 @@ expanded-here or unchanged-here (ALL-mode digest, world predicates,
 saved-post personal_tags — free-form, not Tier-1, excluded by the
 surface-conventions rule). The completed table is recorded in this
 ticket at review time.
+
+| Site | Disposition |
+|---|---|
+| SearchPostsTool.java:159 (`p.tags &&` filter) | **Expanded here** — `NAMES_EXPANSION_SQL` subtree expansion after `validateTagsKnown` (searchPosts.java:159) |
+| DigestPostCollector.java:203 (EXPLICIT filter) | **Expanded here** — `SCOPE_FOLLOWED_LEAVES_SQL` subtree expansion; ALL-mode arm untouched |
+| EligiblePostQuery.java:354 (positional) | **Expanded here** — `expandNames` on the same connection |
+| EligiblePostQuery.java:358 (top-3 restricted) | **Expanded here** — `expandNames` over the restricted node set |
+| EligiblePostQuery.java:361 (EXPLICIT arm) | **Expanded here** — `SCOPE_FOLLOWED_LEAVES_SQL` |
+| EligiblePostQuery.java:465 (topActiveFollowedTags) | **Expanded here** — subtree-rooted recursive CTE counting per followed NODE |
+| TagTreeExpansion.java:36/88 (the CTEs themselves) | **Expanded here** — the shared read-time primitives |
+| DigestRenderer.java:326 / SummaryCommandHandler.java:393 (`sectionKeyByLeaf`) | **Expanded here** — section keying via `TagTreeExpansion` |
+| UnfollowTagCommandHandler.java:98 (seed statement) | **Unchanged here** — resolves names via the tag table; bootstrap_tags hold NODE names post-V84; pinned by `unfollowSeedNodesFlowThroughExplicitDigest` |
+| UnfollowTagCommandHandler.java:84/113/117, FollowTagCommandHandler.java:106 | **Unchanged here** — write-path count/delete/insert, no matching semantics |
+| GetTagsCommandHandler.java:66 | **Unchanged here** — `/tags` lists followed rows as stored; no tag matching |
+| ExportDataCollector.java:55/85/175 | **Unchanged here** — raw table dump for export; no matching semantics |
+| SavedCommandHandler.java:325, ListSavesTool.java:96 (`personal_tags`) | **Unchanged here** — saved-post tags are free-form snapshot arrays, not the Tier-1 tree vocabulary |
+| BundleKeys.java:1345/1384 | **Unchanged here** — comments only |
+| EligiblePostQuery.java:318-319 | **Unchanged here** — comments; the positional arm they describe is the expanded-here row above |
+| EligiblePostQuery.java:442 (countFollowedTags) | **Unchanged here** — a row count for the top-3 threshold, not a matching site |
+
+## Round 1 rework
+
+1. Finding 1: wire TagTreeExpansion.sectionKeyByLeaf into
+   RetryCommandHandler's three replay arms (:304, :366, :372) so /retry
+   reproduces the anchored followed-level sections, verified by the new
+   retry IT asserting the single aggregated 'TECH' header on replay
+   plus `grep -n 'sectionKeyByLeaf' .../RetryCommandHandler.java`.
+2. Finding 2: pass Map.of() (identity keying) from
+   SummaryCommandHandler.java:392-393 when args.tag().isPresent(),
+   verified by a new IT asserting `/summary football` on a
+   tech-following EXPLICIT scope renders a 'FOOTBALL' section, not the
+   Other bucket.
+3. Finding 3: add the end-of-path /summary render test for a
+   top-followed scope (one aggregated section, top-name steer token),
+   verified by the new test failing under the Map.of()-at-:393 mutation.
+4. Finding 4: add the out-of-world READY-post fixture to
+   SearchPostsToolTopExpansionIT.expandedSearchNeverSurfacesOutOfWorldOrNonReadyPosts
+   and assert it never surfaces, verified by the extended test failing
+   under the world-predicate-dropped mutation at SearchPostsTool.java:149.
+5. Finding 5: restore the D59 site note in SearchPostsTool, correct the
+   stale "1-arg overload" javadoc at DigestCategorizer.java:108-109, and
+   repoint "decision 7" to the analysis doc path — comment-only,
+   verified by the three grep probes named in the finding.
+
+## Review observations
+
+- (round 2, RECOMMENDED-NEW-TICKET) /retry did not reproduce the anchored
+  render when the anchor was written by a POSITIONAL /summary on a
+  top-followed EXPLICIT scope — RESOLVED IN-BAND in round 3 by user
+  decision: command_name now echoes the positional tag
+  (SummaryCommandHandler.commandNameFor(form, tag)) and /retry replays a
+  positional anchor with identity keying
+  (RetryCommandHandler.anchorHasPositionalTag), pinned by
+  SummaryRetryTreeKeyingIT.retryOfPositionalSummaryKeepsItsOwnSection.
+- (round 3, RECOMMENDED-NEW-TICKET — user's call whether to file) the new
+  replay test pins only the flag-less echo shape ("summary football"); a
+  positional /summary with a form flag ("summary football --short") is
+  handled by the same form-independent helper but has no pinning test — a
+  future tokenizer regression recognizing only the two-token form would
+  silently mis-key flag-bearing positional anchors with the suite green.
+  Expected: a second case in SummaryRetryTreeKeyingIT delivering
+  "/summary football --short" and asserting the replay keeps the football
+  roll-up section. TOUCHED-BY-THIS-DIFF: yes.
