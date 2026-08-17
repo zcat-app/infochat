@@ -18,6 +18,8 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.function.Consumer;
@@ -49,8 +51,13 @@ import java.util.function.Consumer;
  * A streaming call additionally carries {@code "stream": true} and
  * {@code "stream_options": {"include_usage": true}} — streamed replies
  * report usage only when asked (docs/measurement/streaming-usage-optin.md).
+ * A tools-bearing call ({@link #generateWithTools}) additionally
+ * carries {@code "tools"} (catalog-rendered declarations) and
+ * {@code "tool_choice": "auto"}.
  * Response body's load-bearing path is
  * {@code choices[0].message.content} — the model's plain text reply.
+ * On the tools-bearing shape the reply may instead carry structured
+ * {@code choices[0].message.tool_calls[]}, parsed with finish-reason.
  * The optional {@code usage.prompt_tokens} / {@code usage.completion_tokens}
  * counters and the root {@code model} field feed {@link LlmResponse}'s
  * observability companions when present (M1-321); their absence is not
@@ -163,10 +170,30 @@ public class OpenAiCompatibleProvider implements LlmProvider {
     public LlmResponse generateStreaming(ModelTask task, String systemPrompt, String userPrompt,
                                          Consumer<String> chunkConsumer) {
         TaskConfig cfg = configFor(task);
-        HttpRequest request = buildRequest(task, cfg, systemPrompt, userPrompt, true);
+        HttpRequest request = buildRequest(task, cfg, systemPrompt, userPrompt, true, null);
         return LlmHttpSupport.executeStreamingCall(
             http, config, request, "OpenAiCompatibleProvider", cfg.timeoutMs(),
             new StreamingParser(chunkConsumer));
+    }
+
+    /**
+     * The OpenAI-compatible wire dialect is tools-bearing end to end,
+     * for every task (the {@link #supportsStreaming} posture); the
+     * serving stack's acceptance is detected upstream of the call.
+     */
+    @Override
+    public boolean supportsToolCalls(ModelTask task) {
+        return true;
+    }
+
+    @Override
+    public LlmResponse generateWithTools(ModelTask task, String systemPrompt, String userPrompt,
+                                         List<LlmProvider.ToolDeclaration> tools) {
+        TaskConfig cfg = configFor(task);
+        HttpRequest request = buildRequest(task, cfg, systemPrompt, userPrompt, false, tools);
+        return LlmHttpSupport.executeJsonCall(
+            http, config, request, "OpenAiCompatibleProvider",
+            OpenAiCompatibleProvider::parseChoiceWithToolCalls);
     }
 
     /**
@@ -244,17 +271,19 @@ public class OpenAiCompatibleProvider implements LlmProvider {
     }
 
     private LlmResponse doCall(ModelTask task, TaskConfig cfg, String systemPrompt, String userPrompt) {
-        HttpRequest request = buildRequest(task, cfg, systemPrompt, userPrompt, false);
+        HttpRequest request = buildRequest(task, cfg, systemPrompt, userPrompt, false, null);
         return LlmHttpSupport.executeJsonCall(
             http, config, request, "OpenAiCompatibleProvider", OpenAiCompatibleProvider::parseChoiceText);
     }
 
     /**
      * Assembles the request body shared by the single-string and
-     * streaming calls; {@code stream} adds the SSE request fields only.
+     * streaming calls; {@code stream} adds the SSE request fields, a
+     * non-null {@code tools} the tools-bearing fields, only.
      */
     private String assembleBody(ModelTask task, TaskConfig cfg, String systemPrompt,
-                                String userPrompt, boolean stream) {
+                                String userPrompt, boolean stream,
+                                @Nullable List<LlmProvider.ToolDeclaration> tools) {
         // Assemble the request body. Jackson handles the JSON escape
         // for any quote, backslash, newline, or non-ASCII codepoint
         // inside the prompt strings — a hand-rolled concat would
@@ -282,6 +311,26 @@ public class OpenAiCompatibleProvider implements LlmProvider {
                 // the field (docs/measurement/streaming-usage-optin.md §5).
                 root.putObject("stream_options").put("include_usage", true);
             }
+            if (tools != null) {
+                ArrayNode toolsArray = root.putArray("tools");
+                for (LlmProvider.ToolDeclaration tool : tools) {
+                    ObjectNode entry = toolsArray.addObject();
+                    entry.put("type", "function");
+                    ObjectNode function = entry.putObject("function");
+                    function.put("name", tool.name());
+                    function.put("description", tool.description());
+                    // Catalog-produced JSON re-parsed, not re-serialized
+                    // text: the parameters object lands as a structural
+                    // node, never a doubly-encoded string.
+                    try {
+                        function.set("parameters", LlmHttpSupport.JSON.readTree(tool.parametersJson()));
+                    } catch (IOException e) {
+                        throw new IllegalStateException(
+                            "tool parameters are not valid JSON: " + tool.name(), e);
+                    }
+                }
+                root.put("tool_choice", "auto");
+            }
             ArrayNode messages = root.putArray("messages");
             ObjectNode system = messages.addObject();
             system.put("role", "system");
@@ -302,8 +351,9 @@ public class OpenAiCompatibleProvider implements LlmProvider {
     }
 
     private HttpRequest buildRequest(ModelTask task, TaskConfig cfg, String systemPrompt,
-                                     String userPrompt, boolean stream) {
-        String body = assembleBody(task, cfg, systemPrompt, userPrompt, stream);
+                                     String userPrompt, boolean stream,
+                                     @Nullable List<LlmProvider.ToolDeclaration> tools) {
+        String body = assembleBody(task, cfg, systemPrompt, userPrompt, stream, tools);
         URI uri = URI.create(LlmHttpSupport.joinPath(cfg.baseUrl(), "/chat/completions"));
         HttpRequest.Builder reqBuilder = HttpRequest.newBuilder(uri)
             .timeout(Duration.ofMillis(cfg.timeoutMs()))
@@ -369,6 +419,62 @@ public class OpenAiCompatibleProvider implements LlmProvider {
                 usage.path("completion_tokens").asLong());
         }
         return new LlmResponse(content.asText(), model, tokenUsage);
+    }
+
+    /**
+     * The tools-bearing parse: structured {@code tool_calls[]} entries
+     * (name + raw args JSON string) and {@code finish_reason}; absent
+     * content throws only when no structured calls arrived.
+     */
+    private static LlmResponse parseChoiceWithToolCalls(String responseBody, URI uri) {
+        JsonNode root;
+        try {
+            root = LlmHttpSupport.JSON.readTree(responseBody);
+        } catch (IOException e) {
+            throw new LlmCallFailedException(
+                "OpenAiCompatibleProvider: failed to parse JSON response from " + uri.getHost(), e);
+        }
+        JsonNode choices = root.path("choices");
+        if (!choices.isArray() || choices.isEmpty()) {
+            throw new LlmCallFailedException(
+                "OpenAiCompatibleProvider: response missing choices[] from " + uri.getHost());
+        }
+        JsonNode message = choices.get(0).path("message");
+        JsonNode calls = message.path("tool_calls");
+        List<LlmResponse.ToolCallRequest> toolCalls = null;
+        if (calls.isArray() && !calls.isEmpty()) {
+            toolCalls = new ArrayList<>();
+            for (JsonNode call : calls) {
+                JsonNode name = call.path("function").path("name");
+                JsonNode arguments = call.path("function").path("arguments");
+                if (!name.isTextual() || !arguments.isTextual()) {
+                    throw new LlmCallFailedException(
+                        "OpenAiCompatibleProvider: malformed tool_calls[] entry from "
+                            + uri.getHost());
+                }
+                toolCalls.add(new LlmResponse.ToolCallRequest(name.asText(), arguments.asText()));
+            }
+        }
+        JsonNode content = message.path("content");
+        if (!content.isTextual() && toolCalls == null) {
+            throw new LlmCallFailedException(
+                "OpenAiCompatibleProvider: response missing choices[0].message.content from "
+                    + uri.getHost());
+        }
+        JsonNode finish = choices.get(0).path("finish_reason");
+        String finishReason = finish.isTextual() ? finish.asText() : null;
+        JsonNode modelNode = root.path("model");
+        String model = modelNode.isTextual() ? modelNode.asText() : null;
+        JsonNode usage = root.path("usage");
+        LlmResponse.TokenUsage tokenUsage = null;
+        if (usage.path("prompt_tokens").canConvertToLong()
+                && usage.path("completion_tokens").canConvertToLong()) {
+            tokenUsage = new LlmResponse.TokenUsage(
+                usage.path("prompt_tokens").asLong(),
+                usage.path("completion_tokens").asLong());
+        }
+        return new LlmResponse(content.isTextual() ? content.asText() : "",
+            model, tokenUsage, toolCalls, finishReason);
     }
 
     /**

@@ -13,6 +13,8 @@ import jakarta.enterprise.inject.Any;
 import jakarta.inject.Inject;
 import jakarta.interceptor.Interceptor;
 
+import java.util.List;
+
 /**
  * CDI decorator wrapping every {@link LlmProvider} bean with the
  * per-endpoint circuit breaker (M1-606): an OPEN breaker short-circuits
@@ -74,6 +76,22 @@ public class CircuitBreakingLlmProvider implements LlmProvider {
     @Override
     public boolean supportsStreaming(ModelTask task) {
         return delegate.supportsStreaming(task);
+    }
+
+    @Override
+    public boolean supportsToolCalls(ModelTask task) {
+        return delegate.supportsToolCalls(task);
+    }
+
+    /**
+     * The tools-bearing mirror of {@link #generate} through the same
+     * acquire/classify/record ladder.
+     */
+    @Override
+    public LlmResponse generateWithTools(ModelTask task, String systemPrompt, String userPrompt,
+                                         List<LlmProvider.ToolDeclaration> tools) {
+        return withBreaker(task,
+            () -> delegate.generateWithTools(task, systemPrompt, userPrompt, tools));
     }
 
     /**

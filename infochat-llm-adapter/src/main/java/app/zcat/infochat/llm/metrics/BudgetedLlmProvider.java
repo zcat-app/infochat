@@ -12,6 +12,8 @@ import jakarta.enterprise.inject.Any;
 import jakarta.inject.Inject;
 import jakarta.interceptor.Interceptor;
 
+import java.util.List;
+
 /**
  * CDI decorator wrapping every {@link LlmProvider} bean with the
  * call-scoped spend meter (M1-769): when an {@link LlmCallBudget} is
@@ -84,6 +86,27 @@ public class BudgetedLlmProvider implements LlmProvider {
     @Override
     public boolean supportsStreaming(ModelTask task) {
         return delegate.supportsStreaming(task);
+    }
+
+    @Override
+    public boolean supportsToolCalls(ModelTask task) {
+        return delegate.supportsToolCalls(task);
+    }
+
+    /**
+     * The tools-bearing mirror of {@link #generate}: one call, one
+     * draw, refused before the HTTP attempt as on that path.
+     */
+    @Override
+    public LlmResponse generateWithTools(ModelTask task, String systemPrompt, String userPrompt,
+                                         List<LlmProvider.ToolDeclaration> tools) {
+        if (LlmCallBudget.isBound() && !Thread.currentThread().isInterrupted()
+                && !LlmCallBudget.current().tryDraw()) {
+            throw new LlmCallBudget.RefusedException(
+                "call budget exhausted for task " + task.keySegment()
+                    + "; call refused without an HTTP attempt");
+        }
+        return delegate.generateWithTools(task, systemPrompt, userPrompt, tools);
     }
 
     /**

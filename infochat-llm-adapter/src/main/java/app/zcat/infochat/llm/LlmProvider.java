@@ -1,6 +1,7 @@
 package app.zcat.infochat.llm;
 
 
+import java.util.List;
 import java.util.function.Consumer;
 
 /**
@@ -11,7 +12,7 @@ import java.util.function.Consumer;
  * <p>The SPI is deliberately minimal in v1: a {@link ModelTask}
  * discriminator plus the system / user prompt strings. The
  * {@code (ModelTask, scope_language) → LlmProvider} router, per-profile
- * model defaults, structured-output schema wiring, call-context
+ * model defaults, call-context
  * threading (trace-id / scope-id), and prompt-template / delimiter-wrap
  * logic are downstream concerns that live in the concrete impls and the
  * router, not on this SPI surface; they are intentionally NOT
@@ -37,6 +38,10 @@ import java.util.function.Consumer;
  * gates on the signal (surfaced through
  * {@code LlmRouter.streamingSupportedFor}) and never reaches the
  * refusal unaware.</p>
+ *
+ * <p>{@link #supportsToolCalls} / {@link #generateWithTools} follow the
+ * same shape (transport resolution is fail-safe to text, docs/spec/llm.md
+ * §Tool-call transport).</p>
  *
  * <p><b>Chunk and terminal semantics.</b> One
  * {@link #generateStreaming} call pushes each model-produced text
@@ -113,6 +118,22 @@ public interface LlmProvider {
                                           Consumer<String> chunkConsumer) {
         throw new UnsupportedOperationException(
             providerName() + " does not support streaming for task " + task.keySegment());
+    }
+
+    /** Whether this provider can serve {@code task} as a tools-bearing call (honest cannot-serve default). */
+    default boolean supportsToolCalls(ModelTask task) {
+        return false;
+    }
+
+    /** One tools-bearing call; declared on the interface for decorator forwarding (see {@link #generateStreaming}). Default refuses. */
+    default LlmResponse generateWithTools(ModelTask task, String systemPrompt, String userPrompt,
+                                          List<ToolDeclaration> tools) {
+        throw new UnsupportedOperationException(
+            providerName() + " does not support tool calls for task " + task.keySegment());
+    }
+
+    /** One tool declaration a tools-bearing wire renders (catalog is the single source). */
+    record ToolDeclaration(String name, String description, String parametersJson) {
     }
 
     /**

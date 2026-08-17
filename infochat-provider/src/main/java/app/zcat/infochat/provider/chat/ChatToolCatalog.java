@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jspecify.annotations.Nullable;
 
+import app.zcat.infochat.llm.LlmProvider;
+
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -68,6 +70,14 @@ final class ChatToolCatalog {
 
     static Set<String> names() {
         return TOOLS.stream().map(Tool::name).collect(Collectors.toSet());
+    }
+
+    /** The wire declarations a tools-bearing request renders. */
+    static List<LlmProvider.ToolDeclaration> wireDeclarations() {
+        return TOOLS.stream()
+                .map(tool -> new LlmProvider.ToolDeclaration(
+                        tool.name(), tool.description(), parametersSchema(tool.name())))
+                .toList();
     }
 
     static Tool tool(String name) {

@@ -36,6 +36,7 @@ import java.util.regex.Matcher;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -90,6 +91,10 @@ class ChatAgentTest {
     private boolean callerBotAdmin;
     private String composeUsageBlockLastCommand;
     private int composeUsageBlockCalls;
+    // M1-872 native-transport seam: arms the router's cleared-set + model
+    // so the REAL toolTransportFor resolution probes the stub and answers
+    // NATIVE; default false keeps every pre-existing test on TEXT.
+    private boolean nativeToolTransport;
     private TestChatAgent agent;
 
     @BeforeEach
@@ -119,6 +124,7 @@ class ChatAgentTest {
         callerBotAdmin = false;
         composeUsageBlockLastCommand = null;
         composeUsageBlockCalls = 0;
+        nativeToolTransport = false;
 
         agent = buildAgent("en");
     }
@@ -833,6 +839,98 @@ class ChatAgentTest {
                 "the model's identical semanticSearch call must be served from the "
                         + "per-turn cache shared with the deterministic pre-fetch — "
                         + "one execution per turn, not two");
+    }
+
+    // --- M1-872: the native tool transport's loop seam — structured calls
+    // funnel the SAME dispatch boundary as text-dialect calls. ---
+
+    @Test
+    void structuredToolCallDispatchesThroughTheBoundary() {
+        int[] executions = {0};
+        Map<String, ChatToolRegistry.ChatTool> tools = new HashMap<>();
+        for (String name : new ChatToolRegistry().toolNames()) {
+            tools.put(name, (u, sk, si, a) -> "[]");
+        }
+        tools.put("searchPosts", (u, sk, si, a) -> {
+            executions[0]++;
+            return "[{\"uid\":\"p-1\",\"title\":\"T\"}]";
+        });
+        ChatToolDispatcher realDispatcher = new ChatToolDispatcher(
+                new ChatToolRegistry(), tools, 500, 200, 20);
+        nativeToolTransport = true;
+        llmProvider.supportsToolCalls = true;
+        agent = buildAgent("en", realDispatcher);
+        String structured = "{\"tags\": [\"zcash\"]}";
+        llmProvider.toolCallResponses.add(new LlmResponse("", null, null,
+                List.of(new LlmResponse.ToolCallRequest("searchPosts", structured)),
+                "tool_calls"));
+        llmProvider.toolCallResponses.add(new LlmResponse("", null, null,
+                List.of(new LlmResponse.ToolCallRequest("searchPosts", structured)),
+                "tool_calls"));
+        llmProvider.toolCallResponses.add(new LlmResponse("Found one zcash post."));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "any zcash posts?");
+
+        assertEquals("Found one zcash post.", reply);
+        assertEquals(1, executions[0],
+                "the identical structured repeat must be served from the per-turn "
+                        + "cache — one execution");
+        assertEquals(3, llmProvider.toolCallCount, "three tools-bearing iterations");
+        String fedBack = llmProvider.lastUserPrompt;
+        assertTrue(fedBack.contains("UNTRUSTED_CONTENT"),
+                "tool results ride back wrapped UNTRUSTED: " + fedBack);
+        assertTrue(fedBack.contains("Tool result for searchPosts"));
+        assertTrue(fedBack.contains(ChatAgent.POST_TOOL_RESULT_INSTRUCTION.trim()));
+        assertFalse(reply.contains("UNTRUSTED_CONTENT"),
+                "the delivered text carries no protocol fragment");
+        assertNotNull(llmProvider.lastDeclarations);
+        assertEquals(7, llmProvider.lastDeclarations.size(),
+                "the wire declarations render from the catalog's seven tools");
+    }
+
+    @Test
+    void structuredUnknownAndOverCapCallsReturnTypedValidationErrorsToTheModel() {
+        Map<String, ChatToolRegistry.ChatTool> tools = new HashMap<>();
+        for (String name : new ChatToolRegistry().toolNames()) {
+            tools.put(name, (u, sk, si, a) -> "[]");
+        }
+        ChatToolDispatcher realDispatcher = new ChatToolDispatcher(
+                new ChatToolRegistry(), tools, 500, 200, 20);
+        nativeToolTransport = true;
+        llmProvider.supportsToolCalls = true;
+        agent = buildAgent("en", realDispatcher);
+        llmProvider.toolCallResponses.add(new LlmResponse("", null, null,
+                List.of(new LlmResponse.ToolCallRequest("bogusTool", "{}")), "tool_calls"));
+        llmProvider.toolCallResponses.add(new LlmResponse("", null, null,
+                List.of(new LlmResponse.ToolCallRequest("searchPosts",
+                        "{\"tags\": [\"" + "x".repeat(600) + "\"]}")), "tool_calls"));
+        llmProvider.toolCallResponses.add(new LlmResponse("gave up gracefully"));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "do the impossible");
+
+        assertEquals("gave up gracefully", reply);
+        String fedBack = llmProvider.lastUserPrompt;
+        assertTrue(fedBack.contains("Error: Unknown tool: bogusTool"),
+                "an unknown-name structured call returns the typed ValidationError");
+        assertTrue(fedBack.contains("Input 'tags' exceeds maximum length of 500"),
+                "an over-cap structured call returns the typed ValidationError");
+    }
+
+    @Test
+    void textTransportBehaviorIsByteIdenticalToday() {
+        // The shipped cleared-set is empty, so the production resolution
+        // (the REAL toolTransportFor, no override) answers TEXT and the
+        // loop drives the single-string shape exactly as before.
+        llmProvider.responses.add(new LlmResponse("TOOL_CALL: searchPosts {\"tags\":[\"z\"]}"));
+        llmProvider.responses.add(new LlmResponse("all clear"));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "hi");
+
+        assertEquals("all clear", reply);
+        assertEquals(0, llmProvider.toolCallCount,
+                "TEXT resolution never reaches the tools-bearing shape");
+        assertEquals(2, llmProvider.callCount,
+                "the text tool loop drives generate() as today");
     }
 
     @Test
@@ -1878,7 +1976,9 @@ class ChatAgentTest {
 
         LlmRouter router = new LlmRouter(
                 List.of(new LlmRouter.Entry("test", llmProvider, Set.of("en"))),
-                key -> Optional.empty()) {
+                key -> nativeToolTransport && "infochat.llm.chat.model".equals(key)
+                        ? Optional.of("stub-chat-model") : Optional.empty(),
+                nativeToolTransport ? Set.of("stub-chat-model") : Set.of()) {
             @Override
             public LlmProvider forTask(ModelTask task, String lang) {
                 return llmProvider;
@@ -2093,6 +2193,36 @@ class ChatAgentTest {
             lastSystemPrompt = systemPrompt;
             if (callCount <= responses.size()) {
                 return responses.get(callCount - 1);
+            }
+            return new LlmResponse("default response");
+        }
+
+        // M1-872: the tools-bearing mirror, answering the router's
+        // transport probe without consuming the canned queue.
+        boolean supportsToolCalls;
+        final List<LlmResponse> toolCallResponses = new ArrayList<>();
+        int toolCallCount;
+        List<LlmProvider.ToolDeclaration> lastDeclarations;
+
+        @Override
+        public boolean supportsToolCalls(ModelTask task) {
+            return supportsToolCalls;
+        }
+
+        @Override
+        public LlmResponse generateWithTools(ModelTask task, String systemPrompt,
+                                              String userPrompt,
+                                              List<LlmProvider.ToolDeclaration> tools) {
+            if (LlmRouter.TRANSPORT_PROBE_PROMPT.equals(userPrompt)) {
+                return new LlmResponse("probe-ok");
+            }
+            callCount++;
+            lastUserPrompt = userPrompt;
+            lastSystemPrompt = systemPrompt;
+            lastDeclarations = tools;
+            toolCallCount++;
+            if (toolCallCount <= toolCallResponses.size()) {
+                return toolCallResponses.get(toolCallCount - 1);
             }
             return new LlmResponse("default response");
         }

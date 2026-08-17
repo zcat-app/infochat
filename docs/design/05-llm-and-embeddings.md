@@ -101,7 +101,16 @@ Single implementation that covers:
                                                                                                                                                                                                                                                       
 Distinguished by baseUrl + apiKey. One adapter, four+ effective providers.
 
-```properties                                                                                                                                                                                                                                                       
+The OpenAI-compatible dialect is tools-bearing end to end: a
+`generateWithTools` call renders the catalog's declarations as the
+`tools` array plus `tool_choice:"auto"`, and the reply's structured
+`tool_calls[]` parses back as `(name, args-json)`. Whether the native
+leg is SERVED for a given endpoint is detected at resolution time (see
+§5.4.6), never assumed — the cleared-set of measured `(model, transport)`
+pairs gates it and ships EMPTY.
+
+```properties
+
 # Ollama (default)                                                               
 infochat.llm.summarizer.provider=ollama                                                                                                                                                                                                               
 infochat.llm.summarizer.base-url=http://localhost:11434/v1                                                                                                                                                                                            
@@ -795,7 +804,23 @@ is description tier only: the closed allowlist stays registry-owned
 (security.md §Prompt-injection defenses) and every runtime boundary
 stays in `ChatToolDispatcher`.
 
-### 5.4.7 /compress (long-term memory)                                                                                                                                                                                                                    
+**Tool-call transport (M1-872).** The chat tool loop is
+transport-pluggable behind the fixed dispatch boundary: the instructed
+text protocol (two accepted dialects, universal fallback) is what every
+instruct model learns; a native tools wire shape is used only where the
+serving endpoint's support is DETECTED — never assumed. Resolution runs
+once per `(CHAT_AGENT, endpoint)` beside the startup scan: a bounded
+tools-bearing probe ANDed with membership in a code-constant cleared-set
+of measured `(model, transport)` pairs. Any doubt (4xx, unreachable,
+unparseable) resolves the TEXT transport — the chat turn degrades, never
+breaks. The cleared-set ships EMPTY at landing (no measured pair exists;
+the only measured chat model, gemma, is a text-dialect emitter), so
+every endpoint resolves TEXT and production behavior is byte-identical,
+pinned by test. A future clearance for a real pair is a measurement
+campaign's verdict, never a config flip.
+
+### 5.4.7 /compress (long-term memory)
+
                                                                                  
 prompts/compress.md:                                                                                                                                                                                                                                  
                                                                                  

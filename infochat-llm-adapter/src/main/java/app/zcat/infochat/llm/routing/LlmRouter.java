@@ -11,6 +11,8 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.Config;
 import org.jboss.logging.Logger;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -20,6 +22,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -124,9 +127,43 @@ public class LlmRouter {
     static final String NO_PROVIDERS_REGISTERED_MESSAGE =
         "LlmRouter: at least one LlmProvider must be registered";
 
+    /**
+     * Models cleared for the native tool transport — the measured
+     * (model, transport) pairs a committed bar-clearing record vouches
+     * for (the D79 registry posture). EMPTY at landing: no measured
+     * pair exists, every endpoint resolves TEXT, and the transport
+     * probe never fires.
+     */
+    private static final Set<String> NATIVE_TOOL_TRANSPORT_CLEARED_MODELS = Set.of();
+
+    /**
+     * The minimal tools-bearing body the transport probe sends: one
+     * declaration, no real tool — the probe measures the endpoint's
+     * acceptance of the SHAPE, not any answer.
+     */
+    private static final List<LlmProvider.ToolDeclaration> TRANSPORT_PROBE_DECLARATIONS =
+        List.of(new LlmProvider.ToolDeclaration("transport_probe", "transport probe",
+            "{\"type\":\"object\",\"properties\":{}}"));
+
+    /** The user-prompt sentinel of the transport probe request. */
+    public static final String TRANSPORT_PROBE_PROMPT = "transport probe";
+
+    /** The tool-call transport a resolved endpoint serves. */
+    public enum ToolTransport {
+        TEXT, NATIVE
+    }
+
     private final List<Entry> entries;
     private final Map<String, Entry> entriesByName;
     private final ConfigReader config;
+    private final Set<String> nativeToolTransportClearedModels;
+
+    /**
+     * Sticky per-task tool-transport resolutions (one resolution per
+     * task and endpoint, never a per-call fallback chain).
+     */
+    private final ConcurrentHashMap<ModelTask, ToolTransport> toolTransportResolutions =
+        new ConcurrentHashMap<>();
 
     /**
      * One-shot guard for the priority-3 unknown-default-provider WARN.
@@ -145,11 +182,18 @@ public class LlmRouter {
      * code uses the {@link Inject}-annotated overload below.
      */
     public LlmRouter(List<Entry> entries, ConfigReader config) {
+        this(entries, config, NATIVE_TOOL_TRANSPORT_CLEARED_MODELS);
+    }
+
+    /** Test seam: arms the cleared-set with measured (model) pairs. */
+    public LlmRouter(List<Entry> entries, ConfigReader config,
+              Set<String> nativeToolTransportClearedModels) {
         if (entries.isEmpty()) {
             throw new IllegalStateException(NO_PROVIDERS_REGISTERED_MESSAGE);
         }
         this.entries = List.copyOf(entries);
         this.config = config;
+        this.nativeToolTransportClearedModels = Set.copyOf(nativeToolTransportClearedModels);
         // Key by the lower-cased provider name so lookups are
         // case-insensitive, agreeing with LlmRouterStartupGuard (which
         // lower-cases the operator-supplied name before matching the
@@ -263,6 +307,72 @@ public class LlmRouter {
     }
 
     /**
+     * The tool-call transport the resolved endpoint serves for
+     * {@code task}: NATIVE only on cleared-set membership AND a
+     * successful bounded probe (docs/spec/llm.md §Tool-call
+     * transport); any doubt resolves TEXT. Sticky per task.
+     */
+    public ToolTransport toolTransportFor(ModelTask task, @Nullable String scopeLanguage) {
+        return toolTransportResolutions.computeIfAbsent(task,
+            t -> resolveToolTransport(t, scopeLanguage));
+    }
+
+    private ToolTransport resolveToolTransport(ModelTask task, @Nullable String scopeLanguage) {
+        String model = config.get(task.configPrefix() + "model").orElse("");
+        ToolTransport resolved;
+        if (!nativeToolTransportClearedModels.contains(model)) {
+            // Cleared-set miss: TEXT, provider untouched.
+            resolved = ToolTransport.TEXT;
+        } else {
+            LlmProvider provider = forTask(task, scopeLanguage);
+            if (!provider.supportsToolCalls(task)) {
+                resolved = ToolTransport.TEXT;
+            } else {
+                boolean probeAccepted;
+                try {
+                    provider.generateWithTools(task, "", TRANSPORT_PROBE_PROMPT,
+                        TRANSPORT_PROBE_DECLARATIONS);
+                    probeAccepted = true;
+                } catch (RuntimeException e) {
+                    // Any doubt downgrades to TEXT — no endpoint error-string
+                    // matching (the serving-stack assumption stays non-load-bearing).
+                    probeAccepted = false;
+                }
+                resolved = probeAccepted ? ToolTransport.NATIVE : ToolTransport.TEXT;
+            }
+        }
+        // One resolution log per (task, endpoint), naming the effective
+        // endpoint (per-task base-url, else the shared default) so an
+        // operator with per-task overrides sees WHICH endpoint resolved.
+        LOG.infof("LlmRouter: tool transport for task %s resolved %s (endpoint %s)",
+            task.keySegment(), resolved, endpointLabelFor(task));
+        return resolved;
+    }
+
+    /**
+     * {@code host:port} of the task's effective base-url (per-task key,
+     * else the shared default — the providers' own resolution), for the
+     * resolution log. Never throws; unset/unparseable renders a placeholder.
+     */
+    private String endpointLabelFor(ModelTask task) {
+        String baseUrl = config.get(task.configPrefix() + "base-url")
+            .or(() -> config.get(CONFIG_KEY_DEFAULT_BASE_URL))
+            .orElse("");
+        if (baseUrl.isEmpty()) {
+            return "<unset>";
+        }
+        try {
+            URI uri = new URI(baseUrl);
+            if (uri.getHost() == null || uri.getHost().isEmpty()) {
+                return "<no-host>";
+            }
+            return uri.getPort() < 0 ? uri.getHost() : uri.getHost() + ":" + uri.getPort();
+        } catch (URISyntaxException e) {
+            return "<unparseable>";
+        }
+    }
+
+    /**
      * Startup-time assertion that every {@link ModelTask} resolves to a
      * registered provider under the current config, AND that the
      * resolved provider's per-task config resolves. A per-task provider
@@ -328,6 +438,10 @@ public class LlmRouter {
         // degrades to non-streaming, and the per-task config the
         // streaming call resolves is already asserted above.
         streamingSupportedFor(ModelTask.CHAT_AGENT, "en");
+        // Tool-transport resolution, same startup posture: resolved once
+        // here and fail-safe to TEXT; the probe stays disarmed until a
+        // measured (model, transport) pair enters the cleared-set.
+        toolTransportFor(ModelTask.CHAT_AGENT, "en");
     }
 
     /**

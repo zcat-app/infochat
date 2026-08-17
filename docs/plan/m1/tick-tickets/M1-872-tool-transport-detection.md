@@ -1,17 +1,16 @@
 ---
 id: M1-872
 title: "Native tool-call transport behind detected capability"
-status: pending
+status: done
 created: 2026-08-16
-last_updated: 2026-08-16
+last_updated: 2026-08-17
 flow: tick
 reproduction: >-
   OpenAiCompatibleProviderToolCallTest#aToolsBearingCallParsesStructuredToolCalls
-  (to-be-written: child of a 2+ decomposition, analysis
-  docs/plan/m1/tick-analysis/tool-transport-model-independence.md —
-  /tick start converts the marker by writing the test and running it
-  RED before any fix code, workflow §0; it runs red as the M1-847
-  compile-failure shape — the SPI members do not exist). Probe of
+  (written and run RED at start 2026-08-17 — compile-failure shape, the
+  SPI members do not exist, per the M1-847 precedent; child of a 2+
+  decomposition, analysis
+  docs/plan/m1/tick-analysis/tool-transport-model-independence.md). Probe of
   today's wrong posture (absence, grep-verified): grep -rn
   '"tools"\|tool_choice\|tool_calls\|response_format'
   infochat-llm-adapter/src/main/java returns NO match —
@@ -107,11 +106,43 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-17
+    verdict: REWORK
+    checks:
+      SPEC-TRUTHNESS: FAIL
+      SECURITY: PASS
+      TEST-ADEQUACY: FAIL
+      MAINTAINABILITY: WARN
+      SCOPE: PASS
+    diff_stats: "16 files, +1282/-57"
+  - round: 2
+    date: 2026-08-17
+    verdict: APPROVE
+    checks:
+      SPEC-TRUTHNESS: PASS
+      SECURITY: PASS
+      TEST-ADEQUACY: PASS
+      MAINTAINABILITY: WARN
+      SCOPE: PASS
+    diff_stats: "16 files, +1386/-58 (rebased onto 16e2d028 M1-866 between rounds)"
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-17
+  verdict: PASS
+  warnings:
+    - >-
+      Post-sibling line drift only: M1-870/871 landed after the
+      analysis, so ChatAgent citations shifted (runToolLoop :868,
+      dispatch :906, UNTRUSTED wrap :916-923) — every claim re-verified
+      at the new lines. Execution note: MeteredLlmProvider's
+      prompt-derived input bound includes the rendered tools length on
+      the tools-bearing shape (its slack javadoc assumed no schemas on
+      the wire).
+  blockers: []
 escalation_reason:
 ---
 
@@ -281,3 +312,17 @@ ticket — never a mid-implementation config flip here.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-872-tool-transport-detection.md
 ```
+
+## Round 1 rework
+
+1. Finding 1: make LlmRouter.resolveToolTransport (:318-341) log one line
+   naming task, endpoint host and outcome on every resolution exit —
+   cleared-set miss (:320-321), cannot-serve (:324-325), and probe verdict
+   (:337-340) — evaluated via the new
+   LlmRouterToolTransportTest.resolutionLogsTaskEndpointAndOutcome arm
+   asserting the captured line names task, mock host:port and outcome on a
+   TEXT-downgrade resolution.
+2. Finding 2: add `assertEquals(1, receivedBodies.size(), ...)` after the
+   sticky re-query at LlmRouterToolTransportTest.java:107-109, evaluated
+   via `mvn -pl infochat-llm-adapter -am test -Dtest='LlmRouterToolTransportTest'`
+   green with the new assertion present in the diff.

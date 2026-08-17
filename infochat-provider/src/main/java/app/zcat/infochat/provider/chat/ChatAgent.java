@@ -609,10 +609,16 @@ public class ChatAgent {
                 && llmRouter.streamingSupportedFor(ModelTask.CHAT_AGENT, scopeLanguage)) {
             reveal = liveTextStreamer.newReveal(scope, scopeLanguage);
         }
+        // The native tool transport is single-shot: a streaming turn keeps
+        // the text-protocol loop (streaming + tools is a separate decision).
+        boolean nativeToolsTransport = reveal == null
+                && llmRouter.toolTransportFor(ModelTask.CHAT_AGENT, scopeLanguage)
+                        == LlmRouter.ToolTransport.NATIVE;
 
         String finalText = runToolLoop(provider, augmentedSystemPrompt, baseSystemPrompt,
                 prompt.userPrompt() + semanticBlock + turnDirective,
-                userId, scopeKind, scopeId, turnContext, retrievedPostUids, reveal);
+                userId, scopeKind, scopeId, turnContext, retrievedPostUids, reveal,
+                nativeToolsTransport);
 
         // 6. Sanitize first: everything below evaluates the sanitized text
         // — sanitize itself can surface a protocol token (security.md
@@ -864,42 +870,65 @@ public class ChatAgent {
      * Multi-turn tool loop. Calls the LLM, parses for tool calls, executes
      * tools, feeds results back, repeats until no tool calls remain or the
      * iteration cap is reached; a non-null reveal observes streamed deltas.
+     * The native transport reads the reply's structured tool calls; the
+     * text transport parses the reply — both funnel the SAME dispatch
+     * boundary with the shared TurnContext.
      */
     String runToolLoop(LlmProvider provider, String systemPrompt,
                        String baseSystemPrompt, String userPrompt,
                        UUID userId, String scopeKind, UUID scopeId,
                        ChatToolDispatcher.TurnContext turnContext,
                        Set<String> retrievedPostUids,
-                       ChatLiveTextStreamer.@Nullable LiveTextReveal reveal) {
+                       ChatLiveTextStreamer.@Nullable LiveTextReveal reveal,
+                       boolean nativeToolsTransport) {
         StringBuilder conversation = new StringBuilder(userPrompt);
 
         for (int i = 0; i < MAX_TOOL_ITERATIONS; i++) {
-            LlmResponse response = reveal != null
-                    ? provider.generateStreaming(ModelTask.CHAT_AGENT, systemPrompt,
-                            conversation.toString(), reveal::onChunk)
-                    : provider.generate(
-                            ModelTask.CHAT_AGENT, systemPrompt, conversation.toString());
+            LlmResponse response;
+            if (reveal != null) {
+                response = provider.generateStreaming(ModelTask.CHAT_AGENT, systemPrompt,
+                        conversation.toString(), reveal::onChunk);
+            } else if (nativeToolsTransport) {
+                response = provider.generateWithTools(ModelTask.CHAT_AGENT, systemPrompt,
+                        conversation.toString(), ChatToolCatalog.wireDeclarations());
+            } else {
+                response = provider.generate(
+                        ModelTask.CHAT_AGENT, systemPrompt, conversation.toString());
+            }
             String text = response.text();
 
-            Matcher matcher = earliestToolCallMatch(text);
-            if (matcher == null) {
-                return text;
+            String toolName;
+            String argsJson;
+            if (nativeToolsTransport) {
+                // Structured emission: the first call this reply carries is
+                // this iteration's; an empty list is the final answer.
+                List<LlmResponse.ToolCallRequest> calls = response.toolCalls();
+                if (calls == null || calls.isEmpty()) {
+                    return text;
+                }
+                toolName = calls.get(0).name();
+                argsJson = calls.get(0).argumentsJson();
+            } else {
+                Matcher matcher = earliestToolCallMatch(text);
+                if (matcher == null) {
+                    return text;
+                }
+                // Extract and execute the tool call. group(2) is the opening
+                // brace; scan for its balanced match so nested objects survive
+                // intact. An unbalanced fragment falls back to the tail of the
+                // text, which Jackson then rejects (→ empty args).
+                toolName = matcher.group(1);
+                int braceStart = matcher.start(2);
+                int braceEnd = matchBrace(text, braceStart);
+                argsJson = braceEnd >= 0
+                        ? text.substring(braceStart, braceEnd + 1)
+                        : text.substring(braceStart);
             }
             // Tool iterations reset the reveal and restore the GENERATING label.
             if (reveal != null) {
                 reveal.onIterationToolCall();
             }
 
-            // Extract and execute the tool call. group(2) is the opening
-            // brace; scan for its balanced match so nested objects survive
-            // intact. An unbalanced fragment falls back to the tail of the
-            // text, which Jackson then rejects (→ empty args).
-            String toolName = matcher.group(1);
-            int braceStart = matcher.start(2);
-            int braceEnd = matchBrace(text, braceStart);
-            String argsJson = braceEnd >= 0
-                    ? text.substring(braceStart, braceEnd + 1)
-                    : text.substring(braceStart);
             Map<String, Object> args = parseToolArgs(argsJson);
 
             ChatToolDispatcher.ToolResult result =

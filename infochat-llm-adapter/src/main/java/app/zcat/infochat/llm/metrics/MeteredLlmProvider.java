@@ -17,6 +17,7 @@ import org.jboss.logging.Logger;
 import org.jspecify.annotations.Nullable;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -90,10 +91,8 @@ public class MeteredLlmProvider implements LlmProvider {
     /**
      * Slack added to the prompt-derived input bound for what the
      * provider appends to the request but the decorator cannot see:
-     * chat-template role markers and sentinels. Both v1 request bodies
-     * carry only {@code model}, {@code max_tokens} and the system+user
-     * strings — no tool or function schemas — so that overhead is tens
-     * of tokens, and this is already an order of magnitude above it.
+     * chat-template role markers and sentinels — tens of tokens; the
+     * tools-bearing leg adds the declarations' own char-derived term.
      * Sized to stay honest in both directions: large enough that no
      * real reply is ever discarded, small enough that the accepted
      * residual is the one the spec describes rather than a blanket
@@ -140,7 +139,7 @@ public class MeteredLlmProvider implements LlmProvider {
             Duration latency = Duration.ofNanos(System.nanoTime() - startNanos);
             String model = configuredModel(task);
             metrics.recordLlmCall(task, provider, model, LlmMetrics.Outcome.OK, latency,
-                plausibleUsage(task, provider, systemPrompt, userPrompt, response.usage()));
+                plausibleUsage(task, provider, systemPrompt, userPrompt, null, response.usage()));
             LOG.debugf("llm call ok: trace=%s task=%s provider=%s model=%s latencyMs=%d",
                 context.traceId(), task.keySegment(), provider, model, latency.toMillis());
             return response;
@@ -158,6 +157,45 @@ public class MeteredLlmProvider implements LlmProvider {
     @Override
     public boolean supportsStreaming(ModelTask task) {
         return delegate.supportsStreaming(task);
+    }
+
+    @Override
+    public boolean supportsToolCalls(ModelTask task) {
+        return delegate.supportsToolCalls(task);
+    }
+
+    /**
+     * The tools-bearing mirror of {@link #generate}: same per-call
+     * metrics, same operator-configured model label; the input bound
+     * gains the rendered declarations' own char-derived term.
+     */
+    @Override
+    public LlmResponse generateWithTools(ModelTask task, String systemPrompt, String userPrompt,
+                                         List<LlmProvider.ToolDeclaration> tools) {
+        LlmCallContext context = LlmCallContext.currentOrFresh().withTask(task);
+        String provider = delegate.providerName();
+        AtomicInteger inflight = metrics.llmInflight(task, provider);
+        long startNanos = System.nanoTime();
+        inflight.incrementAndGet();
+        try {
+            LlmResponse response = LlmCallContext.callWith(context, () ->
+                delegate.generateWithTools(task, systemPrompt, userPrompt, tools));
+            Duration latency = Duration.ofNanos(System.nanoTime() - startNanos);
+            String model = configuredModel(task);
+            metrics.recordLlmCall(task, provider, model, LlmMetrics.Outcome.OK, latency,
+                plausibleUsage(task, provider, systemPrompt, userPrompt, tools, response.usage()));
+            LOG.debugf("llm tools call ok: trace=%s task=%s provider=%s model=%s latencyMs=%d",
+                context.traceId(), task.keySegment(), provider, model, latency.toMillis());
+            return response;
+        } catch (RuntimeException e) {
+            Duration latency = Duration.ofNanos(System.nanoTime() - startNanos);
+            metrics.recordLlmCall(task, provider, UNKNOWN_MODEL, LlmMetrics.Outcome.FAIL, latency, null);
+            LOG.debugf("llm tools call fail: trace=%s task=%s provider=%s latencyMs=%d",
+                context.traceId(), task.keySegment(), provider, latency.toMillis());
+            throw e;
+        } finally {
+            inflight.decrementAndGet();
+        }
     }
 
     /**
@@ -181,7 +219,7 @@ public class MeteredLlmProvider implements LlmProvider {
             Duration latency = Duration.ofNanos(System.nanoTime() - startNanos);
             String model = configuredModel(task);
             metrics.recordLlmCall(task, provider, model, LlmMetrics.Outcome.OK, latency,
-                plausibleUsage(task, provider, systemPrompt, userPrompt, response.usage()));
+                plausibleUsage(task, provider, systemPrompt, userPrompt, null, response.usage()));
             LOG.debugf("llm stream ok: trace=%s task=%s provider=%s model=%s latencyMs=%d",
                 context.traceId(), task.keySegment(), provider, model, latency.toMillis());
             return response;
@@ -249,12 +287,15 @@ public class MeteredLlmProvider implements LlmProvider {
      */
     private LlmResponse.@Nullable TokenUsage plausibleUsage(
             ModelTask task, String provider, String systemPrompt, String userPrompt,
+            @Nullable List<LlmProvider.ToolDeclaration> tools,
             LlmResponse.@Nullable TokenUsage usage) {
         if (usage == null) {
             return null;
         }
         long outputBound = effectiveMaxTokens(task);
-        long inputBound = promptDerivedInputBound(systemPrompt, userPrompt);
+        long inputBound = tools == null
+            ? promptDerivedInputBound(systemPrompt, userPrompt)
+            : promptDerivedInputBound(systemPrompt, userPrompt, tools);
         if (usage.inputTokens() >= 0 && usage.outputTokens() >= 0
                 && usage.outputTokens() <= outputBound
                 && usage.inputTokens() <= inputBound) {
@@ -283,6 +324,21 @@ public class MeteredLlmProvider implements LlmProvider {
     private long promptDerivedInputBound(String systemPrompt, String userPrompt) {
         long promptChars = (long) systemPrompt.length() + userPrompt.length();
         return promptChars * MAX_UTF8_BYTES_PER_CHAR + INPUT_OVERHEAD_SLACK_TOKENS;
+    }
+
+    /**
+     * The tools-bearing bound: the declarations ride the same request,
+     * so their chars bound their tokens exactly as the prompt's do.
+     */
+    private long promptDerivedInputBound(String systemPrompt, String userPrompt,
+                                         List<LlmProvider.ToolDeclaration> tools) {
+        long declarationChars = 0;
+        for (LlmProvider.ToolDeclaration tool : tools) {
+            declarationChars += tool.name().length() + tool.description().length()
+                + tool.parametersJson().length();
+        }
+        return promptDerivedInputBound(systemPrompt, userPrompt)
+            + declarationChars * MAX_UTF8_BYTES_PER_CHAR;
     }
 
     /**
