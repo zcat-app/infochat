@@ -76,6 +76,10 @@ public class ChatAgent {
     // brace never dispatches, so the strip recognizes and removes it exactly.
     static final Pattern BRACELESS_NATIVE_TOOL_CALL_PATTERN = Pattern.compile(
             "<\\|tool_call>\\s*call:\\w*");
+    // Elision separator for every removed span: a deletion that joins its
+    // neighbors could assemble a privileged token the redaction never saw.
+    // U+2026 is neither whitespace nor a letter/digit/hyphen (M1-879).
+    static final String ELISION_SEPARATOR = "\u2026";
 
     private static final ObjectMapper TOOL_ARGS_MAPPER = new ObjectMapper();
 
@@ -638,7 +642,9 @@ public class ChatAgent {
         // 8. D21 refusal intercept on the sanitized text: sanitize can
         // assemble the marker, and firing on one is fail-closed. Prefix-only:
         // the strip's drop-through can eat the closing ']' (endsWith leaks).
-        String trimmedFinalText = approved.trim();
+        // The check looks through the strip's elision separators — a marker
+        // whose preceding bytes were removed still anchors the reply start.
+        String trimmedFinalText = approved.replace(ELISION_SEPARATOR, "").trim();
         if (trimmedFinalText.startsWith(REFUSAL_MARKER_PREFIX)) {
             // Degrade like the unavailable path; the refusal reason is
             // LLM-authored untrusted text and MUST NOT be logged (D37).
@@ -1214,9 +1220,9 @@ public class ChatAgent {
      * Strips residual tool-call fragments of both accepted dialects: balanced
      * removed exactly, unbalanced through end-of-text; a brace-less native
      * opener+call:+name token stripped exactly with following prose
-     * preserved; a bare opener stays quoted prose. Runs to a fixpoint
-     * across {@value #MAX_STRIP_PASSES} passes — a deletion can join the
-     * bytes around a removed span into a fresh marker (M1-875).
+     * preserved; a bare opener stays quoted prose. Every removed span is
+     * replaced by an elision separator no token can re-form across (M1-879);
+     * runs to a fixpoint across {@value #MAX_STRIP_PASSES} passes.
      */
     static String stripToolCalls(String text) {
         String current = text;
@@ -1227,13 +1233,19 @@ public class ChatAgent {
             // Deletion-only: a pass that removes nothing returns its input
             // byte-identical, so equal length means the fixpoint is reached.
             if (pass.text().length() == current.length()) {
-                return current;
+                return collapseSeparatorOnly(current);
             }
             current = pass.text();
             protectedOpeners = new HashSet<>(pass.keptOpenerPositions());
             passes++;
         }
-        return current;
+        return collapseSeparatorOnly(current);
+    }
+
+    // Separator-only output counts as empty: the step-9c isBlank() degrade
+    // must fire for a markers-only reply, never a delivered bare separator.
+    private static String collapseSeparatorOnly(String s) {
+        return s.replace(ELISION_SEPARATOR, "").isBlank() ? "" : s;
     }
 
     /** One pass's output plus the kept bare openers' output positions. */
@@ -1284,6 +1296,7 @@ public class ChatAgent {
                 if (full.find(marker) && full.start() == marker) {
                     int close = matchBrace(text, full.start(2));
                     if (close >= 0) {
+                        result.append(ELISION_SEPARATOR);
                         cursor = close + 1;
                         continue;
                     }
@@ -1294,6 +1307,7 @@ public class ChatAgent {
                 // 'call:' plus the name, then scan on.
                 Matcher braceless = BRACELESS_NATIVE_TOOL_CALL_PATTERN.matcher(text);
                 if (braceless.find(marker) && braceless.start() == marker) {
+                    result.append(ELISION_SEPARATOR);
                     cursor = braceless.end();
                     continue;
                 }
@@ -1309,6 +1323,7 @@ public class ChatAgent {
             if (brace >= 0 && (lineEnd < 0 || brace < lineEnd)) {
                 int close = matchBrace(text, brace);
                 if (close >= 0) {
+                    result.append(ELISION_SEPARATOR);
                     cursor = close + 1;
                     continue;
                 }

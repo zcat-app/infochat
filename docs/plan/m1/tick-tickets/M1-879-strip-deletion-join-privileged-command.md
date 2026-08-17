@@ -1,14 +1,17 @@
 ---
 id: M1-879
 title: "Strip deletions must not join privileged command tokens"
-status: pending
+status: done
 created: 2026-08-17
-last_updated: 2026-08-17
+last_updated: 2026-08-18
 flow: tick
 reproduction: >-
   ChatAgentTest.aPrivilegedCommandAssembledAcrossAStripDeletionNeverReachesTheReply
-  (to-be-written — written and run RED at start; the probe half was
-  already run RED 2026-08-17 against main 36d034fb, zero repo changes, strip code byte-identical on current main 280c3194 (the 36d034fb..main delta is docs only),
+  (written and run RED 2026-08-17: the iteration-cap delivery path feeds the
+  final text '/ba<|tool_call>call:x{old}n' and asserts the reply contains no
+  '/ban'; on main the reply IS '/ban' — 4 failures across the reproduction
+  and the three other failure-mode tests, the degrade guard green). The probe
+  half was already run RED 2026-08-17 against main 36d034fb, zero repo changes, strip code byte-identical on current main 280c3194 (the 36d034fb..main delta is docs only),
   reflection into compiled infochat-provider/target/classes):
   ChatAgent.stripToolCalls("/ba<|tool_call>call:x{old}n") returns "/ban". The input contains NO
   contiguous "/ban"; the strip's deletion-join assembled it. On the
@@ -91,7 +94,21 @@ spec_refs:
   - docs/spec/llm.md §Failure handling
 decision_refs:
   - D21
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-18
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS FAIL, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY FAIL, SCOPE PASS"
+    diff_stats: "tracked: 6 files +168/-36 (4 files_scope paths + 2 workflow artifacts: ticket bookkeeping, STATUS-TICK)"
+    rework_items: 2
+    verdict_file: .scratch/tick-review-M1-879-r1.txt
+  - round: 2
+    date: 2026-08-18
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "round-2 fix hunks: 2 files +7/-8; full working tree: 6 files +201/-42"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-879-r2.txt
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -461,3 +478,24 @@ SummaryProseGenerator — carry no strip and are dispositioned by M1-791).
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-879-strip-deletion-join-privileged-command.md
 ```
+
+## Round 1 rework
+
+REWORK ITEMS (verbatim from .scratch/tick-review-M1-879-r1.txt):
+
+1. Finding 1: drop the "that leaves text on both sides" qualifier from the
+   amended sentence at docs/spec/security.md:781-784 so the rule states
+   that each removed span is replaced by an elision separator (drop-through
+   truncations remain the stated exception); show the exact corrected
+   wording to the user per §12 and record the approval in the round-2
+   mechanical report. Verified by
+   `grep -n 'leaves text on both sides' docs/spec/security.md` returning
+   nothing plus ChatToolAllowlistSpecParityTest and
+   DocumentedConfigKeyParityTest green in the round-2 mvn verify.
+2. Finding 2: rewrite the stale header comment at
+   ChatAgentTest.java:687-689 to the separator-era mechanism (pass 1
+   replaces every fragment with a separator; no marker re-forms, so the
+   confirming pass removes nothing). Verified by
+   `grep -n '25 removing passes' infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java`
+   returning nothing plus stripReScanTerminatesOnAdversarialNestedInput
+   green in the round-2 mvn verify.

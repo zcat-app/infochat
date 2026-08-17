@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.chat;
 
 import app.zcat.infochat.core.audit.AuditAction;
+import app.zcat.infochat.core.llm.LlmOutputSanitizerCore;
 import app.zcat.infochat.llm.EmbeddingProvider;
 import app.zcat.infochat.llm.EmbeddingResult;
 import app.zcat.infochat.llm.LlmProvider;
@@ -33,6 +34,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -476,10 +478,10 @@ class ChatAgentTest {
                 USER_ID, SCOPE_KIND, SCOPE_ID, "test");
         result.pendingCommit().commit();
 
-        assertEquals("Here you go.\n", result.reply(),
+        assertEquals("Here you go.\n…", result.reply(),
                 "the delivered reply must carry neither opener, call: nor name");
         assertEquals(2, persistedTexts.size());
-        assertEquals("Here you go.\n", persistedTexts.get(1),
+        assertEquals("Here you go.\n…", persistedTexts.get(1),
                 "the persisted assistant turn must be the stripped text, "
                         + "marker-free like the delivered reply");
     }
@@ -488,7 +490,7 @@ class ChatAgentTest {
     void bracelessTokenStripRemovesExactlyOpenerCallAndName() {
         String stripped = ChatAgent.stripToolCalls(
                 "Answer.\n<|tool_call>call:searchPosts\nMore prose here.");
-        assertEquals("Answer.\n\nMore prose here.", stripped,
+        assertEquals("Answer.\n…\nMore prose here.", stripped,
                 "the strip span is exactly opener + optional whitespace + "
                         + "call: + name chars — the following prose survives");
 
@@ -513,7 +515,7 @@ class ChatAgentTest {
     void bracelessTokenDoesNotSwallowALaterUnrelatedBrace() {
         String stripped = ChatAgent.stripToolCalls(
                 "A <|tool_call>call:searchPosts then {json} later");
-        assertEquals("A  then {json} later", stripped,
+        assertEquals("A … then {json} later", stripped,
                 "a brace outside the grammar's own window must not start a "
                         + "fragment — the token is brace-less and the prose "
                         + "after it survives");
@@ -528,9 +530,109 @@ class ChatAgentTest {
 
         String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "test");
 
-        assertEquals("Clean text. ", reply,
+        assertEquals("Clean text. …", reply,
                 "a brace-less token present only in the sanitized text is "
                         + "stripped, like every protocol-token detector");
+    }
+
+    @Test
+    void aPrivilegedCommandAssembledAcrossAStripDeletionNeverReachesTheReply() {
+        // M1-879 reproduction, delivery path: ten balanced calls consume the
+        // dispatch loop, the final call's raw text reaches sanitize -> strip
+        // undispatch; on main the deletion-join assembles "/ban" unseen.
+        for (int i = 0; i < ChatAgent.MAX_TOOL_ITERATIONS; i++) {
+            llmProvider.responses.add(new LlmResponse(
+                    "<|tool_call>call:searchPosts {\"tags\": [\"x\"]}"));
+        }
+        llmProvider.responses.add(new LlmResponse("/ba<|tool_call>call:x{old}n"));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "test");
+
+        assertFalse(reply.contains("/ban"),
+                "a strip deletion must not assemble a privileged command "
+                        + "token the closed-list pass never saw");
+        assertFalse(reply.isBlank(),
+                "the assembled-token text is replaced with an elision "
+                        + "separator, not emptied");
+    }
+
+    @Test
+    void aMultiWordClosedListEntryCannotBeAssembledAcrossAStripDeletion() {
+        // FAILURE-MODE: multi-word closed-list entries match with \s+
+        // between words, so a whitespace separator (or a join) would let
+        // "/invite create" re-form and dispatch.
+        String stripped = ChatAgent.stripToolCalls(
+                "/invite" + "<|tool_call>call:x{old}" + " create");
+        assertEquals("/invite… create", stripped,
+                "the removal point carries a non-whitespace elision separator");
+
+        int index = LlmOutputSanitizerCore.CLOSED_LIST.indexOf("/invite create");
+        Pattern pattern = LlmOutputSanitizerCore.CLOSED_LIST_PATTERNS.get(index);
+        assertFalse(pattern.matcher(
+                        LlmOutputSanitizerCore.canonicalizeForMatching(stripped))
+                        .find(),
+                "the canonicalized strip output must not match the closed-list "
+                        + "entry — the bytes between the words are the separator");
+
+        String preStrip = "/invite" + "<|tool_call>call:x{old}" + " create";
+        assertFalse(pattern.matcher(LlmOutputSanitizerCore.canonicalizeForMatching(preStrip))
+                        .find(),
+                "ground truth: the pre-strip text does not match either — the "
+                        + "bytes between the words are the fragment, not whitespace");
+    }
+
+    @Test
+    void aFlagEntryCannotBeAssembledAcrossAStripDeletion() {
+        // FAILURE-MODE: redactFlagEntry requires a separator after the
+        // command word; the SPACE after the span is the discriminating byte
+        // (a join yielding "/list-sources--all" would be safe anyway).
+        String stripped = ChatAgent.stripToolCalls(
+                "/list-sources" + "<|tool_call>call:x{old}" + " --all");
+        assertEquals("/list-sources… --all", stripped,
+                "the removal point carries a non-whitespace elision separator");
+
+        LlmOutputSanitizerCore.ClosedListStripResult result =
+                LlmOutputSanitizerCore.applyClosedListStripWithMatches(stripped);
+        assertFalse(result.matches().contains("/list-sources --all"),
+                "the flag entry must not match across the elision separator");
+
+        String preStrip = "/list-sources" + "<|tool_call>call:x{old}" + " --all";
+        assertFalse(LlmOutputSanitizerCore.applyClosedListStripWithMatches(preStrip)
+                        .matches().contains("/list-sources --all"),
+                "ground truth: the pre-strip text does not match either — '<' "
+                        + "after the command word is not a separator");
+    }
+
+    @Test
+    void anAssembledTokenSurvivesIntakeCanonicalizationSplit() {
+        // FAILURE-MODE (P8): the strip output must survive the chat-intake
+        // canonicalization (NFKC + bidi/zero-width strip) without re-forming
+        // the token — a copy-paste of the bot's line must not dispatch.
+        String stripped = ChatAgent.stripToolCalls("/ba<|tool_call>call:x{old}n");
+        assertEquals("/ba…n", stripped,
+                "the strip's removal point carries the elision separator");
+        assertFalse(LlmOutputSanitizerCore.canonicalizeForMatching(stripped)
+                        .contains("/ban"),
+                "the canonical form of the strip output must not re-form the "
+                        + "assembled command token");
+    }
+
+    @Test
+    void aMarkersOnlyReplyStillTakesTheEmptiedDegrade() {
+        // GUARD (P5): a reply that is ONLY removed spans must degrade, never
+        // deliver a bare separator — a separator-only strip output counts as
+        // empty, so the step-9c isBlank() degrade fires.
+        llmProvider.responses.add(new LlmResponse("<|tool_call>call:searchPosts"));
+
+        ChatAgent.ChatTurnResult result =
+                agent.handleTurn(USER_ID, SCOPE_KIND, SCOPE_ID, "test");
+
+        assertEquals(BundleKeys.ERROR_CHAT_UNAVAILABLE, result.reply(),
+                "a markers-only reply degrades like an assistant failure");
+        assertNull(result.pendingCommit(),
+                "the turn is discarded: no chat_session advance, no chat_memory write");
+        assertNull(result.provenanceNotice(),
+                "the degrade carries no provenance notice");
     }
 
     @Test
@@ -540,22 +642,22 @@ class ChatAgentTest {
         // sanitize pass never saw.
         String joinedShipped = ChatAgent.stripToolCalls(
                 "TOOL_" + "<|tool_call>call:x{old}" + "CALL: y {}");
-        assertEquals("", joinedShipped,
-                "the joined span must not ship as a shipped-dialect marker");
+        assertEquals("TOOL_…CALL: y {}", joinedShipped,
+                "the removed span leaves an elision separator — no join");
         assertFalse(joinedShipped.contains("TOOL_CALL:"));
         assertFalse(joinedShipped.contains("<|tool_call>"));
 
         String joinedNative = ChatAgent.stripToolCalls(
                 "<|tool_" + "TOOL_CALL: x {old}" + "call>call:z");
-        assertEquals("", joinedNative,
-                "the joined span must not ship as a native marker");
+        assertEquals("<|tool_…call>call:z", joinedNative,
+                "the removed span leaves an elision separator — no join");
         assertFalse(joinedNative.contains("<|tool_call>"));
         assertFalse(joinedNative.contains("TOOL_CALL:"));
 
         String joinedClosedListToken = ChatAgent.stripToolCalls(
                 "TOOL" + "<|tool_call>call:a{old}" + "_"
                         + "<|tool_call>call:b{old}" + "CALL: y {}");
-        assertEquals("", joinedClosedListToken,
+        assertEquals("TOOL…_…CALL: y {}", joinedClosedListToken,
                 "a marker joined across two deletions must not ship");
         assertFalse(joinedClosedListToken.contains("TOOL_CALL:"));
     }
@@ -568,23 +670,23 @@ class ChatAgentTest {
         String joinedInDropThrough = ChatAgent.stripToolCalls("TOOL_"
                 + "<|tool_call>call:a{old}" + "CALL: q {}"
                 + "<|tool_call>call:b{unbalanced");
-        assertEquals("", joinedInDropThrough,
+        assertEquals("TOOL_…CALL: q {}", joinedInDropThrough,
                 "a marker assembled before a drop-through return must not "
                         + "ship in the truncated output");
 
         String keptOpenerThroughDropThrough = ChatAgent.stripToolCalls(
                 "Quote <|tool_call><|tool_call>call:x{old}"
                         + "call:y TOOL_CALL: {unbalanced");
-        assertEquals("Quote <|tool_call>call:y ", keptOpenerThroughDropThrough,
+        assertEquals("Quote <|tool_call>…call:y ", keptOpenerThroughDropThrough,
                 "a bare opener ruled prose keeps its ruling when the pass "
                         + "ends in a drop-through");
     }
 
     @Test
     void stripReScanTerminatesOnAdversarialNestedInput() {
-        // 24 nested layers: pass 1 strips the fragments, each later pass
-        // peels one assembled shipped marker — 25 removing passes, under
-        // the cap (fragments carry a brace so \w* stops at the boundary).
+        // 24 nested layers: pass 1 removes every fragment, each replaced by
+        // a separator that blocks the marker re-form; pass 2 finds nothing
+        // and settles — no pass ever spins toward the cap.
         int layers = 24;
         StringBuilder nested = new StringBuilder();
         for (int i = 0; i < layers; i++) {
@@ -592,15 +694,16 @@ class ChatAgentTest {
         }
         nested.append("CALL: y {}".repeat(layers));
         String stripped = ChatAgent.stripToolCalls(nested.toString());
-        assertEquals("", stripped,
-                "the re-scan must reach the fixpoint, not stop at the cap");
+        assertEquals("TOOL_…".repeat(layers) + "CALL: y {}".repeat(layers),
+                stripped,
+                "the separator replaces every removed span, no marker re-forms");
         assertFalse(stripped.contains("TOOL_CALL:"));
         assertFalse(stripped.contains("<|tool_call>"));
 
         // 50 quoted bare openers ahead of one fragment: each pass re-rules
         // them prose and the loop settles instead of spinning.
         String spin = "<|tool_call>".repeat(50) + "call:x{old}";
-        assertEquals("<|tool_call>".repeat(49), ChatAgent.stripToolCalls(spin),
+        assertEquals("<|tool_call>".repeat(49) + "…", ChatAgent.stripToolCalls(spin),
                 "bare openers stay quoted prose across passes");
     }
 
@@ -608,7 +711,7 @@ class ChatAgentTest {
     void bareOpenerRulingSurvivesTheReScan() {
         String stripped = ChatAgent.stripToolCalls(
                 "Quote <|tool_call><|tool_call>call:x{old}call:y");
-        assertEquals("Quote <|tool_call>call:y", stripped,
+        assertEquals("Quote <|tool_call>…call:y", stripped,
                 "an opener ruled quoted prose must not be stripped when a "
                         + "removed span makes it look like a marker");
     }

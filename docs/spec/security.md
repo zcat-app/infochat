@@ -778,7 +778,15 @@ check and the `TOOL_CALL:` strip) evaluate the sanitized output —
 they run downstream of every deleting pass, because a detector
 guards delivered bytes and therefore must evaluate delivered bytes:
 a token a deletion or canonicalization assembles out of fragments
-is one they see.
+is one they see. **The `TOOL_CALL:` strip is itself a deleting pass
+whose removals are never joins:** each removed span is replaced by
+an elision separator that is neither whitespace nor a letter, digit
+or hyphen, so a strip deletion can break a token apart but never
+build one, and no command or marker can re-form across a removed
+span after the closed-list strip has run; drop-through truncations
+remove to end-of-text, join nothing, and take no separator; a strip
+output holding nothing outside whitespace and elision separators
+counts as empty (llm.md §Failure handling).
 
 **Markdown flattening survives canonicalization.** The link-flatten
 pass runs on the raw output first, and again on the canonical form
