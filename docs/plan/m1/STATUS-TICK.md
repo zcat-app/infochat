@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 88 |
 | deferred | 0 |
 | abandoned | 2 |
-| **total** | **94** |
+| **total** | **95** |
 
 ---
 
@@ -28,6 +28,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-867 — Tree-aware follow-tag, digest sections, and search (complexity: high, risk: medium)
 - M1-877 — Re-measure the news leg on resolved stored tags (complexity: medium, risk: low)
 - M1-879 — Strip deletions must not join privileged command tokens (complexity: low, risk: medium)
+- M1-880 — Tag-tree cutover runbook: cleanup, migrate, verify for every pre-V84 deployment (complexity: medium, risk: medium)
 
 ---
 
@@ -195,7 +196,8 @@ M1-864 (done)
         ├── M1-867 (pending) ← runnable
         │     └── M1-869 (pending)
         ├── M1-869 (pending) [see above]
-        └── M1-877 (pending) ← runnable
+        ├── M1-877 (pending) ← runnable
+        └── M1-880 (pending) ← runnable
 M1-865 (done)
   ├── M1-866 (done) [see above]
   ├── M1-867 (pending) [see above]
