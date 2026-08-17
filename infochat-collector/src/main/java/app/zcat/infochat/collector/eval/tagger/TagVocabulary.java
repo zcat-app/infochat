@@ -88,8 +88,8 @@ public class TagVocabulary {
     @Inject
     DataSource dataSource;
 
-    /** One tag row as the resolver sees it: the node-kind discriminator + normalized parent link (null = root). */
-    public record TagNode(boolean top, @Nullable String parent) {
+    /** One tag row as the resolver sees it: the node-kind discriminator + normalized parent link (null = root) + the fallback marking (false until the V84 seed lands — M1-878). */
+    public record TagNode(boolean top, @Nullable String parent, boolean fallback) {
     }
 
     /** The atomically-swapped load result: leaf-only names (query order) plus the full tree map — one field, never a mix. */
@@ -149,7 +149,9 @@ public class TagVocabulary {
                     continue;
                 }
                 boolean top = "top".equals(rs.getString(2));
-                tree.put(name, new TagNode(top, TagNormalizer.normalize(rs.getString(3))));
+                // fallback=false is the true value of every row until the
+                // V84 seed marks the fallback leaf (M1-878); no column exists before then.
+                tree.put(name, new TagNode(top, TagNormalizer.normalize(rs.getString(3)), false));
                 if (!top) {
                     leaves.add(name);
                 }

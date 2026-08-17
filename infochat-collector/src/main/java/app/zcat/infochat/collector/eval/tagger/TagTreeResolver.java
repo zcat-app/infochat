@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** Deterministic resolution of a validated proposal set to ONE branch of the v2 tag tree (M1-865, decision 2): highest-priority top per {@link #TOP_PRIORITY} (unlisted tops below News, identity branches last), deepest leaf within the branch, emission order breaks ties. No top-rooted branch → identity passthrough (analysis P6). Pure Java — tree and priority order never enter a prompt (analysis P8, D19). */
+/** Deterministic resolution of a validated proposal set to ONE branch of the v2 tag tree (M1-865, decision 2): highest-priority top per {@link #TOP_PRIORITY} (unlisted tops below News, identity branches last), deepest leaf within the branch, non-fallback leaves before fallback leaves at equal depth, emission order breaks remaining ties (docs/design/05-llm-and-embeddings.md §5.4.2). No top-rooted branch → identity passthrough (analysis P6). Pure Java — tree and priority order never enter a prompt (analysis P8, D19). */
 @ApplicationScoped
 public class TagTreeResolver {
 
@@ -28,8 +28,8 @@ public class TagTreeResolver {
         }
     }
 
-    /** A leaf with its depth inside its branch, in emission order. */
-    private record ScoredLeaf(String leaf, int depth) {
+    /** A leaf with its depth inside its branch and its fallback marking, in emission order. */
+    private record ScoredLeaf(String leaf, int depth, boolean fallback) {
     }
 
     /** Resolve the post-validate, capped set (emission order) against the tree; the input is never mutated. */
@@ -41,9 +41,10 @@ public class TagTreeResolver {
         Map<String, List<ScoredLeaf>> leavesByBranch = new LinkedHashMap<>();
         for (String leaf : validLeaves) {
             Branch branch = branchOf(leaf, tree);
+            TagVocabulary.TagNode node = tree.get(leaf);
             branches.putIfAbsent(branch.root(), branch);
             leavesByBranch.computeIfAbsent(branch.root(), k -> new ArrayList<>())
-                .add(new ScoredLeaf(leaf, branch.depth()));
+                .add(new ScoredLeaf(leaf, branch.depth(), node != null && node.fallback()));
         }
         if (branches.values().stream().noneMatch(Branch::top)) {
             // Identity passthrough: no top-rooted branch exists (the
@@ -63,13 +64,18 @@ public class TagTreeResolver {
         }
         String winningLeaf = null;
         int winningDepth = -1;
+        boolean winningFallback = false;
         // validLeaves.size() >= 2 guarantees the winner and its branch's
         // leaf list exist; the final null check documents that invariant.
         if (winnerLeaves != null) {
             for (ScoredLeaf scored : winnerLeaves) {
-                if (scored.depth() > winningDepth) {
+                // Depth first, then non-fallback-before-fallback at equal
+                // depth, so emission order stays the final tiebreak.
+                if (scored.depth() > winningDepth
+                    || (scored.depth() == winningDepth && winningFallback && !scored.fallback())) {
                     winningLeaf = scored.leaf();
                     winningDepth = scored.depth();
+                    winningFallback = scored.fallback();
                 }
             }
         }

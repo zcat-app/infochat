@@ -1,7 +1,7 @@
 ---
 id: M1-876
 title: "Rank region leaves above world within the News top"
-status: pending
+status: done
 created: 2026-08-17
 last_updated: 2026-08-17
 flow: tick
@@ -108,11 +108,19 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates: M1-865
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-17
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS-CHECK: PASS; SECURITY-CHECK: PASS; TEST-ADEQUACY-CHECK: PASS; MAINTAINABILITY-CHECK: PASS; SCOPE-CHECK: PASS"
+    diff_stats: "6 files, +78/-26 (TagTreeResolver.java, TagVocabulary.java, TagTreeResolutionTest.java, docs/design/05-llm-and-embeddings.md, STATUS-TICK.md regen, ticket frontmatter); 0 findings, 0 critical/high"
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-17
+  verdict: PASS
+  warnings: []
 escalation_reason:
 ---
 

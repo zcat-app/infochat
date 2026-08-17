@@ -118,10 +118,45 @@ class TagTreeResolutionTest {
         tagVocabulary.load();
 
         assertResolution(List.of("europe"), List.of("world"), List.of("europe", "world"));
-        // Emission order is the within-top tiebreak, so the reversed
-        // proposal resolves to the other News leaf.
-        assertResolution(List.of("world"), List.of("europe"), List.of("world", "europe"));
         assertResolution(List.of("ai"), List.of("europe"), List.of("europe", "ai"));
+    }
+
+    @Test
+    void newsFallbackLeafYieldsToRegionLeaves() {
+        // A fallback-marked leaf yields to any proposed region leaf within
+        // the News top regardless of emission order; the marking is data on
+        // the node, never a hardcoded leaf name (acceptance 1).
+        Map<String, TagVocabulary.TagNode> tree = Map.of(
+            "news", new TagVocabulary.TagNode(true, null, false),
+            "europe", new TagVocabulary.TagNode(false, "news", false),
+            "africa", new TagVocabulary.TagNode(false, "news", false),
+            "world", new TagVocabulary.TagNode(false, "news", true));
+
+        assertFallbackResolution(List.of("europe"), List.of("world"), List.of("world", "europe"), tree);
+        assertFallbackResolution(List.of("europe"), List.of("world"), List.of("europe", "world"), tree);
+        // Region-vs-region at equal depth keeps emission order.
+        assertFallbackResolution(List.of("europe"), List.of("world", "africa"),
+            List.of("world", "europe", "africa"), tree);
+        // The fallback leaf stores only when it is the only News leaf proposed.
+        assertFallbackResolution(List.of("world"), List.of(), List.of("world"), tree);
+
+        // Depth is the primary key: a deeper region leaf still beats the
+        // shallower fallback leaf...
+        Map<String, TagVocabulary.TagNode> deeperRegion = Map.of(
+            "news", new TagVocabulary.TagNode(true, null, false),
+            "world", new TagVocabulary.TagNode(false, "news", true),
+            "region-group", new TagVocabulary.TagNode(false, "news", false),
+            "europe", new TagVocabulary.TagNode(false, "region-group", false));
+        assertFallbackResolution(List.of("europe"), List.of("world"), List.of("world", "europe"), deeperRegion);
+
+        // ...and, symmetrically, a deeper fallback leaf beats a shallower
+        // region leaf (fallback alone would have kept europe).
+        Map<String, TagVocabulary.TagNode> deeperFallback = Map.of(
+            "news", new TagVocabulary.TagNode(true, null, false),
+            "europe", new TagVocabulary.TagNode(false, "news", false),
+            "global", new TagVocabulary.TagNode(false, "news", false),
+            "world", new TagVocabulary.TagNode(false, "global", true));
+        assertFallbackResolution(List.of("world"), List.of("europe"), List.of("europe", "world"), deeperFallback);
     }
 
     @Test
@@ -148,11 +183,11 @@ class TagTreeResolutionTest {
     void deepestLeafWinsWithinOneTop_equalDepthKeepsEmissionOrder() {
         // Depth-generality pin (acceptance 1): hand-built depth-3 tree, no DB.
         Map<String, TagVocabulary.TagNode> tree = Map.of(
-            "sport", new TagVocabulary.TagNode(true, null),
-            "ball-games", new TagVocabulary.TagNode(false, "sport"),
-            "football", new TagVocabulary.TagNode(false, "ball-games"),
-            "tennis", new TagVocabulary.TagNode(false, "sport"),
-            "hockey", new TagVocabulary.TagNode(false, "sport"));
+            "sport", new TagVocabulary.TagNode(true, null, false),
+            "ball-games", new TagVocabulary.TagNode(false, "sport", false),
+            "football", new TagVocabulary.TagNode(false, "ball-games", false),
+            "tennis", new TagVocabulary.TagNode(false, "sport", false),
+            "hockey", new TagVocabulary.TagNode(false, "sport", false));
 
         TagTreeResolver.Resolution deep =
             tagTreeResolver.resolve(List.of("tennis", "football"), tree);
@@ -248,6 +283,14 @@ class TagTreeResolutionTest {
     private void assertResolution(List<String> expectedStored, List<String> expectedLosers,
                                   List<String> validatedProposals) {
         TagTreeResolver.Resolution r = tagTreeResolver.resolve(validatedProposals, tagVocabulary.tree());
+        assertEquals(expectedStored, r.stored(), "stored set");
+        assertEquals(expectedLosers, r.losers(), "losers in emission order");
+    }
+
+    private void assertFallbackResolution(List<String> expectedStored, List<String> expectedLosers,
+                                          List<String> validatedProposals,
+                                          Map<String, TagVocabulary.TagNode> tree) {
+        TagTreeResolver.Resolution r = tagTreeResolver.resolve(validatedProposals, tree);
         assertEquals(expectedStored, r.stored(), "stored set");
         assertEquals(expectedLosers, r.losers(), "losers in emission order");
     }
