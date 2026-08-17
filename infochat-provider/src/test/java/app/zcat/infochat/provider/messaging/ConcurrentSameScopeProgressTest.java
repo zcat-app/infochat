@@ -287,6 +287,7 @@ class ConcurrentSameScopeProgressTest {
                     /* maxInboundMessageBytes      */ 65536,
                     /* maxSendsPerSecond           */ 1,
                     /* supportsMessageEdit         */ true,
+                    /* supportsLiveText            */ false,
                     /* supportsTypingIndicator     */ true,
                     /* minEditInterval             */ Duration.ZERO,
                     /* supportsOutboundAttachments */ false,

@@ -1377,7 +1377,7 @@ public class InboundRouter {
                 progressNotifier.publish(scope, ProgressStage.RETRIEVING);
             }
             progressNotifier.publish(scope, ProgressStage.GENERATING);
-            @Nullable String reply = dispatchChat(actorId, scopeKind, scopeId, normalized);
+            @Nullable String reply = dispatchChat(actorId, scopeKind, scopeId, normalized, scope);
             if (reply == null) {
                 // /stop cancelled the turn (the only null-reply source):
                 // terminal stopped text per D35 — complete(), never fail(),
@@ -1970,6 +1970,11 @@ public class InboundRouter {
      * {@link app.zcat.infochat.provider.chat.ChatAgent}.
      */
     @Nullable String dispatchChat(UUID actorId, String scopeKind, UUID scopeId, String normalized) {
+        return dispatchChat(actorId, scopeKind, scopeId, normalized, null);
+    }
+
+    @Nullable String dispatchChat(UUID actorId, String scopeKind, UUID scopeId, String normalized,
+                                  @Nullable ScopeRef scope) {
         // Compute the reply WITHOUT persisting. The chat-turn persistence
         // (and auto-compress) is deferred to a post-delivery commit so a
         // permanent delivery failure leaves the context window "as if the
@@ -1977,8 +1982,11 @@ public class InboundRouter {
         // handling). The pending commit is stashed on the request-scoped
         // InboundContext for onMessage to run after the reply is delivered;
         // it is left unset for a /stop-cancelled / rejected / failed turn.
+        // The ScopeRef rides in for the live-text eligibility gate
+        // (messaging.md §Progress notifications); only the
+        // self-delivering path addresses the placeholder directly.
         ChatAgent.ChatTurnResult result =
-                chatAgent.handleTurn(actorId, scopeKind, scopeId, normalized);
+                chatAgent.handleTurn(actorId, scopeKind, scopeId, normalized, scope);
         ChatAgent.PendingCommit pending = result.pendingCommit();
         if (pending != null) {
             inboundContext.setPendingChatCommit(pending);

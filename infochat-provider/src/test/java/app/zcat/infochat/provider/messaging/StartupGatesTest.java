@@ -306,6 +306,7 @@ class StartupGatesTest {
                     /* maxInboundMessageBytes     */ 100_000,
                     /* maxSendsPerSecond          */ 10_000,
                     /* supportsMessageEdit        */ true,
+                    /* supportsLiveText           */ false,
                     /* supportsTypingIndicator    */ true,
                     /* minEditInterval            */ Duration.ZERO,
                     /* supportsOutboundAttachments */ false,

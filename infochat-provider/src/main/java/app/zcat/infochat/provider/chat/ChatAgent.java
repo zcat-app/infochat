@@ -14,6 +14,7 @@ import app.zcat.infochat.llm.ModelTask;
 import app.zcat.infochat.llm.impl.LlmCallFailedException;
 import app.zcat.infochat.llm.routing.LlmCircuitBreakerRegistry;
 import app.zcat.infochat.llm.routing.LlmRouter;
+import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.help.CommandIntentIndex;
@@ -83,6 +84,19 @@ public class ChatAgent {
     // Fixpoint loop bound: passes only delete, so a pass that removes
     // nothing is done; the cap backstops adversarial assembly chains.
     static final int MAX_STRIP_PASSES = 64;
+
+    // Shared D21 refusal marker for final interception and live hold-back.
+    static final String REFUSAL_MARKER_PREFIX = "[REFUSAL:";
+
+    /** Finds the earliest raw tool opener for fail-closed live display. */
+    static int earliestToolOpenerIndex(String text) {
+        int shipped = text.indexOf("TOOL_CALL:");
+        int nativeOpener = text.indexOf(NATIVE_TOOL_CALL_OPENER);
+        if (shipped < 0) {
+            return nativeOpener;
+        }
+        return nativeOpener < 0 ? shipped : Math.min(shipped, nativeOpener);
+    }
 
     static final String TOOL_INSTRUCTIONS =
             "\n\nYou have the following tools. To call a tool, output EXACTLY "
@@ -252,6 +266,7 @@ public class ChatAgent {
     private final EmbeddingProvider embeddingProvider;
     private final HelpCommandHandler helpHandler;
     private final CancellationService cancellationService;
+    private final ChatLiveTextStreamer liveTextStreamer;
 
     @Inject
     public ChatAgent(InFlightTracker inFlightTracker,
@@ -269,7 +284,8 @@ public class ChatAgent {
                      LlmCircuitBreakerRegistry breakerRegistry,
                      EmbeddingProvider embeddingProvider,
                      HelpCommandHandler helpHandler,
-                     CancellationService cancellationService) {
+                     CancellationService cancellationService,
+                     ChatLiveTextStreamer liveTextStreamer) {
         this.inFlightTracker = inFlightTracker;
         this.promptBuilder = promptBuilder;
         this.toolDispatcher = toolDispatcher;
@@ -286,6 +302,7 @@ public class ChatAgent {
         this.embeddingProvider = embeddingProvider;
         this.helpHandler = helpHandler;
         this.cancellationService = cancellationService;
+        this.liveTextStreamer = liveTextStreamer;
     }
 
     /**
@@ -333,6 +350,13 @@ public class ChatAgent {
      */
     public ChatTurnResult handleTurn(UUID userId, String scopeKind,
                                      UUID scopeId, String userMessage) {
+        return handleTurn(userId, scopeKind, scopeId, userMessage, null);
+    }
+
+    /** Full shape carrying the router-owned address for live-text delivery. */
+    public ChatTurnResult handleTurn(UUID userId, String scopeKind,
+                                     UUID scopeId, String userMessage,
+                                     @Nullable ScopeRef scope) {
         // Read the cached value the router resolved once at intake
         // (InboundRouter.onMessage, D43) so the contention notice and the
         // catch-all unavailable reply localize too — no second
@@ -353,7 +377,8 @@ public class ChatAgent {
             if (slot.isCancelled()) {
                 return new ChatTurnResult(null, null, null);
             }
-            ChatTurnResult result = doHandle(userId, scopeKind, scopeId, userMessage, scopeLanguage);
+            ChatTurnResult result = doHandle(userId, scopeKind, scopeId, userMessage,
+                    scopeLanguage, scope);
             // Delivery boundary: /stop may have marked this request cancelled
             // even though the work completed — the interrupt landed after the
             // last interruptible point, or it never landed at all (a "missed
@@ -396,6 +421,11 @@ public class ChatAgent {
             if (slot.isCancelled()) {
                 return new ChatTurnResult(null, null, null);
             }
+            // Streamed audit failure must reach the router's failure terminal,
+            // rather than becoming the ordinary unavailable response.
+            if (e instanceof LlmOutputSanitizer.StreamedAuditWriteFailedException) {
+                throw (LlmOutputSanitizer.StreamedAuditWriteFailedException) e;
+            }
             // Any non-LLM failure → same friendly error, null commit: the
             // turn is discarded with no session advance, no memory write,
             // and no model-initiated tool call (security.md §Failure
@@ -425,7 +455,8 @@ public class ChatAgent {
     }
 
     private ChatTurnResult doHandle(UUID userId, String scopeKind, UUID scopeId,
-                                    String userMessage, String scopeLanguage) {
+                                    String userMessage, String scopeLanguage,
+                                    @Nullable ScopeRef scope) {
         // Ceiling gate: a failed auto-compress left this session at its
         // token ceiling — reject the turn outright (no LLM call, no
         // persist) instead of silently growing past the ceiling. Clears
@@ -570,14 +601,28 @@ public class ChatAgent {
                 : REPLY_LANGUAGE_DIRECTIVE;
         String baseSystemPrompt = prompt.systemPrompt() + languageDirective;
         String augmentedSystemPrompt = baseSystemPrompt + TOOL_INSTRUCTIONS;
+        // 4b. Live-text eligibility combines transport/mode and LLM support;
+        // null reveal preserves today's stage-label path.
+        ChatLiveTextStreamer.LiveTextReveal reveal = null;
+        if (liveTextStreamer != null && scope != null
+                && liveTextStreamer.eligible(scope, scopeKind, scopeLanguage, replyMode)
+                && llmRouter.streamingSupportedFor(ModelTask.CHAT_AGENT, scopeLanguage)) {
+            reveal = liveTextStreamer.newReveal(scope, scopeLanguage);
+        }
+
         String finalText = runToolLoop(provider, augmentedSystemPrompt, baseSystemPrompt,
                 prompt.userPrompt() + semanticBlock + turnDirective,
-                userId, scopeKind, scopeId, turnContext, retrievedPostUids);
+                userId, scopeKind, scopeId, turnContext, retrievedPostUids, reveal);
 
         // 6. Sanitize first: everything below evaluates the sanitized text
         // — sanitize itself can surface a protocol token (security.md
         // §Prompt-injection defenses); persist sees the redacted text.
-        String sanitized = outputSanitizer.sanitize(finalText);
+        // A streamed turn's audit aggregates per TURN — the final text
+        // plus any token matched only in a transient live update — one
+        // row-set, byte-identical output (security.md §Streamed surfaces).
+        String sanitized = reveal != null
+                ? outputSanitizer.sanitizeStreamed(finalText, reveal.transientMatchMaxima())
+                : outputSanitizer.sanitize(finalText);
 
         // 7. TOOL_CALL strip on the sanitized text: sanitize can assemble
         // a fragment into a full line, so the strip runs after it
@@ -588,7 +633,7 @@ public class ChatAgent {
         // assemble the marker, and firing on one is fail-closed. Prefix-only:
         // the strip's drop-through can eat the closing ']' (endsWith leaks).
         String trimmedFinalText = approved.trim();
-        if (trimmedFinalText.startsWith("[REFUSAL:")) {
+        if (trimmedFinalText.startsWith(REFUSAL_MARKER_PREFIX)) {
             // Degrade like the unavailable path; the refusal reason is
             // LLM-authored untrusted text and MUST NOT be logged (D37).
             log.warn("CHAT_AGENT returned refusal marker for userId={}; degrading turn", userId);
@@ -818,23 +863,31 @@ public class ChatAgent {
     /**
      * Multi-turn tool loop. Calls the LLM, parses for tool calls, executes
      * tools, feeds results back, repeats until no tool calls remain or the
-     * iteration cap is reached.
+     * iteration cap is reached; a non-null reveal observes streamed deltas.
      */
     String runToolLoop(LlmProvider provider, String systemPrompt,
                        String baseSystemPrompt, String userPrompt,
                        UUID userId, String scopeKind, UUID scopeId,
                        ChatToolDispatcher.TurnContext turnContext,
-                       Set<String> retrievedPostUids) {
+                       Set<String> retrievedPostUids,
+                       ChatLiveTextStreamer.@Nullable LiveTextReveal reveal) {
         StringBuilder conversation = new StringBuilder(userPrompt);
 
         for (int i = 0; i < MAX_TOOL_ITERATIONS; i++) {
-            LlmResponse response = provider.generate(
-                    ModelTask.CHAT_AGENT, systemPrompt, conversation.toString());
+            LlmResponse response = reveal != null
+                    ? provider.generateStreaming(ModelTask.CHAT_AGENT, systemPrompt,
+                            conversation.toString(), reveal::onChunk)
+                    : provider.generate(
+                            ModelTask.CHAT_AGENT, systemPrompt, conversation.toString());
             String text = response.text();
 
             Matcher matcher = earliestToolCallMatch(text);
             if (matcher == null) {
                 return text;
+            }
+            // Tool iterations reset the reveal and restore the GENERATING label.
+            if (reveal != null) {
+                reveal.onIterationToolCall();
             }
 
             // Extract and execute the tool call. group(2) is the opening
@@ -879,8 +932,11 @@ public class ChatAgent {
         // (without tool instructions) so the LLM is not prompted toward the
         // shipped format; spontaneous native-dialect emissions can still
         // occur here and are removed by the post-sanitize strip (step 7).
-        LlmResponse finalResponse = provider.generate(
-                ModelTask.CHAT_AGENT, baseSystemPrompt, conversation.toString());
+        LlmResponse finalResponse = reveal != null
+                ? provider.generateStreaming(ModelTask.CHAT_AGENT, baseSystemPrompt,
+                        conversation.toString(), reveal::onChunk)
+                : provider.generate(
+                        ModelTask.CHAT_AGENT, baseSystemPrompt, conversation.toString());
         return finalResponse.text();
     }
 

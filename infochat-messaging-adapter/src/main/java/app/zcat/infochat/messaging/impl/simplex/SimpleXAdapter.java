@@ -91,6 +91,7 @@ public final class SimpleXAdapter implements MessagingAdapter {
             /* maxInboundMessageBytes     */ SimpleXMessageCodec.MAX_INBOUND_TEXT_BYTES,
             /* maxSendsPerSecond          */ 5,
             /* supportsMessageEdit        */ true,
+            /* supportsLiveText           */ true,
             /* supportsTypingIndicator    */ false,
             /* minEditInterval            */ Duration.ofMillis(600),
             /* supportsOutboundAttachments */ true,

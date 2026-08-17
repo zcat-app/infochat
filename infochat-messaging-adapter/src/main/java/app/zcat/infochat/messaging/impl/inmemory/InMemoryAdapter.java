@@ -66,12 +66,16 @@ public final class InMemoryAdapter implements MessagingAdapter {
             /* maxInboundMessageBytes     */ 100_000,
             /* maxSendsPerSecond          */ 10_000,
             /* supportsMessageEdit        */ true,
+            /* supportsLiveText           */ false,
             /* supportsTypingIndicator    */ true,
             /* minEditInterval            */ Duration.ZERO,
             /* supportsOutboundAttachments */ true,
             /* maxOutboundAttachmentBytes  */ 1_048_576); // test-scale; production ceilings verified in M1-800
 
     private final AdapterTrustLevel trustLevel;
+    // Overridable per instance for live-text wiring tests; the static default
+    // preserves the unknown-flag-reads-not-supported rule.
+    private final CapabilityFlags capabilities;
     private final AtomicLong handleIdGen = new AtomicLong();
 
     private final List<OutboundMessage> sent = new CopyOnWriteArrayList<>();
@@ -99,7 +103,17 @@ public final class InMemoryAdapter implements MessagingAdapter {
      * privilege path.
      */
     public InMemoryAdapter(AdapterTrustLevel trustLevel) {
+        this(trustLevel, CAPABILITIES);
+    }
+
+    /** Test-only LOW-trust capability override for adapter wiring tests. */
+    public InMemoryAdapter(CapabilityFlags capabilities) {
+        this(AdapterTrustLevel.LOW, capabilities);
+    }
+
+    private InMemoryAdapter(AdapterTrustLevel trustLevel, CapabilityFlags capabilities) {
         this.trustLevel = trustLevel;
+        this.capabilities = capabilities;
     }
 
     @Override
@@ -109,7 +123,7 @@ public final class InMemoryAdapter implements MessagingAdapter {
 
     @Override
     public CapabilityFlags capabilities() {
-        return CAPABILITIES;
+        return capabilities;
     }
 
     @Override

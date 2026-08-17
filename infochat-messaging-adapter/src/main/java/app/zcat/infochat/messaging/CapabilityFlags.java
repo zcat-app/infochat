@@ -75,6 +75,9 @@ import java.time.Duration;
  * @param supportsMessageEdit        true when the adapter can edit a
  *                                   previously-sent message; drives
  *                                   in-place progress updates.
+ * @param supportsLiveText           true when the adapter supports progressive
+ *                                   in-place live messages; SimpleX is true,
+ *                                   Signal and unknown/default adapters false.
  * @param supportsTypingIndicator    true when typing-on/off pulses are
  *                                   available.
  * @param minEditInterval            adapter-imposed floor between
@@ -108,6 +111,7 @@ public record CapabilityFlags(
         int maxInboundMessageBytes,
         int maxSendsPerSecond,
         boolean supportsMessageEdit,
+        boolean supportsLiveText,
         boolean supportsTypingIndicator,
         Duration minEditInterval,
         boolean supportsOutboundAttachments,

@@ -237,7 +237,7 @@ class SimpleXAdminClaimTokenTest {
      */
     static final class RecordingSimplexAdapter implements MessagingAdapter {
         private static final CapabilityFlags CAPS = new CapabilityFlags(
-                true, false, false, false, 16384, 5, true, false, Duration.ofMillis(600),
+                true, false, false, false, 16384, 5, true, false, false, Duration.ofMillis(600),
                 false, 0); // supportsOutboundAttachments=false, maxOutboundAttachmentBytes=0
 
         private final List<OutboundMessage> sent = new CopyOnWriteArrayList<>();

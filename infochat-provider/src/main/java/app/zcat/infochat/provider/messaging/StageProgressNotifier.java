@@ -142,6 +142,20 @@ public class StageProgressNotifier implements ProgressNotifier {
             // turning off.
             return;
         }
+        publishText(adapter, scope, text);
+    }
+
+    /** Transports caller-sanitized live prefixes through the stage lifecycle. */
+    public void publishLiveText(ScopeRef scope, String text) {
+        MessagingAdapter adapter = resolveAdapter();
+        if (!adapter.capabilities().supportsMessageEdit()
+                || !adapter.capabilities().supportsLiveText()) {
+            return;
+        }
+        publishText(adapter, scope, text);
+    }
+
+    private void publishText(MessagingAdapter adapter, ScopeRef scope, String text) {
         String operationId = inboundContext.operationId();
         ScopeState state = states.computeIfAbsent(operationId, id -> new ScopeState());
         // Register the request-end safety net before any outbound work: if

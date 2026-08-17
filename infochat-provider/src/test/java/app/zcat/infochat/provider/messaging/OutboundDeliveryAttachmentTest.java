@@ -169,7 +169,7 @@ class OutboundDeliveryAttachmentTest {
             @Override
             public CapabilityFlags capabilities() {
                 return new CapabilityFlags(false, false, false, false, 65_536, 1,
-                        false, false, Duration.ZERO, true, 1_048_576);
+                        false, false, false, Duration.ZERO, true, 1_048_576);
             }
 
             @Override

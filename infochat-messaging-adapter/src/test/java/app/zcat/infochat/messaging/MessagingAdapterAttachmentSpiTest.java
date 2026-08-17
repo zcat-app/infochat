@@ -62,6 +62,7 @@ class MessagingAdapterAttachmentSpiTest {
                         /* maxInboundMessageBytes     */ 100_000,
                         /* maxSendsPerSecond          */ 1,
                         /* supportsMessageEdit        */ false,
+                        /* supportsLiveText           */ false,
                         /* supportsTypingIndicator    */ false,
                         /* minEditInterval            */ Duration.ZERO,
                         /* supportsOutboundAttachments */ false,

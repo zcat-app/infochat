@@ -1202,7 +1202,7 @@ class ImageCommandHandlerTest {
         @Override
         public CapabilityFlags capabilities() {
             return new CapabilityFlags(false, false, false, false, 65536, 1,
-                    false, false, Duration.ZERO, supportsAttachments, maxAttachmentBytes);
+                    false, false, false, Duration.ZERO, supportsAttachments, maxAttachmentBytes);
         }
 
         @Override

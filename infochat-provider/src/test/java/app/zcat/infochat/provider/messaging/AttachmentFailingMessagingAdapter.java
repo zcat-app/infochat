@@ -79,7 +79,7 @@ final class AttachmentFailingMessagingAdapter implements MessagingAdapter {
         // cascade): mention, membership, formatting, links, inbound-cap,
         // send-rate, edit, typing, min-edit-interval, attachments, ceiling.
         return new CapabilityFlags(false, false, false, false, 65536, 1,
-                false, false, Duration.ZERO, supportsAttachments, maxBytes);
+                false, false, false, Duration.ZERO, supportsAttachments, maxBytes);
     }
 
     @Override

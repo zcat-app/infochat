@@ -48,7 +48,7 @@ class ChatAgentAuditActorTest {
         ChatAgent agent = new ChatAgent(
                 null, null, null, null, null, null, null, null, null,
                 capturingWriter, SanitizerTestDoubles.noOpDataSource(), inboundContext,
-                null, null, null, null);
+                null, null, null, null, null);
 
         agent.writeAuditRow(UUID.randomUUID(), "dm", UUID.randomUUID());
 

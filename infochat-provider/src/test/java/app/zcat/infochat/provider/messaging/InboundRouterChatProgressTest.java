@@ -184,6 +184,24 @@ class InboundRouterChatProgressTest {
         assertEquals(0, commitRuns.get(), "a cancelled turn carries no commit to run");
     }
 
+    @Test
+    void stopCancelledStreamingShapeReplacesPartialWithStoppedTerminal() {
+        RecordingMessagingAdapter target =
+                new RecordingMessagingAdapter().withSupportsLiveText(true);
+        AtomicInteger commitRuns = new AtomicInteger();
+        InboundRouter router = newChatRouter(target, closedBreaker(), null, commitRuns,
+                true);
+
+        router.onMessage(groupInbound(USER_MESSAGE), ADAPTER);
+
+        assertEquals(List.of(bundle.get(BundleKeys.PROGRESS_STOPPED, "en")), target.finalizes,
+                "a cancelled streamed turn finalizes the D35 stopped terminal");
+        assertTrue(target.finalizes.stream().noneMatch(STALE_REPLY::equals),
+                "the stale streamed prefix never becomes the terminal answer");
+        assertEquals(0, commitRuns.get(),
+                "a cancelled streamed turn keeps deferred persistence untouched");
+    }
+
     /**
      * Hand-wired router (the {@link InboundRouterChatPersistFailureTest}
      * rig) whose {@code dispatchChat} seam returns {@code cannedReply}
@@ -194,15 +212,26 @@ class InboundRouterChatProgressTest {
                                         LlmCircuitBreakerRegistry breaker,
                                         @Nullable String cannedReply,
                                         AtomicInteger commitRuns) {
+        return newChatRouter(target, breaker, cannedReply, commitRuns, false);
+    }
+
+    private InboundRouter newChatRouter(RecordingMessagingAdapter target,
+                                        LlmCircuitBreakerRegistry breaker,
+                                        @Nullable String cannedReply,
+                                        AtomicInteger commitRuns,
+                                        boolean publishPartial) {
         CountingDispatchDataSource counting = new CountingDispatchDataSource(ACTOR_ID);
         InboundRouter router = new InboundRouter() {
             @Override
             @Nullable String dispatchChat(UUID actorId, String scopeKind, UUID scopeId,
-                                          String normalized) {
+                                          String normalized, ScopeRef scope) {
                 if (cannedReply == null) {
                     // /stop-cancelled contract: the computed answer
                     // (STALE_REPLY) is discarded and no commit is stashed
                     // (ChatAgent leaves it unset for cancelled turns).
+                    if (publishPartial) {
+                        progressNotifier.publishLiveText(scope, STALE_REPLY);
+                    }
                     return null;
                 }
                 inboundContext.setPendingChatCommit(() -> {

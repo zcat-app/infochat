@@ -129,6 +129,17 @@ class AdapterCapabilityContractTest {
                 "design §6.4.2: SimpleX does not render code formatting");
     }
 
+    /** Pins the SimpleX-only live-text declaration and unsupported defaults. */
+    @Test
+    void liveTextCapabilityPins() {
+        assertTrue(new SimpleXAdapter().capabilities().supportsLiveText(),
+                "messaging.md §Capability flags: SimpleX declares live text");
+        assertFalse(new SignalAdapter().capabilities().supportsLiveText(),
+                "messaging.md §Capability flags: Signal declares no live text");
+        assertFalse(new InMemoryAdapter().capabilities().supportsLiveText(),
+                "the in-memory default reads not-supported; tests opt in per instance");
+    }
+
     /**
      * Attachment capability pins: M1-799's interim false/0 flip, pre-authorized by M1-799 acceptance item 4 (M1-800 test_plan.modifies), to true with the ceilings verified against the bundled transports (design §6.2.4).
      */

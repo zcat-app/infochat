@@ -35,6 +35,9 @@ final class RecordingMessagingAdapter implements MessagingAdapter {
     // path contract test flips it via withSupportsMessageEdit(false) to pin
     // the notifier's collapse-to-single-final-send behaviour.
     private boolean supportsMessageEdit = true;
+    // FALSE by default (the unknown-flag rule); live-text tests flip it via
+    // withSupportsLiveText(true).
+    private boolean supportsLiveText = false;
     private final AtomicInteger handleIds = new AtomicInteger();
     final List<String> sends = new ArrayList<>();
     final List<String> updates = new ArrayList<>();
@@ -58,6 +61,12 @@ final class RecordingMessagingAdapter implements MessagingAdapter {
     /** Set the supportsMessageEdit capability surfaced through {@link #capabilities()}. */
     RecordingMessagingAdapter withSupportsMessageEdit(boolean supported) {
         this.supportsMessageEdit = supported;
+        return this;
+    }
+
+    /** Set the supportsLiveText capability surfaced through {@link #capabilities()}. */
+    RecordingMessagingAdapter withSupportsLiveText(boolean supported) {
+        this.supportsLiveText = supported;
         return this;
     }
 
@@ -105,6 +114,7 @@ final class RecordingMessagingAdapter implements MessagingAdapter {
                 /* maxInboundMessageBytes      */ 65536,
                 /* maxSendsPerSecond           */ 1,
                 supportsMessageEdit,
+                supportsLiveText,
                 /* supportsTypingIndicator     */ true,
                 /* minEditInterval             */ minEditInterval,
                 /* supportsOutboundAttachments */ false,

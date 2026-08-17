@@ -1,12 +1,12 @@
 ---
 id: M1-849
 title: "Stream sanitized chat replies over SimpleX live messages"
-status: pending
+status: done
 created: 2026-08-14
-last_updated: 2026-08-15
+last_updated: 2026-08-17
 flow: tick
 reproduction: >-
-  to-be-written: StageProgressNotifierLiveTextTest#aLiveTextTurnStreamsSanitizedPrefixesThenFinalizes
+  StageProgressNotifierLiveTextTest#aLiveTextTurnStreamsSanitizedPrefixesThenFinalizes
   (child of a 2+ decomposition, analysis
   docs/plan/m1/tick-analysis/streaming-translation-switch.md). Probe:
   grep -n 'void publish\|void complete\|void fail' infochat-messaging-adapter/src/main/java/app/zcat/infochat/messaging/ProgressNotifier.java
@@ -89,11 +89,26 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-17
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS PASS, SECURITY FAIL, TEST-ADEQUACY FAIL, MAINTAINABILITY WARN, SCOPE PASS"
+    diff_stats: "38 files, +1041/-49"
+    rework_items: 2
+    verdict_file: .scratch/tick-review-M1-849-r1.txt
+  - round: 2
+    date: 2026-08-17
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "fix diff 5 files, +102/-19 (full tree vs merge-base 38 files, +1125/-50)"
+    rework_items: 0
+    rework_dispositions: "round-1 item 1 (gates on sanitizer output) SATISFIED; round-1 item 2 (stream-fed aggregation test) SATISFIED"
+    verdict_file: .scratch/tick-review-M1-849-r2.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check: "2026-08-17 start pass — tick-lint 0 findings/0 BLOCKERs (after copying the gitignored analysis doc into the worktree, the M1-848/M1-795 worktree convention). Citations spot-checked: ProgressNotifier publish/complete/fail only (:57-90, exact), SimpleXAdapter CAPABILITIES :87-97 (11 members, no live-text member — correct), SimpleXMessageCodec encodeUpdate/encodeFinalize :148-166 + shared encodeEdit :168 (ticket said :145-173 — holds), OutboundDelivery.java:271-290 breakLinkAdjacency per update/finalize (exact), InboundRouter dispatchChatSelfDelivering :1355+ / null-reply stopped terminal :1378-1385 / runPostDeliveryCommit :1409+ (ticket's :1365-1373 and :1401-1423 hold), StageProgressNotifier.publishStageText :132 (exact), CapabilityFlags.java:25 amendment rule (exact), messaging.md supportsLiveText :186-190 + live-text publisher mode :282-315 (eligibility/cadence/terminal/collapse exactly as ticket states), security.md Streamed surfaces :933-965 (full-prefix, refusal hold-back, tool-loop revert, per-turn audit aggregation + abort-on-audit-failure, accepted residuals). Line drift from M1-848's landed ChatAgent diff: runToolLoop :783-843 → :833-896 (still single-string, claim unchanged) — Root cause ref updated. Draft fix, no scope change (the M1-846 P5 precedent): P20 was carried in acceptance item 10 + out_of_scope but missing from the Pitfalls enumeration — added to the enumeration and the Pitfall→mitigation map. blocked_by tests traced: M1-846 adds none; M1-847's 8 llm-adapter test classes pin the SPI contract only (delta chunks + assembled LlmResponse + LlmRouter.streamingSupportedFor gate — the exact consumption shape planned here; module untouched); M1-848's ChatAgentReplyModeTest (10 tests) pins the mode machinery, which streaming does not reroute — the enable key defaults off so the batch path is untouched and the tests run unchanged; M1-853's tests live in llm-adapter (untouched) and its out_of_scope explicitly defers consumer wiring here. The ledger GAP row for infochat.chat.live-text (documented-config-key-exemptions.txt:83) already names this ticket for its removal — acceptance rides step 5. Census N/A (feature integration, not a defect class). replaces empty; no worktree holds a superseded streaming implementation (grep liveText over main src returns nothing). No blocking question: the amendment names the key, the eligibility rule, the cadence, the terminal rule, and the collapse semantics."
 escalation_reason:
 ---
 
@@ -117,14 +132,14 @@ fallback_send). Shared analysis: `analysis_ref:`.
 Three absences meet here: the notifier SPI has no live-text publisher
 (ProgressNotifier.java:51-90), the adapter capability set has no live-text
 member (messaging.md:154-224), and ChatAgent's tool loop never exposes
-partial text (runToolLoop returns one string, ChatAgent.java:783-843). The
+partial text (runToolLoop returns one string, ChatAgent.java:833-896). The
 wiring is the integration of three finished pieces per the amendment's
 rules — no new policy is decided in this ticket.
 
 ## Pitfalls
 
 Numbered per the analysis document; this ticket carries P1, P2, P3, P4,
-P5, P10, P11, P13, P15.
+P5, P10, P11, P13, P15, P20.
 
 - P1: full-prefix re-sanitize per transmitted update, never a delta — the
   passes see the whole generated prefix, so pass ordering and deletion-join
@@ -147,6 +162,9 @@ P5, P10, P11, P13, P15.
 - P15: the collapse cases pin TODAY's stage-label bytes as the end state
   for ineligible scopes — nothing here retargets the M1-607/M1-794/M1-796
   pins; they run unchanged.
+- P20: the live probe runs against whatever simplex-chat CLI the
+  M1-819..843 batch leaves bundled and records the version; it never
+  asserts one.
 
 ## Approach
 
@@ -184,7 +202,8 @@ P5, P10, P11, P13, P15.
   aggregation + item 6; P5→step 4's unchanged finalize + item 1's
   byte-identity assertion; P10→step 3's reuse of the existing machinery +
   item 10's observed cadence; P11→step 4 + item 7; P13→step 5 + the build
-  gates; P15→item 3's collapse pins.
+  gates; P15→item 3's collapse pins; P20→item 10's version-recording
+  probe + the out_of_scope CLI-assertion ban.
 
 ## Definition of done
 
@@ -216,7 +235,31 @@ mvn verify is green.
 - P13 → DocumentedConfigKeyParityTest and the D43 completeness gate run in
   `mvn verify`.
 - P15 → item 3's collapse cases + the unchanged pre-existing suite.
+- P20 → acceptance item 10's probe record — the CLI version it ran
+  against is recorded, never asserted.
 - acceptance item 11 → `mvn verify` from repo root.
+
+## Live probe record
+
+- Host/test instance: prepared synthetic SimpleX `ProbeV7` DM, matching
+  collector/provider images built from this worktree, schema v81, and the
+  configured `nomic-embed-text` Ollama service available on the private
+  compose network. Production was left running and untouched; the test
+  PostgreSQL host port was unpublished to avoid its 5432 binding.
+- Bundled CLI: `SimpleX Chat v7.0.0.11` (recorded, not asserted).
+- Probe command:
+  `/home/infochat/infochat-test/prod/runtime/simplex-clients/bin/simplex-chat
+  -d /home/infochat/infochat-test/prod/runtime/test-clients/probe-v7/simplex_v1
+  -y --execute-log messages -t 120 -e '@Admin-Reno In two concise
+  sentences, explain why a streamed reply should be finalized before the
+  live preview is turned off.'`
+- Observed: the real-relay DM first delivered the stage text `Working on
+  it...`; the client then received an edited live-message row containing the
+  full sanitized reply. The final row was `item_edited=1` with `item_live`
+  unset (live off), and the client retained the complete final text. The
+  first turn's final client row was created at `23:38:38.039` after the
+  request at `23:38:37.464`, consistent with the existing coalescing floor
+  rather than per-token sends.
 
 ## Out-of-scope
 
@@ -232,3 +275,32 @@ do not widen the amendment by implementation.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-849-streaming-translation-switch-6.md
 ```
+
+## Round 1 rework
+
+1. FINDING 1: In ChatLiveTextStreamer.LiveTextReveal.onChunk
+   (ChatLiveTextStreamer.java:121-163), evaluate the refusal-window and
+   tool-opener gates on the sanitizer's OUTPUT (sanitizeWithMatches first,
+   decide on pass.rewritten()) so the gated bytes and the published bytes
+   agree; evaluated via the two StageProgressNotifierLiveTextTest cases
+   named in FINDING 1's EVALUATED-AS (refusal-assembled and
+   opener-assembled), each RED before and GREEN after, plus `mvn verify`.
+2. FINDING 2: Add the stream-fed aggregation test named in FINDING 2's
+   EVALUATED-AS (recording AuditLogWriter rig, two-iteration
+   streamingSequences with a transient-only /grant-admin, asserting exactly
+   one row {"match_count":1,"match_kind":"/grant-admin"} and the clean final
+   reply), verified RED under the mergeMaxima-removed mutation and GREEN on
+   the fixed diff, plus `mvn verify`.
+
+## Review observations
+
+- Round 2, RECOMMENDED-NEW-TICKET (comment-only, TOUCHED-BY-THIS-DIFF: yes,
+  no DECIDE-BEFORE): the comment above the tool-opener latch in
+  LiveTextReveal.onChunk says the trailing partial opener "is covered by
+  truncating at the earliest index" (ChatLiveTextStreamer.java:133-138),
+  but no truncation exists on the live path — the code holds the whole
+  iteration at the stage label (the stronger choice; only the batch
+  stripToolCalls truncates at the opener). A reader tracing the comment
+  looks for a substring publish that never happens; the comment should name
+  the label hold (and may cite the batch-side strip for the finalize).
+  Ticket-or-fold-in is the user's call; carry into the commit body.

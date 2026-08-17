@@ -50,7 +50,8 @@ class InboundRouterAcquisitionCountTest {
 
         InboundRouter router = new InboundRouter() {
             @Override
-            String dispatchChat(UUID actorId, String scopeKind, UUID scopeId, String normalized) {
+            String dispatchChat(UUID actorId, String scopeKind, UUID scopeId, String normalized,
+                                app.zcat.infochat.messaging.ScopeRef scope) {
                 openAtLlmBoundary.set(counting.openConnections());
                 llmScopeId.set(scopeId);
                 return "chat-reply";

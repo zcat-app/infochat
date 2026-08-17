@@ -283,6 +283,44 @@ public class LlmOutputSanitizer {
         return result.rewritten();
     }
 
+    /** Distinct streamed-audit failure routed to the live turn's failure terminal. */
+    public static final class StreamedAuditWriteFailedException extends IllegalStateException {
+        StreamedAuditWriteFailedException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
+
+    /** Terminal full-chain sanitize with one per-turn aggregated audit write. */
+    public String sanitizeStreamed(String llmOutput, Map<String, Integer> transientMatchMaxima) {
+        LlmOutputSanitizerCore.FullSanitizeResult result =
+                LlmOutputSanitizerCore.sanitizeWithMatches(llmOutput);
+        LinkedHashMap<String, Integer> turnCounts =
+                aggregateMatchCounts(result.matches());
+        for (Map.Entry<String, Integer> maxima : transientMatchMaxima.entrySet()) {
+            // Final-text counts win: a surviving token is rowed exactly as
+            // the batch path rows it, never update-multiplied (the per-turn
+            // aggregation rule).
+            turnCounts.putIfAbsent(maxima.getKey(), maxima.getValue());
+        }
+        List<String> turnMatches = new ArrayList<>();
+        turnCounts.forEach((token, count) -> {
+            for (int i = 0; i < count; i++) {
+                turnMatches.add(token);
+            }
+        });
+        for (Map.Entry<String, Integer> aggregated : turnCounts.entrySet()) {
+            LOG.warnf("LLM_OUTPUT_SANITIZED token=%s count=%d",
+                    aggregated.getKey(), aggregated.getValue());
+        }
+        try {
+            emitAuditRows(turnMatches);
+        } catch (IllegalStateException e) {
+            throw new StreamedAuditWriteFailedException(
+                    "LlmOutputSanitizer: failed to durably audit-log streamed-turn sanitizer hits", e);
+        }
+        return result.rewritten();
+    }
+
     /**
      * Write one {@code audit_log} row per distinct matched token via
      * {@link AuditLogWriter}, all in a single transaction, the row's

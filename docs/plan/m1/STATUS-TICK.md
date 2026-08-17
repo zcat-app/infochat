@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 10 |
+| pending | 9 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 82 |
+| done | 83 |
 | deferred | 0 |
 | abandoned | 2 |
 | **total** | **94** |
@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-849 — Stream sanitized chat replies over SimpleX live messages (complexity: high, risk: high)
 - M1-868 — Store losing tag proposals as a Tier-2 search array (complexity: low, risk: low)
 - M1-872 — Native tool-call transport behind detected capability (complexity: high, risk: medium)
 - M1-876 — Rank region leaves above world within the News top (complexity: low, risk: low)
@@ -74,11 +73,11 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-871 | Single-source tool catalog for prompts and transports | 2026-08-17 | round 1 APPROVE-WITH-FIXES |
 | M1-865 | Tag tree schema and deterministic leaf resolution | 2026-08-17 | round 1 APPROVE-WITH-FIXES |
 | M1-864 | Measure the tag-tree leaf vocabulary on the local model | 2026-08-17 | round 2 APPROVE-WITH-FIXES |
+| M1-849 | Stream sanitized chat replies over SimpleX live messages | 2026-08-17 | round 2 APPROVE |
 | M1-870 | Strip brace-less native tool-call markers from final replies | 2026-08-16 | round 1 APPROVE |
 | M1-863 | Run the prefix A/B; record the adopt-or-drop number | 2026-08-16 | round 1 APPROVE-WITH-FIXES |
 | M1-862 | A/B rig: raw vs prefixed vectors on the deployment embedder | 2026-08-16 | round 1 APPROVE |
 | M1-859 | Harness: real vector retrieval for the tool-loop campaign | 2026-08-16 | round 2 APPROVE |
-| M1-858 | Re-measure the tool loop with the levers landed | 2026-08-16 | round 3 APPROVE |
 
 ---
 
@@ -174,16 +173,16 @@ M1-841 (done)
 M1-844 (done)
   └── M1-845 (done)
         ├── M1-846 (done)
-        │     └── M1-849 (pending) ← runnable
+        │     └── M1-849 (done)
         └── M1-848 (done)
-              └── M1-849 (pending) [see above]
+              └── M1-849 (done) [see above]
 M1-847 (done)
-  └── M1-849 (pending) [see above]
+  └── M1-849 (done) [see above]
 M1-850 (done)
   └── M1-851 (done)
 M1-852 (done)
   └── M1-853 (done)
-        └── M1-849 (pending) [see above]
+        └── M1-849 (done) [see above]
 M1-854 (done)
 M1-855 (done)
 M1-856 (done)

@@ -1032,4 +1032,26 @@ public final class LlmOutputSanitizerCore {
         return counts;
     }
 
+    /** Carrier for {@link #sanitizeWithMatches(String)}. */
+    public record FullSanitizeResult(String rewritten, List<String> matches) {}
+
+    /** Pure full-chain transform for live prefixes; audit emission stays terminal. */
+    public static FullSanitizeResult sanitizeWithMatches(String input) {
+        if (input == null || input.isEmpty()) {
+            return new FullSanitizeResult("", List.of());
+        }
+        String afterMarkdown = applyMarkdownLinkStrip(input);
+        String afterDowngrade = applyPlainTextDowngrade(afterMarkdown);
+        ConfigKeyStripResult afterConfigKeys =
+                applyConfigKeyStripWithMatches(afterDowngrade);
+        ScaffoldingStripResult afterScaffolding =
+                applyScaffoldingMarkerStripWithMatches(afterConfigKeys.rewritten());
+        ClosedListStripResult result =
+                applyClosedListStripWithMatches(afterScaffolding.rewritten());
+        List<String> matches = new ArrayList<>(afterConfigKeys.matches());
+        matches.addAll(afterScaffolding.matches());
+        matches.addAll(result.matches());
+        return new FullSanitizeResult(result.rewritten(), matches);
+    }
+
 }

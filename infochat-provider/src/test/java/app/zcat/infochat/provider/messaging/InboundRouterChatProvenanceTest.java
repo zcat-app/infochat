@@ -82,13 +82,14 @@ class InboundRouterChatProvenanceTest {
 
         StubChatAgent(ChatTurnResult result) {
             super(null, null, null, null, null, null, null, null, null, null,
-                    null, null, null, null, null, null);
+                    null, null, null, null, null, null, null);
             this.result = result;
         }
 
         @Override
         public ChatTurnResult handleTurn(UUID userId, String scopeKind,
-                                         UUID scopeId, String userMessage) {
+                                         UUID scopeId, String userMessage,
+                                         app.zcat.infochat.messaging.ScopeRef scope) {
             return result;
         }
     }

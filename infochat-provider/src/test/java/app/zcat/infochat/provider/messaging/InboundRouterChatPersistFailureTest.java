@@ -47,7 +47,8 @@ class InboundRouterChatPersistFailureTest {
 
         InboundRouter router = new InboundRouter() {
             @Override
-            String dispatchChat(UUID actorId, String scopeKind, UUID scopeId, String normalized) {
+            String dispatchChat(UUID actorId, String scopeKind, UUID scopeId, String normalized,
+                                app.zcat.infochat.messaging.ScopeRef scope) {
                 // Production shape: stash the deferred commit, return the reply.
                 // Here the commit fails AFTER the reply will have been delivered.
                 inboundContext.setPendingChatCommit(() -> {

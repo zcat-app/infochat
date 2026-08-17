@@ -232,7 +232,7 @@ class ChatAgentRefusalInterceptionTest {
                       AutoCompressTrigger autoCompressTrigger) {
             super(tracker, builder, dispatcher, repo, router,
                     sanitizer, pipeline, bundle, autoCompressTrigger, null, null,
-                    inboundContextEn(), closedBreakerRegistry(), null, null, null);
+                    inboundContextEn(), closedBreakerRegistry(), null, null, null, null);
         }
 
         @Override

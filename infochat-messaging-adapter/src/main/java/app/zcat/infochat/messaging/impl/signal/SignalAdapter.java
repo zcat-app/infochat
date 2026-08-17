@@ -93,6 +93,7 @@ public final class SignalAdapter implements MessagingAdapter {
             /* maxInboundMessageBytes     */ SignalMessageCodec.MAX_INBOUND_TEXT_BYTES,
             /* maxSendsPerSecond          */ 5,
             /* supportsMessageEdit        */ true,
+            /* supportsLiveText           */ false,
             /* supportsTypingIndicator    */ true,
             /* minEditInterval            */ Duration.ofMillis(600),
             /* supportsOutboundAttachments */ true,

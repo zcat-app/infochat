@@ -358,7 +358,7 @@ class ChatAgentProvenanceTest {
                       InboundContext context, LlmCircuitBreakerRegistry breakerRegistry) {
             super(tracker, builder, dispatcher, repo, router,
                     sanitizer, pipeline, bundle, autoCompressTrigger, null, null,
-                    context, breakerRegistry, null, null, null);
+                    context, breakerRegistry, null, null, null, null);
         }
 
         @Override
