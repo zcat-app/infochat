@@ -137,9 +137,9 @@ import java.util.regex.Pattern;
  *
  * <h2>Persistence cursor</h2>
  *
- * <p>The {@code UPDATE post SET tags=..., tagger_done=true,
- * tagger_fallback=...} statement writes the tag array and the
- * per-stage flags atomically per Invariant 5
+ * <p>The {@code UPDATE post SET tags=..., tag_candidates=...,
+ * tagger_done=true, tagger_fallback=...} statement writes the tag array,
+ * the Tier-2 candidate array and the per-stage flags atomically per Invariant 5
  * ({@code docs/spec/schema.md} §Invariants — "the per-stage flags
  * are the durable cursor"). Splitting the write into two UPDATEs
  * would create a crash window where {@code tagger_done=true} but
@@ -428,7 +428,7 @@ public class TaggerWorker {
         AttemptResult first = tryOnce(provider, row, primaryPromptTemplate, /* attempt */ 1);
 
         if (isAnswered(first.kind())) {
-            return llmOutcome(first.validTags());
+            return llmOutcome(first.validTags(), row.id());
         }
 
         // Decide the retry shape from the first-attempt failure mode.
@@ -461,7 +461,7 @@ public class TaggerWorker {
         }
 
         if (isAnswered(second.kind())) {
-            return llmOutcome(second.validTags());
+            return llmOutcome(second.validTags(), row.id());
         }
 
         // Second failure on any path → bootstrap-fallback audit log +
@@ -478,11 +478,23 @@ public class TaggerWorker {
         return new TaggerOutcome(Outcome.BOOTSTRAP, row.bootstrapTags(), List.of());
     }
 
-    /** LLM terminal: resolve the validated, capped set to ONE stored leaf (identity passthrough pre-seed, M1-865 P6); losers ride the record for M1-868 — dropped until then. The bootstrap path never resolves. */
-    private TaggerOutcome llmOutcome(List<String> validTags) {
+    /** LLM terminal: resolve the validated, capped set to ONE stored leaf (identity passthrough pre-seed, M1-865 P6); the losing leaves become the Tier-2 candidate array (M1-868). The bootstrap path never resolves. */
+    private TaggerOutcome llmOutcome(List<String> validTags, UUID postId) {
         TagTreeResolver.Resolution resolution =
             tagTreeResolver.resolve(validTags, tagVocabulary.tree());
-        return new TaggerOutcome(Outcome.LLM, resolution.stored(), resolution.losers());
+        return new TaggerOutcome(Outcome.LLM, resolution.stored(),
+            cappedCandidates(postId, resolution.losers()));
+    }
+
+    /** Tier-2 array bound (M1-868 P15): first {@link #MAX_TAGS_PER_POST} losers in emission order, overflow counted and logged, never silent. Structural defense-in-depth — validate() already caps below it; package-private for the failure-mode test. */
+    List<String> cappedCandidates(UUID postId, List<String> losers) {
+        if (losers.size() <= MAX_TAGS_PER_POST) {
+            return losers;
+        }
+        List<String> kept = List.copyOf(losers.subList(0, MAX_TAGS_PER_POST));
+        LOG.info("TaggerWorker: post_id={} tagger_candidates kept={} dropped={}",
+            postId, kept.size(), losers.size() - MAX_TAGS_PER_POST);
+        return kept;
     }
 
     /**
@@ -691,22 +703,26 @@ public class TaggerWorker {
     }
 
     /**
-     * Atomic write of tags + per-stage cursor flags. Per Invariant 5
-     * this single statement is the durable cursor for the Tagger
-     * boundary; splitting it would create a crash window.
+     * Atomic write of tags + Tier-2 candidates + per-stage cursor flags.
+     * Per Invariant 5 this single statement is the durable cursor for the
+     * Tagger boundary; splitting it would create a crash window.
      */
     private void persistCursor(PostRow row, TaggerOutcome outcome) {
         boolean fallback = outcome.outcome() == Outcome.BOOTSTRAP;
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                 "UPDATE post SET tags = ?, tagger_done = TRUE, tagger_fallback = ? "
+                 "UPDATE post SET tags = ?, tag_candidates = ?, tagger_done = TRUE,"
+                     + " tagger_fallback = ? "
                      + "WHERE id = ? AND fetched_at = ?")) {
             Array tagsArray = conn.createArrayOf(
                 "text", outcome.tags().toArray(new String[0]));
+            Array candidatesArray = conn.createArrayOf(
+                "text", outcome.losers().toArray(new String[0]));
             ps.setArray(1, tagsArray);
-            ps.setBoolean(2, fallback);
-            ps.setObject(3, row.id());
-            ps.setTimestamp(4, Timestamp.from(row.fetchedAt()));
+            ps.setArray(2, candidatesArray);
+            ps.setBoolean(3, fallback);
+            ps.setObject(4, row.id());
+            ps.setTimestamp(5, Timestamp.from(row.fetchedAt()));
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException(

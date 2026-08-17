@@ -1,16 +1,15 @@
 ---
 id: M1-868
 title: "Store losing tag proposals as a Tier-2 search array"
-status: pending
+status: done
 created: 2026-08-16
-last_updated: 2026-08-16
+last_updated: 2026-08-17
 flow: tick
 reproduction: >-
-  to-be-written TagCandidatesCaptureTest.resolutionLosersLandInTagCandidates
-  (child of a 2+ decomposition — needs M1-865's resolution, which returns
-  the losing leaves to the caller; `start` converts the marker per
-  workflow §0). Intended wrong behavior it states: M1-865's resolver
-  computes the losing validated leaves (the showcase measured them
+  TagCandidatesCaptureTest.resolutionLosersLandInTagCandidates (child of a
+  2+ decomposition — needs M1-865's resolution, which returns the losing
+  leaves to the caller). Intended wrong behavior it states: M1-865's
+  resolver computes the losing validated leaves (the showcase measured them
   constant: football+europe, esports+gaming, ai+cybersecurity+world —
   .bench/tag-tree-showcase/calls.jsonl) and then DROPS them — no column
   exists to hold them (post's columns verified at V7/V66: tags, no
@@ -82,11 +81,34 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-17
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY WARN, SCOPE PASS"
+    diff_stats: "7 files changed, 434 insertions(+), 31 deletions(-)"
+    verdict_file: .scratch/tick-review-M1-868-r1.txt
+    note: >-
+      No findings; all candidate concerns falsified with cited guards
+      (see verdict FALSIFIED-AND-DROPPED). Commit-body obligations for
+      /tick commit: (1) engineering-rules §8 — name the two forced
+      one-line guard registrations in pre-existing test surfaces
+      (ScanWindowFixtureGuardTest.java:104 and
+      integration-test-naming-baseline.txt, both the guards' designed
+      intake for a new test class) plus the ScanWindow census
+      justification (seeded 2026-05-20 instant feeds only a direct
+      processOne(PostRow) call binding id/fetched_at as exact
+      parameters; no now-derived scan gate consumes it — the
+      TaggerWorkerTest/MiscShareMonitorTest pattern); (2) Renames:
+      trailer — TagCandidatesCaptureTest.java:64 field relayLogger →
+      taggerLogger (holds TaggerWorker's logger; no relay touched).
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-17
+  verdict: PASS
+  warnings: []
 escalation_reason:
 ---
 

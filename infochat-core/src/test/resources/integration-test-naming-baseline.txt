@@ -29,6 +29,7 @@ app.zcat.infochat.collector.eval.reeval.ReEvaluationJobCooldownTest
 app.zcat.infochat.collector.eval.reeval.ReEvaluationJobTest
 app.zcat.infochat.collector.eval.reeval.ReEvaluationJobWindowTest
 app.zcat.infochat.collector.eval.tagger.MiscShareMonitorTest
+app.zcat.infochat.collector.eval.tagger.TagCandidatesCaptureTest
 app.zcat.infochat.collector.eval.tagger.TagTreeResolutionTest
 app.zcat.infochat.collector.eval.tagger.TaggerWorkerBackoffTest
 app.zcat.infochat.collector.eval.tagger.TaggerWorkerTest

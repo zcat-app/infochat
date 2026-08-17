@@ -101,6 +101,7 @@ class ScanWindowFixtureGuardTest {
             "app.zcat.infochat.collector.eval.stage2.Stage2VerdictPersistenceIT",
             "app.zcat.infochat.collector.eval.stage2.Stage2WorkerIT",
             "app.zcat.infochat.collector.eval.tagger.MiscShareMonitorTest",
+            "app.zcat.infochat.collector.eval.tagger.TagCandidatesCaptureTest",
             "app.zcat.infochat.collector.eval.tagger.TaggerWorkerBackoffTest",
             "app.zcat.infochat.collector.eval.tagger.TaggerWorkerTest",
             "app.zcat.infochat.collector.fetch.FetchSchedulerPersistFailureIT",
