@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 9 |
+| pending | 10 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 82 |
 | deferred | 0 |
 | abandoned | 2 |
-| **total** | **93** |
+| **total** | **94** |
 
 ---
 
@@ -30,6 +30,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-872 — Native tool-call transport behind detected capability (complexity: high, risk: medium)
 - M1-876 — Rank region leaves above world within the News top (complexity: low, risk: low)
 - M1-878 — Coordinate the fallback seed with M1-866 and M1-869 (complexity: low, risk: low)
+- M1-879 — Strip deletions must not join privileged command tokens (complexity: low, risk: medium)
 
 ---
 
@@ -217,4 +218,5 @@ M1-875 (done)
 M1-876 (pending) ← runnable
   └── M1-877 (pending) [see above]
 M1-878 (pending) ← runnable
+M1-879 (pending) ← runnable
 ```
