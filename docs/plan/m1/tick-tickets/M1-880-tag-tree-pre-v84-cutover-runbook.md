@@ -1,24 +1,30 @@
 ---
 id: M1-880
 title: "Tag-tree cutover runbook: cleanup, migrate, verify for every pre-V84 deployment"
-status: pending
+status: done
 created: 2026-08-17
-last_updated: 2026-08-17
+last_updated: 2026-08-18
 flow: tick
 reproduction: >-
-  to-be-written TagTreeCutoverCheckIT.leftoverOccurrencesFailThePreflight —
-  `start` converts the marker: write prod/scripts/tag-tree-cutover.sh and
-  the IT, run the IT RED (absent script — "no such script", the M1-818
-  absent-artifact shape), then the live preflight against the target
-  deployment's DB (every deployment with a pre-V84 DB needs its own
-  pass). The wrong behavior it states: the operator cutover surface does
-  not exist — nothing checks a pre-V84 deployment DB for the ruled
-  nostr/video leftovers across tag / post.tags / source.bootstrap_tags /
-  scope_tag, nothing removes them, and nothing verifies the
-  post-migration state, so the next Collector restart onto the V84
-  migration set fails loudly (E4002 crash-loop under restart:
-  unless-stopped) or trips the BootstrapLoader node gate
+  TagTreeCutoverCheckIT.leftoverOccurrencesFailThePreflight (written at
+  start; run RED before any script existed — all four cases failed on
+  "the cutover script must exist", the M1-818 absent-artifact shape, log
+  .scratch/tick-test-M1-880-r1-red.log). The wrong behavior it states:
+  the operator cutover surface does not exist — nothing checks a
+  pre-V84 deployment DB for the ruled nostr/video leftovers across tag /
+  post.tags / source.bootstrap_tags / scope_tag, nothing removes them,
+  and nothing verifies the post-migration state, so the next Collector
+  restart onto the V84 migration set fails loudly (E4002 crash-loop
+  under restart: unless-stopped) or trips the BootstrapLoader node gate
   (BootstrapLoader.java:304-339) against the pre-V84 tag table.
+  Live preflight leg (P10), recorded at start against the first real
+  target deployment — this box's prod stack (compose project
+  infochat-prod, DB at migration head V79 = pre-V84, deployed runtime
+  file predates M1-866): preflight exit 1, findings: `file: Video` x13
+  (the deployed bootstrap-sources.json), `post.tags: video`,
+  `source.bootstrap_tags: video`, `tag: video`; no nostr findings. The
+  runbook's cleanup/migrate legs are NOT run against prod here — they
+  are the operator's stop-first pass, not an implement-time act.
 analysis_ref: self
 blocked_by:
   - M1-866
@@ -117,11 +123,37 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-18
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS FAIL, SECURITY PASS, TEST-ADEQUACY FAIL, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "5 files changed, 780 insertions(+), 20 deletions(-)"
+    rework_items: 2
+    verdict_file: .scratch/tick-review-M1-880-r1.txt
+  - round: 2
+    date: 2026-08-18
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "5 files changed, 819 insertions(+), 23 deletions(-)"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-880-r2.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  start: >-
+    Lint clean (0/0). Citations spot-checked against the checkout: all hold
+    (backup.sh's read_dotenv_value sits at :82-94 inside the cited :76-86
+    comment region). Census grep re-runs clean. analysis_ref: self — no
+    cross-read. No replaces:. blocked_by M1-866 done; its seam tests
+    (TagTreeMigrationIT et al.) unmodified by this diff. Two notes: (a) the
+    "§7.14 scenario table" is §7.15 Disaster scenarios — the E4002-leftover
+    row lands there, pointing at the new §7.14 subsection (same intent);
+    (b) P10 — this checkout has no deployment DB access (memory-local: zero
+    containers, no runtime file), so the live preflight RED leg cannot run
+    here; the Testcontainers IT is the reproduction and the runbook keeps
+    preflight-as-inventory for the first real target deployment.
 escalation_reason:
 ---
 
@@ -506,3 +538,20 @@ bootstrap-sources.json file — the file check, not a DB surface.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-880-tag-tree-pre-v84-cutover-runbook.md
 ```
+
+## Round 1 rework
+
+Verdict file: `.scratch/tick-review-M1-880-r1.txt` (REWORK, 2 items, 0 critical/high).
+
+1. Finding 1: add the upgrade.sh decline-restart sequencing sentence to the
+   new §7.14 subsection in docs/design/07-deployment.md (intro at :1677 or a
+   step 0 before :1679), citing upgrade.sh:301 — verified by
+   sed -n '/Cut over the tag-tree migration/,/^\*\*Sweep note/p' \
+   docs/design/07-deployment.md | grep -c 'upgrade\.sh' returning ≥ 1.
+2. Finding 2: state the psql-client prerequisite plus the exact CUTOVER_PSQL
+   container-exec wrapper in the runbook subsection (07-deployment.md:1677)
+   and in the script's usage text (tag-tree-cutover.sh:548-564), and fix the
+   no-jq comment's implied host-prerequisite claim — verified by
+   sed -n '/Cut over the tag-tree migration/,/^\*\*Sweep note/p' \
+   docs/design/07-deployment.md | grep -cE 'postgresql-client|CUTOVER_PSQL' \
+   returning ≥ 1 and the script's --help output showing the added guidance.

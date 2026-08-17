@@ -1672,12 +1672,41 @@ v1 does not support per-adapter hot restart — the activated `infochat.adapters
 
 See §7.8.5. Likely causes: a previous Provider crashed without releasing its advisory lock and Postgres has not yet reaped the backend session (rare; recovery is `SELECT pg_terminate_backend(pid)` against the holder PID printed in the rejection log), or the rolling deploy script raced itself.
 
+**"Cut over the tag-tree migration (one-time)."**
+
+The V84 tag-tree migration (M1-866) is loud by design: it seeds the v2 tree, maps the flat vocabulary by a deterministic zero-LLM lookup, and **raises E4002 on any stored `nostr`/`video` name** — deliberately unmapped platform/medium names whose disposal the product ruled on — in `tag`, `post.tags`, `source.bootstrap_tags`, or `scope_tag`. A plain restart of a pre-V84 deployment therefore fails: the failed migration rolls back and `restart: unless-stopped` crash-loops the Collector, or the BootstrapLoader node gate ([../spec/deployment.md](../spec/deployment.md) §Bootstrap behavior on startup) fails fast on the deployed runtime file's retired tag names. The cutover is a sequenced stop-first procedure, not a restart. The SAME sequence runs **once per pre-V84 deployment** — the prod instance, the live test instance, any restored clone or host-migration target — each with its own stop-first pass, none skipped. `prod/scripts/tag-tree-cutover.sh` is its executable core: `tag-tree-cutover.sh preflight` inventories the leftovers, `tag-tree-cutover.sh cleanup` removes exactly `{nostr, video}` from the four DB surfaces, `tag-tree-cutover.sh postflight` verifies the end state. The script reads the migration-owner password from `secrets.env` and passes it as `PGPASSWORD` environment only; it targets the compose-published loopback DB by default (`CUTOVER_PGHOST`/`CUTOVER_PGDB`/`CUTOVER_PGUSER`, or wholesale via `CUTOVER_PSQL`). The host needs a **psql client** on `PATH` (`postgresql-client`) — the one host prerequisite beyond Docker + Compose — or `CUTOVER_PSQL` pointed at a container-exec wrapper that runs psql inside the postgres container, e.g.:
+
+```sh
+#!/bin/sh
+exec docker compose exec -T postgres sh -c 'PGPASSWORD="$INFOCHAT_DB_PASSWORD" psql "$@"' sh "$@"
+```
+
+(run it from the repo root so compose resolves the shipped `docker-compose.yml`; the in-container psql takes the password from the container's own environment — never argv).
+
+**Arriving via a routine upgrade?** Run `upgrade.sh` with the step-5 restart confirm declined (`upgrade.sh:301`), then `apps.sh stop` and continue at step 1 — a confirmed restart boots the Collector onto the pre-cutover DB and crash-loops it with E4002, and the health-failure auto-rollback would mask the leftover state.
+
+1. **Stop the apps.** `apps.sh stop` — explicit stop, so `unless-stopped` cannot resurrect a half-migrated stack. Keep them stopped until both the DB and the runtime file are reconciled (a start in between crash-loops).
+2. **Back up.** `backup.sh` — Postgres stays up for the `pg_dump` (stop-first order, the M1-582 shape).
+3. **Preflight.** `tag-tree-cutover.sh preflight`. The FIRST run is the inventory: it exits 1 and lists every `nostr`/`video` occurrence per surface — the deployment's actual leftovers, not a guess. (Anything else unmapped stays untouched: cleanup targets exactly the ruled two; a stray coinage surfaces loudly at the migrate boot, see the E4002 recovery below.)
+4. **Review, then clean.** `tag-tree-cutover.sh cleanup --dry-run` prints the exact targets and changes nothing — review it. Then `tag-tree-cutover.sh cleanup` removes the scope_tag references first (FK order), then the tag rows, then the array elements, in one transaction; a second run changes 0 rows.
+5. **Reconcile the runtime file.** Bring the deployment's runtime `bootstrap-sources.json` (the compose mount at `/app/bootstrap-sources.json`) to tree names with Video/Nostr removed — hand-edit, or delete the file and re-run `5-bootstrap.sh` (the wizard never clobbers an existing runtime file, `5-bootstrap.sh:137-138`). Preflight must now print `preflight: clean`.
+6. **Migrate = start the Collector.** `apps.sh start` — only the Collector runs Flyway in production ([../spec/deployment.md](../spec/deployment.md) §Topology); it applies the migration set through V84 and the Provider waits on its healthcheck. Never hand-run V84's statements via psql: the schema change would land without a `flyway_schema_history` row and the next boot would re-apply it over existing objects.
+7. **Postflight.** `tag-tree-cutover.sh postflight` — GREEN on: history version 84 applied, 9 tops + 53 leaves, the 8 fallback-marked leaves, zero `nostr`/`video` anywhere, every `post.tags` / `source.bootstrap_tags` element naming a tag node, zero `scope_tag` orphans, and every runtime-file tag naming a node.
+8. **Smoke.** `8-verify.sh` per §7.7.2.
+
+**E4002 at the migrate boot = a leftover survived.** The message names it, and Flyway's transactional per-migration rollback leaves the DB at V83 — fix the named leftover, re-run `tag-tree-cutover.sh preflight` until clean, and restart. Never reach for a `pg_restore`: the DB was never damaged.
+
+**Loader-gate failure AFTER a successful V84 = the runtime file still carries non-node names.** The DB is already migrated; fix the file's tags[] to tree names and restart — the Collector resumes without re-running anything.
+
+**Sweep note.** The vocabulary change bumps the sweep fingerprint: previously `tags='{}'` posts are re-tagged within the existing caps (batch 4/tick, max 3 attempts) — bounded, one-time, expected. Mapped non-empty historical tags are NOT re-tagged.
+
 ---
 
 ## 7.15 Disaster scenarios
 
 | Scenario | Recovery |
 |---|---|
+| Collector crash-loops with `E4002` after upgrade | A pre-V84 `nostr`/`video` leftover survived the cutover (or no cutover was run): V84 raises E4002 naming it, the failed migration rolls back, the DB stays at V83, and `restart: unless-stopped` re-crashes. Run the cutover sequence (§7.14, "Cut over the tag-tree migration (one-time)"): fix the named leftover, re-run `tag-tree-cutover.sh preflight` until clean, restart — never a `pg_restore`. |
 | DB corruption | Restore from `pg_dump`. Loss of up-to-24h of new posts. Saved posts and admin state preserved. |
 | LLM outage > 1 day | Eval pipeline degrades; user-facing summaries become "raw post lists". Restore Ollama / switch provider; the eval queue auto-drains via outbox rehydrator. |
 | One adapter wedged, others fine | Per-adapter resilience ([06-messaging.md §6.7](06-messaging.md)): Provider stays ready, remaining adapters continue serving. Diagnose the failing adapter via §7.14 (SimpleX subprocess/connection check, `signal-cli` re-registration); cycle Provider once the underlying client is healthy again. |
