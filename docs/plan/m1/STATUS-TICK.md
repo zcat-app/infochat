@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-868 — Store losing tag proposals as a Tier-2 search array (complexity: low, risk: low)
 - M1-872 — Native tool-call transport behind detected capability (complexity: high, risk: medium)
 - M1-876 — Rank region leaves above world within the News top (complexity: low, risk: low)
-- M1-878 — Coordinate the fallback seed with M1-866 and M1-869 (complexity: low, risk: low)
 - M1-879 — Strip deletions must not join privileged command tokens (complexity: low, risk: medium)
 
 ---
@@ -68,6 +67,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-878 | Coordinate the fallback seed with M1-866 and M1-869 | 2026-08-17 | round 1 APPROVE |
 | M1-875 | Stop the strip from assembling tool-call markers | 2026-08-17 | round 2 APPROVE |
 | M1-873 | Record the tool-call transport architecture in spec | 2026-08-17 | round 1 APPROVE |
 | M1-871 | Single-source tool catalog for prompts and transports | 2026-08-17 | round 1 APPROVE-WITH-FIXES |
@@ -216,6 +216,6 @@ M1-873 (done)
 M1-875 (done)
 M1-876 (pending) ← runnable
   └── M1-877 (pending) [see above]
-M1-878 (pending) ← runnable
+M1-878 (done)
 M1-879 (pending) ← runnable
 ```

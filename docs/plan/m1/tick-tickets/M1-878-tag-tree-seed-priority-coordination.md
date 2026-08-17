@@ -1,7 +1,7 @@
 ---
 id: M1-878
 title: "Coordinate the fallback seed with M1-866 and M1-869"
-status: pending
+status: done
 created: 2026-08-17
 last_updated: 2026-08-17
 flow: tick
@@ -80,7 +80,14 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-17
+    verdict: APPROVE
+    checks: {SPEC-TRUTHNESS: PASS, SECURITY: PASS, TEST-ADEQUACY: NOT-APPLICABLE, MAINTAINABILITY: PASS, SCOPE: PASS}
+    diff_stats: "4 files, +11/-10 (M1-866 +5/-2 fallback column + world marking + SELECT + probe scoping, M1-869 +1/-1 sub-order wording flag, STATUS-TICK regen, M1-878 status flip)"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-878-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -184,3 +191,13 @@ ticket's diff.
 ## Census
 
 Not class-scoped: two pending ticket files, four acceptance edits.
+
+## Merge note (2026-08-17)
+
+Post-approval, main advanced one commit (cbcd1114, board-only regen after
+M1-879's filing). The branch was rebased onto it; the conflict set was
+exactly the STATUS-TICK.md board regen (the expected pseudo-conflict), and
+`git diff <r1-review-tree> HEAD --name-only -- ':(exclude)docs/plan'` is
+empty — the build input is byte-identical to the r1-verified tree. The
+post-rebase full re-verify was SKIPPED — MERGE-VERIFY-SKIP, driver-directed
+(M1-873 precedent; the same board-only conflict set).
