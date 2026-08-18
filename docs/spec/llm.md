@@ -514,8 +514,11 @@ required field) is treated identically to an unparseable reply at every
 stage.
 
 - Security Stage 2 — verdict vs. infra split (see `security.md`).
-- Tagger — bootstrap tags fallback; schema-violating output is treated as
-  unparseable (retry once, then fall back). **Partial-valid handling.**
+- Tagger — bootstrap tags fallback; source admission and bootstrap loading
+  accept only existing leaf tag-tree nodes for `source.bootstrap_tags`. Top
+  nodes are rejected before writing, so the fallback can persist leaves only;
+  schema-violating output is treated as unparseable (retry once, then fall
+  back). **Partial-valid handling.**
   When the LLM emits a list of tags and only some entries pass the
   controlled-vocabulary validation (post-normalization per
   `commands.md` §Surface conventions: NFC + lower-case + character

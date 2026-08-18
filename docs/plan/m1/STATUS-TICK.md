@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 94 |
+| done | 95 |
 | deferred | 0 |
 | abandoned | 3 |
 | **total** | **99** |
@@ -26,7 +26,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-877 — Re-measure the news leg on resolved stored tags (complexity: medium, risk: low)
-- M1-884 — Reconcile tag-tree source and unfollow rules (complexity: low, risk: medium)
 
 ---
 
@@ -62,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-884 | Reconcile tag-tree source and unfollow rules | 2026-08-18 | round 1 APPROVE |
 | M1-883 | Exclude a top subtree when unfollowing from ALL | 2026-08-18 | round 1 APPROVE-WITH-FIXES |
 | M1-882 | Reject top nodes as source bootstrap tags | 2026-08-18 | round 2 APPROVE |
 | M1-881 | Preserve literal elisions at refusal intercept | 2026-08-18 | round 1 APPROVE-WITH-FIXES |
@@ -71,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-878 | Coordinate the fallback seed with M1-866 and M1-869 | 2026-08-17 | round 1 APPROVE |
 | M1-876 | Rank region leaves above world within the News top | 2026-08-17 | round 1 APPROVE |
 | M1-875 | Stop the strip from assembling tool-call markers | 2026-08-17 | round 2 APPROVE |
-| M1-873 | Record the tool-call transport architecture in spec | 2026-08-17 | round 1 APPROVE |
 
 ---
 
@@ -219,6 +218,6 @@ M1-879 (done)
 M1-881 (done)
 M1-882 (done)
   ├── M1-883 (done)
-  │     └── M1-884 (pending) ← runnable
-  └── M1-884 (pending) [see above]
+  │     └── M1-884 (done)
+  └── M1-884 (done) [see above]
 ```

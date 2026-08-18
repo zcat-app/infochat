@@ -407,8 +407,13 @@ them to the marked region — doing so would red the build.
   admin view includes a count of pending groups
   (`approval_status = 'pending'`) so the admin has passive discovery
   of groups awaiting approval without running `/list-groups`.
-- `/get-tags` — controlled vocabulary, marking the scope's followed
-  tags. DM and group; any non-banned user (read-only, scope-filtered).
+- `/get-tags` — controlled vocabulary, marking the scope's followed tags
+  and labeling each entry in the effective language as either a
+  source-eligible leaf or a top node. A source-eligible leaf may be used as
+  a value of `source.bootstrap_tags`; a top node remains valid for
+  `/follow-tag`, `/unfollow-tag`, `/summary`, and search filters but is not a
+  valid source/bootstrap tag. DM and group; any non-banned user (read-only,
+  scope-filtered).
 - `/get-sources` — alias of `/list-sources` accepting the same
   flags **except `--all`** (and therefore not `--include-deleted`
   either, since that requires `--all`). DM and group; any
@@ -1111,10 +1116,13 @@ and makes the digest query depend on row presence.
     `scope_tag` rows for **the followed tag only**. Matches the user
     mental model: "I asked for X, only X."
   - `ALL` mode + `/unfollow-tag <tag>` → flip to `EXPLICIT` and seed
-    rows for **all the scope's world-source `bootstrap_tags`
-    minus the unfollowed tag** (D59: a fresh, subscription-less scope
-    seeds from the bootstrap corpus — never an empty set). Matches
-    the user mental model: "I want everything except X."
+    rows for all the scope's world-source `bootstrap_tags` whose value is
+    neither the requested tag nor a descendant of it. For a top node, this
+    excludes its complete descendant-leaf subtree; for a leaf, it excludes
+    that leaf. A top-node follow remains a read-time subtree wildcard; this
+    transition changes only the explicit seed (D59: a fresh,
+    subscription-less scope seeds from the bootstrap corpus — never an empty
+    set). Matches the user mental model: "I want everything except X."
   - `EXPLICIT` mode + `/follow-tag` / `/unfollow-tag` → add or
     remove the row in place. When the row count drops to 0, the
     mode flips back to `ALL`.
