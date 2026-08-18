@@ -97,6 +97,56 @@ class ChatAgentRefusalInterceptTest {
     }
 
     @Test
+    void literalLeadingElisionDoesNotTriggerRefusalIntercept() {
+        String literalElision = "…[REFUSAL: quoted]";
+        llmProvider.response = new LlmResponse(literalElision);
+
+        ChatAgent.ChatTurnResult result =
+                agent.handleTurn(USER_ID, SCOPE_KIND, SCOPE_ID, "what happened in the thread?");
+
+        assertEquals(literalElision, result.reply(),
+                "a literal leading elision is not a strip-generated separator");
+        assertNotNull(result.pendingCommit(),
+                "a literal leading elision carries the normal deferred commit");
+        result.pendingCommit().commit();
+        assertEquals(2, sessionPersistCalls,
+                "a literal leading elision persists the user + assistant rows as usual");
+    }
+
+    @Test
+    void literalLeadingElisionStaysNonRefusalWhenToolStripAlsoAddsAnElision() {
+        String literalElision = "…[REFUSAL: quoted]";
+        llmProvider.response = new LlmResponse(
+                literalElision + "\nTOOL_CALL: getPost {\"uid\": \"u-1\"}");
+
+        ChatAgent.ChatTurnResult result =
+                agent.handleTurn(USER_ID, SCOPE_KIND, SCOPE_ID, "what happened in the thread?");
+
+        assertEquals(ChatAgent.MAX_TOOL_ITERATIONS + 1, llmProvider.generateCalls,
+                "the balanced call reaches the post-cap terminal response");
+        assertEquals(literalElision + "\n…", result.reply(),
+                "only the strip-generated elision is omitted from the refusal comparison");
+        assertNotNull(result.pendingCommit(),
+                "the literal leading elision keeps the normal deferred commit");
+        result.pendingCommit().commit();
+        assertEquals(2, sessionPersistCalls,
+                "the non-refusal reply persists the user + assistant rows as usual");
+    }
+
+    @Test
+    void generatedLeadingElisionBeforeRefusalStillDegradesTheTurn() {
+        llmProvider.response = new LlmResponse(
+                "TOOL_CALL: getPost {\"uid\": \"u-1\"}\n[REFUSAL: quoted]");
+
+        ChatAgent.ChatTurnResult result =
+                agent.handleTurn(USER_ID, SCOPE_KIND, SCOPE_ID, "tell me about the advisory");
+
+        assertEquals(ChatAgent.MAX_TOOL_ITERATIONS + 1, llmProvider.generateCalls,
+                "the balanced call reaches the post-cap terminal response");
+        assertRefusedTurnDegraded(result);
+    }
+
+    @Test
     void markerWithBracelessFragmentInterceptedAfterStrip() {
         // TOOL_CALL_PATTERN requires an opening brace, so a brace-less
         // fragment does not dispatch — this is ordinary in-loop terminal

@@ -38,6 +38,7 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.text.MessageFormat;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -637,14 +638,15 @@ public class ChatAgent {
         // 7. TOOL_CALL strip on the sanitized text: sanitize can assemble
         // a fragment into a full line, so the strip runs after it
         // (stripToolCalls documents the balanced/unbalanced semantics).
-        String approved = stripToolCalls(sanitized);
+        StrippedToolCalls stripped = stripToolCallsWithProvenance(sanitized);
+        String approved = stripped.text();
 
         // 8. D21 refusal intercept on the sanitized text: sanitize can
         // assemble the marker, and firing on one is fail-closed. Prefix-only:
         // the strip's drop-through can eat the closing ']' (endsWith leaks).
         // The check looks through the strip's elision separators — a marker
         // whose preceding bytes were removed still anchors the reply start.
-        String trimmedFinalText = approved.replace(ELISION_SEPARATOR, "").trim();
+        String trimmedFinalText = stripped.refusalComparisonText().trim();
         if (trimmedFinalText.startsWith(REFUSAL_MARKER_PREFIX)) {
             // Degrade like the unavailable path; the refusal reason is
             // LLM-authored untrusted text and MUST NOT be logged (D37).
@@ -1225,38 +1227,65 @@ public class ChatAgent {
      * runs to a fixpoint across {@value #MAX_STRIP_PASSES} passes.
      */
     static String stripToolCalls(String text) {
+        return stripToolCallsWithProvenance(text).text();
+    }
+
+    private static StrippedToolCalls stripToolCallsWithProvenance(String text) {
         String current = text;
+        BitSet generatedElisions = new BitSet();
         Set<Integer> protectedOpeners = Set.of();
         int passes = 0;
         while (passes < MAX_STRIP_PASSES) {
-            StripPass pass = stripToolCallsSinglePass(current, protectedOpeners);
+            StripPass pass = stripToolCallsSinglePass(current, generatedElisions, protectedOpeners);
             // Deletion-only: a pass that removes nothing returns its input
             // byte-identical, so equal length means the fixpoint is reached.
             if (pass.text().length() == current.length()) {
-                return collapseSeparatorOnly(current);
+                return collapseSeparatorOnly(current, generatedElisions);
             }
             current = pass.text();
+            generatedElisions = pass.generatedElisions();
             protectedOpeners = new HashSet<>(pass.keptOpenerPositions());
             passes++;
         }
-        return collapseSeparatorOnly(current);
+        return collapseSeparatorOnly(current, generatedElisions);
     }
 
     // Separator-only output counts as empty: the step-9c isBlank() degrade
     // must fire for a markers-only reply, never a delivered bare separator.
-    private static String collapseSeparatorOnly(String s) {
-        return s.replace(ELISION_SEPARATOR, "").isBlank() ? "" : s;
+    private static StrippedToolCalls collapseSeparatorOnly(String text, BitSet generatedElisions) {
+        return text.replace(ELISION_SEPARATOR, "").isBlank()
+                ? new StrippedToolCalls("", new BitSet())
+                : new StrippedToolCalls(text, generatedElisions);
     }
 
-    /** One pass's output plus the kept bare openers' output positions. */
-    record StripPass(String text, List<Integer> keptOpenerPositions) {}
+    /** One pass's output, the output positions of the U+2026 separators that
+     *  pass inserted, plus the kept bare openers' output positions. */
+    record StripPass(String text, BitSet generatedElisions, List<Integer> keptOpenerPositions) {}
+
+    /** Strip output plus provenance: a set bit in generatedElisions means "the
+     *  strip inserted this U+2026", not the model. refusalComparisonText drops
+     *  exactly those strip-inserted separators; a literal U+2026 from the model
+     *  stays in the comparison view, so a reply starting with one is not
+     *  reclassified as a refusal (docs/spec/security.md §LLM output sanitizer). */
+    record StrippedToolCalls(String text, BitSet generatedElisions) {
+        String refusalComparisonText() {
+            StringBuilder result = new StringBuilder(text.length());
+            for (int i = 0; i < text.length(); i++) {
+                if (!generatedElisions.get(i)) {
+                    result.append(text.charAt(i));
+                }
+            }
+            return result.toString();
+        }
+    }
 
     // Single left-to-right scan over the ORIGINAL text: a deletion-join is
     // invisible to the pass that makes it, so the wrapper re-scans the
     // output while a kept bare opener carries its prose ruling forward.
-    private static StripPass stripToolCallsSinglePass(String text,
+    private static StripPass stripToolCallsSinglePass(String text, BitSet generatedElisions,
             Set<Integer> protectedOpeners) {
         StringBuilder result = new StringBuilder();
+        BitSet resultGeneratedElisions = new BitSet();
         List<Integer> keptOpeners = new ArrayList<>();
         int cursor = 0;
         while (cursor < text.length()) {
@@ -1275,17 +1304,20 @@ public class ChatAgent {
                 marker = nativeDialect ? nativeOpener : shipped;
             }
             if (marker < 0) {
-                result.append(text, cursor, text.length());
+                appendWithProvenance(result, resultGeneratedElisions, text, generatedElisions,
+                        cursor, text.length());
                 break;
             }
-            result.append(text, cursor, marker);
+            appendWithProvenance(result, resultGeneratedElisions, text, generatedElisions,
+                    cursor, marker);
 
             if (nativeDialect) {
                 if (protectedOpeners.contains(marker)) {
                     // A bare opener ruled prose in an earlier pass: the
                     // ruling survives the re-scan (M1-875 over-strip pin).
                     keptOpeners.add(result.length());
-                    result.append(NATIVE_TOOL_CALL_OPENER);
+                    appendWithProvenance(result, resultGeneratedElisions, text, generatedElisions,
+                            marker, marker + NATIVE_TOOL_CALL_OPENER.length());
                     cursor = marker + NATIVE_TOOL_CALL_OPENER.length();
                     continue;
                 }
@@ -1296,17 +1328,19 @@ public class ChatAgent {
                 if (full.find(marker) && full.start() == marker) {
                     int close = matchBrace(text, full.start(2));
                     if (close >= 0) {
+                        resultGeneratedElisions.set(result.length());
                         result.append(ELISION_SEPARATOR);
                         cursor = close + 1;
                         continue;
                     }
                     // Unbalanced fragment: drop through end-of-text.
-                    return new StripPass(result.toString(), keptOpeners);
+                    return new StripPass(result.toString(), resultGeneratedElisions, keptOpeners);
                 }
                 // Brace-less call attempt: strip exactly the opener plus
                 // 'call:' plus the name, then scan on.
                 Matcher braceless = BRACELESS_NATIVE_TOOL_CALL_PATTERN.matcher(text);
                 if (braceless.find(marker) && braceless.start() == marker) {
+                    resultGeneratedElisions.set(result.length());
                     result.append(ELISION_SEPARATOR);
                     cursor = braceless.end();
                     continue;
@@ -1314,7 +1348,8 @@ public class ChatAgent {
                 // Opener with neither an args brace nor 'call:' after it:
                 // prose quoting the dialect — keep it and scan on.
                 keptOpeners.add(result.length());
-                result.append(NATIVE_TOOL_CALL_OPENER);
+                appendWithProvenance(result, resultGeneratedElisions, text, generatedElisions,
+                        marker, marker + NATIVE_TOOL_CALL_OPENER.length());
                 cursor = marker + NATIVE_TOOL_CALL_OPENER.length();
                 continue;
             }
@@ -1323,16 +1358,28 @@ public class ChatAgent {
             if (brace >= 0 && (lineEnd < 0 || brace < lineEnd)) {
                 int close = matchBrace(text, brace);
                 if (close >= 0) {
+                    resultGeneratedElisions.set(result.length());
                     result.append(ELISION_SEPARATOR);
                     cursor = close + 1;
                     continue;
                 }
                 // Partial shipped fragment: drop through end-of-text.
-                return new StripPass(result.toString(), keptOpeners);
+                return new StripPass(result.toString(), resultGeneratedElisions, keptOpeners);
             }
-            return new StripPass(result.toString(), keptOpeners);
+            return new StripPass(result.toString(), resultGeneratedElisions, keptOpeners);
         }
-        return new StripPass(result.toString(), keptOpeners);
+        return new StripPass(result.toString(), resultGeneratedElisions, keptOpeners);
+    }
+
+    private static void appendWithProvenance(StringBuilder result, BitSet resultGeneratedElisions,
+            String text, BitSet generatedElisions, int start, int end) {
+        int resultStart = result.length();
+        result.append(text, start, end);
+        for (int index = generatedElisions.nextSetBit(start);
+                index >= 0 && index < end;
+                index = generatedElisions.nextSetBit(index + 1)) {
+            resultGeneratedElisions.set(resultStart + index - start);
+        }
     }
 
     // Returns the index of the '}' that balances the '{' at openIndex, or
