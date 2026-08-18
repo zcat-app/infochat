@@ -223,6 +223,47 @@ class FollowTopDigestIT {
                 "posts under the unfollowed node never reach the digest");
     }
 
+    @Test
+    void unfollowTopFromAllExcludesDescendantLeaves() throws Exception {
+        testLlmProvider.setResponseText("Unfollow-top roll-up.");
+        Instant base = Instant.now().minusSeconds(120);
+        for (int i = 1; i <= 3; i++) {
+            seedReadyPostOn(SOURCE2, "uta" + i, "UTA " + i, "ai", base);
+            seedReadyPostOn(SOURCE2, "utf" + i, "UTF " + i, "football", base);
+        }
+
+        adapter.deliverGroupMention(UPSTREAM_UNFOLLOW, ADMIN_CONTACT, "/unfollow-tag tech");
+
+        String successReply = MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_UNFOLLOW_TAG_SUCCESS_FROM_ALL, "en"), "tech");
+        assertTrue(adapter.sentMessages().stream().map(OutboundMessage::text)
+                        .anyMatch(text -> text.contains(successReply)),
+                "the ALL→EXPLICIT flip must surface the success_from_all reply");
+        assertEquals("EXPLICIT", tagModeOf(UNFOLLOW_GROUP),
+                "tag_mode must flip to EXPLICIT");
+        assertEquals(1, countScopeTag(UNFOLLOW_GROUP),
+                "the seed must drop every tech-subtree leaf, keeping only football — got: "
+                        + scopeTagNames(UNFOLLOW_GROUP));
+        assertTrue(scopeTagNames(UNFOLLOW_GROUP).contains("football"),
+                "the unrelated sport leaf remains followed");
+        assertFalse(scopeTagNames(UNFOLLOW_GROUP).contains("ai"),
+                "the ai leaf under the unfollowed tech top is excluded from the seed");
+
+        Instant slotStart = Instant.now().minusSeconds(3600);
+        DigestSlot slot = new DigestSlot(UNFOLLOW_GROUP, "UTC", "morning", slotStart,
+                Instant.now().plusSeconds(600));
+        worker.execute(slot);
+
+        List<SectionRow> categories = readCategories(UNFOLLOW_GROUP, slotStart);
+        assertEquals(1, categories.size(),
+                "only the surviving football leaf renders a section — got: " + categories);
+        assertEquals("football", categories.get(0).slug());
+        assertTrue(categories.get(0).content().contains("UTF"),
+                "posts under the surviving leaf are delivered");
+        assertFalse(categories.get(0).content().contains("UTA"),
+                "AI content under the excluded tech subtree never reaches the digest");
+    }
+
     // -- helpers ----------------------------------------------------------------
 
     private List<String> scopeTagNames(UUID groupId) throws Exception {

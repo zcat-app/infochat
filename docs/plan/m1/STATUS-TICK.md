@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 93 |
+| done | 94 |
 | deferred | 0 |
 | abandoned | 3 |
 | **total** | **99** |
@@ -26,7 +26,7 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-877 — Re-measure the news leg on resolved stored tags (complexity: medium, risk: low)
-- M1-883 — Exclude a top subtree when unfollowing from ALL (complexity: low, risk: medium)
+- M1-884 — Reconcile tag-tree source and unfollow rules (complexity: low, risk: medium)
 
 ---
 
@@ -43,7 +43,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-884 — blocked_by: M1-882 (done), M1-883 (pending)
+_(none)_
 
 ---
 
@@ -62,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-883 | Exclude a top subtree when unfollowing from ALL | 2026-08-18 | round 1 APPROVE-WITH-FIXES |
 | M1-882 | Reject top nodes as source bootstrap tags | 2026-08-18 | round 2 APPROVE |
 | M1-881 | Preserve literal elisions at refusal intercept | 2026-08-18 | round 1 APPROVE-WITH-FIXES |
 | M1-880 | Tag-tree cutover runbook: cleanup, migrate, verify for every pre-V84 deployment | 2026-08-18 | round 2 APPROVE |
@@ -71,7 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-876 | Rank region leaves above world within the News top | 2026-08-17 | round 1 APPROVE |
 | M1-875 | Stop the strip from assembling tool-call markers | 2026-08-17 | round 2 APPROVE |
 | M1-873 | Record the tool-call transport architecture in spec | 2026-08-17 | round 1 APPROVE |
-| M1-872 | Native tool-call transport behind detected capability | 2026-08-17 | round 2 APPROVE |
 
 ---
 
@@ -218,7 +218,7 @@ M1-878 (done)
 M1-879 (done)
 M1-881 (done)
 M1-882 (done)
-  ├── M1-883 (pending) ← runnable
-  │     └── M1-884 (pending)
+  ├── M1-883 (done)
+  │     └── M1-884 (pending) ← runnable
   └── M1-884 (pending) [see above]
 ```

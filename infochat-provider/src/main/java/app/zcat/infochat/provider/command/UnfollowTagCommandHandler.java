@@ -41,8 +41,7 @@ import java.util.UUID;
  *       the pending and executes the wipe.</li>
  * </ul>
  *
- * <p>Permission gate (DM = own scope; group = group-admin only,
- * v1 short-circuits ALL group calls) is identical to
+ * <p>Permission gate (DM = own scope; group = bot-admin or group-admin) is identical to
  * {@link FollowTagCommandHandler}; see that handler's class javadoc
  * for the T2-F deferral context.</p>
  *
@@ -91,9 +90,9 @@ public class UnfollowTagCommandHandler implements CommandHandler {
     // (UNNEST), then resolves each name → tag(id) via the tag table.
     // The ON CONFLICT DO NOTHING keeps the INSERT idempotent against
     // ALL → EXPLICIT retries; the WHERE clause excludes the
-    // unfollowed tag so "I want everything except X" is satisfied in
-    // one statement (the application-side fetch-then-loop alternative
-    // would widen the transaction window unnecessarily).
+    // unfollowed node and its subtree (recursive walk over
+    // tag.parent_name) so "I want everything except X" is satisfied
+    // in one statement (no fetch-then-loop window widening).
     private static final String INSERT_SEED_ALL_MINUS_ONE_SQL =
             "INSERT INTO scope_tag (scope_kind, scope_id, tag_id) "
                     + "SELECT DISTINCT ?, ?, t.id "
@@ -106,7 +105,13 @@ public class UnfollowTagCommandHandler implements CommandHandler {
                     + "                           AND e.source_id = s.id)) "
                     + "    OR s.id IN (SELECT source_id FROM source_subscription "
                     + "                 WHERE scope_kind = ? AND scope_id = ?)) "
-                    + "  AND t.id <> ? "
+                    + "  AND t.id NOT IN ("
+                    + "      WITH RECURSIVE subtree(node) AS ("
+                    + "          SELECT name FROM tag WHERE name = ?"
+                    + "          UNION SELECT c.name FROM tag c JOIN subtree p"
+                    + "              ON c.parent_name = p.node"
+                    + "      )"
+                    + "      SELECT id FROM tag WHERE name IN (SELECT node FROM subtree)) "
                     + "ON CONFLICT (scope_kind, scope_id, tag_id) DO NOTHING";
 
     private static final String DELETE_SCOPE_TAG_ONE_SQL =
@@ -259,14 +264,14 @@ public class UnfollowTagCommandHandler implements CommandHandler {
                 final String body;
                 if ("ALL".equals(mode)) {
                     // ALL → EXPLICIT: flip + seed the
-                    // {all-subscribed-bootstrap-tags MINUS the
-                    // unfollowed tag} set in one INSERT…SELECT join.
+                    // set excluding the selected tag and its descendants
+                    // in one INSERT…SELECT join.
                     // The flip UPDATE runs BEFORE the INSERT so a
                     // concurrent read on the same scope cannot observe
                     // (mode=ALL, scope_tag non-empty) — the forbidden
                     // intermediate state per spec.
                     updateFlipToExplicit(conn, scopeKind, scopeId);
-                    insertSeedAllMinusOne(conn, scopeKind, scopeId, tagIdValue);
+                    insertSeedAllMinusOne(conn, scopeKind, scopeId, tagName);
                     body = MessageFormat.format(
                             bundleLoader.get(BundleKeys.REPLY_UNFOLLOW_TAG_SUCCESS_FROM_ALL, inboundContext.effectiveLanguage()),
                             tagName);
@@ -379,7 +384,7 @@ public class UnfollowTagCommandHandler implements CommandHandler {
     }
 
     private void insertSeedAllMinusOne(Connection conn, String scopeKind, UUID scopeId,
-                                       UUID excludedTagId) throws SQLException {
+                                       String excludedTagName) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(INSERT_SEED_ALL_MINUS_ONE_SQL)) {
             // Binds 3-6: the world predicate's exclusion probe pair, then
             // its subscription-arm pair.
@@ -389,7 +394,7 @@ public class UnfollowTagCommandHandler implements CommandHandler {
             ps.setObject(4, scopeId);
             ps.setString(5, scopeKind);
             ps.setObject(6, scopeId);
-            ps.setObject(7, excludedTagId);
+            ps.setString(7, excludedTagName);
             ps.executeUpdate();
         }
     }

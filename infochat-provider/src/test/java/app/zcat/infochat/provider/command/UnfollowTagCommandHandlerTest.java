@@ -146,6 +146,54 @@ class UnfollowTagCommandHandlerTest {
     // ----- (a2) ALL → EXPLICIT seeds from the WORLD, not subscriptions ----
 
     @Test
+    void unfollowTopRetainsNormalizationAndUnknownError() throws Exception {
+        String actor = PREFIX + "top-actor";
+        UUID actorId = seedUser(actor);
+        seedTop(PREFIX + "top");
+        UUID leaf = seedLeafUnder(PREFIX + "top", PREFIX + "leaf");
+        UUID other = seedTag(PREFIX + "other");
+        UUID sourceId = seedSourceWithBootstrapTags(PREFIX + "top-src",
+                PREFIX + "leaf", PREFIX + "other");
+        seedSourceSubscription(actorId, sourceId);
+        seedScopePreferences(actorId, "ALL");
+        long versionBefore = tagSubscriptionVersionOf(actorId);
+
+        // Mixed-case inbound top: the TagNormalizer pipeline resolves it to
+        // the seeded lowercase top, which then takes the subtree-exclusion
+        // ALL→EXPLICIT path instead of the plain one-row subtraction.
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor), "/unfollow-tag M1-054-Unfollow-Top");
+
+        assertEquals(expectedSuccessFromAll(PREFIX + "top"), reply.text(),
+                "the normalized top must surface reply.unfollow_tag.success_from_all");
+        assertEquals("EXPLICIT", tagModeOf(actorId),
+                "tag_mode must flip to EXPLICIT");
+        assertEquals(1L, countScopeTag(actorId),
+                "the seed must drop the top's descendant leaf, keeping only the unrelated one");
+        assertTrue(scopeTagContains(actorId, other),
+                "the unrelated leaf stays followed");
+        assertFalse(scopeTagContains(actorId, leaf),
+                "the descendant leaf of the unfollowed top is excluded from the seed");
+        assertEquals(versionBefore + 1L, tagSubscriptionVersionOf(actorId),
+                "the ALL→EXPLICIT transition must bump tag_subscription_version exactly once");
+
+        // Unknown token: the existing normalized, non-reflecting error path
+        // with zero preference mutation.
+        OutboundMessage unknownReply = handler.handle(
+                new ScopeRef.Dm(actor), "/unfollow-tag " + PREFIX + "notavocab");
+        assertFalse(unknownReply.text().contains(PREFIX + "notavocab"),
+                "unknown-tag reply must NOT echo the supplied tag — got: " + unknownReply.text());
+        assertTrue(unknownReply.text().contains("Did you mean"),
+                "unknown-tag reply must carry the fuzzy-suggestion footer");
+        assertEquals("EXPLICIT", tagModeOf(actorId),
+                "unknown-tag reject must not flip tag_mode");
+        assertEquals(1L, countScopeTag(actorId),
+                "unknown-tag reject must not touch scope_tag");
+        assertEquals(versionBefore + 1L, tagSubscriptionVersionOf(actorId),
+                "unknown-tag reject must not bump tag_subscription_version");
+    }
+
+    @Test
     void unfollowTagInAllModeOnSubscriptionlessScopeSeedsFromBootstrapWorld() throws Exception {
         // Acceptance test (d) (M1-621): the ALL → EXPLICIT seed draws from
         // the scope's D59 world — here the implicit bootstrap corpus — so a
@@ -492,6 +540,34 @@ class UnfollowTagCommandHandlerTest {
                      "INSERT INTO tag (name, display) VALUES (?, ?) RETURNING id")) {
             ps.setString(1, tagName);
             ps.setString(2, tagName);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return (UUID) rs.getObject("id");
+            }
+        }
+    }
+
+    private UUID seedTop(String topName) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO tag (name, display, node_kind) VALUES (?, ?, 'top') RETURNING id")) {
+            ps.setString(1, topName);
+            ps.setString(2, topName);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return (UUID) rs.getObject("id");
+            }
+        }
+    }
+
+    private UUID seedLeafUnder(String topName, String leafName) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO tag (name, display, node_kind, parent_name)"
+                             + " VALUES (?, ?, 'leaf', ?) RETURNING id")) {
+            ps.setString(1, leafName);
+            ps.setString(2, leafName);
+            ps.setString(3, topName);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return (UUID) rs.getObject("id");

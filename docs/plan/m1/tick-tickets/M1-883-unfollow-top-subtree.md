@@ -1,13 +1,14 @@
 ---
 id: M1-883
 title: "Exclude a top subtree when unfollowing from ALL"
-status: pending
+status: done
 created: 2026-08-18
 last_updated: 2026-08-18
 flow: tick
 reproduction: >-
-  to-be-written FollowTopDigestIT.unfollowTopFromAllExcludesDescendantLeaves —
-  today ALL mode with leaf bootstrap tags `ai` and `football`, followed by
+  FollowTopDigestIT.unfollowTopFromAllExcludesDescendantLeaves (written,
+  verified RED pre-fix: seed kept 2 scope_tag rows instead of 1) — today ALL
+  mode with leaf bootstrap tags `ai` and `football`, followed by
   `/unfollow-tag tech`, seeds `ai` and still renders its digest content.
 analysis_ref: docs/plan/m1/tick-analysis/tag-top-source-and-unfollow-subtree.md
 blocked_by:
@@ -56,11 +57,35 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-18
+    verdict: APPROVE-WITH-FIXES
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY FAIL (1 low stale-comment fix), SCOPE PASS"
+    diff_stats: "5 files changed, 152 insertions(+), 18 deletions(-)"
+    fix_items: 1
+    fix_probes: >-
+      1. obsolete-comment grep exited 1; every post-gate changed line was a
+      comment/javadoc line; ./mvnw -B -pl infochat-provider -am test-compile
+      BUILD SUCCESS; fixed tree .scratch/tick-fixes-M1-883.tree =
+      54bb42c2ccb5fe5fda4606aead6ae3f5f55af0ce.
+    verdict_file: .scratch/tick-review-M1-883-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-18
+  result: >-
+    Pass. tick-lint 0 findings. blocked_by M1-882 done; its diff added no
+    tests on this seam (source/bootstrap gate files only). Acceptance items
+    implementable: V84 seeds leaf ai under top tech and football under sport;
+    FollowTopDigestIT already holds an ALL-mode UNFOLLOW_GROUP subscribed to
+    SOURCE2 with bootstrap_tags {ai,football}. Root-cause citation
+    UnfollowTagCommandHandler.java:97-110 verified (UNNEST seed, t.id <> ? at
+    109). Pitfalls P5-P7 all landed (P1-P4 owned by M1-882). Preserves
+    traced: unfollowSeedNodesFlowThroughExplicitDigest (leaf unfollow) and
+    handler flat-leaf minus-one tests remain correct under a node-or-
+    descendant exclusion predicate; no ambiguity blocking start.
 escalation_reason:
 ---
 
