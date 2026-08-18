@@ -1,9 +1,9 @@
 ---
 id: M1-877
 title: "Re-measure the news leg on resolved stored tags"
-status: pending
+status: done
 created: 2026-08-17
-last_updated: 2026-08-17
+last_updated: 2026-08-18
 flow: tick
 reproduction: >-
   Probe (evidence gap, verified 2026-08-17): docs/measurement/tag-tree-taxonomy.md
@@ -92,8 +92,19 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
-overrides: []
+reviews:
+  - round: 1
+    date: 2026-08-18
+    verdict: OVERRIDE-APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY FAIL, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "3 files changed, 88 insertions(+), 12 deletions(-)"
+    findings: "Original MANUAL finding accepted by explicit user override: the fallback-aware resolver probe and scoring artifacts remain ignored local evidence; the committed record is approved as an evidence-only exception."
+    verdict_file: .scratch/tick-review-M1-877-r1.txt
+overrides:
+  - date: 2026-08-18
+    arm: override
+    justification: "I approve that exception: the committed record may publish results while the ignored .bench harness and scoring data remain local."
+    finding: "The clean-checkout reproducibility requirement for the resolver probe and stored-tag scoring artifacts is waived for this evidence-only ticket."
 aborted_attempts: []
 reopens: []
 clarity_check: {}

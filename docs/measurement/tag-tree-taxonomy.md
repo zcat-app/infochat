@@ -387,9 +387,9 @@ the wrapper discipline held on all other injection fixtures
 
 - **The news-distribution leg FAILS as measured** — the world co-tag
   inflation above. This does not settle M1-865's within-News priority;
-  it is the evidence that the priority must exist. A re-run after
-  M1-865 lands would measure the RESOLVED stored tag, not the raw
-  validated tuple.
+  it is the evidence that the priority must exist. The re-run that
+  measures the RESOLVED stored tag, not the raw validated tuple, is the
+  M1-877 re-run section at the end of this record.
 - **The AI-policy strict bar (ai >= 0.9) missed by one call** (16/18
   = 0.8889); the carve-out arm passes at Tech-top 1.0. The showcase's
   10/12 row-level ai rate and this 16/18 are the same family of
@@ -481,3 +481,81 @@ the corpus-bound floor).
 - M1-751 order-sensitivity prior: 0.783 mean / 5-of-10 identical — the
   render-order contract stays binding even though gemma measured
   order-robust on the M1-860 corpus.
+
+## Re-run: news-distribution on RESOLVED stored tags (M1-877)
+
+The promised follow-up to the news-distribution FAIL above: the same
+news-expected corpus re-run through the frozen-leg render/parse/validate
+chain plus a new RESOLVE step, and the news-distribution leg re-scored on
+the RESOLVED STORED tag — the single leaf the post-fix deterministic
+resolver stores (M1-876: depth → non-fallback-before-fallback → emission
+order; world fallback-marked by the V84 seed) — instead of the raw
+validated tuple. The resolver port is verify-against-java GREEN over the
+resolver probes BEFORE any stored-tag scoring is trusted. The stored-tag
+basis applies to the two cells below ONLY — every existing leg keeps its
+scored-on-PROPOSED basis (P3 above) and no existing cell, bar, or verdict
+is re-scored or edited.
+
+### Pre-registered bars (thresholds commit — no arm has run yet)
+
+1. **NEWS-DISTRIBUTION (resolved stored).** max single-News-leaf share
+   of News-attributed output, counted as distinct RESOLVED STORED tuples,
+   `<= 0.50` — the original bar (record:69-71, :318), now on stored tags.
+2. **WORLD-CO-TAG cell.** world present in ZERO regional stored tuples:
+   a stored tuple carrying a region leaf (africa/americas/asia/europe/
+   middle-east) never co-carries world (the fallback rule's observable
+   consequence — M1-876 acceptance 1); world is stored only on the
+   fixtures whose ENTIRE News proposal is world (the 12 world-only
+   tuples of the original leg, record:349).
+
+### Method (re-run)
+
+- **Corpus.** The 26 news-expected fixtures (18 leaf-news + 7 news-geo +
+  xft-cop) × 3 same-prompt resamples = 78 calls — the record's corpus
+  accounting (record:342-346). The frozen 46-leaf render, the same
+  render/parse/validate chain as the frozen leg, one setsid'd batch
+  session, ABORT on UNREACHABLE (P4).
+- **Resolver port (P10).** The track-a harness gains a fallback-aware
+  port of the post-fix resolver — M1-876's depth → non-fallback-before-
+  fallback → emission order, world marked fallback per the V84 seed
+  (data, never a hardcoded name); verify-against-java.py extended with
+  resolver probes and run GREEN before the stored-tag scoring is
+  trusted (the record:206-208 discipline).
+
+### Results (re-run)
+
+One batch session, 78 call rows (26 fixtures × 3 resamples, all attempt-1
+answered, 0 schema violations, 0 UNREACHABLE). The resolver port is
+verify-against-java GREEN before this scoring was trusted (33 parse probes
++ 24 resolver probes against the real Java TagTreeResolver — see the Pins
+table below).
+
+| cell | measured | bar | verdict |
+|---|---|---|---|
+| news-distribution: max single-News-leaf share (distinct RESOLVED stored tuples) | **0.25** (middle-east 0.25, world 0.25, americas 0.1875, asia 0.125, europe 0.125, africa 0.0625 — 48 News-attributed rows) | <= 0.50 | **PASS** |
+| world-co-tag: world in zero regional stored tuples | **0** regional stored tuples carry world; world stored on **0** rows whose validated News content included a region leaf; world-only stored rows **12** (the original leg's 12 world-only tuples, record:349); the fallback rule fired on **35** rows (region stored, world dropped from storage) | 0 | **PASS** |
+
+30 rows route a real category (stored tag outside News — COP →
+environment/economy, world-001 → public-health, geo-003/005/006 → economy,
+etc.) and are recorded CORRECT per the original bar (record:72-74), never a
+News row. The stored-tuple distribution is in
+`.bench/tag-tree-taxonomy/score-news-rerun.json` (gitignored by design).
+
+The world share moved from **1.0** on the raw validated tuples (the
+original FAIL, record:318) to **0.25** on the resolved stored tags, and no
+regional stored tuple co-carries world — the fallback rule's observable
+consequence the original finding demanded (record:355-359) now holds on
+shipped behavior.
+
+### Pins (re-run)
+
+| pin | value |
+|---|---|
+| leaf-list snapshot sha256 (ORDER BY name) | `9fe6d2b2e4fc408a60ee99ce5601c820f44f7d43eb7ec9ba1300fd4e0d3d4f33` (the frozen 46-leaf list, unchanged from the original legs) |
+| thresholds commit | `dc0b9eba` (bars pre-registered; predates the arm; rebased onto M1-884) |
+| results commit | this commit (branch `m1/M1-877-tag-tree-news-remeasure`) |
+| model | gemma-4-26B-A4B-it-UD-Q6_K_XL, served from `/home/infochat/.local/share/docker/volumes/infochat-llamacpp-models/_data/gemma-4-26B-A4B-it-UD-Q6_K_XL.gguf` (23,295,391,456 bytes; NOT the stale track-a arms.json path) |
+| llama.cpp | build b10221 (commit 815a2a591), GNU 11.4.0 Linux x86_64 |
+| prompt files (repo == harness copies) | `infochat-llm-adapter/src/main/resources/prompts/tagger.md` sha256 `c92a41fe2bac44f058ce56b42ee221f63f2dfbe006cc2cbfec044b43d0bea90e`; `tagger-fallback.md` sha256 `f8f108161ab66307e10565aab82491443e5ae475326b38e06db9216aa833713b` |
+| resolver tree data | `track-a/tree-v84.json` sha256 `9b98b99859525435deb2dcd674e6cf8a9d88af210bef34c5ff4e95489cd3ad79` — transcribed from the V84 seed (`V84__tag_tree_seed_and_migration.sql`); world fallback = TRUE, the five region leaves fallback = FALSE (the designation is data the port reads, never a hardcoded name) |
+| verify-against-java.py | PASS — 33 parse probes + 24 resolver probes agree with the real Java TagTreeResolver (compiled fresh from the repo source at run time; run BEFORE any stored-tag scoring was trusted) |
