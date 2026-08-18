@@ -173,6 +173,27 @@ class GetTagsCommandHandlerTest {
                 "a tag the group does not follow must NOT carry the marker — got: " + body);
     }
 
+    @Test
+    void rendersTopNodesDistinctFromSourceEligibleLeaves() throws Exception {
+        String actor = PREFIX + "roles-actor";
+        UUID actorId = seedUser(actor);
+        String top = PREFIX + "tech";
+        String leaf = PREFIX + "ai";
+        UUID topId = seedTag(top, "top", null);
+        seedTag(leaf, "leaf", top);
+        seedScopePreferences("dm", actorId, "EXPLICIT");
+        seedScopeTag("dm", actorId, topId);
+
+        String body = handler.handle(new ScopeRef.Dm(actor), "/get-tags").text();
+
+        assertTrue(body.contains(FOLLOWED + top + " [topic]"),
+                "a followed top must retain its marker and show its follow/filter role — got: " + body);
+        assertTrue(body.contains("  " + leaf + " [source]"),
+                "an un-followed leaf must show its source-eligible role — got: " + body);
+        assertFalse(body.contains(FOLLOWED + leaf + " [source]"),
+                "the leaf must retain its existing un-followed marker — got: " + body);
+    }
+
     // ----- helpers ---------------------------------------------------------
 
     private UUID seedUser(String contactId) throws Exception {
@@ -205,11 +226,18 @@ class GetTagsCommandHandlerTest {
     }
 
     private UUID seedTag(String tagName) throws Exception {
+        return seedTag(tagName, "leaf", null);
+    }
+
+    private UUID seedTag(String tagName, String nodeKind, String parentName) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "INSERT INTO tag (name, display) VALUES (?, ?) RETURNING id")) {
+                     "INSERT INTO tag (name, display, node_kind, parent_name) "
+                             + "VALUES (?, ?, ?, ?) RETURNING id")) {
             ps.setString(1, tagName);
             ps.setString(2, tagName);
+            ps.setString(3, nodeKind);
+            ps.setString(4, parentName);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return (UUID) rs.getObject("id");

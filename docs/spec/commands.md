@@ -944,10 +944,13 @@ over the whole world (§Per-scope tag preferences).
   would be an empty set). The friendly error for a zero-tag attempt
   is the same as for a fresh insert with no tags. Per-scope tag preferences continue to flow through
   `scope_tag` (`/follow-tag` / `/unfollow-tag`), not through
-  `/add-source`. On a fresh insert (whether bot-admin or non-admin),
-  the supplied `--tags` populate `bootstrap_tags` and are unioned into
-  the controlled vocabulary (decision D5) before the row write so
-  they are addressable by `/follow-tag` immediately. The user-visible
+  `/add-source`. On a fresh insert (whether bot-admin or non-admin), the
+  supplied `--tags` must name existing source-eligible leaves in the
+  controlled vocabulary. Top nodes are valid for `/follow-tag`,
+  `/unfollow-tag`, `/summary`, and search filters, but are rejected here.
+  The leaf check happens before the source, subscription, tag, or audit
+  writes, so `bootstrap_tags` always remains a leaf-only fallback set. The
+  user-visible
   reply distinguishes outcomes: "source added" (fresh insert),
   "source already existed, tags updated" (bot-admin tag replacement),
   "subscribed; tags unchanged on existing source" (non-admin against

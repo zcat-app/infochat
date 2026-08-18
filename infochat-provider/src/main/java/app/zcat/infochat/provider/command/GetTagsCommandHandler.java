@@ -56,7 +56,7 @@ import java.util.UUID;
 public class GetTagsCommandHandler implements CommandHandler {
 
     private static final String SELECT_VOCABULARY_SQL =
-            "SELECT name FROM tag ORDER BY name ASC";
+            "SELECT name, node_kind FROM tag ORDER BY name ASC";
 
     private static final String SELECT_TAG_MODE_SQL =
             "SELECT tag_mode FROM scope_preferences "
@@ -95,7 +95,7 @@ public class GetTagsCommandHandler implements CommandHandler {
 
     @Override
     public OutboundMessage handle(ScopeRef scope, String rawText) {
-        List<String> vocabulary = readVocabulary();
+        List<VocabularyTag> vocabulary = readVocabulary();
         if (vocabulary.isEmpty()) {
             return reply(scope, bundleLoader.get(BundleKeys.REPLY_GET_TAGS_EMPTY, inboundContext.effectiveLanguage()));
         }
@@ -129,24 +129,30 @@ public class GetTagsCommandHandler implements CommandHandler {
                 selectFollowedTagNames(key.scopeKind(), key.scopeId().get()));
     }
 
-    private String render(List<String> vocabulary, FollowedTags followed) {
+    private String render(List<VocabularyTag> vocabulary, FollowedTags followed) {
         StringBuilder sb = new StringBuilder();
         sb.append(bundleLoader.get(BundleKeys.REPLY_GET_TAGS_HEADER, inboundContext.effectiveLanguage()));
-        for (String name : vocabulary) {
+        String sourceMarker = bundleLoader.get(
+                BundleKeys.REPLY_GET_TAGS_SOURCE_MARKER, inboundContext.effectiveLanguage());
+        String topMarker = bundleLoader.get(
+                BundleKeys.REPLY_GET_TAGS_TOP_MARKER, inboundContext.effectiveLanguage());
+        for (VocabularyTag tag : vocabulary) {
             sb.append('\n');
-            sb.append(followed.isFollowed(name) ? FOLLOWED_MARKER : UNFOLLOWED_MARKER);
-            sb.append(name);
+            sb.append(followed.isFollowed(tag.name()) ? FOLLOWED_MARKER : UNFOLLOWED_MARKER);
+            sb.append(tag.name());
+            sb.append(' ');
+            sb.append("top".equals(tag.nodeKind()) ? topMarker : sourceMarker);
         }
         return sb.toString();
     }
 
-    private List<String> readVocabulary() {
+    private List<VocabularyTag> readVocabulary() {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(SELECT_VOCABULARY_SQL);
              ResultSet rs = ps.executeQuery()) {
-            List<String> out = new ArrayList<>();
+            List<VocabularyTag> out = new ArrayList<>();
             while (rs.next()) {
-                out.add(rs.getString("name"));
+                out.add(new VocabularyTag(rs.getString("name"), rs.getString("node_kind")));
             }
             return out;
         } catch (SQLException e) {
@@ -210,6 +216,8 @@ public class GetTagsCommandHandler implements CommandHandler {
 
     /** Resolved scope coordinates: the {@code scope_kind} literal and the scope's row id (empty when unresolved). */
     private record ScopeKey(String scopeKind, Optional<UUID> scopeId) {}
+
+    private record VocabularyTag(String name, String nodeKind) {}
 
     /**
      * The calling scope's followed-tag set. {@code followsAll} is the

@@ -135,7 +135,7 @@ public class BootstrapLoader {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                failFastOnNonNodeTags(conn, entries);
+                failFastOnNonLeafTags(conn, entries);
                 upsertSources(conn, entries, parser);
                 upsertTags(conn, entries);
                 insertAuditRow(conn, sha256, path.toString(), entries.size());
@@ -298,10 +298,8 @@ public class BootstrapLoader {
                 + String.join("\n  - ", invalidTagReports));
     }
 
-    /** Node-membership gate (M1-866): every file tag must name an existing
-     * tag-tree node; runs before the first write so a file carrying retired
-     * v1 names (or any coinage) fails startup loudly, nothing partial (M1-077 shape). */
-    private void failFastOnNonNodeTags(Connection conn, List<BootstrapSourcesEntry> entries)
+    /** Leaf-membership gate (M1-882): validate every file tag before the first write so a top, retired v1 name, or any coinage fails startup loudly (M1-077 shape). */
+    private void failFastOnNonLeafTags(Connection conn, List<BootstrapSourcesEntry> entries)
             throws SQLException {
         Map<String, String> uniqueTags = new LinkedHashMap<>();
         for (BootstrapSourcesEntry entry : entries) {
@@ -311,7 +309,7 @@ public class BootstrapLoader {
         }
         Set<String> existing = new HashSet<>();
         try (PreparedStatement ps = conn.prepareStatement(
-                "SELECT name FROM tag WHERE name = ANY(?)")) {
+                "SELECT name FROM tag WHERE node_kind = 'leaf' AND name = ANY(?)")) {
             ps.setArray(1, conn.createArrayOf("TEXT",
                 uniqueTags.keySet().toArray(new String[0])));
             try (ResultSet rs = ps.executeQuery()) {
@@ -326,14 +324,14 @@ public class BootstrapLoader {
                 String name = normalizeTag(raw);
                 if (!existing.contains(name)) {
                     reports.add("source '" + entry.identifier() + "': tag '" + raw
-                        + "' — not an existing tag-tree node");
+                        + "' — not an existing source-eligible leaf tag-tree node");
                 }
             }
         }
         if (!reports.isEmpty()) {
             throw new IllegalStateException(
                 "BootstrapLoader: " + reports.size()
-                    + " tag(s) in bootstrap-sources file are not tag-tree nodes — fix all of them, then restart:\n  - "
+                    + " tag(s) in bootstrap-sources file are not source-eligible leaf tag-tree nodes — fix all of them, then restart:\n  - "
                     + String.join("\n  - ", reports));
         }
     }

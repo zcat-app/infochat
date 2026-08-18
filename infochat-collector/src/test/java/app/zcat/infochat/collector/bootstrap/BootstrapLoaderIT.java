@@ -266,7 +266,7 @@ class BootstrapLoaderIT {
     @Test
     @Order(6)
     void nonNodeTagInBootstrapJsonFailsFast(@TempDir Path tempDir) throws IOException {
-        // M1-866 node gate: a valid-character-class name that is not an
+        // M1-866 vocabulary gate: a valid-character-class name that is not an
         // existing tag-tree node fails startup the same way, naming the
         // offender — the growth gate that keeps the v1 vendor tail out.
         Path fixture = tempDir.resolve("non-node-tags.json");
@@ -284,9 +284,61 @@ class BootstrapLoaderIT {
             assertTrue(ex.getMessage().contains("kimiai2"),
                 "exception message must name the non-node tag; got: " + ex.getMessage());
             assertTrue(ex.getMessage().contains("tag-tree node"),
-                "exception message must state the node-membership reason; got: " + ex.getMessage());
+                "exception message must state the vocabulary-membership reason; got: " + ex.getMessage());
         } finally {
             unwrapped.sourcesFilePath = original;
+        }
+    }
+
+    @Test
+    @Order(7)
+    void topBootstrapTagFailsBeforeAnySourceWrite(@TempDir Path tempDir) throws Exception {
+        Path fixture = tempDir.resolve("top-tags.json");
+        Files.writeString(fixture, """
+            [{"kind":"rss","identifier":"https://example.com/top-tags",\
+            "name":"X","category":"news","tags":["tech"]}]
+            """);
+
+        long sourceCountBefore = countRows("SELECT count(*) FROM source");
+        long tagCountBefore = countRows("SELECT count(*) FROM tag");
+        long auditCountBefore = countRows(
+                "SELECT count(*) FROM audit_log WHERE action = 'BOOTSTRAP_SOURCE_LOAD'");
+        long metaCountBefore = countRows("SELECT count(*) FROM bootstrap_meta");
+
+        BootstrapLoader unwrapped = ClientProxy.unwrap(loader);
+        String original = unwrapped.sourcesFilePath;
+        try {
+            unwrapped.sourcesFilePath = fixture.toString();
+            IllegalStateException ex = assertThrows(IllegalStateException.class,
+                    () -> loader.runLoad());
+            assertTrue(ex.getMessage().contains("tech"),
+                    "top-tag failure must identify the configured tag; got: " + ex.getMessage());
+            assertTrue(ex.getMessage().contains("source-eligible leaf"),
+                    "top-tag failure must identify the valid source remedy; got: " + ex.getMessage());
+        } finally {
+            unwrapped.sourcesFilePath = original;
+        }
+
+        assertEquals(sourceCountBefore, countRows("SELECT count(*) FROM source"),
+                "top-tag rejection must not write any source row");
+        assertEquals(tagCountBefore, countRows("SELECT count(*) FROM tag"),
+                "top-tag rejection must not write any tag row");
+        assertEquals(auditCountBefore, countRows(
+                "SELECT count(*) FROM audit_log WHERE action = 'BOOTSTRAP_SOURCE_LOAD'"),
+                "top-tag rejection must not write a bootstrap audit row");
+        assertEquals(metaCountBefore, countRows("SELECT count(*) FROM bootstrap_meta"),
+                "top-tag rejection must not write bootstrap metadata");
+        assertEquals(0L, countRows(
+                "SELECT count(*) FROM source WHERE identifier = 'https://example.com/top-tags'"),
+                "the rejected fixture source must not exist");
+    }
+
+    private long countRows(String sql) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery(sql)) {
+            assertTrue(rs.next());
+            return rs.getLong(1);
         }
     }
 }

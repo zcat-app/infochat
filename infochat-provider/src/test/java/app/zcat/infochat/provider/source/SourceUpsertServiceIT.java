@@ -431,6 +431,53 @@ class SourceUpsertServiceIT {
         }
     }
 
+    @Test
+    void topBootstrapTagIsRejectedWithoutWrites() throws Exception {
+        UUID caller = insertUser("m1-036-top-repro", false);
+
+        assertThrows(
+                SourceUpsertService.UnknownTagsException.class,
+                () -> service.upsert(
+                        caller, false, "dm", caller, SourceKind.RSS,
+                        "https://example.com/m1-036-top-repro.xml", "Top Feed", "news", "en",
+                        List.of("tech")));
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT COUNT(*) FROM source "
+                             + "WHERE identifier = 'https://example.com/m1-036-top-repro.xml'")) {
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                assertEquals(0, rs.getInt(1), "a top tag must be rejected before source write");
+            }
+        }
+
+        UpsertResult leafResult = service.upsert(
+                caller, false, "dm", caller, SourceKind.RSS,
+                "https://example.com/m1-036-leaf-repro.xml", "Leaf Feed", "news", "en",
+                List.of("ai"));
+        assertEquals(Outcome.FRESH_INSERT, leafResult.outcome(),
+                "an existing source-eligible leaf must still succeed");
+
+        UUID admin = insertUser("m1-036-top-admin-repro", true);
+        UpsertResult adminSeed = service.upsert(
+                admin, true, "dm", admin, SourceKind.RSS,
+                "https://example.com/m1-036-admin-top-repro.xml", "Admin Feed", "news", "en",
+                List.of("ai"));
+        assertEquals(0L, countAuditRows(adminSeed.sourceId(), admin));
+
+        assertThrows(
+                SourceUpsertService.UnknownTagsException.class,
+                () -> service.upsert(
+                        admin, true, "dm", admin, SourceKind.RSS,
+                        "https://example.com/m1-036-admin-top-repro.xml", "Admin Feed", "news", "en",
+                        List.of("tech")));
+        assertEquals(List.of("ai"), readSource(adminSeed.sourceId()).bootstrapTags,
+                "a top replacement must leave existing bootstrap leaves unchanged");
+        assertEquals(0L, countAuditRows(adminSeed.sourceId(), admin),
+                "a rejected top replacement must not write an audit row");
+    }
+
     // M1-750: the declared language round-trips into source.language on
     // insert, and a re-upsert (ON CONFLICT DO UPDATE) does NOT overwrite
     // it — V31's column-scoped UPDATE grant excludes language, so the

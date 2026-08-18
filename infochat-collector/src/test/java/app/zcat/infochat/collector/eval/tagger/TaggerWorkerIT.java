@@ -1,8 +1,10 @@
 package app.zcat.infochat.collector.eval.tagger;
 
+import app.zcat.infochat.collector.bootstrap.BootstrapLoader;
 import app.zcat.infochat.collector.eval.testing.StubLlmProvider;
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.llm.LlmProvider;
+import io.quarkus.arc.ClientProxy;
 import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
@@ -13,6 +15,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
 import javax.sql.DataSource;
+import java.lang.reflect.Field;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -77,6 +82,9 @@ class TaggerWorkerIT {
 
     @Inject
     TaggerWorker taggerWorker;
+
+    @Inject
+    BootstrapLoader bootstrapLoader;
 
     @Inject
     TagVocabulary tagVocabulary;
@@ -262,7 +270,73 @@ class TaggerWorkerIT {
         assertPostTagsExclude(post.id, List.of("ai", "java"));
     }
 
+    // ---------- leaf-only bootstrap fallback ----------
+
+    @Test
+    @Order(9)
+    void bootstrapFallbackStoresOnlyLeafAfterRejectedTopInputs(@org.junit.jupiter.api.io.TempDir Path tempDir)
+            throws Exception {
+        // Exercise the collector admission boundary first: the same loader
+        // rejects a top before writes, then admits the leaf-valued source used
+        // by the fallback assertion below.
+        String topIdentifier = "https://tagger-it.example.test/leaf-gate-top/feed.xml";
+        String leafIdentifier = "https://tagger-it.example.test/leaf-gate-leaf/feed.xml";
+        Path topFixture = tempDir.resolve("top-tags.json");
+        Files.writeString(topFixture, """
+            [{"kind":"rss","identifier":"%s","name":"Top gate","category":"news","tags":["tech"]}]
+            """.formatted(topIdentifier));
+        Path leafFixture = tempDir.resolve("leaf-tags.json");
+        Files.writeString(leafFixture, """
+            [{"kind":"rss","identifier":"%s","name":"Leaf gate","category":"news","tags":["ai","software-development"]}]
+            """.formatted(leafIdentifier));
+
+        BootstrapLoader unwrapped = ClientProxy.unwrap(bootstrapLoader);
+        Field sourcesFilePath = BootstrapLoader.class.getDeclaredField("sourcesFilePath");
+        sourcesFilePath.trySetAccessible();
+        String originalPath = (String) sourcesFilePath.get(unwrapped);
+        try {
+            sourcesFilePath.set(unwrapped, topFixture.toString());
+            assertTrue(org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalStateException.class, () -> bootstrapLoader.runLoad())
+                .getMessage().contains("tech"));
+            assertEquals(0L, countSources(topIdentifier));
+
+            sourcesFilePath.set(unwrapped, leafFixture.toString());
+            bootstrapLoader.runLoad();
+        } finally {
+            sourcesFilePath.set(unwrapped, originalPath);
+        }
+
+        stub().failAll();
+        List<String> bootstrapLeaves = List.of("ai", "software-development");
+        SeededPost post = seedPickupReadyPostForExistingSource(
+            "tagger-it-leaf-bootstrap-fallback", "Body", leafIdentifier, bootstrapLeaves);
+
+        taggerWorker.processOne(rowFor(post, bootstrapLeaves));
+
+        assertEquals(2, stub().callCount(),
+            "bootstrap fallback must follow two failed tagger attempts");
+        assertPostState(post.id, true, /* fallback */ true, bootstrapLeaves);
+        assertPostTagsExclude(post.id, List.of("tech"));
+    }
+
     // ---------- helpers ----------
+
+    private SeededPost seedPickupReadyPostForExistingSource(
+            String slug, String body, String identifier, List<String> bootstrapTags)
+            throws Exception {
+        UUID sourceId;
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT id FROM source WHERE identifier = ?")) {
+            ps.setString(1, identifier);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "loader must admit the leaf-valued source");
+                sourceId = (UUID) rs.getObject(1);
+            }
+        }
+        return insertPickupReadyPost(slug, body, sourceId);
+    }
 
     private SeededPost seedPickupReadyPost(String slug, String body, List<String> bootstrapTags)
             throws Exception {
@@ -270,6 +344,11 @@ class TaggerWorkerIT {
             "https://tagger-it.example.test/" + slug + "/feed.xml",
             "Tagger IT " + slug,
             bootstrapTags);
+        return insertPickupReadyPost(slug, body, sourceId);
+    }
+
+    private SeededPost insertPickupReadyPost(String slug, String body, UUID sourceId)
+            throws Exception {
         Instant fetchedAt = Instant.parse("2026-05-15T13:00:00Z");
         String uid = "tagger-it-" + slug + "-uid";
 
@@ -359,6 +438,18 @@ class TaggerWorkerIT {
             ps.setString(1, name);
             ps.setString(2, name);
             ps.executeUpdate();
+        }
+    }
+
+    private long countSources(String identifier) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT count(*) FROM source WHERE identifier = ?")) {
+            ps.setString(1, identifier);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                return rs.getLong(1);
+            }
         }
     }
 

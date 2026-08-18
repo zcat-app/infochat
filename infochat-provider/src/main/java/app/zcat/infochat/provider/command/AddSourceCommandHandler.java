@@ -97,7 +97,7 @@ public class AddSourceCommandHandler implements CommandHandler {
             "SELECT id FROM groups WHERE adapter = ? AND upstream_group_id = ?";
 
     private static final String SELECT_VOCABULARY_SQL =
-            "SELECT name FROM tag ORDER BY name ASC";
+            "SELECT name FROM tag WHERE node_kind = 'leaf' ORDER BY name ASC";
 
     private static final int FUZZY_SUGGESTION_MAX = 5;
 
@@ -231,8 +231,8 @@ public class AddSourceCommandHandler implements CommandHandler {
                     kind, args.url().toString(),
                     displayName, args.category(), args.lang(), args.tags());
         } catch (SourceUpsertService.UnknownTagsException e) {
-            // The v2 growth gate (M1-866): tags must name existing
-            // tag-tree nodes. Friendly fuzzy-suggestion shape, never
+            // The v2 growth gate (M1-882): tags must name existing
+            // source-eligible leaves. Friendly fuzzy-suggestion shape, never
             // echoing the supplied names (M1-656).
             return reply(scope, format(BundleKeys.ERROR_ADD_SOURCE_UNKNOWN_TAG,
                     String.join(", ", suggestionsFor(e.unknownNames().getFirst()))));

@@ -307,7 +307,10 @@ connect with (see decision D34 and `security.md`).
   bootstrap arm already filters `deleted_at`), and an exclusion
   re-applies if the source is later revived — the scope opted out.
 - **Tag.** A row in the controlled vocabulary (Tier 1, decision D5).
-  Seeded by the bootstrap loader and extended by `/add-source --tags`.
+  The tag tree contains both top nodes and leaves. A source's
+  `bootstrap_tags` are a leaf-only reference set: every value MUST name an
+  existing `tag` row whose `node_kind` is `leaf`. Top nodes remain valid for
+  follow/filter operations, but are not valid source bootstrap tags.
   **Stored form.** Every tag value is stored in its
   post-normalization form per `commands.md` §Surface conventions
   (NFC, lower-cased via `Locale.ROOT`, character class
@@ -325,14 +328,15 @@ connect with (see decision D34 and `security.md`).
   vocabulary.
 
   **Vocabulary lifecycle (v1).** The controlled vocabulary is
-  **append-only in v1**: tags enter via the bootstrap loader's
-  `tags[]` union (decision D8) and `/add-source --tags` on a fresh
-  insert (decision D14, decision D5); **nothing removes a tag row**.
-  Reducing the JSON, soft-deleting a source, and `/remove-source`
-  are all silent on the vocabulary. A bot admin replacing
+  **append-only in v1**: **nothing removes a tag row**. Bootstrap loading and
+  `/add-source --tags` may reference only existing leaves for
+  `source.bootstrap_tags`; neither source-admission path creates a new
+  vocabulary value or accepts a top node. A bot admin replacing
   `bootstrap_tags` on an existing source row (commands.md §Source
-  management) **adds** any new values to the vocabulary and leaves
-  any removed values in place. This is a deliberate v1
+  management) therefore selects existing leaves and leaves the vocabulary
+  unchanged.
+  Reducing the JSON, soft-deleting a source, and `/remove-source`
+  are all silent on the vocabulary. This is a deliberate v1
   simplification: an automatic GC trigger that walked
   `bootstrap_tags ⋃ scope_tag` and removed unreferenced rows
   would race with concurrent `/follow-tag` writes and require a

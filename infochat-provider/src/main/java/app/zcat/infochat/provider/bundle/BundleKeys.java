@@ -561,7 +561,7 @@ public final class BundleKeys {
     /** Caller passed a URL carrying a {@code user:password@} userinfo component (M1-156); credentials in a stored, echoed source URL are refused outright rather than stripped. */
     public static final String ERROR_ADD_SOURCE_USERINFO_REJECTED = "error.add_source.userinfo_rejected";
 
-    /** {@code /add-source --tags} names a tag that is not an existing tag-tree node (the v2 growth gate, M1-866); the reply surfaces fuzzy suggestions without echoing the supplied names (M1-656). Token {@code {0}} = comma-joined suggestions. */
+    /** {@code /add-source --tags} names a tag that is not a source-eligible leaf (the v2 growth gate, M1-882); the reply surfaces fuzzy suggestions without echoing the supplied names (M1-656). Token {@code {0}} = comma-joined suggestions. */
     public static final String ERROR_ADD_SOURCE_UNKNOWN_TAG = "error.add_source.unknown_tag";
 
     // ----- /add-source successful replies (M1-036) ------------------------
@@ -1218,6 +1218,12 @@ public final class BundleKeys {
 
     /** {@code /get-tags} header line printed before the per-tag rows (explains the {@code *} followed-marker). */
     public static final String REPLY_GET_TAGS_HEADER = "reply.get_tags.header";
+
+    /** Suffix identifying a source-eligible leaf in the {@code /get-tags} vocabulary. */
+    public static final String REPLY_GET_TAGS_SOURCE_MARKER = "reply.get_tags.source_marker";
+
+    /** Suffix identifying a top node in the {@code /get-tags} vocabulary. */
+    public static final String REPLY_GET_TAGS_TOP_MARKER = "reply.get_tags.top_marker";
 
     /** {@code /get-tags} reply when the controlled vocabulary (the {@code tag} table) is empty. */
     public static final String REPLY_GET_TAGS_EMPTY = "reply.get_tags.empty";

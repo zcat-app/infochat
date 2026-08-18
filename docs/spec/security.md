@@ -1645,8 +1645,11 @@ every stage: retry once, then apply the stage-specific failure path below.
   since `audit_log` is the append-only, `/audit`-readable record. D42 is the HTTP-shaped mirror of
   D38's per-relay degradation commitment for stream sources.
 - **Tagger** failure → fall back to `source.bootstrap_tags`, mark the post,
-  throttled admin notify. (This is why `/add-source --tags` is mandatory:
-  every source must have a deterministic fallback.) A clean empty proposal
+  throttled admin notify. `source.bootstrap_tags` contains only existing
+  leaf tag-tree nodes: source admission and bootstrap loading reject top
+  nodes before writing, so this fallback can persist leaves only. (This is
+  why `/add-source --tags` is mandatory: every source must have a
+  deterministic fallback.) A clean empty proposal
   (`{"tags":[]}`) is an outcome, not a failure (`llm.md` §Failure
   handling), so it never fires this path — and a tagger answering empty
   to EVERY post would otherwise emit no signal at all: a sustained
@@ -2506,4 +2509,4 @@ operational complexity; v1 commits to global source rows.
 - Re-evaluation job cadence, per-post attempt cap, and re-eval status values
 - Fetcher consecutive-failure threshold (*N*) and source re-enable procedure
 - Invite-code TTL default and the exact drop-counter metric name
-- Slow-start tier duration (per profile) and the exact allowed-command list 
+- Slow-start tier duration (per profile) and the exact allowed-command list
