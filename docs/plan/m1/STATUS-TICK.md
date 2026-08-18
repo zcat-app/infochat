@@ -13,10 +13,10 @@
 | pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
-| escalated | 1 |
+| escalated | 0 |
 | done | 92 |
 | deferred | 0 |
-| abandoned | 2 |
+| abandoned | 3 |
 | **total** | **99** |
 
 ---
@@ -52,7 +52,8 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 | ID | Title | Trigger | Date |
 |---|---|---|---|
-| M1-869 | Amend the spec for the v2 tag-tree taxonomy | manual-verdict | 2026-08-18 |
+
+_(none)_
 
 ---
 
@@ -84,6 +85,9 @@ _(none)_
 ## Abandoned
 
 Tickets decided against — not implemented as this ticket. Terminal: not reopenable via the driver's `reopen`. `abandoned_reason` records why (`decomposed` = split into shipped children; `superseded` = absorbed by another ticket; `obsoleted-by-spec-amend` = a spec change dropped the requirement; `wont-do-infeasible` = evaluated and judged not worth building). See `docs/process/workflow.md` §Status values.
+
+### decomposed (1)
+- M1-869 — Amend the spec for the v2 tag-tree taxonomy
 
 ### superseded (2)
 - M1-860 — Measure news-category tagger coverage on the local model
@@ -192,8 +196,8 @@ M1-860 (abandoned)
 M1-864 (done)
   └── M1-866 (done)
         ├── M1-867 (done)
-        │     └── M1-869 (escalated)
-        ├── M1-869 (escalated) [see above]
+        │     └── M1-869 (abandoned)
+        ├── M1-869 (abandoned) [see above]
         ├── M1-877 (pending) ← runnable
         └── M1-880 (done)
 M1-865 (done)
@@ -201,8 +205,8 @@ M1-865 (done)
   ├── M1-867 (done) [see above]
   ├── M1-868 (done)
   │     ├── M1-866 (done) [see above]
-  │     └── M1-869 (escalated) [see above]
-  └── M1-869 (escalated) [see above]
+  │     └── M1-869 (abandoned) [see above]
+  └── M1-869 (abandoned) [see above]
 M1-870 (done)
 M1-871 (done)
   └── M1-872 (done)

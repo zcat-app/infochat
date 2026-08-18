@@ -1,7 +1,7 @@
 ---
 id: M1-869
 title: "Amend the spec for the v2 tag-tree taxonomy"
-status: escalated
+status: abandoned
 created: 2026-08-16
 last_updated: 2026-08-18
 flow: tick
@@ -104,10 +104,10 @@ decision_refs:
   - D63
 decomposed_from:
 replaces:
-replaced_by:
+replaced_by: [M1-882, M1-883, M1-884]
 deferred_on:
 deferred_reason:
-abandoned_reason:
+abandoned_reason: decomposed
 spec_amend_for:
 spec_amend_parent:
 remediates:
@@ -141,7 +141,7 @@ clarity_check:
     landed verbatim; the M1-865 review fold-in and the sub-order wording
     flag are carried in acceptance 2. blocked_by M1-865..868 all done.
     No replaces. Doc-only ticket: no code seam, no test-preserves seam.
-escalation_reason: manual-verdict
+escalation_reason:
 ---
 
 # M1-869: amend the spec for the v2 tag-tree taxonomy
