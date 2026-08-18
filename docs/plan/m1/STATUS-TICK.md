@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
-| escalated | 0 |
+| escalated | 1 |
 | done | 92 |
 | deferred | 0 |
 | abandoned | 2 |
-| **total** | **96** |
+| **total** | **99** |
 
 ---
 
@@ -25,8 +25,8 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-869 — Amend the spec for the v2 tag-tree taxonomy (complexity: low, risk: low)
 - M1-877 — Re-measure the news leg on resolved stored tags (complexity: medium, risk: low)
+- M1-882 — Reject top nodes as source bootstrap tags (complexity: medium, risk: medium)
 
 ---
 
@@ -43,7 +43,8 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-883 — blocked_by: M1-882 (pending)
+- M1-884 — blocked_by: M1-882 (pending), M1-883 (pending)
 
 ---
 
@@ -51,8 +52,7 @@ _(none)_
 
 | ID | Title | Trigger | Date |
 |---|---|---|---|
-
-_(none)_
+| M1-869 | Amend the spec for the v2 tag-tree taxonomy | manual-verdict | 2026-08-18 |
 
 ---
 
@@ -192,8 +192,8 @@ M1-860 (abandoned)
 M1-864 (done)
   └── M1-866 (done)
         ├── M1-867 (done)
-        │     └── M1-869 (pending) ← runnable
-        ├── M1-869 (pending) [see above]
+        │     └── M1-869 (escalated)
+        ├── M1-869 (escalated) [see above]
         ├── M1-877 (pending) ← runnable
         └── M1-880 (done)
 M1-865 (done)
@@ -201,8 +201,8 @@ M1-865 (done)
   ├── M1-867 (done) [see above]
   ├── M1-868 (done)
   │     ├── M1-866 (done) [see above]
-  │     └── M1-869 (pending) [see above]
-  └── M1-869 (pending) [see above]
+  │     └── M1-869 (escalated) [see above]
+  └── M1-869 (escalated) [see above]
 M1-870 (done)
 M1-871 (done)
   └── M1-872 (done)
@@ -214,4 +214,8 @@ M1-876 (done)
 M1-878 (done)
 M1-879 (done)
 M1-881 (done)
+M1-882 (pending) ← runnable
+  ├── M1-883 (pending)
+  │     └── M1-884 (pending)
+  └── M1-884 (pending) [see above]
 ```

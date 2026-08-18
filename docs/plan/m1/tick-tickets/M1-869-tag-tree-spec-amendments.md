@@ -1,9 +1,9 @@
 ---
 id: M1-869
 title: "Amend the spec for the v2 tag-tree taxonomy"
-status: pending
+status: escalated
 created: 2026-08-16
-last_updated: 2026-08-17
+last_updated: 2026-08-18
 flow: tick
 reproduction: >-
   Probe (spec-truthness gap, verified 2026-08-16): after M1-865..M1-868
@@ -111,12 +111,37 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-18
+    verdict: MANUAL
+    checks: "SPEC-TRUTHNESS FAIL, SECURITY PASS, TEST-ADEQUACY NOT-APPLICABLE, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "7 files changed, 143 insertions(+), 76 deletions(-)"
+    verdict_file: .scratch/tick-review-M1-869-r1.txt
+    note: >-
+      Manual decision required: source/bootstrap tags accept a top although
+      fallback persistence can store it unchanged in post.tags, contradicting
+      the leaf-only post contract; and ALL-mode top-unfollow retains its
+      descendants although the command text claims "everything except X".
+      The reviewer names the evidence and decision alternatives in the
+      verdict artifact.
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
-escalation_reason:
+clarity_check:
+  result: clear
+  notes: >-
+    Lint 0 findings. All five reproduction anchors verified against main
+    (schema.md lifecycle :327-347 and Tag entity :309-317; commands.md
+    preferences :1090-1120 and digests :2051-2140; security.md searchPosts
+    :328). Minor citation drift only: the llm.md Tagger bullet sits at :79,
+    not :70-72 (anchor §SPI shape correct, quote accurate). Analysis
+    cross-read (docs/plan/m1/tick-analysis/tag-tree-taxonomy-v2.md, read
+    from the M1-865 worktree — the file is gitignored by design): P17
+    landed verbatim; the M1-865 review fold-in and the sub-order wording
+    flag are carried in acceptance 2. blocked_by M1-865..868 all done.
+    No replaces. Doc-only ticket: no code seam, no test-preserves seam.
+escalation_reason: manual-verdict
 ---
 
 # M1-869: amend the spec for the v2 tag-tree taxonomy
