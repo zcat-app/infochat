@@ -1930,7 +1930,7 @@ public class InboundRouter {
                     language = rs.getString("language");
                     replyModeOverride = rs.getString("reply_mode");
                 }
-                resolveReplyMode(replyModeOverride, language, scopeKind, scopeId);
+                resolveReplyMode(replyModeOverride);
                 return language;
             }
         } catch (SQLException e) {
@@ -1942,13 +1942,12 @@ public class InboundRouter {
     // D79: resolve the reply mode once per dispatch and cache it on the
     // context so it never flips mid-turn. Guarded for unit tests that wire
     // the router by hand and leave the resolver/context unset.
-    private void resolveReplyMode(@Nullable String replyModeOverride, String language,
-                                  String scopeKind, UUID scopeId) {
+    private void resolveReplyMode(@Nullable String replyModeOverride) {
         if (replyModeResolver == null || inboundContext == null) {
             return;
         }
         inboundContext.setReplyMode(
-                replyModeResolver.resolve(replyModeOverride, language, scopeKind, scopeId));
+                replyModeResolver.resolve(replyModeOverride));
     }
 
     private void ensureGroupMembership(DispatchDb db, UUID groupId, UUID userId) {

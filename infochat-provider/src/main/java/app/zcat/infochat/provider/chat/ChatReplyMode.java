@@ -7,8 +7,7 @@ package app.zcat.infochat.provider.chat;
  * generated in English and the display leg translates it for non-en
  * scopes. NATIVE generates the reply in the scope's declared /lang
  * language and skips the display leg. The mode is resolved once per
- * dispatch at intake (scope override, else deployment default, gated
- * on the bar-clearing registry) and cached on
+ * dispatch at intake (scope override, else deployment default) and cached on
  * {@link app.zcat.infochat.provider.messaging.InboundContext}, so it
  * never flips mid-turn.
  */

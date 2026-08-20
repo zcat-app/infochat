@@ -130,9 +130,8 @@ public class LlmRouter {
     /**
      * Models cleared for the native tool transport — the measured
      * (model, transport) pairs a committed bar-clearing record vouches
-     * for (the D79 registry posture). EMPTY at landing: no measured
-     * pair exists, every endpoint resolves TEXT, and the transport
-     * probe never fires.
+     * for. EMPTY at landing: no measured pair exists, every endpoint
+     * resolves TEXT, and the transport probe never fires.
      */
     private static final Set<String> NATIVE_TOOL_TRANSPORT_CLEARED_MODELS = Set.of();
 

@@ -27,12 +27,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code docs/process/test-pyramid.md} §Shape B: @QuarkusTest against the
  * default-profile DevServices Postgres image, direct
  * {@code handler.handle(scope, rawText)} calls (the inbound → router chain
- * belongs to the ITs). Decision D79: the override is stored either way; an
- * uncleared native setting resolves translate until the (model, language)
- * pair clears, and the confirmation / status read name that inactive state.
- * The shipped bar-clearing registry clears only gemma × cs/ru/tr (M1-858
- * restated matrix), and this IT's scope language is en with a non-gemma
- * chat model, so every native write here lands stored-but-inactive.
+ * belongs to the ITs). The configured reply mode is decisive; a native
+ * setting is active immediately and independent of model or language.
  */
 @QuarkusTest
 class ReplyModeCommandHandlerIT {
@@ -90,18 +86,19 @@ class ReplyModeCommandHandlerIT {
     }
 
     @Test
-    void nativeWriteIsStoredButConfirmedUncleared() throws Exception {
+    void nativeWriteIsStoredAndConfirmedActive() throws Exception {
         String actor = PREFIX + "native-actor";
         UUID actorId = seedUser(actor);
 
         OutboundMessage reply = handler.handle(new ScopeRef.Dm(actor), "/reply-mode native");
 
         assertEquals("native", scopeReplyModeOf(actorId),
-                "the native override is stored either way (activates if the pair clears later)");
-        String expected = bundleLoader.get(
-                BundleKeys.REPLY_MODE_SUCCESS_UNCLEARED, inboundContext.effectiveLanguage());
+                "the native override is stored and takes effect when set");
+        String expected = MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_MODE_SUCCESS, inboundContext.effectiveLanguage()),
+                "native");
         assertEquals(expected, reply.text(),
-                "an uncleared native write confirms stored-but-inactive, never a silent no-op");
+                "a native write confirms the decisive configured mode");
     }
 
     @Test
@@ -119,17 +116,18 @@ class ReplyModeCommandHandlerIT {
     }
 
     @Test
-    void bareInvocationReportsStoredNativeAsInactive() throws Exception {
+    void bareInvocationReportsStoredNative() throws Exception {
         String actor = PREFIX + "bare-native-actor";
         seedUser(actor);
         handler.handle(new ScopeRef.Dm(actor), "/reply-mode native");
 
         OutboundMessage reply = handler.handle(new ScopeRef.Dm(actor), "/reply-mode");
 
-        String expected = bundleLoader.get(
-                BundleKeys.REPLY_MODE_STATUS_UNCLEARED, inboundContext.effectiveLanguage());
+        String expected = MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_MODE_STATUS, inboundContext.effectiveLanguage()),
+                "native");
         assertEquals(expected, reply.text(),
-                "the status read names an uncleared native setting stored but inactive");
+                "the status read names the stored native setting");
     }
 
     @Test

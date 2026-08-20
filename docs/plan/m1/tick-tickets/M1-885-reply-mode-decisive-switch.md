@@ -1,9 +1,9 @@
 ---
 id: M1-885
 title: "Land the decisive reply-mode switch (registry removal)"
-status: pending
+status: done
 created: 2026-08-19
-last_updated: 2026-08-19
+last_updated: 2026-08-20
 flow: tick
 reproduction: >-
   ChatAgentReplyModeTest#configuredNativeModeIsDecisiveForAnyModelAndLanguage
@@ -33,6 +33,7 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/command/ReplyModeCommandHandlerIT.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/messaging/ReplyModeDispatchHopIT.java
   - infochat-llm-adapter/src/main/java/app/zcat/infochat/llm/routing/LlmRouter.java
+  - infochat-provider/src/main/resources/application.properties
 complexity: medium
 risk: high
 round_cap: 3
@@ -71,7 +72,7 @@ acceptance:
   - "The resolver carries no dead gate shape (analysis P3, §1 orphan cleanup): ChatReplyModeResolver.resolve shrinks to the decisive inputs (scope override → deployment default), the one call site (InboundRouter.java:1951, inside the guarded resolveReplyMode at :1942-1952 — the hand-wired-test guard at :1947 stays) and the javadoc are updated, and grep -n 'scopeLanguage\\|scopeKind' ChatReplyModeResolver.java returns nothing below the class javadoc. Verify: compile plus the reproduction test green with the shrunken signature."
   - "The /help usage text tells the decisive truth in ALL FIVE bundles (analysis P2): help.cmd.reply-mode.usage loses the 'takes effect only when the chat model clears that language' clause (en.properties:100, cs:102, es:118, ru:124, tr:116) in favor of the M1-886-approved wording's behavior — native takes effect when set. Verify: grep -n 'clears that language' bundles/*.properties returns nothing, BundleLoaderTest:82 green, and LangCommandIT.java:132 / AdapterRouterIT.java:194 pass UNTOUCHED (they pin only the gate-free HELP_CMD_REPLY_MODE_SHORT one-liner)."
   - "Stale gate citations are reworded (analysis P4, §11 — the Census below enumerates them): ReplyModeCommandHandlerIT.java:96 ('activates if the pair clears later'), ReplyModeDispatchHopIT.java:126 ('stored either way'), and LlmRouter.java:133 ('(the D79 registry posture)') each state the gate-free truth. Verify: the Census grep returns nothing."
-  - "Zero drift (analysis P10): git diff infochat-provider/src/main/resources/application.properties is empty and no new config key, migration, or audit action is introduced. Verify: the diff stat."
+  - "Zero drift (analysis P10): the `infochat.chat.reply-mode=translate` VALUE line in infochat-provider/src/main/resources/application.properties is byte-untouched and no new config key, migration, or audit action is introduced; the only admitted diff in that file is the stale-gate comment reword above the key (the Census catch-all disposition of a grep hit, §11 — decision recorded in clarity_check). Verify: the diff stat shows comment lines only."
   - "mvn verify from repo root is green (engineering-rules §5; risk: high → commit-time verify re-run). The 2026-08-19 campaign log (BUILD SUCCESS, 1,932 provider tests, 376 failsafe, 0 failures) is the pre-existing evidence for the working-tree state; the commit-time run is the gate of record."
 test_plan:
   adds:
@@ -112,11 +113,29 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-20
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "18 files changed, 71 insertions(+), 307 deletions(-)"
+    verdict_file: .scratch/tick-review-M1-885-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check: "start 2026-08-20: lint clean; citations spot-checked against the
+  tree (resolver decisive at ChatReplyModeResolver.java:38-45, registry deleted,
+  gate bundle keys gone, reproduction test in-tree). Two draft defects found and
+  resolved: (1) the handoff's claim that the P2/P3/P4 cleanups were already in
+  the working tree was FALSE — the dead resolver params, the five-bundle help
+  gate clause, and the three stale comments are all still present and are this
+  implementation's work; (2) BLOCKING QUESTION — the tree's comment-only
+  application.properties reword (stale gate citation above the key) conflicted
+  with acceptance item 8's empty-diff demand and the file's absence from
+  files_scope, while the Census catch-all authorizes rewording exactly such
+  hits; user decision 2026-08-20: KEEP the reword, refine the ticket (file
+  added to files_scope; item 8 now pins the VALUE line byte-untouched with the
+  comment reword as the only admitted diff)."
 escalation_reason:
 ---
 

@@ -3,21 +3,17 @@ package app.zcat.infochat.provider.messaging;
 import app.zcat.infochat.messaging.impl.inmemory.InMemoryAdapter;
 import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
-import app.zcat.infochat.provider.chat.ChatReplyModeRegistry;
 import app.zcat.infochat.provider.testing.TestLlmProvider;
 import app.zcat.infochat.provider.testsupport.DispatchAwaits;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
-import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
-import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -45,9 +41,6 @@ class ReplyModeDispatchHopIT {
     @Inject BundleLoader bundleLoader;
     @Inject TestLlmProvider testLlmProvider;
     @Inject RegisteredContactSet registeredContactSet;
-
-    @ConfigProperty(name = "infochat.llm.chat.model")
-    String chatModel;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -88,12 +81,8 @@ class ReplyModeDispatchHopIT {
     }
 
     @Test
-    void aClearedNativeScopeSkipsTheDisplayLegAcrossTheHop() throws Exception {
-        String contact = seedCsNativeScope("cleared");
-        QuarkusMock.installMockForType(
-                new ChatReplyModeRegistry(Set.of(
-                        new ChatReplyModeRegistry.ClearedPair(chatModel, "cs"))),
-                ChatReplyModeRegistry.class);
+    void aConfiguredNativeScopeSkipsTheDisplayLegAcrossTheHop() throws Exception {
+        String contact = seedCsNativeScope("configured");
         testLlmProvider.setResponseText(GENERATED_REPLY);
         testLlmProvider.setTranslatorResponseText(TRANSLATED_REPLY);
 
@@ -106,26 +95,6 @@ class ReplyModeDispatchHopIT {
         assertEquals(expected, adapter.finalizedBodies().getLast(),
                 "the worker-side agent must run the intake-resolved NATIVE mode across the "
                         + "hop: no display leg, the generated text IS the delivered text");
-    }
-
-    @Test
-    void anUnclearedNativeScopeKeepsTheDisplayLegAcrossTheHop() throws Exception {
-        String contact = seedCsNativeScope("uncleared");
-        // The shipped registry clears gemma × cs, but this profile's chat
-        // model (infochat.llm.chat.model) is not gemma, so the pair is
-        // uncleared and the stored native override resolves translate.
-        testLlmProvider.setResponseText(GENERATED_REPLY);
-        testLlmProvider.setTranslatorResponseText(TRANSLATED_REPLY);
-
-        adapter.deliverDm(contact, "ahoj, co je noveho?");
-
-        DispatchAwaits.await(() -> !adapter.finalizedBodies().isEmpty(),
-                "the uncleared native scope's chat terminal");
-        String expected = TRANSLATED_REPLY + "\n\n"
-                + bundleLoader.get(BundleKeys.CHAT_PROVENANCE_GENERAL_KNOWLEDGE, "cs");
-        assertEquals(expected, adapter.finalizedBodies().getLast(),
-                "an uncleared pair resolves translate across the hop even with the "
-                        + "native override stored");
     }
 
     // --- helpers ---
@@ -154,7 +123,7 @@ class ReplyModeDispatchHopIT {
         adapter.reset();
         adapter.deliverDm(contact, "/reply-mode native");
         assertFalse(adapter.sentMessages().isEmpty(),
-                "/reply-mode native must produce a confirmation reply (stored either way)");
+                "/reply-mode native must produce a confirmation reply");
         adapter.reset();
         return contact;
     }

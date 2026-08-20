@@ -29,13 +29,6 @@ import java.util.UUID;
  * {@code InboundRouter} via the CDI {@code Instance<CommandHandler>}
  * scan; no router-side edit needed.
  *
- * <p>The override is stored either way — a pair that clears later
- * activates it without a further command. An uncleared native override
- * resolves translate until the bar-clearing registry clears the
- * deployment's chat model and the scope language; the confirmation and
- * the bare-invocation status read both name that stored-but-inactive
- * state rather than silently no-op'ing.
- *
  * <p>Permission gate matches {@code /lang}: DM scope is the caller's own
  * scope; group scope requires bot-admin or group-admin. The handler writes
  * zero rows to {@code audit_log} — a user-preference mutation, not a
@@ -111,10 +104,6 @@ public class ReplyModeCommandHandler implements CommandHandler {
 
         upsertScopeReplyMode(scopeKind, scopeId, suppliedMode);
 
-        if (MODE_NATIVE.equals(suppliedMode)
-                && !replyModeResolver.nativeClears(inboundContext.effectiveLanguage())) {
-            return reply(scope, bundleLoader.get(BundleKeys.REPLY_MODE_SUCCESS_UNCLEARED, inboundContext.effectiveLanguage()));
-        }
         String body = MessageFormat.format(
                 bundleLoader.get(BundleKeys.REPLY_MODE_SUCCESS, inboundContext.effectiveLanguage()),
                 suppliedMode);
@@ -129,9 +118,6 @@ public class ReplyModeCommandHandler implements CommandHandler {
                     bundleLoader.get(BundleKeys.REPLY_MODE_STATUS_DEFAULT, lang),
                     replyModeResolver.deploymentDefault());
             return reply(scope, body);
-        }
-        if (MODE_NATIVE.equals(stored) && !replyModeResolver.nativeClears(lang)) {
-            return reply(scope, bundleLoader.get(BundleKeys.REPLY_MODE_STATUS_UNCLEARED, lang));
         }
         String body = MessageFormat.format(
                 bundleLoader.get(BundleKeys.REPLY_MODE_STATUS, lang), stored);

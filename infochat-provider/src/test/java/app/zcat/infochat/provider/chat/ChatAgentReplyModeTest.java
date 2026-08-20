@@ -35,9 +35,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.logging.Handler;
-import java.util.logging.LogRecord;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -137,75 +134,20 @@ class ChatAgentReplyModeTest {
     }
 
     @Test
-    void anUnclearedPairResolvesTranslateEvenWithTheOverrideSet() {
-        // "some-model" clears no language in the shipped registry, so
-        // every (model, language) pair here is uncleared.
-        ChatReplyModeRegistry registry = new ChatReplyModeRegistry();
-        ChatReplyModeResolver resolver =
-                new ChatReplyModeResolver("translate", "some-model", registry);
+    void configuredNativeModeIsDecisiveForAnyModelAndLanguage() {
+        // Decisive means the configured values are the ONLY inputs — the
+        // signature takes no model or language to gate on (decision D79).
+        ChatReplyModeResolver resolver = new ChatReplyModeResolver("native");
 
-        // D79 names the resolution-time fallback as a logged event — the
-        // operator's only dispatch-time trace of a stored-but-inactive
-        // native setting; captured per the codebase's handler precedent.
-        org.jboss.logmanager.Logger resolverLogger =
-                org.jboss.logmanager.Logger.getLogger(ChatReplyModeResolver.class.getName());
-        CapturingLogHandler capture = new CapturingLogHandler();
-        resolverLogger.addHandler(capture);
-        try {
-            assertEquals(ChatReplyMode.TRANSLATE,
-                    resolver.resolve("native", "cs", "dm", SCOPE_ID),
-                    "a native override on an uncleared pair resolves translate");
-
-            ChatReplyModeResolver nativeDefault =
-                    new ChatReplyModeResolver("native", "some-model", registry);
-            assertEquals(ChatReplyMode.TRANSLATE,
-                    nativeDefault.resolve(null, "cs", "dm", SCOPE_ID),
-                    "a native deployment default on an uncleared pair resolves translate");
-        } finally {
-            resolverLogger.removeHandler(capture);
-        }
-
-        long fallbackLines = capture.records.stream()
-                .filter(r -> r.getMessage() != null
-                        && r.getMessage().contains("not cleared by the bar-clearing registry"))
-                .count();
-        assertEquals(2, fallbackLines,
-                "each uncleared-pair fallback must log the resolution-time trace line; "
-                        + "captured: " + capture.formatted());
-        assertTrue(capture.formatted().contains(SCOPE_ID.toString()),
-                "the fallback trace must carry the scope id; captured: " + capture.formatted());
-    }
-
-    @Test
-    void aClearedPairResolvesNativeWhenConfigured() {
-        ChatReplyModeRegistry registry = new ChatReplyModeRegistry(
-                Set.of(new ChatReplyModeRegistry.ClearedPair("model-x", "cs")));
-        ChatReplyModeResolver resolver =
-                new ChatReplyModeResolver("translate", "model-x", registry);
-
-        assertEquals(ChatReplyMode.NATIVE, resolver.resolve("native", "cs", "dm", SCOPE_ID));
-        assertEquals(ChatReplyMode.TRANSLATE, resolver.resolve("native", "es", "dm", SCOPE_ID),
-                "a different (uncleared) language resolves translate");
-        assertEquals(ChatReplyMode.TRANSLATE, resolver.resolve(null, "cs", "dm", SCOPE_ID),
-                "the translate deployment default wins even for a cleared pair");
-
-        ChatReplyModeResolver otherModel =
-                new ChatReplyModeResolver("translate", "model-y", registry);
-        assertEquals(ChatReplyMode.TRANSLATE, otherModel.resolve("native", "cs", "dm", SCOPE_ID),
-                "a different (uncleared) model resolves translate");
-    }
-
-    @Test
-    void theShippedRegistrySeedsFromTheRestatedMatrix() {
-        // The record's end-state matrix (M1-858 restatement): gemma ×
-        // cs/ru/tr clear the zero-L0 bar; en/es FAIL on citation defects.
-        assertEquals(
-                Set.of(
-                        new ChatReplyModeRegistry.ClearedPair("gemma-4-26b-a4b", "cs"),
-                        new ChatReplyModeRegistry.ClearedPair("gemma-4-26b-a4b", "ru"),
-                        new ChatReplyModeRegistry.ClearedPair("gemma-4-26b-a4b", "tr")),
-                new ChatReplyModeRegistry().clearedPairs(),
-                "the shipped bar-clearing registry must mirror the record's restated matrix");
+        assertEquals(ChatReplyMode.NATIVE, resolver.resolve("native"));
+        assertEquals(ChatReplyMode.NATIVE, resolver.resolve(null),
+                "an unset scope inherits the configured native default");
+        assertEquals(ChatReplyMode.NATIVE,
+                new ChatReplyModeResolver("translate").resolve("native"),
+                "a native override beats a translate deployment default");
+        assertEquals(ChatReplyMode.TRANSLATE,
+                new ChatReplyModeResolver("translate").resolve(null),
+                "an unset scope inherits the translate deployment default");
     }
 
     @Test
@@ -556,31 +498,4 @@ class ChatAgentReplyModeTest {
         }
     }
 
-    /** JUL handler that records every published record (codebase log-capture precedent). */
-    private static final class CapturingLogHandler extends Handler {
-        final List<LogRecord> records = new CopyOnWriteArrayList<>();
-
-        @Override
-        public void publish(LogRecord record) {
-            records.add(record);
-        }
-
-        @Override
-        public void flush() {}
-
-        @Override
-        public void close() {}
-
-        String formatted() {
-            StringBuilder sb = new StringBuilder("[");
-            for (LogRecord r : records) {
-                sb.append(r.getLevel()).append(": ").append(r.getMessage());
-                if (r.getParameters() != null) {
-                    sb.append(" params=").append(java.util.Arrays.toString(r.getParameters()));
-                }
-                sb.append("; ");
-            }
-            return sb.append("]").toString();
-        }
-    }
 }

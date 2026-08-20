@@ -1418,14 +1418,8 @@ public final class BundleKeys {
     /** {@code /reply-mode} confirmation for a setting that takes effect; token {@code {0}} = the written mode. */
     public static final String REPLY_MODE_SUCCESS = "reply.mode.success";
 
-    /** {@code /reply-mode native} confirmation when the (model, language) pair is not cleared: stored either way, resolves translate meanwhile (D79). */
-    public static final String REPLY_MODE_SUCCESS_UNCLEARED = "reply.mode.success.uncleared";
-
     /** Bare {@code /reply-mode} status read for a stored setting in effect; token {@code {0}} = the stored mode. */
     public static final String REPLY_MODE_STATUS = "reply.mode.status";
-
-    /** Bare {@code /reply-mode} status read naming a stored native setting the registry does not clear (stored but inactive). */
-    public static final String REPLY_MODE_STATUS_UNCLEARED = "reply.mode.status.uncleared";
 
     /** Bare {@code /reply-mode} status read for an unset scope; token {@code {0}} = the inherited deployment default. */
     public static final String REPLY_MODE_STATUS_DEFAULT = "reply.mode.status.default";
