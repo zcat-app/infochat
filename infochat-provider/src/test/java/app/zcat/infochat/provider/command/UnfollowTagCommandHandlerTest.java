@@ -19,6 +19,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.text.MessageFormat;
 import java.time.Clock;
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -272,6 +273,135 @@ class UnfollowTagCommandHandlerTest {
                 "scope_tag must be empty after the flip-back");
     }
 
+    // ----- (c2) EXPLICIT mode: top unfollow subtracts the subtree (M1-891) --
+
+    @Test
+    void explicitUnfollowTopRemovesDescendantLeavesAndNamesThem() throws Exception {
+        // D-4 reproduction: a top followed only through its descendant
+        // leaves must subtract those rows, not reply a fake success.
+        String actor = PREFIX + "subtree-actor";
+        UUID actorId = seedUser(actor);
+        seedTop(PREFIX + "top");
+        UUID leafA = seedLeafUnder(PREFIX + "top", PREFIX + "leaf-a");
+        UUID leafB = seedLeafUnder(PREFIX + "top", PREFIX + "leaf-b");
+        UUID unrelated = seedTag(PREFIX + "unrelated");
+        seedScopePreferences(actorId, "EXPLICIT");
+        seedScopeTag(actorId, leafA);
+        seedScopeTag(actorId, leafB);
+        seedScopeTag(actorId, unrelated);
+        long versionBefore = tagSubscriptionVersionOf(actorId);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/unfollow-tag " + PREFIX + "top");
+
+        assertEquals(
+                expectedSuccessSubtree(PREFIX + "top",
+                        List.of(PREFIX + "leaf-a", PREFIX + "leaf-b")),
+                reply.text(),
+                "the subtree reply must name the requested top and the removed leaves");
+        assertEquals("EXPLICIT", tagModeOf(actorId),
+                "tag_mode must remain EXPLICIT — the unrelated leaf keeps the set non-empty");
+        assertEquals(1L, countScopeTag(actorId),
+                "only the unrelated leaf row may remain");
+        assertFalse(scopeTagContains(actorId, leafA),
+                "the first descendant leaf row must be deleted");
+        assertFalse(scopeTagContains(actorId, leafB),
+                "the second descendant leaf row must be deleted");
+        assertTrue(scopeTagContains(actorId, unrelated),
+                "the unrelated leaf row must be kept");
+        assertEquals(versionBefore + 1L, tagSubscriptionVersionOf(actorId),
+                "a real removal must bump tag_subscription_version exactly once");
+    }
+
+    @Test
+    void explicitUnfollowMatchingNothingRepliesTruthfullyAndMutatesNothing() throws Exception {
+        // P2 failure mode: a real vocabulary top with no followed rows
+        // under it must be a truthful no-op, not a fake success.
+        String actor = PREFIX + "nothing-actor";
+        UUID actorId = seedUser(actor);
+        seedTop(PREFIX + "top");
+        UUID unrelated = seedTag(PREFIX + "unrelated");
+        seedScopePreferences(actorId, "EXPLICIT");
+        seedScopeTag(actorId, unrelated);
+        long versionBefore = tagSubscriptionVersionOf(actorId);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/unfollow-tag " + PREFIX + "top");
+
+        assertEquals(expectedNothingMatched(PREFIX + "top"), reply.text(),
+                "a nothing-matched invocation must surface reply.unfollow_tag.nothing_matched");
+        assertEquals(1L, countScopeTag(actorId),
+                "a nothing-matched invocation must delete zero rows");
+        assertEquals("EXPLICIT", tagModeOf(actorId),
+                "a nothing-matched invocation must not flip tag_mode");
+        assertEquals(versionBefore, tagSubscriptionVersionOf(actorId),
+                "a nothing-matched invocation must not bump tag_subscription_version");
+    }
+
+    @Test
+    void explicitUnfollowTopEmptyingTheSetFlipsBackToAllAndNamesTheRemoved() throws Exception {
+        // P3: a subtree delete that empties the followed set flips back
+        // to ALL and the reply names what was actually removed.
+        String actor = PREFIX + "subtreeFlip-actor";
+        UUID actorId = seedUser(actor);
+        seedTop(PREFIX + "top");
+        UUID leafA = seedLeafUnder(PREFIX + "top", PREFIX + "leaf-a");
+        UUID leafB = seedLeafUnder(PREFIX + "top", PREFIX + "leaf-b");
+        seedScopePreferences(actorId, "EXPLICIT");
+        seedScopeTag(actorId, leafA);
+        seedScopeTag(actorId, leafB);
+        long versionBefore = tagSubscriptionVersionOf(actorId);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/unfollow-tag " + PREFIX + "top");
+
+        assertEquals(
+                expectedFlipsBackToAllSubtree(PREFIX + "top",
+                        List.of(PREFIX + "leaf-a", PREFIX + "leaf-b")),
+                reply.text(),
+                "the flip reply must name the removed leaves");
+        assertEquals("ALL", tagModeOf(actorId),
+                "an emptying subtree delete must flip tag_mode back to ALL");
+        assertEquals(0L, countScopeTag(actorId),
+                "scope_tag must be empty after the flip-back");
+        assertEquals(versionBefore + 1L, tagSubscriptionVersionOf(actorId),
+                "the subtree flip-back must bump tag_subscription_version exactly once");
+    }
+
+    @Test
+    void explicitUnfollowOfStoredTopRowRemovesTheWildcardRow() throws Exception {
+        // P1 second half: the subtree predicate covers the requested node
+        // itself, so a stored top wildcard row is removed by the same path.
+        String actor = PREFIX + "storedTop-actor";
+        UUID actorId = seedUser(actor);
+        UUID top = seedTop(PREFIX + "top");
+        UUID unrelated = seedTag(PREFIX + "unrelated");
+        seedScopePreferences(actorId, "EXPLICIT");
+        seedScopeTag(actorId, top);
+        seedScopeTag(actorId, unrelated);
+        long versionBefore = tagSubscriptionVersionOf(actorId);
+
+        OutboundMessage reply = handler.handle(
+                new ScopeRef.Dm(actor),
+                "/unfollow-tag " + PREFIX + "top");
+
+        assertEquals(expectedSuccessInPlace(PREFIX + "top"), reply.text(),
+                "a single stored-row removal keeps the existing in-place template");
+        assertEquals("EXPLICIT", tagModeOf(actorId),
+                "tag_mode must remain EXPLICIT — the unrelated leaf keeps the set non-empty");
+        assertEquals(1L, countScopeTag(actorId),
+                "only the unrelated leaf row may remain");
+        assertFalse(scopeTagContains(actorId, top),
+                "the stored top wildcard row must be deleted");
+        assertTrue(scopeTagContains(actorId, unrelated),
+                "the unrelated leaf row must be kept");
+        assertEquals(versionBefore + 1L, tagSubscriptionVersionOf(actorId),
+                "a real removal must bump tag_subscription_version exactly once");
+    }
+
     // ----- (d) Unknown tag → fuzzy-suggestion error -----------------------
 
     @Test
@@ -505,6 +635,29 @@ class UnfollowTagCommandHandlerTest {
         return MessageFormat.format(
                 bundleLoader.get(BundleKeys.REPLY_UNFOLLOW_TAG_FLIPS_BACK_TO_ALL),
                 tagName);
+    }
+
+    private String expectedNothingMatched(String tagName) {
+        return MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_UNFOLLOW_TAG_NOTHING_MATCHED),
+                tagName);
+    }
+
+    private String expectedSuccessSubtree(String tagName, List<String> removed) {
+        return MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_UNFOLLOW_TAG_SUCCESS_SUBTREE),
+                tagName, quoted(removed));
+    }
+
+    private String expectedFlipsBackToAllSubtree(String tagName, List<String> removed) {
+        return MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_UNFOLLOW_TAG_FLIPS_BACK_TO_ALL_SUBTREE),
+                tagName, quoted(removed));
+    }
+
+    private static String quoted(List<String> names) {
+        return names.stream().map(n -> "`" + n + "`")
+                .collect(java.util.stream.Collectors.joining(", "));
     }
 
     private String expectedConfirmPrompt(long rowCount) {

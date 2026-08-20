@@ -1123,9 +1123,13 @@ and makes the digest query depend on row presence.
     transition changes only the explicit seed (D59: a fresh,
     subscription-less scope seeds from the bootstrap corpus — never an empty
     set). Matches the user mental model: "I want everything except X."
-  - `EXPLICIT` mode + `/follow-tag` / `/unfollow-tag` → add or
-    remove the row in place. When the row count drops to 0, the
-    mode flips back to `ALL`.
+  - `EXPLICIT` mode + `/follow-tag <tag>` → add the row in place.
+    `EXPLICIT` mode + `/unfollow-tag <tag>` → remove the stored
+    row for the tag and every stored row for a descendant of it.
+    An `/unfollow-tag` that would remove no stored row changes
+    nothing and replies saying so. A successful removal replies
+    naming the tags it actually removed. When the row count drops
+    to 0, the mode flips back to `ALL`.
 
   Digest query: `ALL` mode uses the union of the scope's
   world-source `bootstrap_tags`; `EXPLICIT` mode uses only the tags

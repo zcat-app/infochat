@@ -1384,6 +1384,15 @@ public final class BundleKeys {
     /** {@code /unfollow-tag <t>} in {@code tag_mode='EXPLICIT'} that empties the set: post-delete count reached zero, mode flipped back to ALL. Token {@code {0}} = unfollowed tag. */
     public static final String REPLY_UNFOLLOW_TAG_FLIPS_BACK_TO_ALL = "reply.unfollow_tag.flips_back_to_all";
 
+    /** {@code /unfollow-tag <t>} in {@code tag_mode='EXPLICIT'} with no followed row under {@code t}: a truthful no-op. Token {@code {0}} = requested tag. */
+    public static final String REPLY_UNFOLLOW_TAG_NOTHING_MATCHED = "reply.unfollow_tag.nothing_matched";
+
+    /** {@code /unfollow-tag <t>} in {@code tag_mode='EXPLICIT'} that removed more than the single requested row (subtree delete, set still non-empty). Tokens: {@code {0}} = requested tag, {@code {1}} = the removed tag names. */
+    public static final String REPLY_UNFOLLOW_TAG_SUCCESS_SUBTREE = "reply.unfollow_tag.success_subtree";
+
+    /** {@code /unfollow-tag <t>} in {@code tag_mode='EXPLICIT'} subtree delete that empties the set: flipped back to ALL. Tokens: {@code {0}} = requested tag, {@code {1}} = the removed tag names. */
+    public static final String REPLY_UNFOLLOW_TAG_FLIPS_BACK_TO_ALL_SUBTREE = "reply.unfollow_tag.flips_back_to_all_subtree";
+
     /**
      * First-call prompt template for {@code /unfollow-tag --all}. Tokens:
      * {@code {0}} = timeout in whole seconds, {@code {1}} = current

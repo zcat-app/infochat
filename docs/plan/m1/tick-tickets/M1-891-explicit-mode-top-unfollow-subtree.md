@@ -1,20 +1,21 @@
 ---
 id: M1-891
 title: "EXPLICIT-mode top unfollow subtracts the subtree truthfully"
-status: pending
+status: done
 created: 2026-08-19
-last_updated: 2026-08-19
+last_updated: 2026-08-20
 flow: tick
 reproduction: >-
-  to-be-written
   UnfollowTagCommandHandlerTest.explicitUnfollowTopRemovesDescendantLeavesAndNamesThem
-  — `start` converts the marker per workflow §0 (write the test, run it RED)
-  before any fix code. The wrong behavior it states: a DM scope in EXPLICIT
-  mode following two leaves under top `t` plus one unrelated leaf receives, on
-  `/unfollow-tag t`, the reply.unfollow_tag.success_in_place text naming `t`
-  while the DELETE (`UnfollowTagCommandHandler.java:284` via
-  `DELETE_SCOPE_TAG_ONE_SQL`, :117-119) matches no row — both descendant
-  leaves stay in scope_tag and tag_subscription_version is still bumped.
+  (written at start, run RED before any fix code: the reply was the fake
+  success_in_place text naming `t`, both descendant leaves stayed followed,
+  and tag_subscription_version bumped regardless). The wrong behavior it
+  states: a DM scope in EXPLICIT mode following two leaves under top `t`
+  plus one unrelated leaf receives, on `/unfollow-tag t`, the
+  reply.unfollow_tag.success_in_place text naming `t` while the DELETE
+  (`UnfollowTagCommandHandler.java:284` via `DELETE_SCOPE_TAG_ONE_SQL`,
+  :117-119) matches no row — both descendant leaves stay in scope_tag and
+  tag_subscription_version is still bumped.
   Live-verified as defect D-4 (2026-08-18): EXPLICIT {ai, cybersecurity},
   `/unfollow-tag tech` replied "Removed 'tech' from your followed tags" and
   removed nothing (.scratch/LIVE-E2E-DEFECT-REPORT-2026-08.md §D-4; plan §9
@@ -79,7 +80,12 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-20
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS:WARN (§12 style leg — approval recorded in ticket, no verbatim artifact in tree); SECURITY:PASS; TEST-ADEQUACY:PASS; MAINTAINABILITY:PASS; SCOPE:PASS"
+    diff_stats: "11 files changed, 267 insertions(+), 45 deletions(-)"
 overrides: []
 aborted_attempts: []
 reopens: []

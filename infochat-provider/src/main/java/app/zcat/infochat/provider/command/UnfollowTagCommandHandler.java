@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Implements {@code /unfollow-tag <tag>} and
@@ -114,9 +115,21 @@ public class UnfollowTagCommandHandler implements CommandHandler {
                     + "      SELECT id FROM tag WHERE name IN (SELECT node FROM subtree)) "
                     + "ON CONFLICT (scope_kind, scope_id, tag_id) DO NOTHING";
 
-    private static final String DELETE_SCOPE_TAG_ONE_SQL =
-            "DELETE FROM scope_tag "
-                    + "WHERE scope_kind = ? AND scope_id = ? AND tag_id = ?";
+    // EXPLICIT-branch delete: the requested node's stored row plus every
+    // stored descendant row (the recursive walk over tag.parent_name, as
+    // in the ALL-branch seed), RETURNING the removed names for the reply.
+    private static final String DELETE_SCOPE_TAG_SUBTREE_SQL =
+            "WITH RECURSIVE subtree(node) AS ("
+                    + "    SELECT name FROM tag WHERE name = ?"
+                    + "    UNION SELECT c.name FROM tag c JOIN subtree p"
+                    + "        ON c.parent_name = p.node"
+                    + ")"
+                    + "DELETE FROM scope_tag st"
+                    + " USING tag t"
+                    + " WHERE st.tag_id = t.id"
+                    + "   AND st.scope_kind = ? AND st.scope_id = ?"
+                    + "   AND t.name IN (SELECT node FROM subtree)"
+                    + " RETURNING t.name";
 
     private static final String DELETE_SCOPE_TAG_ALL_SQL =
             "DELETE FROM scope_tag "
@@ -247,13 +260,12 @@ public class UnfollowTagCommandHandler implements CommandHandler {
         }
 
         return executeUnfollowTagPositionalTransaction(
-                scope, scopeKind, scopeId, tagId.get(), normalizedTag);
+                scope, scopeKind, scopeId, normalizedTag);
     }
 
     private OutboundMessage executeUnfollowTagPositionalTransaction(ScopeRef scope,
                                                                     String scopeKind,
                                                                     UUID scopeId,
-                                                                    UUID tagIdValue,
                                                                     String tagName) {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
@@ -276,23 +288,41 @@ public class UnfollowTagCommandHandler implements CommandHandler {
                             bundleLoader.get(BundleKeys.REPLY_UNFOLLOW_TAG_SUCCESS_FROM_ALL, inboundContext.effectiveLanguage()),
                             tagName);
                 } else {
-                    // EXPLICIT mode: DELETE the row; if post-delete
-                    // count is 0, flip back to ALL (the spec's
-                    // empty-set semantic). The COUNT happens after the
-                    // DELETE so the row count reflects the post-delete
-                    // state inside the same transaction.
-                    deleteOneScopeTag(conn, scopeKind, scopeId, tagIdValue);
-                    long remaining = countScopeTagRowsInTx(conn, scopeKind, scopeId);
-                    if (remaining == 0L) {
-                        updateFlipToAll(conn, scopeKind, scopeId);
+                    // EXPLICIT mode: subtract the requested node's subtree;
+                    // the reply names what was actually removed, and a
+                    // nothing-matched invocation mutates nothing.
+                    List<String> removed = deleteSubtreeScopeTags(conn, scopeKind, scopeId, tagName);
+                    if (removed.isEmpty()) {
                         body = MessageFormat.format(
-                                bundleLoader.get(BundleKeys.REPLY_UNFOLLOW_TAG_FLIPS_BACK_TO_ALL, inboundContext.effectiveLanguage()),
+                                bundleLoader.get(BundleKeys.REPLY_UNFOLLOW_TAG_NOTHING_MATCHED, inboundContext.effectiveLanguage()),
                                 tagName);
                     } else {
-                        updateBumpTagVersion(conn, scopeKind, scopeId);
-                        body = MessageFormat.format(
-                                bundleLoader.get(BundleKeys.REPLY_UNFOLLOW_TAG_SUCCESS_IN_PLACE, inboundContext.effectiveLanguage()),
-                                tagName);
+                        long remaining = countScopeTagRowsInTx(conn, scopeKind, scopeId);
+                        boolean singleRequestedRow =
+                                removed.size() == 1 && removed.get(0).equals(tagName);
+                        if (remaining == 0L) {
+                            updateFlipToAll(conn, scopeKind, scopeId);
+                            if (singleRequestedRow) {
+                                body = MessageFormat.format(
+                                        bundleLoader.get(BundleKeys.REPLY_UNFOLLOW_TAG_FLIPS_BACK_TO_ALL, inboundContext.effectiveLanguage()),
+                                        tagName);
+                            } else {
+                                body = MessageFormat.format(
+                                        bundleLoader.get(BundleKeys.REPLY_UNFOLLOW_TAG_FLIPS_BACK_TO_ALL_SUBTREE, inboundContext.effectiveLanguage()),
+                                        tagName, quotedNames(removed));
+                            }
+                        } else {
+                            updateBumpTagVersion(conn, scopeKind, scopeId);
+                            if (singleRequestedRow) {
+                                body = MessageFormat.format(
+                                        bundleLoader.get(BundleKeys.REPLY_UNFOLLOW_TAG_SUCCESS_IN_PLACE, inboundContext.effectiveLanguage()),
+                                        tagName);
+                            } else {
+                                body = MessageFormat.format(
+                                        bundleLoader.get(BundleKeys.REPLY_UNFOLLOW_TAG_SUCCESS_SUBTREE, inboundContext.effectiveLanguage()),
+                                        tagName, quotedNames(removed));
+                            }
+                        }
                     }
                 }
                 conn.commit();
@@ -399,14 +429,26 @@ public class UnfollowTagCommandHandler implements CommandHandler {
         }
     }
 
-    private void deleteOneScopeTag(Connection conn, String scopeKind, UUID scopeId, UUID tagId)
-            throws SQLException {
-        try (PreparedStatement ps = conn.prepareStatement(DELETE_SCOPE_TAG_ONE_SQL)) {
-            ps.setString(1, scopeKind);
-            ps.setObject(2, scopeId);
-            ps.setObject(3, tagId);
-            ps.executeUpdate();
+    private List<String> deleteSubtreeScopeTags(Connection conn, String scopeKind, UUID scopeId,
+                                                String tagName) throws SQLException {
+        List<String> removed = new ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement(DELETE_SCOPE_TAG_SUBTREE_SQL)) {
+            ps.setString(1, tagName);
+            ps.setString(2, scopeKind);
+            ps.setObject(3, scopeId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    removed.add(rs.getString(1));
+                }
+            }
         }
+        removed.sort(null);
+        return removed;
+    }
+
+    private static String quotedNames(List<String> names) {
+        return names.stream().map(n -> "`" + n + "`")
+                .collect(Collectors.joining(", "));
     }
 
     private long deleteAllScopeTags(Connection conn, String scopeKind, UUID scopeId)
