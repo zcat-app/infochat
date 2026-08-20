@@ -1183,8 +1183,10 @@ for it; the manual steps 1-5 above remain the under-the-hood description of what
   gate it also probes the restored DB for operational state inherited from the
   source host — `asset_config` pairs at `status = 'failed'` and `source` rows at
   `status = 'failed'` — and WARNs (naming each failed pair's asset, sub-verb,
-  consecutive-failure count and last-failure timestamp, plus the §10.8b recovery
-  UPDATE and the `/source-enable` pointer), continuing the restore unchanged:
+  consecutive-failure count and last-failure timestamp, plus `/asset-enable` as
+  the recovery command with the §10.8b UPDATE as the host-level fallback for a
+  down/unreachable Provider, and the `/source-enable` pointer), continuing the
+  restore unchanged:
   the clone is faithful and the inherited state is legitimate source-host history
   (the D42 fetch ladder tripped there), so the WARN reports and the operator
   recovers — the restore never fails or auto-resets inherited failure state.

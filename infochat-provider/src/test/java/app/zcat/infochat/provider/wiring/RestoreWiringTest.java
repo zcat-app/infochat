@@ -923,9 +923,9 @@ class RestoreWiringTest {
     @Test
     @EnabledOnOs(OS.LINUX)
     void inheritedFailedAssetPairsSurfaceAsRestoreWarning(@TempDir Path tmp) throws Exception {
-        // M1-822 reproduction (live 2026-08-11): a status='failed' zcash/coingecko pair
-        // inherited with the dump made bare /zcash look broken; the probe must WARN naming
-        // the pair + both recovery pointers and CONTINUE (P7).
+        // M1-822 reproduction, re-aimed by M1-893: a status='failed' zcash/coingecko pair
+        // inherited with the dump made bare /zcash look broken; the WARN must name the pair,
+        // /asset-enable as primary recovery with the §10.8b UPDATE fallback, and CONTINUE (P7).
         Path failedStateFixture = tmp.resolve("inherited-state.txt");
         Files.writeString(failedStateFixture,
                 "PAIR|zcash|coingecko|5|2026-07-31 10:00:00+00|t\n"
@@ -942,17 +942,21 @@ class RestoreWiringTest {
                 "the probe must produce a WARN block:\n" + r.output);
         assertTrue(r.output.contains("zcash/coingecko: consecutive_failures=5, last_failure_at=2026-07-31"),
                 "the WARN must name asset, sub_verb, consecutive_failures and last_failure_at:\n" + r.output);
+        assertTrue(r.output.contains("/asset-enable zcash coingecko"),
+                "the WARN must name /asset-enable <asset> <sub-verb> as the primary recovery:\n" + r.output);
         assertTrue(r.output.contains("UPDATE asset_config SET status='active', consecutive_failures=0")
                         && r.output.contains("WHERE asset='zcash' AND sub_verb='coingecko';"),
-                "the WARN must print the §10.8b recovery UPDATE shape:\n" + r.output);
+                "the WARN must keep the §10.8b recovery UPDATE as the host-level fallback:\n" + r.output);
+        assertTrue(r.output.indexOf("/asset-enable zcash coingecko")
+                        < r.output.indexOf("UPDATE asset_config"),
+                "/asset-enable must be the primary pointer, the §10.8b UPDATE the fallback:\n" + r.output);
         assertTrue(r.output.contains("/source-enable"),
                 "the WARN must name the /source-enable pointer:\n" + r.output);
         assertTrue(r.output.contains("bare /zcash"),
                 "a failed is_default pair must flag the bare-command dead surface:\n" + r.output);
-        // P8: the WARN names the §10.8b UPDATE and /source-enable ONLY — /asset-enable does
-        // not exist yet (batch F owns introducing it) and must never appear in the script.
-        assertFalse(Files.readString(repoRoot().resolve("prod/scripts/restore.sh")).contains("/asset-enable"),
-                "the script must never name the not-yet-existing /asset-enable (P8)");
+        // M1-822 P8 flipped by M1-893: /asset-enable shipped (M1-836), so the script must name it.
+        assertTrue(Files.readString(repoRoot().resolve("prod/scripts/restore.sh")).contains("/asset-enable"),
+                "the script must name /asset-enable (the command exists since M1-836)");
         String argvLog = Files.readString(tmp.resolve("docker-argv.log"));
         int probeIdx = argvLog.indexOf("inherited_failed_probe=1");
         int rehydrateIdx = argvLog.indexOf("llamacpp-embeddings");

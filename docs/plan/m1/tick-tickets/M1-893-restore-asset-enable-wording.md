@@ -1,15 +1,16 @@
 ---
 id: M1-893
 title: Restore failed-asset wording + cold-start timeout note
-status: pending
+status: done
 created: 2026-08-20
 last_updated: 2026-08-20
 flow: tick
 reproduction: >-
   RestoreWiringTest#inheritedFailedAssetPairsSurfaceAsRestoreWarning
-  (to-be-written §8-authorized flip, run RED at start): the flipped
-  assertions — the WARN names `/asset-enable zcash coingecko` as the
-  recovery — red against the current script text, which prints the
+  (flipped per acceptance item 2 at start; RED run recorded in
+  .scratch/tick-test-M1-893-r1-RED.log before any script change): the
+  flipped assertions — the WARN names `/asset-enable zcash coingecko` as
+  the recovery — red against the current script text, which prints the
   §10.8b manual UPDATE (prod/scripts/restore.sh:777-779, banner note
   :1000-1001) and never names /asset-enable (grep-verified; the stale
   P8 assertFalse at RestoreWiringTest.java:954-955 pins the pre-M1-836
@@ -95,11 +96,22 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-20
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "6 files changed, 47 insertions(+), 23 deletions(-)"
+    verdict_file: .scratch/tick-review-M1-893-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  note: >-
+    All citations spot-checked at start (restore.sh:765-784/:1000-1001,
+    RestoreWiringTest.java:923-964/:954-955, 07-deployment.md:1183-1190,
+    10-asset-commands.md:414-432, application.properties:443,
+    4-llm.sh:873-877, M1-822 :39-41). No blocking ambiguity.
 escalation_reason:
 ---
 

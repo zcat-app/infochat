@@ -774,7 +774,9 @@ if [[ "$failed_pair_rows" -gt 0 || "$failed_source_count" -gt 0 ]]; then
       echo "          bare /$asset resolves to this default pair — the bare command is the" >&2
       echo "          dead surface while explicit sub-verbs may work" >&2
     fi
-    echo "          recovery UPDATE (docs/design/10-asset-commands.md §10.8b):" >&2
+    echo "          recovery: /asset-enable $asset $sub_verb" >&2
+    echo "          host-level fallback if the Provider is down or unreachable — the §10.8b" >&2
+    echo "          UPDATE (docs/design/10-asset-commands.md):" >&2
     echo "            UPDATE asset_config SET status='active', consecutive_failures=0" >&2
     echo "              WHERE asset='$asset' AND sub_verb='$sub_verb';" >&2
   done
@@ -998,7 +1000,7 @@ DONE
 # the WARN scrolled) — only then, so a clean clone stays silent (M1-822).
 if [[ "$failed_pair_rows" -gt 0 || "$failed_source_count" -gt 0 ]]; then
   echo "  NOTE: this clone inherited $failed_pair_rows failed asset pair(s) and $failed_source_count failed source(s)" >&2
-  echo "        from the source host — the WARN block above names the recovery actions (§10.8b UPDATE; /source-enable)." >&2
+  echo "        from the source host — the WARN block above names the recovery actions (/asset-enable; §10.8b UPDATE fallback; /source-enable)." >&2
 fi
 
 if [[ "$verify_status" -ne 0 ]]; then

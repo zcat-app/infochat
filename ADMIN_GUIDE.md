@@ -464,6 +464,18 @@ app services):
 `apps.sh` remains the quick app-only lifecycle for config changes; `stack.sh`
 is the machine-level cycle around host maintenance.
 
+### Cold local models and the first chat
+
+After a (re)start, the first chat against a still-cold local model can exceed
+the configured chat timeout while the model warms up, so that first reply comes
+back as a one-off unavailable message. That is the timeout working, not an
+outage — an outage is signalled by the circuit-breaker admin notification, not
+by a cold first chat missing its deadline.
+
+The knob is `infochat.llm.chat.timeout-ms` (default 120 s), which the setup
+wizard's step-4 timing question already writes. For a slow local model, either
+raise the value or warm the model before inviting traffic.
+
 ### Full references
 
 - Command catalogue (every command, every flag, exact argument grammar):

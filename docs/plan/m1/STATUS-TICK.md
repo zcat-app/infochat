@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 9 |
+| pending | 8 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 98 |
+| done | 99 |
 | deferred | 0 |
 | abandoned | 3 |
 | **total** | **110** |
@@ -30,7 +30,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-890 — SimpleX zero-SMP-session liveness + child restart (complexity: medium, risk: medium)
 - M1-891 — EXPLICIT-mode top unfollow subtracts the subtree truthfully (complexity: low, risk: medium)
 - M1-892 — Signal image completion carries the prompt echo (complexity: medium, risk: low)
-- M1-893 — Restore failed-asset wording + cold-start timeout note (complexity: low, risk: low)
 - M1-894 — V14 header comment correction + checksum repair runbook (complexity: low, risk: medium)
 - M1-895 — Wizard: per-model chat reply-mode recommendation (D79) (complexity: medium, risk: medium)
 
@@ -68,6 +67,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-893 | Restore failed-asset wording + cold-start timeout note | 2026-08-20 | round 1 APPROVE |
 | M1-886 | Spec: reply-mode decisive switch amendments (D79) | 2026-08-20 | round 1 APPROVE |
 | M1-885 | Land the decisive reply-mode switch (registry removal) | 2026-08-20 | round 1 APPROVE |
 | M1-884 | Reconcile tag-tree source and unfollow rules | 2026-08-18 | round 1 APPROVE |
@@ -77,7 +77,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-880 | Tag-tree cutover runbook: cleanup, migrate, verify for every pre-V84 deployment | 2026-08-18 | round 2 APPROVE |
 | M1-879 | Strip deletions must not join privileged command tokens | 2026-08-18 | round 2 APPROVE |
 | M1-877 | Re-measure the news leg on resolved stored tags | 2026-08-18 | round 1 OVERRIDE-APPROVE |
-| M1-867 | Tree-aware follow-tag, digest sections, and search | 2026-08-18 | round 3 APPROVE |
 
 ---
 
@@ -236,6 +235,6 @@ M1-889 (pending) ← runnable
 M1-890 (pending) ← runnable
 M1-891 (pending) ← runnable
 M1-892 (pending) ← runnable
-M1-893 (pending) ← runnable
+M1-893 (done)
 M1-894 (pending) ← runnable
 ```
