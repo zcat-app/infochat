@@ -1,15 +1,15 @@
 ---
 id: M1-889
 title: "Signal connected-but-deaf liveness probe + silence WARN"
-status: pending
+status: done
 created: 2026-08-20
 last_updated: 2026-08-20
 flow: tick
 reproduction: >-
-  to-be-written SignalLivenessProbeTest.probeTimeoutEscalatesWithoutAnyUserTraffic
-  (child of a 2+ decomposition — analysis
-  docs/plan/m1/tick-analysis/transport-liveness-instrumentation.md; `start`
-  converts the marker per workflow §0). The wrong behavior it states: a
+  SignalLivenessProbeTest.probeTimeoutEscalatesWithoutAnyUserTraffic —
+  written and run RED at start (2026-08-20, compile-failed against the
+  pre-probe API: attachLivenessProbe/LIVENESS_PROBE_INTERVAL/
+  SILENCE_WARN_WINDOW did not exist; the wrong behavior it names: a
   connected-but-deaf JSON-RPC channel — reader thread alive and parked in
   read(), socket ESTABLISHED, daemon alive and serving OTHER connections,
   zero inbound and zero outbound user traffic — fires NO detector, so
@@ -140,7 +140,25 @@ spec_refs:
   - docs/spec/deployment.md §Health and observability
 decision_refs:
   - D37
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-20
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY WARN, SCOPE PASS"
+    diff_stats: "9 files changed, 653 insertions(+), 37 deletions(-)"
+    verdict_file: .scratch/tick-review-M1-889-r1.txt
+    note: >-
+      All checks PASS; MAINTAINABILITY WARN is informational only — 9
+      comment runs over the 3-line cap, all in the two NEW test files
+      (javadoc contracts / pitfall-trap explanations; content §11 permits),
+      left for the driver to trim or keep. SCOPE PASS dispositions the two
+      unplanned files: SignalMessageCodec.encodeVersion (the probe frame
+      every probe acceptance item requires) and ControllableProbeScheduler
+      (the planned test class's scheduler double). Post-APPROVE the driver
+      trimmed the 9 over-cap comment runs (comment lines only, diff vs the
+      r1 tree verified comment-only); probes: tick-comment-cap 0 runs over
+      the trimmed diff, `mvnw -B -pl infochat-messaging-adapter -am
+      test-compile` exit 0; the r1 green log remains the log of record.
 overrides: []
 aborted_attempts: []
 reopens: []

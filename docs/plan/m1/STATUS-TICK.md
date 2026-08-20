@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 106 |
+| done | 107 |
 | deferred | 0 |
 | abandoned | 3 |
 | **total** | **110** |
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-889 — Signal connected-but-deaf liveness probe + silence WARN (complexity: medium, risk: medium)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -67,10 +67,10 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-892 | Signal image completion carries the prompt echo | 2026-08-20 | round 1 APPROVE |
 | M1-891 | EXPLICIT-mode top unfollow subtracts the subtree truthfully | 2026-08-20 | round 1 APPROVE |
 | M1-890 | SimpleX zero-SMP-session liveness + child restart | 2026-08-20 | round 2 APPROVE |
+| M1-889 | Signal connected-but-deaf liveness probe + silence WARN | 2026-08-20 | round 1 APPROVE |
 | M1-888 | Reconcile the deployed bootstrap-sources.json in the cutover | 2026-08-20 | round 2 APPROVE |
 | M1-887 | Generalize the pre-V84 preflight and gate upgrade.sh on it | 2026-08-20 | round 2 APPROVE |
 | M1-886 | Spec: reply-mode decisive switch amendments (D79) | 2026-08-20 | round 1 APPROVE |
-| M1-885 | Land the decisive reply-mode switch (registry removal) | 2026-08-20 | round 1 APPROVE |
 
 ---
 
@@ -225,7 +225,7 @@ M1-886 (done)
   └── M1-895 (done)
 M1-887 (done)
   └── M1-888 (done)
-M1-889 (pending) ← runnable
+M1-889 (done)
 M1-890 (done)
 M1-891 (done)
 M1-892 (done)

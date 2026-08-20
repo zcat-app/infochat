@@ -34,6 +34,8 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -234,6 +236,19 @@ class SignalJsonRpcClient {
     // per crossing (see recordTimeout).
     private final AtomicInteger consecutiveTimeouts = new AtomicInteger();
 
+    /** Liveness-probe cadence (§Failure handling): fixed-delay, so a timed-out probe completes before the next; escalation inherits HUNG_TIMEOUT_THRESHOLD. */
+    static final Duration LIVENESS_PROBE_INTERVAL = Duration.ofSeconds(30);
+
+    /** Connected-but-silent window: crossing WARNs (counts only, D37) and never restarts — silence is an idle deployment's norm. */
+    static final Duration SILENCE_WARN_WINDOW = Duration.ofMinutes(5);
+
+    // Liveness-probe clock (§9): every probe time gate — the silence-window
+    // comparison, the per-notification stamp — reads this. Wire by attachLivenessProbe;
+    // an unwired client runs no probe. The wiring caller owns scheduler shutdown.
+    private volatile Clock clock = Clock.systemUTC();
+    @Nullable private volatile ScheduledExecutorService probeScheduler;
+    @Nullable private volatile ScheduledFuture<?> livenessTask;
+
     // The live connection, or null between disconnect() and the next
     // connect(). ONE client instance spans reconnects (unlike SimpleX's
     // per-rebuild client), so every piece of state a reader may mutate on
@@ -364,6 +379,12 @@ class SignalJsonRpcClient {
         this.groupNotificationHandler = handler;
     }
 
+    /** Wire the probe (§Failure handling): its own scheduler thread (never reader/dispatch) + injected Clock (§9). Unwired = no probe (pre-existing detectors only). */
+    void attachLivenessProbe(ScheduledExecutorService scheduler, Clock clock) {
+        this.probeScheduler = scheduler;
+        this.clock = clock;
+    }
+
     void connect() throws IOException {
         // Bounded connect (CONNECT_TIMEOUT_MS): an unconnected socket plus an
         // explicit connect(endpoint, timeout) so an unanswered SYN fails fast
@@ -389,12 +410,18 @@ class SignalJsonRpcClient {
         // later tell whether the child it served is still current before
         // asking the supervisor to SIGKILL it.
         SignalConnection conn = new SignalConnection(
-                s, w, inboundQueueCapacity, daemonGeneration.getAsLong());
+                s, w, inboundQueueCapacity, daemonGeneration.getAsLong(), clock.instant());
         Thread t = new Thread(() -> readerLoop(conn), "signal-jsonrpc-reader");
         t.setDaemon(true);
         conn.readerThread = t;
         this.current = conn;
         t.start();
+        ScheduledExecutorService scheduler = probeScheduler;
+        if (scheduler != null) {
+            livenessTask = scheduler.scheduleWithFixedDelay(this::livenessProbe,
+                    LIVENESS_PROBE_INTERVAL.toMillis(), LIVENESS_PROBE_INTERVAL.toMillis(),
+                    TimeUnit.MILLISECONDS);
+        }
     }
 
     /**
@@ -441,6 +468,7 @@ class SignalJsonRpcClient {
             // these futures and must be released for the shutdown to complete.
             conn.drainPending();
             conn.shutdownDispatcher();
+            stopLivenessProbe();
         }
         // Drop any open per-handle state — a reconnect starts with a
         // fresh registry; stale handles from before the disconnect
@@ -793,6 +821,36 @@ class SignalJsonRpcClient {
         }
     }
 
+    /** One probe tick: silence leg WARNs once per crossing (never restarts); probe leg feeds recordTimeout via call()'s timeout arm (threshold/CAS/generation inherited). Skips on a latched channel. */
+    private void livenessProbe() {
+        SignalConnection conn = current;
+        if (conn == null || conn.closed) {
+            return;
+        }
+        Instant now = clock.instant();
+        Duration silent = Duration.between(conn.lastInboundActivity, now);
+        if (silent.compareTo(SILENCE_WARN_WINDOW) >= 0 && !conn.silenceWarned) {
+            conn.silenceWarned = true;
+            LOG.warnf("signal-cli JSON-RPC channel inbound-silent for %d s (silence window %d s)",
+                    silent.toSeconds(), SILENCE_WARN_WINDOW.toSeconds());
+        }
+        long rpcId = rpcIdGen.incrementAndGet();
+        try {
+            pacedCall(rpcId, codec.encodeVersion(rpcId));
+        } catch (MessagingException e) {
+            LOG.debugf("signal liveness probe call failed (%s)", e.category());
+        }
+    }
+
+    /** Cancel the scheduled probe task; the scheduler itself is the wiring caller's to shut down. */
+    private void stopLivenessProbe() {
+        ScheduledFuture<?> task = livenessTask;
+        if (task != null) {
+            task.cancel(false);
+            livenessTask = null;
+        }
+    }
+
     private static FailureCategory classify(SignalMessageCodec.JsonRpcMessage.ErrorResponse err) {
         // JSON-RPC -32603 ("Internal error") covers signal-cli transient
         // faults from its upstream signaling server; retry has a chance.
@@ -936,6 +994,10 @@ class SignalJsonRpcClient {
         if (!peerInitiated) {
             return;
         }
+        // The dead channel's probe stops with it: cancel, not scheduler
+        // shutdown (the wiring caller owns the scheduler); a reconnect's
+        // connect() schedules a successor.
+        stopLivenessProbe();
         int discarded = conn.shutdownDispatcher();
         if (discarded > 0) {
             long total = droppedInboundCount.addAndGet(discarded);
@@ -1016,7 +1078,14 @@ class SignalJsonRpcClient {
         switch (msg) {
             case SignalMessageCodec.JsonRpcMessage.Response r -> completePending(conn, r.id(), r);
             case SignalMessageCodec.JsonRpcMessage.ErrorResponse e -> completePending(conn, e.id(), e);
-            case SignalMessageCodec.JsonRpcMessage.Notification n -> dispatchAsync(conn, n);
+            case SignalMessageCodec.JsonRpcMessage.Notification n -> {
+                // ANY inbound notification — DM, group, typing, receipt — is
+                // inbound activity: re-stamp the silence window and re-arm the
+                // WARN-once latch. Probe responses deliberately do not stamp.
+                conn.lastInboundActivity = clock.instant();
+                conn.silenceWarned = false;
+                dispatchAsync(conn, n);
+            }
         }
     }
 

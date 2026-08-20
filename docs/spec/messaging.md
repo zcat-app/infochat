@@ -445,16 +445,22 @@ Provider produces plain text per decision D30. The adapter:
   and drives recovery through a supervised restart of the subprocess —
   the same backoff-and-cap path a crash takes, ending in the
   supervisor's terminal failure and its operator notification when the
-  cap is exhausted. Signal's restart
-  fires from either of two detectors: the
-  reader-side death latch (the JSON-RPC channel died while signal-cli
+  cap is exhausted. Signal's restart fires from any of three detectors:
+  the reader-side death latch (the JSON-RPC channel died while signal-cli
   keeps running — detected from the channel's own read side, with no
-  dependence on outbound traffic) or the consecutive-response-timeout
+  dependence on outbound traffic), the consecutive-response-timeout
   escalation (a daemon that is alive but not answering, which a live
-  reader cannot detect). The escalation's restart kills the daemon,
-  which kills the channel, which exits the reader — so for that one
-  death the latch defers to the restart the escalation already
-  requested rather than forcing a second one. The outage stays
+  reader cannot detect), or an active liveness probe — a paced probe
+  frame on the adapter's own scheduler thread that escalates through the
+  same consecutive-timeout path when the daemon answers nothing on the
+  live channel, detecting a connected-but-deaf channel with no dependence
+  on user traffic. A connected-but-silent channel — no inbound
+  notification traffic for a silence window — is WARN-surfaced and never
+  itself triggers recovery: silence is the normal state of an idle
+  deployment. The escalation's restart kills the daemon, which kills the
+  channel, which exits the reader — so for that one death the latch
+  defers to the restart the escalation already requested rather than
+  forcing a second one. The outage stays
   operator-visible for as long as it lasts (`connected()` /
   `adapter.connection.status` report the dead transport — no false
   green), and sends attempted after the latch, while recovery is

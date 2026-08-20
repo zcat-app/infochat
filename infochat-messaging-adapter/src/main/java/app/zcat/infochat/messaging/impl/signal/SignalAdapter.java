@@ -26,6 +26,8 @@ import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -126,6 +128,10 @@ public final class SignalAdapter implements MessagingAdapter {
     @Nullable private volatile SignalSubprocess subprocess;
     @Nullable private volatile SignalJsonRpcClient client;
     @Nullable private volatile InboundHandler handler;
+    // Liveness-probe scheduler: created at start(), handed to the client,
+    // shut down by close()/start-failure. Outlives reconnects so connect()
+    // can reschedule on it (docs/spec/messaging.md §Failure handling).
+    @Nullable private volatile ScheduledExecutorService probeScheduler;
     // Single-flight latch: two restart notifications must not run two
     // concurrent reconnects (overlapping disconnect/connect would race the
     // reader/dispatcher teardown). A failed attempt simply ends; the next
@@ -274,22 +280,22 @@ public final class SignalAdapter implements MessagingAdapter {
                     "signal-cli daemon endpoint " + daemonEndpoint + " not reachable within "
                             + ENDPOINT_PROBE_TIMEOUT);
         }
-        // Wire the supervised-restart escalation. Two client-side detectors
-        // fire this same hook, one per failure shape SignalSubprocess.onExit
-        // cannot see: a run of consecutive response timeouts (a daemon that
-        // is alive but deadlocked) and the reader-exit transport-death latch
-        // (the TCP channel died while the daemon keeps running — no outbound
-        // traffic needed to notice, M1-681). The client guards against both
-        // firing for one death; the hook name keeps its original hung-daemon
-        // framing, the widened cause is documented here at the wiring site.
-        // sp::generation lets the client gate that restart on the child a
-        // dying connection actually served still being the live one, so a
-        // reader delayed across a supervised respawn cannot SIGKILL the
-        // healthy successor (RT-M1-681-r2-1).
+        // Wire the supervised-restart escalation: three client-side detectors
+        // (consecutive timeouts, reader-exit latch, active liveness probe) fire
+        // this hook; the client guards against two firing for one death. sp::generation gates the restart (RT-M1-681-r2-1).
         SignalJsonRpcClient c = new SignalJsonRpcClient(
                 daemonEndpoint, account, new SignalMessageCodec(), JSONRPC_RESPONSE_TIMEOUT,
                 sp::restartHung, SignalJsonRpcClient.INBOUND_QUEUE_CAPACITY, outboundRate,
                 sp::generation);
+        // The probe's own scheduler thread (never reader or dispatch — a probe
+        // awaiting its response must not sit in the dispatch hop's deadlock geometry) and the injected Clock (§9).
+        ScheduledExecutorService probeScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "signal-liveness-probe");
+            t.setDaemon(true);
+            return t;
+        });
+        this.probeScheduler = probeScheduler;
+        c.attachLivenessProbe(probeScheduler, Clock.systemUTC());
         // Attach BEFORE connect: connect() starts the reader thread, and
         // signal-cli can flush queued envelopes the moment the connection
         // opens — a handler wired only after connect loses those envelopes
@@ -356,6 +362,7 @@ public final class SignalAdapter implements MessagingAdapter {
             sp.stop();
             this.subprocess = null;
             this.client = null;
+            stopProbeScheduler();
             throw new MessagingException(FailureCategory.TRANSIENT,
                     "Failed to connect SignalJsonRpcClient", e);
         }
@@ -368,12 +375,22 @@ public final class SignalAdapter implements MessagingAdapter {
             c.disconnect();
             this.client = null;
         }
+        stopProbeScheduler();
         SignalSubprocess sp = subprocess;
         if (sp != null) {
             sp.stop();
             this.subprocess = null;
         }
         LOG.infof("Signal adapter stopped");
+    }
+
+    /** Shut down the liveness-probe scheduler created at start(); idempotent. */
+    private void stopProbeScheduler() {
+        ScheduledExecutorService scheduler = probeScheduler;
+        if (scheduler != null) {
+            scheduler.shutdownNow();
+            this.probeScheduler = null;
+        }
     }
 
     /**

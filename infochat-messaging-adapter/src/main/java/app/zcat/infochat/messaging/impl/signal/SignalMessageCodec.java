@@ -171,6 +171,11 @@ final class SignalMessageCodec {
         return encodeRequest(rpcId, "sendTyping", b.build());
     }
 
+    /** Minimal probe frame (§Failure handling): a parameterless {@code version} request — any answer proves the daemon alive; only silence escalates. */
+    String encodeVersion(long rpcId) {
+        return encodeRequest(rpcId, "version", Json.createObjectBuilder().build());
+    }
+
     private String encodeRequest(long rpcId, String method, JsonObject params) {
         return Json.createObjectBuilder()
                 .add("jsonrpc", "2.0")

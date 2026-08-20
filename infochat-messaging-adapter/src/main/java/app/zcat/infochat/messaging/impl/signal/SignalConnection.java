@@ -7,6 +7,7 @@ import app.zcat.infochat.messaging.MessagingException;
 
 import java.io.BufferedWriter;
 import java.net.Socket;
+import java.time.Instant;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -43,9 +44,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * {@code latchTransportDeath}.</p>
  *
  * <p>Not thread-safe as a whole, and does not need to be: every field is
- * immutable, individually thread-safe, or — for {@link #closed} — a
- * volatile flag written only by the owning reader's death latch and by
- * {@code disconnect()}.</p>
+ * immutable, individually thread-safe, or a volatile flag — {@link #closed}
+ * (death latch / disconnect), {@link #lastInboundActivity} + {@link #silenceWarned} (reader + probe).</p>
  */
 final class SignalConnection {
 
@@ -112,6 +112,12 @@ final class SignalConnection {
      */
     final AtomicBoolean restartRequested = new AtomicBoolean();
 
+    /** Instant of the last inbound NOTIFICATION frame — any receive shape re-stamps it; probe responses deliberately do not (see the client's liveness probe, messaging.md §Failure handling). */
+    volatile Instant lastInboundActivity;
+
+    /** WARN-once-per-crossing latch for the connected-but-silent WARN: set by the probe, cleared by the reader on inbound traffic. */
+    volatile boolean silenceWarned;
+
     /**
      * Set by {@code connect()} immediately after construction — the thread
      * cannot be built before the connection it reads for. Nullable only
@@ -120,10 +126,11 @@ final class SignalConnection {
     @Nullable volatile Thread readerThread;
 
     SignalConnection(Socket socket, BufferedWriter writer, int inboundQueueCapacity,
-                     long daemonGeneration) {
+                     long daemonGeneration, Instant initialLastInboundActivity) {
         this.socket = socket;
         this.writer = writer;
         this.daemonGeneration = daemonGeneration;
+        this.lastInboundActivity = initialLastInboundActivity;
         this.dispatchQueue = new LinkedBlockingQueue<>(inboundQueueCapacity);
         this.dispatchExecutor = new ThreadPoolExecutor(
                 1, 1, 0L, TimeUnit.MILLISECONDS, dispatchQueue,
