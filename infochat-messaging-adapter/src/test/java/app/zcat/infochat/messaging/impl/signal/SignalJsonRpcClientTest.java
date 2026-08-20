@@ -191,6 +191,90 @@ class SignalJsonRpcClientTest {
     }
 
     @Test
+    void multiLineBodyThroughEditArrivesByteForByte() throws Exception {
+        try (FakeSignalCli fake = new FakeSignalCli()) {
+            SignalJsonRpcClient client = new SignalJsonRpcClient(
+                    fake.endpoint(), "+15551111111", new SignalMessageCodec(), TEST_RESPONSE_TIMEOUT);
+            client.connect();
+            try {
+                AtomicReference<MessageHandle> sentHandle = new AtomicReference<>();
+                AtomicReference<Exception> sendFailure = new AtomicReference<>();
+                OutboundMessage out = new OutboundMessage(
+                        new ScopeRef.Dm("aabbccdd-1111-2222-3333-444455556666"),
+                        "first line",
+                        Instant.now(),
+                        "corr-multi");
+                Thread sender = new Thread(() -> {
+                    try {
+                        sentHandle.set(client.send(out));
+                    } catch (MessagingException e) {
+                        sendFailure.set(e);
+                    }
+                }, "multi-sender");
+                sender.start();
+                JsonObject request = fake.nextOutbound(QUEUE_WAIT_MS);
+                String requestId = request.getString("id");
+                fake.respondSuccess(requestId, Json.createObjectBuilder()
+                        .add("timestamp", 1700000004000L)
+                        .add("results", Json.createArrayBuilder())
+                        .build());
+                sender.join(QUEUE_WAIT_MS);
+                if (sendFailure.get() != null) {
+                    fail("send() failed: " + sendFailure.get());
+                }
+                MessageHandle handle = sentHandle.get();
+                assertNotNull(handle, "send() must return a handle within " + QUEUE_WAIT_MS + " ms");
+
+                String twoLineBody = "Image generated.\nPrompt used: a lighthouse at sunrise";
+
+                Thread updater = new Thread(() -> {
+                    try {
+                        client.update(handle, twoLineBody);
+                    } catch (MessagingException e) {
+                        sendFailure.set(e);
+                    }
+                }, "multi-updater");
+                updater.start();
+                JsonObject editRequest = fake.nextOutbound(QUEUE_WAIT_MS);
+                assertEquals("send", editRequest.getString("method"),
+                        "an edit is a send carrying editTimestamp — signal-cli has no updateMessage");
+                assertEquals(
+                        twoLineBody,
+                        editRequest.getJsonObject("params").getString("message"),
+                        "the update's multi-line body must arrive in the encoded edit frame byte-for-byte");
+                fake.respondSuccess(editRequest.getString("id"),
+                        Json.createObjectBuilder().add("timestamp", 1700000004500L).build());
+                updater.join(QUEUE_WAIT_MS);
+                if (sendFailure.get() != null) {
+                    fail("update() failed: " + sendFailure.get());
+                }
+
+                Thread finalizer = new Thread(() -> {
+                    try {
+                        client.finalizeHandle(handle, twoLineBody);
+                    } catch (MessagingException e) {
+                        sendFailure.set(e);
+                    }
+                }, "multi-finalizer");
+                finalizer.start();
+                JsonObject finalRequest = fake.nextOutbound(QUEUE_WAIT_MS);
+                assertEquals(
+                        twoLineBody,
+                        finalRequest.getJsonObject("params").getString("message"),
+                        "the finalize's multi-line body must arrive in the encoded edit frame byte-for-byte");
+                fake.respondSuccess(finalRequest.getString("id"),
+                        Json.createObjectBuilder().add("timestamp", 1700000005000L).build());
+                finalizer.join(QUEUE_WAIT_MS);
+                if (sendFailure.get() != null) {
+                    fail("finalize() failed: " + sendFailure.get());
+                }
+            } finally {
+                client.disconnect();
+            }
+        }
+    }
+
+    @Test
     void transientErrorClassifiesAsTransient() throws Exception {
         try (FakeSignalCli fake = new FakeSignalCli()) {
             SignalJsonRpcClient client = new SignalJsonRpcClient(

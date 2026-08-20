@@ -1214,6 +1214,8 @@
 
   Edit failure handling: a `signal-cli` JSON-RPC error indicating the original message is no longer editable (deleted by user, edit window expired) is non-recoverable for that handle. The adapter falls back to a fresh `send` with the original `correlationId` and increments `adapter.outbound.update.fail{reason='edit_window_expired' | 'item_deleted' | …}`, paralleling the SimpleX `CEInvalidChatItemUpdate` handling in §6.4.5.
 
+  Multi-line completion bodies (the D43 image echo, `Image generated.\nPrompt used: <prompt>` per locale) travel as ONE `message` param with the newline intact — no transport truncation on the Signal leg. Live wire capture on the isolated test stack (M1-892 capture-first probe, 2026-08-20): the provider→daemon edit frame (`send` + `editTimestamp`) and the delivered receive envelope both carry the full two-line body byte-for-byte, en and es scopes, and the sanitizer leg redacts a privileged prompt token to `[redacted command]` on the wire. The earlier campaign reading of the completion as exactly `Image generated.` was a capture-notation artifact: the plain `receive` formatter prints the body's second line as an unprefixed continuation line beneath `Body: Image generated.`.
+
   ### 6.5.8 Reconnection
 
   - **Network failures** (subprocess died, JSON-RPC pipe broken, signal-server unreachable from `signal-cli`'s perspective surfaced as a transient signal-cli error) → exponential backoff reconnect (1s → 2s → 5s → 15s → 60s, then steady at 60s), matching the SimpleX reconnection cadence in §6.4.6.

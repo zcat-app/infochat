@@ -1,7 +1,7 @@
 ---
 id: M1-892
 title: Signal image completion carries the prompt echo
-status: pending
+status: done
 created: 2026-08-20
 last_updated: 2026-08-20
 flow: tick
@@ -102,11 +102,32 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-20
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "4 files changed, 156 insertions(+), 8 deletions(-)"
+    verdict_file: .scratch/tick-review-M1-892-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check: >-
+  2026-08-20 start pass — tick-lint 0 findings/0 BLOCKERs after copying the
+  gitignored tick-analysis/small-followup-batch.md into the worktree (the
+  M1-855 precedent); citations spot-checked and hold (en.properties:930,
+  cs:721, es:945, ru:911, tr:815 image.reply.echo; ImageCommandHandler
+  echo+sanitize+audit at :388-396; SignalAdapter.finalizeMessage;
+  SignalJsonRpcClient editMessage → encodeEditSend places the full message
+  param; no truncation grep in the signal package; SignalJsonRpcClientTest
+  FakeSignalCli param-inspection at :133-160; commands.md:640-652 echo
+  mandate; security.md §LLM output sanitizer; StageProgressNotifier
+  no-branch rule :138). Pitfalls P1-P4 landed. blocked_by empty. No
+  superseded worktree of this surface. The one implementation decision
+  (leg-1 capture mechanics: temporary raw-frame log at the JSON-RPC write
+  point in the TEST checkout, image rebuilt via 7-apps.sh, reverted after —
+  the M1-855 dispatch-log precedent) was execution, not a blocking
+  ambiguity, and the user pre-approved the probe plan including it.
 escalation_reason:
 ---
 
@@ -142,6 +163,55 @@ not in the repo, so a fresh capture localizes the layer — the M1-855
 capture-first precedent. The ticket is still safe to start: every fork has
 a small, pre-mapped deliverable, and the expected fork (A) is a five-file
 bundle change.
+
+## Wire evidence — capture-first step, FORK C (2026-08-20)
+
+Stack: the isolated `infochat-test` compose project (per
+`LIVE-TEST-STARTUP.md`; never anything named infochat-prod). Prod was
+stopped before the probes and restored after, per the 2026-08-19
+M1-830..833 pattern.
+
+- **Leg 1 (provider→daemon).** Temporary raw-frame log at
+  `SignalJsonRpcClient.call` (the JSON-RPC write point) in the TEST
+  checkout only — uncommitted, reverted after; image rebuilt via
+  `prod/scripts/7-apps.sh`. Artifact: `/tmp/opencode/sig-m1-892-leg1.log`
+  (masked). The edit frame for the en-scope completion carries
+  `"message":"Image generated.\nPrompt used: infochat-canary-892-lighthouse-sunrise"`;
+  the es-scope frame carries
+  `"message":"Imagen generada.\nPrompt utilizado: infochat-canary-892-faro-rojo-costa"`.
+- **Leg 2 (daemon→client).** One long-lived admin-account `jsonRpc`
+  stdin session per `.agents/memory-local/signal-jsonrpc-capture.md`
+  (stdin held open; `--dns 8.8.8.8`; contact ids masked). Artifacts:
+  `/tmp/opencode/sig-m1-892-leg2.log` (en),
+  `/tmp/opencode/sig-m1-892-leg2-es.log` (es),
+  `/tmp/opencode/sig-m1-892-leg2-sanitize.log`. The delivered receive
+  envelopes (`editMessage`) carry the same full two-line bodies.
+- **Sanitizer leg (P2).** A prompt containing `/vouch` renders the live
+  completion as
+  `Image generated.\nPrompt used: infochat-canary-892 [redacted command] a-user draw a boat`
+  — the raw token is never on the wire; exactly one
+  `LLM_OUTPUT_SANITIZED` audit row (`{"match_kind": "/vouch",
+  "match_count": 1}`, names only) after the content-free
+  `IMAGE_GENERATE` row (`{"outcome": "delivered"}`).
+- **Fork decision: C — evidence-only close, no production change.** Both
+  legs carry the full two-line body on every captured completion, en and
+  es. D-3 was a capture-notation artifact: the campaign's own capture
+  (`/tmp/opencode/sig-img-08.log`, 2026-08-18) shows the disclosure was
+  delivered then too — the plain `receive` formatter prints the body's
+  second line as an unprefixed continuation line beneath
+  `Body: Image generated.`, and the case note read only the `Body:` line.
+  The defect report's D-3 retest case (SIG-IMG-07 after fix) is answered
+  by the fresh captures: the disclosure arrives on Signal, en and
+  non-en, with the sanitizer discipline intact.
+
+Fork-C dispositions: acceptance item 1 satisfied (captures attached, fork
+recorded from the frames); item 2's live probes run (en + es, both
+captured); item 3 (boundary pin) and item 7 (design record) land with this
+ticket; item 4's live sanitizer arm run above (and the pre-existing
+ImageCommandHandlerTest pins stay unmodified); items 5 and 6 are vacuous
+under Fork C (no bundle change, no handler diff). Under Fork C "done" is
+the boundary pin + design record + this evidence — per the ticket's own
+Definition of done.
 
 ## Pitfalls
 
