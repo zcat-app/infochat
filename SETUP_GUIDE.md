@@ -323,6 +323,21 @@ leaves your machine. The wizard prints a per-task disclosure before you type
 your key; the leg-by-leg detail for `translator` is under
 [Switching your AI backend later](#what-translator-sends-leg-by-leg).
 
+**Chat reply mode (per model).** After the timing questions, the wizard asks
+how chat replies are generated (`infochat.chat.reply-mode`): **translate** —
+the reply is generated in English and translated for non-English chats
+(today's behavior) — or **native** — the reply is generated directly in the
+chat's own language, skipping the translation leg. The recommended answer
+depends on the chat model, per the committed in-language measurement record:
+**native** only for a model the record clears in every measured language,
+**translate** for a model it fails in any, and always **translate** for an
+unmeasured model. The choice is yours — the wizard writes the value you give
+it and tells you what it picked; to change it later, edit
+`infochat.chat.reply-mode` in `prod/runtime/application.properties` (then
+restart the Provider), or just re-run this step, which asks again and
+rewrites it. An existing install that never re-runs this step keeps the
+shipped default `translate` — today's behavior, the safe posture.
+
 ### Step 4b — Image generation (`/image`) (optional)
 
 infochat can generate images with the `/image` command. This is **optional and

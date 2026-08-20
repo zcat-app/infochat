@@ -49,6 +49,17 @@ WAIT_TIMEOUT=120
 # container that mounts it, so the GGUF download runs in this throwaway.
 CURL_IMAGE="curlimages/curl:8.11.1"
 
+# D79: per-model chat reply-mode recommendation, keyed by the EXACT model
+# string each branch writes; an absent key falls back to translate. Rule:
+# docs/measurement/direct-chat-e2e.md: native only on a full clear, else translate.
+declare -A MODEL_REPLYMODE_RECOMMENDED=(
+  [gemma-4-26b-a4b]=translate
+)
+# The printed per-language detail for each seeded model (advice, never a gate).
+declare -A MODEL_REPLYMODE_DETAIL=(
+  [gemma-4-26b-a4b]="cs/ru/tr PASS, en/es FAIL"
+)
+
 # Curated, checksum-pinned GGUFs the llamacpp branch defaults to (M1-417). Enter
 # accepts each with its SHA-256 ENFORCED (not skippable); a custom URL overrides
 # and falls back to the optional-SHA prompt (operator-trusted TLS fetch, M1-394).
@@ -118,6 +129,34 @@ prompt_timing() {
     exit 1
   fi
   printf -v "$__var" '%s' "$answer"
+}
+
+# D79: per-model recommendation (MODEL_REPLYMODE_RECOMMENDED); bare Enter and
+# --defaults take it. A re-run re-asks, disclosing a differing current value
+# so a deliberate operator choice is never silently reverted (4b's shape).
+choose_reply_mode() {
+  local rec="${MODEL_REPLYMODE_RECOMMENDED[$reply_mode_model]:-translate}"
+  local detail="${MODEL_REPLYMODE_DETAIL[$reply_mode_model]:-unmeasured}"
+  if [[ "$defaults" -eq 1 ]]; then
+    reply_mode="$rec"
+    echo "taking reply-mode recommendation for $reply_mode_model: $rec"
+    return 0
+  fi
+  local current=""
+  if grep -qE '^infochat\.chat\.reply-mode=' "$CONFIG_FILE" 2>/dev/null; then
+    current="$(sed -n 's/^infochat\.chat\.reply-mode=//p' "$CONFIG_FILE" | tail -n1)"
+  fi
+  echo "chat reply-mode recommendation for $reply_mode_model: $rec ($detail)"
+  if [[ -n "$current" && "$current" != "$rec" ]]; then
+    echo "currently set: $current (Enter takes the recommendation)"
+  fi
+  local choice
+  read -rp "Chat reply mode (native|translate) [$rec]: " choice
+  choice="${choice:-$rec}"
+  case "$choice" in
+    native|translate) reply_mode="$choice" ;;
+    *) echo "FAIL: chat reply mode must be native or translate (got '$choice')." >&2; exit 1 ;;
+  esac
 }
 
 # Migrate an old-format runtime file (per-task base-url/api-key fan-out,
@@ -457,6 +496,7 @@ case "$backend" in
       set_prop "infochat.llm.${task}.model" "$chat_model"
     done
     set_prop infochat.embeddings.model "$embedding_model"
+    reply_mode_model="$chat_model"
     echo "ollama backend ready: models pulled, endpoint $OLLAMA_URL"
     ;;
   llamacpp)
@@ -506,6 +546,7 @@ case "$backend" in
       gen_sha="$LLAMACPP_GEN_GGUF_SHA"   # pinned: enforced, not skippable
       echo "using pinned generative GGUF: $gen_file"
     fi
+    reply_mode_model="$gen_file"
 
     # --- Embeddings backend: a second llama.cpp instance or co-running Ollama. ---
     read -rp "Embeddings backend (llamacpp|ollama) [llamacpp]: " emb_backend
@@ -770,6 +811,7 @@ case "$backend" in
         exit 1
       fi
     fi
+    reply_mode_model="$remote_model"
     # The API key is a secret, so it lives in secrets.env (§7.3 — secrets never
     # enter application.properties), reusing any value a prior step-4 run already
     # recorded. application.properties references it by env var for Quarkus to
@@ -874,8 +916,10 @@ prompt_timing infochat.llm.chat.timeout-ms       "$chat_timeout_default" chat_ti
 prompt_timing infochat.llm.chat.max-tokens       "$chat_maxtok_default"  chat_maxtok
 prompt_timing infochat.llm.summarizer.timeout-ms "$summ_timeout_default" summ_timeout
 prompt_timing infochat.llm.summarizer.max-tokens "$summ_maxtok_default"  summ_maxtok
+choose_reply_mode
 set_prop infochat.llm.chat.timeout-ms "$chat_timeout"
 set_prop infochat.llm.chat.max-tokens "$chat_maxtok"
 set_prop infochat.llm.summarizer.timeout-ms "$summ_timeout"
 set_prop infochat.llm.summarizer.max-tokens "$summ_maxtok"
+set_prop infochat.chat.reply-mode "$reply_mode"
 echo "+ wrote LLM timing: chat ${chat_timeout} ms / ${chat_maxtok} tokens; summarizer ${summ_timeout} ms / ${summ_maxtok} tokens"

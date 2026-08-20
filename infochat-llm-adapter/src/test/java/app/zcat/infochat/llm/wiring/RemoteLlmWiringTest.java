@@ -63,6 +63,10 @@ class RemoteLlmWiringTest {
     // prompt_timing reads (chat/summarizer × timeout-ms/max-tokens) — every
     // wizard drive must supply them or the script dies at EOF under set -e.
     private static final String ACCEPT_TIMING_DEFAULTS = "\n\n\n\n";
+    // One appended Enter answering the M1-895 reply-mode ask (fires after the
+    // timing reads); every tail-reaching drive must supply it or the script
+    // dies at EOF under set -e — the new prompt must never add unasked stdin.
+    private static final String ACCEPT_REPLYMODE_DEFAULT = "\n";
 
     @Test
     @EnabledOnOs(OS.LINUX)
@@ -72,7 +76,7 @@ class RemoteLlmWiringTest {
         // the branch reads it from stdin), timing defaults (4× Enter).
         Map<String, String> props = runWizard(tmp,
                 "remote\n" + "\n" + REMOTE_BASE_URL + "\n" + REMOTE_MODEL + "\n"
-                        + REMOTE_API_KEY + "\n" + ACCEPT_TIMING_DEFAULTS);
+                        + REMOTE_API_KEY + "\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT);
 
         // Generative tasks → the SHARED default endpoint + API-key reference,
         // written ONCE (D56/M1-603). Because inheritance is task-agnostic, a
@@ -143,7 +147,7 @@ class RemoteLlmWiringTest {
         // wording that framed translator as bot-reply echo in the public-post tier.
         WizardRun run = runWizardCapturingOutput(tmp,
                 "remote\n" + "\n" + REMOTE_BASE_URL + "\n" + REMOTE_MODEL + "\n"
-                        + REMOTE_API_KEY + "\n" + ACCEPT_TIMING_DEFAULTS);
+                        + REMOTE_API_KEY + "\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT);
 
         assertTrue(run.output().contains("!! translator — carries PRIVATE user text"),
                 "translator must sit in the loud/private tier beside chat at INSTALL time,"
@@ -207,7 +211,7 @@ class RemoteLlmWiringTest {
         // https://api.deepseek.com default), NO model prompt (deepseek pins one
         // model), the API key, timing defaults (M1-614).
         Map<String, String> props = runWizard(tmp,
-                "remote\n" + "deepseek\n" + "\n" + REMOTE_API_KEY + "\n" + ACCEPT_TIMING_DEFAULTS);
+                "remote\n" + "deepseek\n" + "\n" + REMOTE_API_KEY + "\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT);
 
         // The deepseek dialect routes through the dedicated DeepSeekProvider:
         // provider=deepseek + deepseek-v4-flash on every task, endpoint defaulted
@@ -251,6 +255,22 @@ class RemoteLlmWiringTest {
         String secrets = Files.readString(tmp.resolve("runtime/secrets.env"));
         assertTrue(secrets.contains("INFOCHAT_LLM_API_KEY=\"" + REMOTE_API_KEY + "\""),
                 "the wizard must mint the API key into secrets.env:\n" + secrets);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void replyModeAskedAndWrittenForRemoteModel(@TempDir Path tmp) throws Exception {
+        // M1-895: the single shared reply-mode ask fires on the remote branch
+        // after chat-model selection; an operator-entered model is unmeasured,
+        // so the conservative translate is written.
+        WizardRun run = runWizardCapturingOutput(tmp,
+                "remote\n" + "\n" + REMOTE_BASE_URL + "\n" + REMOTE_MODEL + "\n"
+                        + REMOTE_API_KEY + "\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT);
+
+        assertTrue(run.output().contains("recommendation for " + REMOTE_MODEL),
+                "the recommendation must name the remote model:\n" + run.output());
+        assertEquals("translate", run.props().get("infochat.chat.reply-mode"),
+                "an unmeasured remote model must get translate written");
     }
 
     // --- helpers (trimmed mirror of LlamacppWiringTest) -------------------------

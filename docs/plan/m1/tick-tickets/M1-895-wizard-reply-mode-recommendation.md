@@ -1,13 +1,14 @@
 ---
 id: M1-895
 title: "Wizard: per-model chat reply-mode recommendation (D79)"
-status: pending
+status: done
 created: 2026-08-20
 last_updated: 2026-08-20
 flow: tick
 reproduction: >-
-  LlamacppWiringTest.wizardAsksAndWritesChatReplyMode (to-be-written — `start`
-  writes it and runs it RED before any fix code, workflow §0): a drive of the
+  LlamacppWiringTest.wizardAsksAndWritesChatReplyMode (written and run RED at
+  start, workflow §0 — 2026-08-20 module run: 1 failure, the new test; the
+  317 pre-existing green): a drive of the
   real prod/scripts/4-llm.sh (fake docker/curl, pinned-default llamacpp
   branch) answering the reply-mode prompt with bare Enter asserts
   `infochat.chat.reply-mode=translate` in the generated
@@ -104,11 +105,36 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-20
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "7 files changed, 229 insertions(+), 47 deletions(-)"
+    verdict_file: .scratch/tick-review-M1-895-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  preflight: >-
+    2026-08-20: tick-lint 0 findings; blocked_by M1-886 done; root-cause
+    citations spot-verified (4-llm.sh branches/tail, 4b-image.sh table +
+    choose_translate_prompt, D79 row, application.properties:508,
+    ChatReplyModeResolver CONFIG_KEY, direct-chat-e2e.md matrix,
+    SETUP_GUIDE.md 4b paragraph); §Census re-runs clean (no reply-mode in
+    prod/). M1-886's added tests are provider-side, disjoint from this seam.
+  spec_wording_approval: >-
+    2026-08-20 user verdict: approve the D79-row wizard sentence AS AMENDED —
+    two user-directed deltas from acceptance item 7's prescribed wording,
+    recorded so the review gate sees them: (1) "per chat model" instead of
+    "per measured chat model" (the wizard recommends for every selected
+    model; unmeasured falls back, so the prescribed wording was less
+    truthful); (2) the native case is stated for D78 symmetry. Final approved
+    sentence: "The setup wizard recommends the value per chat model from the
+    committed in-language measurement record — native for a model the record
+    clears in every measured language, translate for a model it fails in any,
+    and always translate for an unmeasured model — and the operator owns the
+    final value."
 escalation_reason:
 ---
 
@@ -388,3 +414,20 @@ altered in any pre-existing test method.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-895-wizard-reply-mode-recommendation.md
 ```
+
+## Review observations
+
+Round 1 (APPROVE) RECOMMENDED-NEW-TICKET, dispositioned per the driver's
+rules (TOUCHED-BY-THIS-DIFF: yes, no DECIDE-BEFORE — recorded here and
+carried into the commit body; filing stays the user's call):
+
+- No wiring drive ever selects the ollama backend branch of 4-llm.sh, so two
+  pieces of behavior this diff added are verified by read only: the
+  `--defaults` arm of choose_reply_mode (4-llm.sh:140-144) and the
+  per-language detail printed for the one seeded model
+  (MODEL_REPLYMODE_DETAIL at 4-llm.sh:59-61, printed at :149). If the seeded
+  detail string rotted (or the --defaults arm wrote native), an operator
+  would see wrong advice or get a wrong value written and all wiring tests
+  would stay green. Coverage extension, not a defect in this diff: the
+  recommended value, the override, the disclosure, and the failure mode all
+  have end-of-path assertions.

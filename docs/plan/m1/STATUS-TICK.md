@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 105 |
+| done | 106 |
 | deferred | 0 |
 | abandoned | 3 |
 | **total** | **110** |
@@ -26,7 +26,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-889 — Signal connected-but-deaf liveness probe + silence WARN (complexity: medium, risk: medium)
-- M1-895 — Wizard: per-model chat reply-mode recommendation (D79) (complexity: medium, risk: medium)
 
 ---
 
@@ -62,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-895 | Wizard: per-model chat reply-mode recommendation (D79) | 2026-08-20 | round 1 APPROVE |
 | M1-894 | V14 header comment correction + checksum repair runbook | 2026-08-20 | round 2 APPROVE |
 | M1-893 | Restore failed-asset wording + cold-start timeout note | 2026-08-20 | round 1 APPROVE |
 | M1-892 | Signal image completion carries the prompt echo | 2026-08-20 | round 1 APPROVE |
@@ -71,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-887 | Generalize the pre-V84 preflight and gate upgrade.sh on it | 2026-08-20 | round 2 APPROVE |
 | M1-886 | Spec: reply-mode decisive switch amendments (D79) | 2026-08-20 | round 1 APPROVE |
 | M1-885 | Land the decisive reply-mode switch (registry removal) | 2026-08-20 | round 1 APPROVE |
-| M1-884 | Reconcile tag-tree source and unfollow rules | 2026-08-18 | round 1 APPROVE |
 
 ---
 
@@ -223,7 +222,7 @@ M1-882 (done)
   └── M1-884 (done) [see above]
 M1-886 (done)
   ├── M1-885 (done)
-  └── M1-895 (pending) ← runnable
+  └── M1-895 (done)
 M1-887 (done)
   └── M1-888 (done)
 M1-889 (pending) ← runnable
