@@ -1417,6 +1417,29 @@ confirms before each irreversible gate):
    always — a full cache-hit rebuild is cheap and yields the same image id — while
    the old containers keep serving. A compile failure here stops before anything is
    recreated, so the running bot is unaffected.
+
+**One-time V14 checksum repair (pre-edit deployments).** V14's header
+comment now names `/asset-enable` as the operator recovery path (§10.8b).
+The correction is comment-only, but Flyway checksums cover comments, so
+the edit changes V14's checksum. A database that applied the pre-edit V14
+then fails Collector boot validation on its first migrate-at-start against
+the corrected tree, and keeps failing until repaired (Flyway migrates
+forward only). On such a deployment, run the repair ONCE — with the
+corrected tree in place and BEFORE the first Collector start of step 6 —
+as the database superuser:
+
+```sql
+UPDATE flyway_schema_history SET checksum = <new> WHERE version = '14';
+```
+
+`<new>` is the corrected migration's checksum: compute it with
+restore.sh's `flyway_checksum` (restore.sh:635-669, pinned to flyway-core
+by `RestoreFlywayChecksumIT`), or run `flyway repair` where the Flyway CLI
+is installed. Restores of pre-edit dumps need no extra step — the §7.10
+restore drift gate already prints the equivalent per-row repair when a
+pre-edit dump meets the edited tree. Deployments created after the
+correction never need this.
+
 6. **Restart in §Topology order via `docker compose up -d`.** `up -d` is itself
    the change-detector: it recreates only a service whose resolved image differs
    from its running container (the source changed → a rebuilt image) or whose

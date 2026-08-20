@@ -464,6 +464,25 @@ app services):
 `apps.sh` remains the quick app-only lifecycle for config changes; `stack.sh`
 is the machine-level cycle around host maintenance.
 
+### One-time V14 checksum repair after upgrading an older deployment
+
+An upgrade corrected V14's header comment to name `/asset-enable` as the
+asset-recovery command (design docs §10.8b). The edit is comment-only, but
+Flyway checksums cover comments, so any database that applied the ORIGINAL
+V14 fails Collector boot validation on its first start against the
+corrected tree — the bot won't start until this is repaired. On such a
+deployment, run this ONCE as the database superuser, before the first
+Collector start after the upgrade:
+
+```sql
+UPDATE flyway_schema_history SET checksum = <new> WHERE version = '14';
+```
+
+`<new>` is the corrected migration's checksum, computed with restore.sh's
+`flyway_checksum` helper or `flyway repair`. Backups restored from
+pre-edit dumps are already handled by restore.sh's drift gate. A
+deployment created after the correction never needs this step.
+
 ### Cold local models and the first chat
 
 After a (re)start, the first chat against a still-cold local model can exceed

@@ -30,8 +30,8 @@
 -- status: closed three-state machine ('active' | 'failed' | 'disabled'),
 -- same taxonomy as source.status. The fetcher transitions
 -- active → failed on consecutive failures (D42); operator recovery is
--- the runbook SQL in docs/design/10-asset-commands.md §10.8b (no
--- chat-command equivalent in v1).
+-- /asset-enable (docs/design/10-asset-commands.md §10.8b), with the
+-- §10.8b SQL as the host-level fallback when the Provider is down.
 -- ---------------------------------------------------------------------
 
 CREATE TABLE asset_config (

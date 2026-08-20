@@ -1,7 +1,7 @@
 ---
 id: M1-894
 title: V14 header comment correction + checksum repair runbook
-status: pending
+status: done
 created: 2026-08-20
 last_updated: 2026-08-20
 flow: tick
@@ -86,11 +86,33 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-20
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS FAIL (repair note placed after the restart step it must precede), SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "6 files, +207/-10"
+    rework_items: 1
+    verdict_file: .scratch/tick-review-M1-894-r1.txt
+  - round: 2
+    date: 2026-08-20
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS; rework item 1 SATISFIED"
+    diff_stats: "6 files, +227/-12 (fix hunks 3 files, +41/-21 — pure paragraph move + bookkeeping)"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-894-r2.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-20
+  verdict: PASS
+  warnings:
+    - >-
+      analysis_ref resolved only after copying the gitignored analysis doc
+      into the worktree (tick-analysis/ is untracked in the primary
+      checkout); lint BLOCKER before the copy, clean after.
+  blockers: []
 escalation_reason:
 ---
 
@@ -277,3 +299,13 @@ python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-894-v14-header-comment
 
 The lint gate is the mechanical half of readiness; `start` refuses on a
 BLOCKER. Full check table: `docs/process/tick-workflow.md` §1.
+
+## Round 1 rework
+
+1. Finding 1: move the "One-time V14 checksum repair (pre-edit deployments)"
+   paragraph in docs/design/07-deployment.md §7.11 from after step 8 to
+   immediately before step 6, keeping its text intact; verified by
+   `grep -n "One-time V14 checksum repair\|^6\. \*\*Restart"
+   docs/design/07-deployment.md` printing the repair note before step 6, and
+   `grep -nE "version = '14'" docs/design/07-deployment.md ADMIN_GUIDE.md`
+   still hitting both runbooks.
