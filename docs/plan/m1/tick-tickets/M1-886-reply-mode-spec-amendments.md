@@ -1,9 +1,9 @@
 ---
 id: M1-886
 title: "Spec: reply-mode decisive switch amendments (D79)"
-status: pending
+status: done
 created: 2026-08-19
-last_updated: 2026-08-19
+last_updated: 2026-08-20
 flow: tick
 reproduction: >-
   Probe: grep -n 'registry' docs/spec/llm.md hits :322 and :333, grep -n
@@ -96,7 +96,13 @@ abandoned_reason:
 spec_amend_for: docs/spec/llm.md §Translation flow
 spec_amend_parent: M1-885
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-20
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY NOT-APPLICABLE, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "5 files changed, 22 insertions(+), 30 deletions(-)"
+    verdict_file: .scratch/tick-review-M1-886-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []

@@ -14,10 +14,10 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 96 |
+| done | 97 |
 | deferred | 0 |
 | abandoned | 3 |
-| **total** | **106** |
+| **total** | **107** |
 
 ---
 
@@ -25,11 +25,12 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-886 — Spec: reply-mode decisive switch amendments (D79) (complexity: medium, risk: medium)
+- M1-885 — Land the decisive reply-mode switch (registry removal) (complexity: medium, risk: high)
 - M1-887 — Generalize the pre-V84 preflight and gate upgrade.sh on it (complexity: medium, risk: medium)
 - M1-889 — Signal connected-but-deaf liveness probe + silence WARN (complexity: medium, risk: medium)
 - M1-890 — SimpleX zero-SMP-session liveness + child restart (complexity: medium, risk: medium)
 - M1-891 — EXPLICIT-mode top unfollow subtracts the subtree truthfully (complexity: low, risk: medium)
+- M1-895 — Wizard: per-model chat reply-mode recommendation (D79) (complexity: medium, risk: medium)
 
 ---
 
@@ -46,7 +47,6 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-885 — blocked_by: M1-886 (pending)
 - M1-888 — blocked_by: M1-887 (pending)
 
 ---
@@ -66,6 +66,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-886 | Spec: reply-mode decisive switch amendments (D79) | 2026-08-20 | round 1 APPROVE |
 | M1-884 | Reconcile tag-tree source and unfollow rules | 2026-08-18 | round 1 APPROVE |
 | M1-883 | Exclude a top subtree when unfollowing from ALL | 2026-08-18 | round 1 APPROVE-WITH-FIXES |
 | M1-882 | Reject top nodes as source bootstrap tags | 2026-08-18 | round 2 APPROVE |
@@ -75,7 +76,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-877 | Re-measure the news leg on resolved stored tags | 2026-08-18 | round 1 OVERRIDE-APPROVE |
 | M1-867 | Tree-aware follow-tag, digest sections, and search | 2026-08-18 | round 3 APPROVE |
 | M1-878 | Coordinate the fallback seed with M1-866 and M1-869 | 2026-08-17 | round 1 APPROVE |
-| M1-876 | Rank region leaves above world within the News top | 2026-08-17 | round 1 APPROVE |
 
 ---
 
@@ -225,8 +225,9 @@ M1-882 (done)
   ├── M1-883 (done)
   │     └── M1-884 (done)
   └── M1-884 (done) [see above]
-M1-886 (pending) ← runnable
-  └── M1-885 (pending)
+M1-886 (done)
+  ├── M1-885 (pending) ← runnable
+  └── M1-895 (pending) ← runnable
 M1-887 (pending) ← runnable
   └── M1-888 (pending)
 M1-889 (pending) ← runnable

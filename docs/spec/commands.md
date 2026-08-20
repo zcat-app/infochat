@@ -1174,20 +1174,15 @@ and makes the digest query depend on row presence.
   pipeline mode (decision D79). `translate` is the deployment default:
   the reply is generated in English and translated for display on a
   non-`en` scope. `native` generates the reply in the scope's `/lang`
-  language and skips the display leg; it takes effect only when the
-  deployment's chat model and the scope language form a pair the
-  bar-clearing registry clears. The setting is stored either way — a
-  pair that clears later activates it without a further command — and
-  on an uncleared pair the confirmation names the registry requirement
-  and that the setting takes no effect yet, never a silent no-op, with
-  turns resolving `translate` while the pair remains uncleared. DM:
+  language and skips the display leg; the configured mode is
+  decisive and takes effect when set, for any model and any language.
+  DM:
   own scope. Group: group admin or bot admin. Probation-allowed, zero
   audit rows — a user preference. An unsupported value produces a
   friendly error listing `translate` and `native`. A bare
-  `/reply-mode` replies with the scope's setting — or the deployment
-  default the scope inherits when unset — naming an uncleared `native`
-  setting as stored but inactive; confirmations and errors are D43
-  localization-bundle strings.
+  `/reply-mode` replies with the scope's setting (or the deployment
+  default the scope inherits when unset); confirmations and errors are
+  D43 localization-bundle strings.
 - `/group-timezone <tz>` — sets the group's timezone for periodic
   digest scheduling (decision D16). IANA zone name (e.g.
   `Europe/Prague`, `UTC`). Group only; group admin or bot admin.

@@ -316,12 +316,11 @@ Adding a fallback chain is a v2 candidate.
   default is set by the operator key `infochat.chat.reply-mode` (default
   `translate`) — a capability-gating posture on the D73 precedent, not a
   feature flag: translate mode IS today's behavior and remains a
-  supported deployment posture. A scope resolves native only when the
-  deployment's chat model and the scope language form a (model,
-  language) pair with a committed bar-clearing measurement record — a
-  code-constant registry, never an operator key (decision D79); an
-  uncleared pair resolves translate mode at resolution time, logged,
-  and the mode never flips mid-turn.
+  supported deployment posture. The configured mode is decisive (decision D79): a
+  scope's `/reply-mode` override wins over the deployment default,
+  native resolves whenever it is configured — for any model and any
+  language, with no clearance condition and no resolution-time
+  fallback — and the mode never flips mid-turn.
 - The reply-language contract is mode-conditional: in translate mode the
   model writes English and the display leg translates; in native mode
   the model writes the scope's language. In both modes the language is
@@ -330,8 +329,8 @@ Adding a fallback chain is a v2 candidate.
   sanity checks below backstop the display legs, and native mode has
   none, so a whole-turn collapse in native mode delivers the wrong
   language with no note; the accepted residual's controls are the
-  registry gate and the measurement record it cites, not a runtime
-  check.
+  operator's configured mode choice, informed by the committed
+  in-language measurement record as advice, not a runtime check.
 - Query anchoring is mode-independent: the X→EN query translation
   (decision D58) runs in both modes because the embedding store is
   English; only the chat-reply display leg is conditional.
