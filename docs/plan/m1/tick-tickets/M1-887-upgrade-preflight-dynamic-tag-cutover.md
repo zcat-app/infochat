@@ -1,28 +1,24 @@
 ---
 id: M1-887
 title: "Generalize the pre-V84 preflight and gate upgrade.sh on it"
-status: pending
+status: done
 created: 2026-08-19
 last_updated: 2026-08-20
 flow: tick
 reproduction: >-
-  to-be-written TagTreeCutoverCheckIT.dynamicUnmappedNamesFailThePreflight
-  (child of a 2+ decomposition — analysis
-  docs/plan/m1/tick-analysis/upgrade-pre-v84-cutover.md; `start` converts
-  the marker per workflow §0). The wrong behavior it states: a pre-V84
-  database carrying an arbitrary legacy dynamic tag (`ai-image` — an
-  operator/tagger coinage, NOT the ruled nostr/video) passes
-  tag-tree-cutover.sh preflight CLEAN today, because PREFLIGHT_SQL
-  inventories only the ruled two names (tag-tree-cutover.sh:86-104, the
-  deliberate scope its :83-85 comment states); the name surfaces only at
-  the V84 migrate boot as an E4002 crash-loop. Probes against the current
-  tree: grep -n "nostr','video'" prod/scripts/tag-tree-cutover.sh shows
-  the two-name filters at :88-103; grep -n 'tag-tree-cutover'
-  prod/scripts/upgrade.sh returns nothing — upgrade.sh restarts the apps
-  on every run (upgrade.sh:291-309, including no-op-pull redeploys) with
-  no pre-restart check. Live evidence: routine upgrade.sh against a
-  pre-V84 DB with legacy dynamic tags ai-image + video restarted the apps
-  into the V84 crash-loop, DB left at V83
+  TagTreeCutoverCheckIT.dynamicUnmappedNamesFailThePreflight
+  (converted at start from the to-be-written marker; run RED against the
+  pre-change script on 2026-08-20 — old two-name scope listed only
+  "post.tags: video", the ai-image surfaces invisible — log
+  .scratch/m1-887-red-run.log; green after the fix). The wrong behavior it
+  states: a pre-V84 database carrying an arbitrary legacy dynamic tag
+  (`ai-image` — an operator/tagger coinage, NOT the ruled nostr/video)
+  passes tag-tree-cutover.sh preflight CLEAN today, because PREFLIGHT_SQL
+  inventories only the ruled two names; the name surfaces only at the V84
+  migrate boot as an E4002 crash-loop. upgrade.sh restarts the apps on
+  every run with no pre-restart check. Live evidence: routine upgrade.sh
+  against a pre-V84 DB with legacy dynamic tags ai-image + video restarted
+  the apps into the V84 crash-loop, DB left at V83
   (.scratch/LIVE-E2E-REGRESSION-PLAN-2026-08.md §7;
   .scratch/LIVE-E2E-DEFECT-REPORT-2026-08.md D-1, release blocker).
 analysis_ref: docs/plan/m1/tick-analysis/upgrade-pre-v84-cutover.md
@@ -96,8 +92,8 @@ out_of_scope:
 acceptance:
   - "TagTreeCutoverCheckIT.dynamicUnmappedNamesFailThePreflight (the converted reproduction) passes — it seeds the hostile four-surface state with ARBITRARY legacy names on the real Testcontainers DB (a tag row 'ai-image', a post carrying {ai, ai-image}, a source carrying {cybersecurity, ai-image}, a scope_tag row referencing the ai-image row, plus a 'video' occurrence) plus a runtime-file fixture carrying the title-cased legacy name 'Development', drives prod/scripts/tag-tree-cutover.sh preflight through the CUTOVER_PSQL seam, and asserts: exit 1; every occurrence named per surface WITH counts (tag / post.tags / source.bootstrap_tags / scope_tag / file); the known names (ai, cybersecurity) NOT flagged; the discriminating assertion — a DB-side 'development' element (a V84 mapping key) is NOT flagged on the DB surfaces but the file-side 'Development' IS flagged (DB predicate nodes ∪ keys, file predicate leaves only — analysis P1); and the skeleton rulings file is written at CUTOVER_MAP_FILE with one commented placeholder per unknown name (per-surface counts in the comments) and a pre-filled ACTIVE `video: drop` line for the standing ruling, its path printed in the output (analysis P15). A second preflight after an operator edit to the rulings file leaves that file BYTE-IDENTICAL (the skeleton never clobbers — failure mode: the review artifact must survive re-runs)."
   - "TagTreeCutoverCheckIT.preflightGreenStateExecutesV84Cleanly passes (mirror completeness, P1/P7) — seeds one edge name from EVERY known-set class (a mapping key as a tag row AND as array elements incl. 'news' in post.tags, an operator coinage colliding with a to-be-seeded leaf name, the identity leaves) → preflight exits 0 → the migrate step re-executes the real V84 classpath resource (the runV84 mechanics) and SUCCEEDS → postflight exits 0; and a post-V84-state preflight run is silent-clean (the gate's every-upgrade posture: no false positives on migrated or fresh DBs)."
-  - "TagTreeCutoverCheckIT.applyAppliesTheRulingsFile passes (failure modes mandatory) — with a rulings file carrying `ai-image: ai` and `video: drop`: apply --dry-run prints the per-surface plan and changes nothing (preflight still RED, bystanders byte-identical — failure mode: a would-be destructive run must be reviewable and side-effect-free); the real apply: (a) a scope following BOTH ai-image and ai re-points without a PK violation (ON CONFLICT DO NOTHING, the V84:316-333 mechanics), (b) a mapped tag row whose target leaf row is absent pre-migrate is RENAMED with node_kind/parent_name/fallback set from the script's V84 mirror so the post-migrate postflight counts (9 tops / 53 parented leaves / 8 fallbacks) stay GREEN, (c) post {ai, ai-image} rewrites to exactly {ai} — order-preserving dedup (V84:233-311 mechanics), (d) per-surface counts are printed along with the consumed ruling lines to retire (the audit/count plan §7 requires), (e) every bystander row/element is byte-identical, (f) a re-run with the unretired file refuses the consumed lines as stale (exit 2 naming the lines) with 0 rows changed, and after the lines are retired a further run exits 0 with 0 rows (the staleness guard, analysis P14/P15)."
-  - "TagTreeCutoverCheckIT.applyRefusesAnInvalidRulingsFile passes (failure mode, analysis P14) — each invalid rulings-file shape fed as a fixture: an uncovered unknown name; a duplicate name line; an extra line (a name in no current unknown inventory); a malformed line; a `*: drop` catch-all line; a map target that is no seeded leaf; a map ruling for nostr/video — every leg asserts exit 2 naming the offending line or name and ZERO mutation (preflight still RED, bystander rows byte-identical: validation completes before the transaction opens, never a partial apply)."
+  - "TagTreeCutoverCheckIT.applyAppliesTheRulingsFile passes (failure modes mandatory) — with a rulings file carrying `ai-image: ai` and `video: drop`: apply --dry-run prints the per-surface plan and changes nothing (preflight still RED, bystanders byte-identical — failure mode: a would-be destructive run must be reviewable and side-effect-free); the real apply: (a) a scope following BOTH ai-image and ai re-points without a PK violation (ON CONFLICT DO NOTHING, the V84:316-333 mechanics), (b) a map ruling whose target leaf row is ABSENT pre-migrate is REFUSED at validation — exit 2 naming the line and the working alternatives (a map onto a row that already exists, or drop), zero mutation, and after the operator re-rules to an identity leaf the apply succeeds and the post-migrate postflight counts (9 tops / 53 parented leaves / 8 fallbacks) stay GREEN (the round-1 review's Finding 1: a rename-with-mirror-columns is undeliverable on a pre-V84 schema — fallback is added by V84 itself, node_kind/parent_name by V82 — so the follow-preserving move is re-point + delete onto an EXISTING row, never a rename), (c) post {ai, ai-image} rewrites to exactly {ai} — order-preserving dedup (V84:233-311 mechanics), (d) per-surface counts are printed along with the consumed ruling lines to retire (the audit/count plan §7 requires), (e) every bystander row/element is byte-identical, (f) a re-run with the unretired file refuses the consumed lines as stale (exit 2 naming the lines) with 0 rows changed, and after the lines are retired a further run exits 0 with 0 rows (the staleness guard, analysis P14/P15)."
+  - "TagTreeCutoverCheckIT.applyRefusesAnInvalidRulingsFile passes (failure mode, analysis P14) — each invalid rulings-file shape fed as a fixture: an uncovered unknown name; a duplicate name line; an extra line (a name in no current unknown inventory); a malformed line; a `*: drop` catch-all line; a map target that is no seeded leaf; a map target whose leaf row is absent pre-migrate; a map ruling for nostr/video — every leg asserts exit 2 naming the offending line or name and ZERO mutation (preflight still RED, bystander rows byte-identical: validation completes before the transaction opens, never a partial apply)."
   - "UpgradeWiringTest.preflightFindingsAbortBeforeBuildAndRestart passes — driving the REAL upgrade.sh under the RestoreWiringTest seam (restricted PATH, fake docker + git, -y) with a RED preflight seam: exit 1, output names the per-surface findings, the rulings-file path ($RUNTIME_DIR/tag-cutover-map.txt), and the subcommand-neutral cutover instruction (pointing at tag-tree-cutover.sh and docs/design/07-deployment.md §7.14 WITHOUT naming reconcile-file — analysis P10), and the fake-docker argv log shows NEITHER a build NOR any `up -d`: the abort precedes the build confirm, so there is nothing to roll back (analysis P2/P4). UpgradeWiringTest.cleanPreflightReachesTheRestart passes — a GREEN seam (including the no-op-pull leg, the M1-476 redeploy path) reaches build + Collector/Provider restart unchanged."
   - "UpgradeWiringTest.unreachableDatabaseFailsLoud passes (failure mode, P3) — the psql seam made to fail (postgres unreachable) aborts the upgrade non-zero naming the container-exec wrapper and the recovery instruction; a gate that cannot read the DB never silently passes (the M1-819 P10 shape)."
   - "docs/design/07-deployment.md §7.14 'Cut over the tag-tree migration (one-time)' is rewritten to the rulings-file sequence — preflight (full four-surface + file inventory; skeleton written on first RED) → complete the rulings in $RUNTIME_DIR/tag-cutover-map.txt (one line per name) → apply --dry-run → apply → retire the consumed lines → reconcile the runtime bootstrap file to tree leaves (hand-edit wording, subcommand-neutral until M1-888) → apps.sh start (migrate) → postflight — and the 'Arriving via a routine upgrade?' paragraph now states that upgrade.sh gates automatically before the build/restart (the M1-880 decline-restart workaround is retired); the §7.15 E4002 row still points at the subsection. Probes: grep -n 'Cut over the tag-tree migration' docs/design/07-deployment.md hits; grep -o 'tag-tree-cutover.sh [a-z-]*' docs/design/07-deployment.md matches only subcommands the script implements; grep -n 'tag-cutover-map.txt' docs/design/07-deployment.md names the rulings file."
@@ -139,11 +135,47 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-20
+    verdict: MANUAL
+    checks: "SPEC-TRUTHNESS FAIL, SECURITY PASS, TEST-ADEQUACY WARN, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "7 files changed, 1107 insertions(+), 129 deletions(-)"
+    verdict_file: .scratch/tick-review-M1-887-r1.txt
+    note: >-
+      High: the apply's rename writes tree columns (fallback added by V84
+      itself; node_kind/parent_name by V82) that do not exist on any pre-V84
+      database — undeliverable where the tool runs, invisible to the IT
+      (head-migrated fixture); design decision required (schema-aware rename
+      + validation-time refusal vs re-scoped acceptance). Medium (rides
+      along): two rulings onto the same absent leaf — the re-point is emitted
+      before the rename in the transaction, so the follow is silently lost.
+  - round: 2
+    date: 2026-08-20
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY WARN, SCOPE PASS"
+    diff_stats: "7 files changed, 1153 insertions(+), 146 deletions(-)"
+    verdict_file: .scratch/tick-review-M1-887-r2.txt
+    note: >-
+      Both round-1 findings SATISFIED (rename path deleted; absent-target
+      refusal at validation with named alternatives; Finding 2's code path
+      gone). MAINTAINABILITY WARN is one informational nit: a dead
+      `lineno=0` local in load_actions (tag-tree-cutover.sh) — non-blocking,
+      deletable on the next touch of that function.
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-20
+  result: pass
+  note: >-
+    Start pre-flight: lint clean (0 findings); citations spot-checked
+    (tag-tree-cutover.sh two-name scope + deliberate-scope comment,
+    upgrade.sh no-gate/restart-every-run/clean-tracked-tree/never-writes-runtime,
+    V84 :131-176/:181-226/:316-344); Census grep re-ran clean; analysis
+    cross-read — P1-P10/P14/P15 all landed in the ticket (P11-P13 are
+    M1-888's per the decomposition). blocked_by empty, no replaces:.
+    No blocking ambiguities.
 escalation_reason:
 ---
 
@@ -210,8 +242,11 @@ pitfalls are M1-888's).
   cutover script, never to upgrade.sh.
 - P5: scope_tag FK order + UNIQUE collisions — re-point/delete references
   before tag rows (V7:64-69 no cascade), ON CONFLICT DO NOTHING on
-  re-point (V84:316-333); rename-with-mirror-columns when the target leaf
-  row is absent pre-migrate, or postflight's exact counts go RED.
+  re-point (V84:316-333). The follow-preserving map is re-point + delete
+  onto an EXISTING target row only: a rename-with-mirror-columns is
+  undeliverable pre-migrate (the tree columns do not exist on a pre-V84
+  schema — the round-1 review's Finding 1), so a map ruling whose target
+  leaf row is absent is REFUSED at validation, naming the alternatives.
 - P6: Array dedup — order-preserving (V84:233-311); naive array_replace
   duplicates.
 - P7: False positives — post-V84 and fresh DBs must be silent-clean;
@@ -280,13 +315,12 @@ it never decides (M1-866's loud contract).
    - Replace `cleanup` with `apply [--dry-run]` (no argv rulings): read
      the rulings file, validate totally against the current union
      inventory (P14 — malformed/duplicate/extra/uncovered/non-leaf
-     target/catch-all/nostr-video-map → exit 2 naming the line or name,
-     before any mutation), then one transaction: scope_tag re-points
-     (ON CONFLICT DO NOTHING) or deletions first, tag-row retire /
-     rename-with-mirror-columns (P5), order-preserving deduped array
-     rewrites (P6); per-surface counts printed; the consumed ruling
-     lines printed for retirement; --dry-run prints the same plan and
-     changes nothing.
+     target/absent-target/catch-all/nostr-video-map → exit 2 naming the
+     line or name, before any mutation), then one transaction: scope_tag
+     re-points (ON CONFLICT DO NOTHING) or deletions first, tag-row
+     retire, order-preserving deduped array rewrites (P6); per-surface
+     counts printed; the consumed ruling lines printed for retirement;
+     --dry-run prints the same plan and changes nothing.
    - Usage text updated; exit codes unchanged (0 pass / 1 findings / 2
      usage-or-environment — a rulings validation refusal is 2).
 2. `prod/scripts/upgrade.sh` — new gate step after the config-diff step
@@ -327,8 +361,9 @@ stated per case below.
 **Pitfall→mitigation mapping:** P1→the mirror + acceptance 2's
 drive-the-real-V84 case; P2→gate before build + the wiring RED/GREEN
 legs; P3→the container-exec default + acceptance 6; P4→out_of_scope +
-the wiring test's no-mutation argv assertions; P5/P6→acceptance 3's
-collision/rename/dedup arms; P7→acceptance 2's clean-state arms;
+the wiring test's no-mutation argv assertions; P5→acceptance 3's
+collision/absent-target-refusal arms; P6→acceptance 3's dedup arm;
+P7→acceptance 2's clean-state arms;
 P8→acceptance 3's bystander/dry-run arms; P9→acceptance 8's probes;
 P10→the named §8 authorizations + subcommand-neutral wording; P14→
 acceptance 4's refusal legs; P15→acceptance 1's skeleton arms +
@@ -343,7 +378,7 @@ skeleton written with placeholders + standing-ruling drops and never
 clobbered); the mirror-completeness case green (GREEN preflight ⇒ the
 real V84 resource executes clean ⇒ postflight GREEN); the rulings-file
 apply green incl. all failure arms (dry-run purity, collision re-point,
-rename-with-mirror columns, dedup, counts + consumed-lines print,
+absent-target refusal + re-rule recovery, dedup, counts + consumed-lines print,
 bystanders, stale-line refusal, clean post-retirement run); every invalid
 rulings-file shape refused with exit 2 and zero mutation; the three
 upgrade.sh gate legs green (RED aborts before build/restart naming
@@ -373,7 +408,8 @@ subcommands and the rulings file named; the credential probes green;
   build/restart.
 - P5/P6/P8 → TagTreeCutoverCheckIT.applyAppliesTheRulingsFile (failure
   modes) — hostile seeds (scope following both old name and target,
-  absent target row, duplicate-producing array) plus dry-run purity and
+  absent target row refused at validation, duplicate-producing array)
+  plus dry-run purity and
   bystander byte-identity; a wrong FK order raises on the tag DELETE, a
   naive array_replace fails the {ai} assertion.
 - P7 → the same IT's GREEN arms run pre- and post-migrate (the
@@ -443,7 +479,7 @@ infochat-core/src/main/resources/db/migration/V84__tag_tree_seed_and_migration.s
 post.tags and source.bootstrap_tags (V84:181-226), the scope_tag remap
 (V84:316-344); columns per the M1-880 census (V7:159 post.tags, V6:42
 source.bootstrap_tags, V7:64-69 scope_tag FK, V6:74-84 tag.name).
-Dispositions: tag.name → preflight inventory + apply (retire/rename);
+Dispositions: tag.name → preflight inventory + apply (retire);
 post.tags → inventory + apply (deduped rewrite); source.bootstrap_tags →
 inventory + apply (deduped rewrite); scope_tag → inventory + apply
 (re-point/delete first — P5). Examined and excluded: post.tag_candidates
@@ -452,6 +488,36 @@ census; no salvage on operator maps); frozen content (summary_cache /
 digest slugs / saved_post — D19/D36/D65 replay); the runtime
 bootstrap-sources.json file — flagged by this ticket's preflight,
 reconciled by M1-888.
+
+## Round 1 refine (escalation: manual-verdict, user decision 2026-08-20)
+
+The round-1 gate's Finding 1 (high): acceptance 3(b)'s
+rename-with-mirror-columns is undeliverable on the only databases the
+apply ever runs against — `fallback` is added by V84 itself,
+`node_kind`/`parent_name` by V82, and V84's immutability forecloses any
+post-migrate repair (the IT could not see it: the fixture migrates to
+head). Finding 2 (medium): two rulings onto the same absent leaf planned
+rename + re-point, but the re-point was emitted before the rename in the
+transaction, silently losing the follow. User decision: **option B** —
+drop the rename path entirely. A map ruling whose target leaf row is
+absent pre-migrate is REFUSED at validation (exit 2 naming the line and
+the working alternatives: a map onto a row that already exists — the
+identity leaves ai/crypto/research or the operator's own coinages — or
+drop). The follow-preserving move is re-point + delete onto an existing
+row, which needs no tree columns and works on any schema. Finding 2's
+code path disappears with the rename. Acceptance 3(b)/4, P5, and the
+Approach/Verification texts above are amended accordingly.
+
+## Review observations
+
+- (round 1, RECOMMENDED-NEW-TICKET, not touched by this diff — recorded, no
+  decision requested): the postflight's runtime-file check uses membership in
+  ALL tag rows (`SELECT name FROM tag`) while the BootstrapLoader gate it
+  cites is leaf-only (`node_kind = 'leaf'`) — a post-migrate file carrying a
+  TOP name (e.g. "news") prints GREEN but the next boot fails the loader
+  gate. Low urgency: this ticket's new preflight file check IS leaf-only, so
+  the documented sequence flags the same file before migrate; only a
+  standalone postflight misleads. Filing a follow-up is the user's call.
 
 ## Pre-flight self-check (author-side)
 

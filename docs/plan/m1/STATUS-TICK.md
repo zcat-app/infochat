@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 8 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 99 |
+| done | 100 |
 | deferred | 0 |
 | abandoned | 3 |
 | **total** | **110** |
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-887 — Generalize the pre-V84 preflight and gate upgrade.sh on it (complexity: medium, risk: medium)
+- M1-888 — Reconcile the deployed bootstrap-sources.json in the cutover (complexity: medium, risk: medium)
 - M1-889 — Signal connected-but-deaf liveness probe + silence WARN (complexity: medium, risk: medium)
 - M1-890 — SimpleX zero-SMP-session liveness + child restart (complexity: medium, risk: medium)
 - M1-891 — EXPLICIT-mode top unfollow subtracts the subtree truthfully (complexity: low, risk: medium)
@@ -48,7 +48,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-888 — blocked_by: M1-887 (pending)
+_(none)_
 
 ---
 
@@ -68,6 +68,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-893 | Restore failed-asset wording + cold-start timeout note | 2026-08-20 | round 1 APPROVE |
+| M1-887 | Generalize the pre-V84 preflight and gate upgrade.sh on it | 2026-08-20 | round 2 APPROVE |
 | M1-886 | Spec: reply-mode decisive switch amendments (D79) | 2026-08-20 | round 1 APPROVE |
 | M1-885 | Land the decisive reply-mode switch (registry removal) | 2026-08-20 | round 1 APPROVE |
 | M1-884 | Reconcile tag-tree source and unfollow rules | 2026-08-18 | round 1 APPROVE |
@@ -76,7 +77,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-881 | Preserve literal elisions at refusal intercept | 2026-08-18 | round 1 APPROVE-WITH-FIXES |
 | M1-880 | Tag-tree cutover runbook: cleanup, migrate, verify for every pre-V84 deployment | 2026-08-18 | round 2 APPROVE |
 | M1-879 | Strip deletions must not join privileged command tokens | 2026-08-18 | round 2 APPROVE |
-| M1-877 | Re-measure the news leg on resolved stored tags | 2026-08-18 | round 1 OVERRIDE-APPROVE |
 
 ---
 
@@ -229,8 +229,8 @@ M1-882 (done)
 M1-886 (done)
   ├── M1-885 (done)
   └── M1-895 (pending) ← runnable
-M1-887 (pending) ← runnable
-  └── M1-888 (pending)
+M1-887 (done)
+  └── M1-888 (pending) ← runnable
 M1-889 (pending) ← runnable
 M1-890 (pending) ← runnable
 M1-891 (pending) ← runnable

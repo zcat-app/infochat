@@ -1,8 +1,10 @@
 #!/bin/bash
 # prod/scripts/upgrade.sh — deploy a CONFIGURED infochat deployment to the
-# current checkout: backup → (best-effort) pull → rebuild the two app images
-# from the current source → restart Collector then Provider WHEN their image
-# changed — preserving ALL data and config.
+# current checkout: backup → (best-effort) pull → tag-cutover gate → rebuild
+# the two app images from the current source.
+
+# The restart hits Collector then Provider WHEN their image changed —
+# preserving ALL data and config.
 #
 # ZERO-CONFIG: a bare `upgrade.sh` (or `-y`) needs NO operator-supplied env var
 # and NO git checkout/reset. It rebuilds from whatever the checkout currently
@@ -271,6 +273,45 @@ main() {
   else
     echo "  no config changes this release."
   fi
+
+  # ── Step 3.5: tag-cutover gate — a DB carrying tag names the pending migration
+  # set cannot map would crash-loop the Collector's Flyway after the Step-5 restart
+  # (V84's E4002); refuse BEFORE the build, when nothing but backup/pull happened.
+
+  # Fires on every run, incl. no-op-pull redeploys, and runs the NEW checkout's
+  # preflight so the check rides the upgrade. Gate + instruct only: no mutation,
+  # no rulings-file write from here — the full sequence is §7.14.
+  local cutover_psql_wrapper gate_rc=0
+  cutover_psql_wrapper="$(mktemp)"
+  cat > "$cutover_psql_wrapper" <<EOF
+#!/bin/sh
+exec docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" \\
+  exec -T postgres sh -c 'PGPASSWORD="\$INFOCHAT_DB_PASSWORD" psql "\$@"' sh "\$@"
+EOF
+  chmod +x "$cutover_psql_wrapper"
+  CUTOVER_PSQL="${CUTOVER_PSQL:-$cutover_psql_wrapper}" CUTOVER_SKELETON=0 \
+    "$SCRIPT_DIR/tag-tree-cutover.sh" preflight || gate_rc=$?
+  if [[ "$gate_rc" -eq 1 ]]; then
+    rm -f "$cutover_psql_wrapper"
+    echo "FAIL: pre-migration tag cutover required — the inventory above lists tag names" >&2
+    echo "      the pending migration set cannot map (the V84 E4002 crash-loop). The upgrade" >&2
+    echo "      stops BEFORE the build/restart; nothing but the backup and the pull happened." >&2
+    echo "      Complete the rulings file $RUNTIME_DIR/tag-cutover-map.txt and run the" >&2
+    echo "      cutover per docs/design/07-deployment.md §7.14 (prod/scripts/tag-tree-cutover.sh)," >&2
+    echo "      then re-run upgrade.sh." >&2
+    exit 1
+  fi
+  if [[ "$gate_rc" -ne 0 ]]; then
+    echo "FAIL: the tag-cutover preflight could not inventory the database, so the gate" >&2
+    echo "      cannot pass (a gate that cannot read the DB never silently passes). The gate" >&2
+    echo "      probed via the container-exec wrapper $cutover_psql_wrapper" >&2
+    echo "      (docker compose exec -T postgres ... psql). Recovery: bring the postgres" >&2
+    echo "      service up (docker compose up -d postgres) — or point CUTOVER_PSQL at a" >&2
+    echo "      reachable psql — and re-run upgrade.sh." >&2
+    rm -f "$cutover_psql_wrapper"
+    exit 1
+  fi
+  rm -f "$cutover_psql_wrapper"
 
   # ── Step 4: rebuild the two app images (old containers keep serving) ──
   if ! confirm "Rebuild the app images at ${new_sha}? (apps keep running on the old image during the build)"; then

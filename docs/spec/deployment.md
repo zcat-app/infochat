@@ -55,7 +55,13 @@ keeps any concurrent apply correct).
 
 After a migration version has shipped on `main`, its file content is
 immutable, including comments; corrections are made in a new migration
-version.
+version. A comment-only correction to a shipped migration is permitted
+by explicit owner decision when the comment states a fact that has
+become false, the SQL bytes are untouched, and the change ships with a
+documented repair step — the per-row `flyway_schema_history` checksum
+UPDATE, or `flyway repair` — that every deployment that applied the
+migration before the edit runs before its next Collector start; the
+exception and its authorization are recorded in the committing change.
 
 ## Operator inputs
 

@@ -8,26 +8,34 @@ PROD_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 RUNTIME_DIR="${INFOCHAT_RUNTIME_DIR:-$PROD_DIR/runtime}"
 SECRETS_FILE="$RUNTIME_DIR/secrets.env"
 BOOTSTRAP_FILE="${CUTOVER_BOOTSTRAP_FILE:-$RUNTIME_DIR/bootstrap-sources.json}"
+MAP_FILE="${CUTOVER_MAP_FILE:-$RUNTIME_DIR/tag-cutover-map.txt}"
+WRITE_SKELETON="${CUTOVER_SKELETON:-1}"
 CUTOVER_PGHOST="${CUTOVER_PGHOST:-127.0.0.1}"
 CUTOVER_PGDB="${CUTOVER_PGDB:-infochat}"
 CUTOVER_PGUSER="${CUTOVER_PGUSER:-infochat}"
 CUTOVER_PSQL="${CUTOVER_PSQL:-psql}"
 
 usage() {
-  echo "Usage: tag-tree-cutover.sh {preflight|cleanup [--dry-run]|postflight} [-h|--help]"
-  echo "  preflight              list nostr/video leftovers per surface (tag / post.tags /"
-  echo "                         source.bootstrap_tags / scope_tag / runtime file tags[]);"
-  echo "                         exit 1 when any exists — the pre-migrate inventory."
-  echo "  cleanup [--dry-run]    remove exactly {nostr, video} from the four DB surfaces in"
-  echo "                         one transaction (scope_tag first — the FK order); idempotent;"
-  echo "                         --dry-run prints the targets and changes nothing."
+  echo "Usage: tag-tree-cutover.sh {preflight|apply [--dry-run]|postflight} [-h|--help]"
+  echo "  preflight              inventory every tag name the V84 migration cannot map, per"
+  echo "                         surface with counts (tag / post.tags / source.bootstrap_tags /"
+  echo "                         scope_tag / runtime file tags[]); exit 1 on any finding, writing"
+  echo "                         the rulings skeleton unless CUTOVER_SKELETON=0."
+  echo "  apply [--dry-run]      execute the rulings file (one line per unknown name,"
+  echo "                         'name: <tree-leaf>' or 'name: drop'): validate totally (exit 2"
+  echo "                         naming the line on any invalid shape — a map target must be a"
+  echo "                         seeded leaf whose row already exists — zero mutation), then one"
+  echo "                         transaction: scope_tag re-points/removals first (the FK order),"
+  echo "                         tag rows retired, arrays rewritten with order-preserving dedup."
+  echo "                         --dry-run prints the plan and changes nothing."
   echo "  postflight             verify the post-migration state (history at 84, tree seed,"
   echo "                         fallback marks, leftovers, array node-membership, scope_tag"
   echo "                         orphans, runtime file tags); GREEN/RED lines, exit 1 on any RED."
   echo "Transport: psql via CUTOVER_PGHOST / CUTOVER_PGDB / CUTOVER_PGUSER (defaults"
   echo "127.0.0.1 / infochat / infochat — the compose loopback publish) or wholesale via"
   echo "CUTOVER_PSQL; password from secrets.env as PGPASSWORD environment only; runtime"
-  echo "file via CUTOVER_BOOTSTRAP_FILE or \$RUNTIME_DIR/bootstrap-sources.json."
+  echo "file via CUTOVER_BOOTSTRAP_FILE or \$RUNTIME_DIR/bootstrap-sources.json; rulings"
+  echo "file via CUTOVER_MAP_FILE or \$RUNTIME_DIR/tag-cutover-map.txt."
   echo "Requires a psql client on PATH (postgresql-client) — the one host prerequisite"
   echo "beyond Docker + Compose — or CUTOVER_PSQL set to a container-exec wrapper, e.g.:"
   echo "  docker compose exec -T postgres sh -c 'PGPASSWORD=\"\$INFOCHAT_DB_PASSWORD\" psql \"\$@\"' sh \"\$@\""
@@ -80,53 +88,185 @@ file_tag_names() {
     | grep -o '"[^"]*"' | tr -d '"' || true
 }
 
-# The four-surface leftover inventory: one row per (surface, name, count).
-# Scope is deliberately the ruled two names only — any other unmapped name is
-# the operator's decision, signalled by V84's own loud failure at boot.
+# ── V84's frozen known-set, mirrored by NAME (never node_kind — that column arrives
+# at V82 and the gate must answer on older DBs too). Mirror of V84's immutable lists:
+# infochat-core/src/main/resources/db/migration/V84__tag_tree_seed_and_migration.sql
+TOPS=(sport health fashion culture science tech business news others)
+
+LEAF_NAMES=(
+  football basketball hockey tennis motorsport athletics esports other-sports
+  medicine nutrition fitness mental-health public-health other-health
+  style beauty luxury other-fashion
+  art movies music tv books gaming other-culture
+  space environment biology physics research other-science
+  ai software-development cybersecurity robotics hardware internet other-tech
+  markets economy crypto startups personal-finance other-business
+  world africa americas asia europe middle-east
+  personal opinion misc
+)
+
+KEYS=(claude openai anthropic qwen google zcash malware privacy security quarkus java
+      spring-io langchain4j oracle development comfyui news glmai kimiai)
+
+declare -A IS_LEAF=()
+_leaf=""
+for _leaf in "${LEAF_NAMES[@]}"; do
+  IS_LEAF[$_leaf]=1
+done
+unset _leaf
+
+# args → the ('a'),('b') SQL VALUES list (names here are mirror constants or
+# validator-approved [a-z0-9-] rulings keys — never free text).
+sql_values() {
+  local out="" x
+  for x in "$@"; do
+    out+="${out:+,}('$x')"
+  done
+  printf '%s' "$out"
+}
+
+KNOWN_TAG_VALUES="$(sql_values "${TOPS[@]}" "${LEAF_NAMES[@]}" "${KEYS[@]}")"
+KNOWN_ARRAY_VALUES="$(sql_values "${LEAF_NAMES[@]}" "${KEYS[@]}")"
+
+# The four-surface unknown-name inventory: one row per (surface, name, count) —
+# every name V84's per-surface predicate would RAISE on (tag rows: tops ∪ leaves ∪
+# keys; arrays: leaves ∪ keys; scope_tag follows its referenced row's name).
 PREFLIGHT_SQL="SELECT 'tag' AS surface, name, 1 AS cnt
   FROM tag
- WHERE name IN ('nostr','video')
+ WHERE name NOT IN (VALUES $KNOWN_TAG_VALUES)
 UNION ALL
 SELECT 'post.tags', e.name, count(*)
   FROM post, unnest(tags) AS e(name)
- WHERE e.name IN ('nostr','video')
+ WHERE e.name NOT IN (VALUES $KNOWN_ARRAY_VALUES)
  GROUP BY e.name
 UNION ALL
 SELECT 'source.bootstrap_tags', e.name, count(*)
   FROM source, unnest(bootstrap_tags) AS e(name)
- WHERE e.name IN ('nostr','video')
+ WHERE e.name NOT IN (VALUES $KNOWN_ARRAY_VALUES)
  GROUP BY e.name
 UNION ALL
 SELECT 'scope_tag', t.name, count(*)
   FROM scope_tag st JOIN tag t ON t.id = st.tag_id
- WHERE t.name IN ('nostr','video')
+ WHERE t.name NOT IN (VALUES $KNOWN_TAG_VALUES)
  GROUP BY t.name
 ORDER BY 1, 2;"
 
-preflight() {
-  local findings=0 file_findings="" file_names f lower
-  file_names="$(file_tag_names)"
+# The DB-side inventory rows (surface|name|count). A gate that cannot read the DB
+# fails loud (exit 2), never silently passes.
+db_inventory() {
+  local out
+  if ! out="$(psql_seam -qAt -F '|' -c "$PREFLIGHT_SQL")"; then
+    echo "FAIL: the inventory query failed — the database is unreachable or refused the" >&2
+    echo "      connection. Bring postgres up (or fix CUTOVER_PSQL) and re-run." >&2
+    exit 2
+  fi
+  printf '%s\n' "$out"
+}
+
+# The file-side inventory rows (raw form|count): every runtime-file tag whose
+# lower-cased form is no seeded leaf — the file predicate is stricter than the DB
+# one (a mapping key in the file is a finding: it must be converted, not passed).
+file_inventory() {
+  local names f lower
+  declare -A counts=()
+  local order=()
+  names="$(file_tag_names)"
   while IFS= read -r f; do
     if [[ -z "$f" ]]; then
       continue
     fi
     lower="$(printf '%s' "$f" | tr '[:upper:]' '[:lower:]')"
-    if [[ "$lower" == "nostr" || "$lower" == "video" ]]; then
-      if [[ -z "$file_findings" ]]; then
-        file_findings="$f"
-      else
-        file_findings+=", $f"
+    if [[ -z "${IS_LEAF[$lower]:-}" ]]; then
+      if [[ -z "${counts[$f]:-}" ]]; then
+        order+=("$f")
+        counts[$f]=0
       fi
+      counts[$f]=$(( counts[$f] + 1 ))
     fi
-  done <<< "$file_names"
-  if [[ -n "$file_findings" ]]; then
-    echo "file: $file_findings"
-    findings=1
+  done <<< "$names"
+  if [[ "${#order[@]}" -eq 0 ]]; then
+    return 0
   fi
+  for f in "${order[@]}"; do
+    printf '%s|%s\n' "$f" "${counts[$f]}"
+  done
+}
 
-  local db_out prev="" names="" surface name _cnt
-  db_out="$(psql_seam -qAt -F '|' -c "$PREFLIGHT_SQL")"
-  while IFS='|' read -r surface name _cnt; do
+# On RED, write the rulings skeleton IFF the file is absent — the rulings file is
+# the review artifact, so an existing one (operator edits included) is never
+# clobbered. Ruled names get ACTIVE drop lines, other unknowns commented placeholders.
+write_skeleton() {
+  local db_rows="$1"
+  if [[ -e "$MAP_FILE" ]]; then
+    echo "rulings file: $MAP_FILE — left untouched (already exists); complete it, then:"
+    echo "  tag-tree-cutover.sh apply --dry-run"
+    return 0
+  fi
+  declare -A surf_seen=() raw_seen=()
+  local order=() surface name cnt fraw fcnt lower
+  while IFS='|' read -r surface name cnt; do
+    if [[ -z "$surface" ]]; then
+      continue
+    fi
+    if [[ -z "${surf_seen[$name]:-}" ]]; then
+      order+=("$name")
+    fi
+    surf_seen[$name]+="${surf_seen[$name]:+, }$surface ($cnt)"
+  done <<< "$db_rows"
+  while IFS='|' read -r fraw fcnt; do
+    if [[ -z "$fraw" ]]; then
+      continue
+    fi
+    lower="$(printf '%s' "$fraw" | tr '[:upper:]' '[:lower:]')"
+    if [[ -z "${surf_seen[$lower]:-}" && -z "${raw_seen[$lower]:-}" ]]; then
+      order+=("$lower")
+    fi
+    surf_seen[$lower]+="${surf_seen[$lower]:+, }file ($fcnt)"
+    raw_seen[$lower]+="${raw_seen[$lower]:+, }$fraw"
+  done <<< "$(file_inventory)"
+  {
+    cat <<'SKELETON_HEADER'
+# tag-cutover rulings — one ACTIVE line per unknown tag name, reviewed before any run:
+#   name: <tree-leaf>   map every occurrence of `name` onto the seeded tree leaf
+#   name: drop          remove every occurrence of `name`
+
+# Keys use the normalized (lower-cased) stored form; raw file forms are quoted in the
+# per-name comments. Blank lines and lines starting with '#' are ignored.
+
+# A map target must be a tree leaf whose ROW already exists on this database (the
+# identity leaves ai/crypto/research or your own coinages) — any other tree leaf's
+# row only exists after the migration: map to an existing leaf or drop instead.
+
+# Complete every commented placeholder below (one per unknown name), review with
+# `tag-tree-cutover.sh apply --dry-run`, then `tag-tree-cutover.sh apply`. Retire each
+# consumed line after a successful apply (the apply prints them) — stale lines refuse.
+SKELETON_HEADER
+    local n ruled
+    for n in ${order[@]+"${order[@]}"}; do
+      if [[ "$n" == "nostr" || "$n" == "video" ]]; then
+        continue
+      fi
+      printf '\n# %s — %s%s\n' "$n" "${surf_seen[$n]}" \
+        "${raw_seen[$n]:+ — raw file form(s): ${raw_seen[$n]}}"
+      printf '# %s: drop\n' "$n"
+    done
+    for ruled in nostr video; do
+      if [[ -n "${surf_seen[$ruled]:-}" ]]; then
+        printf '\n# %s — %s%s — the standing disposal ruling (pre-filled)\n' \
+          "$ruled" "${surf_seen[$ruled]}" "${raw_seen[$ruled]:+ — raw file form(s): ${raw_seen[$ruled]}}"
+        printf '%s: drop\n' "$ruled"
+      fi
+    done
+  } > "$MAP_FILE"
+  echo "rulings skeleton written: $MAP_FILE — complete every commented placeholder"
+  echo "  (one per unknown name), then review: tag-tree-cutover.sh apply --dry-run"
+}
+
+preflight() {
+  local findings=0
+  local db_rows surface name cnt prev="" names=""
+  db_rows="$(db_inventory)"
+  while IFS='|' read -r surface name cnt; do
     if [[ -z "$surface" ]]; then
       continue
     fi
@@ -136,63 +276,342 @@ preflight() {
         findings=1
       fi
       prev="$surface"
-      names="$name"
+      names="$name ($cnt)"
     else
-      names+=", $name"
+      names+=", $name ($cnt)"
     fi
-  done <<< "$db_out"
+  done <<< "$db_rows"
   if [[ -n "$names" ]]; then
     echo "$prev: $names"
     findings=1
   fi
 
+  local fraw fcnt fnames=""
+  while IFS='|' read -r fraw fcnt; do
+    if [[ -z "$fraw" ]]; then
+      continue
+    fi
+    fnames+="${fnames:+, }$fraw ($fcnt)"
+    findings=1
+  done <<< "$(file_inventory)"
+  if [[ -n "$fnames" ]]; then
+    echo "file: $fnames"
+  fi
+
   if [[ "$findings" -eq 0 ]]; then
-    echo "preflight: clean (zero nostr/video occurrences)"
+    echo "preflight: clean (every stored tag name maps onto the V84 tag tree)"
     return 0
+  fi
+  if [[ "$WRITE_SKELETON" == "1" ]]; then
+    write_skeleton "$db_rows"
   fi
   return 1
 }
 
-CLEANUP_TARGETS_SQL="SELECT 'scope_tag', count(*)
-  FROM scope_tag st JOIN tag t ON t.id = st.tag_id
- WHERE t.name IN ('nostr','video')
-UNION ALL
-SELECT 'tag', count(*) FROM tag WHERE name IN ('nostr','video')
-UNION ALL
-SELECT 'post.tags', count(*) FROM post WHERE tags && ARRAY['nostr','video']::text[]
-UNION ALL
-SELECT 'source.bootstrap_tags', count(*) FROM source WHERE bootstrap_tags && ARRAY['nostr','video']::text[];"
+# ── apply: the rulings file is the ONLY ruling input. Validation is total and
+# completes BEFORE any mutation: malformed (any '*' catch-all included), duplicate,
+# extra/stale, uncovered, non-leaf target, or a ruled-name map each refuses exit 2.
+declare -A RULING_TARGET=() IN_INVENTORY=() DB_UNKNOWN=() TARGET_EXISTS=() ACTION=()
+RULINGS_ORDER=()
 
-# One transaction; the DELETE order is load-bearing: scope_tag.tag_id
-# REFERENCES tag(id) with no cascade, so the references go before the rows.
-CLEANUP_SQL="BEGIN;
-WITH d AS (DELETE FROM scope_tag WHERE tag_id IN (SELECT id FROM tag WHERE name IN ('nostr','video')) RETURNING 1) SELECT 'scope_tag removed: ' || count(*) FROM d;
-WITH d AS (DELETE FROM tag WHERE name IN ('nostr','video') RETURNING 1) SELECT 'tag removed: ' || count(*) FROM d;
-WITH d AS (UPDATE post SET tags = array_remove(array_remove(tags, 'nostr'), 'video') WHERE tags && ARRAY['nostr','video']::text[] RETURNING 1) SELECT 'post.tags rewritten: ' || count(*) FROM d;
-WITH d AS (UPDATE source SET bootstrap_tags = array_remove(array_remove(bootstrap_tags, 'nostr'), 'video') WHERE bootstrap_tags && ARRAY['nostr','video']::text[] RETURNING 1) SELECT 'source.bootstrap_tags rewritten: ' || count(*) FROM d;
-COMMIT;"
+parse_rulings() {
+  local lineno=0 line name target
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    lineno=$((lineno + 1))
+    if [[ "$line" =~ ^[[:space:]]*$ || "$line" =~ ^[[:space:]]*# ]]; then
+      continue
+    fi
+    if [[ ! "$line" =~ ^[[:space:]]*([a-z0-9][a-z0-9-]{0,47})[[:space:]]*:[[:space:]]*([a-z0-9][a-z0-9-]{0,47}|drop)[[:space:]]*(#.*)?$ ]]; then
+      echo "FAIL: malformed rulings line $lineno: $line" >&2
+      echo "      expected 'name: <tree-leaf>' or 'name: drop' — no wildcards, one ruling per line." >&2
+      exit 2
+    fi
+    name="${BASH_REMATCH[1]}"
+    target="${BASH_REMATCH[2]}"
+    if [[ -n "${RULING_TARGET[$name]:-}" ]]; then
+      echo "FAIL: duplicate ruling for '$name' (line $lineno) — one line per name." >&2
+      exit 2
+    fi
+    if [[ ( "$name" == "nostr" || "$name" == "video" ) && "$target" != "drop" ]]; then
+      echo "FAIL: line $lineno maps the ruled name '$name' — its standing ruling is disposal;" >&2
+      echo "      write '$name: drop'." >&2
+      exit 2
+    fi
+    if [[ "$target" != "drop" && -z "${IS_LEAF[$target]:-}" ]]; then
+      echo "FAIL: line $lineno maps '$name' to '$target', which is no seeded tree leaf." >&2
+      exit 2
+    fi
+    RULING_TARGET[$name]="$target"
+    RULINGS_ORDER+=("$name")
+  done < "$MAP_FILE"
+}
 
-cleanup() {
-  local dry=0 label count
-  if [[ "${1:-}" == "--dry-run" ]]; then
-    dry=1
-  fi
-  if [[ "$dry" -eq 1 ]]; then
-    echo "dry-run (no changes):"
-    psql_seam -qAt -F '|' -c "$CLEANUP_TARGETS_SQL" | while IFS='|' read -r label count; do
-      echo "dry-run: $label rows: $count"
+# Coverage against the CURRENT union inventory (four DB surfaces + runtime file):
+# a ruling for a name no longer unknown is extra/stale (consumed lines are retired
+# between runs); an unknown without a ruling is uncovered.
+validate_coverage() {
+  local db_rows="$1" surface name cnt fraw fcnt lower u
+  while IFS='|' read -r surface name cnt; do
+    if [[ -z "$surface" ]]; then
+      continue
+    fi
+    IN_INVENTORY[$name]=1
+    DB_UNKNOWN[$name]=1
+  done <<< "$db_rows"
+  while IFS='|' read -r fraw fcnt; do
+    if [[ -z "$fraw" ]]; then
+      continue
+    fi
+    lower="$(printf '%s' "$fraw" | tr '[:upper:]' '[:lower:]')"
+    IN_INVENTORY[$lower]=1
+  done <<< "$(file_inventory)"
+  if [[ "${#RULINGS_ORDER[@]}" -gt 0 ]]; then
+    for name in "${RULINGS_ORDER[@]}"; do
+      if [[ -z "${IN_INVENTORY[$name]:-}" ]]; then
+        echo "FAIL: ruling '$name: ${RULING_TARGET[$name]}' names no current unknown — extra or" >&2
+        echo "      stale (already applied? retire the consumed line from $MAP_FILE)." >&2
+        exit 2
+      fi
     done
-    return 0
   fi
-  if ! psql_seam -qAt -v ON_ERROR_STOP=1 -c "$CLEANUP_SQL"; then
-    echo "FAIL: cleanup transaction failed — nothing changed (rollback)." >&2
-    exit 2
+  if [[ "${#IN_INVENTORY[@]}" -gt 0 ]]; then
+    while IFS= read -r u; do
+      if [[ -z "${RULING_TARGET[$u]:-}" ]]; then
+        echo "FAIL: unknown name '$u' has no ruling in $MAP_FILE — every unknown name" >&2
+        echo "      needs exactly one line." >&2
+        exit 2
+      fi
+    done <<< "$(printf '%s\n' "${!IN_INVENTORY[@]}" | sort)"
   fi
 }
 
-# One row per postflight check: check|value. The leftover count reuses the
-# preflight probes; the array checks are DB-driven (no static name list) and
-# mirror the BootstrapLoader node gate's predicate on the file side below.
+# A map ruling re-points + retires, and its target leaf row must EXIST (identity
+# leaves, operator coinages): the follow-preserving rename is undeliverable
+# pre-migrate, so an absent target refuses here, naming the working alternatives.
+load_actions() {
+  local name target maps=() rows row lineno=0
+  for name in ${RULINGS_ORDER[@]+"${RULINGS_ORDER[@]}"}; do
+    target="${RULING_TARGET[$name]}"
+    if [[ "$target" != "drop" ]]; then
+      maps+=("$target")
+    fi
+  done
+  if [[ "${#maps[@]}" -gt 0 ]]; then
+    if ! rows="$(psql_seam -qAt -c "SELECT name FROM tag WHERE name IN (VALUES $(sql_values "${maps[@]}"))")"; then
+      echo "FAIL: could not read the tag table to plan the apply — the database is" >&2
+      echo "      unreachable or refused the connection." >&2
+      exit 2
+    fi
+    while IFS= read -r row; do
+      if [[ -n "$row" ]]; then
+        TARGET_EXISTS[$row]=1
+      fi
+    done <<< "$rows"
+  fi
+  for name in ${RULINGS_ORDER[@]+"${RULINGS_ORDER[@]}"}; do
+    target="${RULING_TARGET[$name]}"
+    if [[ "$target" == "drop" ]]; then
+      ACTION[$name]=drop
+    elif [[ -n "${TARGET_EXISTS[$target]:-}" ]]; then
+      ACTION[$name]=repoint
+    else
+      echo "FAIL: ruling '$name: $target' maps onto a leaf whose row does not exist on this" >&2
+      echo "      database yet — the pre-migration schema cannot create it. Map to a leaf that" >&2
+      echo "      already has a row (ai, crypto, research, or your own) or use '$name: drop'." >&2
+      exit 2
+    fi
+  done
+}
+
+# The ruled names as a SQL array literal + VALUES list (for the array-rewrite
+# row restriction and the dry-run counts).
+ruled_names_sql() {
+  local arr="" vals="" name
+  for name in ${RULINGS_ORDER[@]+"${RULINGS_ORDER[@]}"}; do
+    arr+="${arr:+,}'$name'"
+    vals+="${vals:+,}('$name')"
+  done
+  printf 'ARRAY[%s]::text[]|%s' "$arr" "$vals"
+}
+
+dry_run_plan() {
+  local name target ruled arr vals counts label n
+  echo "dry-run (no changes):"
+  for name in ${RULINGS_ORDER[@]+"${RULINGS_ORDER[@]}"}; do
+    target="${RULING_TARGET[$name]}"
+    case "${ACTION[$name]}" in
+      drop)    echo "plan: $name -> drop" ;;
+      repoint) echo "plan: $name -> $target (scope_tag re-pointed, tag row retired)" ;;
+    esac
+  done
+  if [[ "${#RULINGS_ORDER[@]}" -eq 0 ]]; then
+    echo "dry-run: scope_tag rows: 0"
+    echo "dry-run: tag rows: 0"
+    echo "dry-run: post.tags rows: 0"
+    echo "dry-run: source.bootstrap_tags rows: 0"
+    return 0
+  fi
+  ruled="$(ruled_names_sql)"
+  arr="${ruled%%|*}"
+  vals="${ruled##*|}"
+  if ! counts="$(psql_seam -qAt -F '|' -c "SELECT 'scope_tag', count(*)
+  FROM scope_tag st JOIN tag t ON t.id = st.tag_id
+ WHERE t.name IN (VALUES $vals)
+UNION ALL
+SELECT 'tag', count(*) FROM tag WHERE name IN (VALUES $vals)
+UNION ALL
+SELECT 'post.tags', count(*) FROM post WHERE tags && $arr
+UNION ALL
+SELECT 'source.bootstrap_tags', count(*) FROM source WHERE bootstrap_tags && $arr")"; then
+    echo "FAIL: the dry-run count query failed — the database is unreachable or refused" >&2
+    echo "      the connection." >&2
+    exit 2
+  fi
+  declare -A got=()
+  while IFS='|' read -r label n; do
+    if [[ -n "$label" ]]; then
+      got[$label]="$n"
+    fi
+  done <<< "$counts"
+  echo "dry-run: scope_tag rows: ${got[scope_tag]:-0}"
+  echo "dry-run: tag rows: ${got[tag]:-0}"
+  echo "dry-run: post.tags rows: ${got[post.tags]:-0}"
+  echo "dry-run: source.bootstrap_tags rows: ${got[source.bootstrap_tags]:-0}"
+}
+
+# One transaction; the order is load-bearing: scope_tag re-points/removals before
+# tag-row changes (scope_tag.tag_id REFERENCES tag(id) with no cascade), arrays last.
+# The array rewrite is V84's order-preserving dedup restricted to rows with a ruled name.
+apply_transaction() {
+  local sql="BEGIN;" name target ruled arr map_vals="" drop_vals="" map_join="" map_expr="e.name" drop_filter=""
+  for name in ${RULINGS_ORDER[@]+"${RULINGS_ORDER[@]}"}; do
+    target="${RULING_TARGET[$name]}"
+    case "${ACTION[$name]}" in
+      repoint)
+        sql+="
+WITH d AS (INSERT INTO scope_tag (scope_kind, scope_id, tag_id)
+  SELECT DISTINCT st.scope_kind, st.scope_id, t2.id
+    FROM scope_tag st JOIN tag old ON old.id = st.tag_id
+   JOIN tag t2 ON t2.name = '$target'
+   WHERE old.name = '$name'
+ON CONFLICT (scope_kind, scope_id, tag_id) DO NOTHING RETURNING 1)
+SELECT 'scope_tag re-pointed|' || count(*) FROM d;" ;&
+      drop)
+        sql+="
+WITH d AS (DELETE FROM scope_tag WHERE tag_id IN (SELECT id FROM tag WHERE name = '$name') RETURNING 1)
+SELECT 'scope_tag removed|' || count(*) FROM d;" ;;
+    esac
+  done
+  for name in ${RULINGS_ORDER[@]+"${RULINGS_ORDER[@]}"}; do
+    target="${RULING_TARGET[$name]}"
+    case "${ACTION[$name]}" in
+      repoint|drop)
+        sql+="
+WITH d AS (DELETE FROM tag WHERE name = '$name' RETURNING 1)
+SELECT 'tag removed|' || count(*) FROM d;" ;;
+    esac
+  done
+  if [[ "${#RULINGS_ORDER[@]}" -gt 0 ]]; then
+    ruled="$(ruled_names_sql)"
+    arr="${ruled%%|*}"
+    for name in ${RULINGS_ORDER[@]+"${RULINGS_ORDER[@]}"}; do
+      target="${RULING_TARGET[$name]}"
+      if [[ "$target" == "drop" ]]; then
+        drop_vals+="${drop_vals:+,}('$name')"
+      else
+        map_vals+="${map_vals:+,}('$name','$target')"
+      fi
+    done
+    if [[ -n "$map_vals" ]]; then
+      map_join="LEFT JOIN (VALUES $map_vals) AS lm(v1, leaf) ON lm.v1 = e.name"
+      map_expr="COALESCE(lm.leaf, e.name)"
+    fi
+    if [[ -n "$drop_vals" ]]; then
+      drop_filter="WHERE e.name NOT IN (VALUES $drop_vals)"
+    fi
+    sql+="
+WITH d AS (UPDATE post p SET tags = m.mapped
+  FROM (SELECT p2.id,
+          (SELECT COALESCE(array_agg(x.mapped ORDER BY x.ord), '{}')
+             FROM (SELECT DISTINCT ON ($map_expr) $map_expr AS mapped, e.ord
+                     FROM unnest(p2.tags) WITH ORDINALITY AS e(name, ord)
+                     $map_join
+                     $drop_filter
+                    ORDER BY $map_expr, e.ord) x) AS mapped
+         FROM post p2
+        WHERE p2.tags && $arr) m
+ WHERE p.id = m.id RETURNING 1)
+SELECT 'post.tags rewritten|' || count(*) FROM d;"
+    sql+="
+WITH d AS (UPDATE source s SET bootstrap_tags = m.mapped
+  FROM (SELECT s2.id,
+          (SELECT COALESCE(array_agg(x.mapped ORDER BY x.ord), '{}')
+             FROM (SELECT DISTINCT ON ($map_expr) $map_expr AS mapped, e.ord
+                     FROM unnest(s2.bootstrap_tags) WITH ORDINALITY AS e(name, ord)
+                     $map_join
+                     $drop_filter
+                    ORDER BY $map_expr, e.ord) x) AS mapped
+         FROM source s2
+        WHERE s2.bootstrap_tags && $arr) m
+ WHERE s.id = m.id RETURNING 1)
+SELECT 'source.bootstrap_tags rewritten|' || count(*) FROM d;"
+  fi
+  sql+="
+COMMIT;"
+  local out label n
+  if ! out="$(psql_seam -qAt -v ON_ERROR_STOP=1 -c "$sql")"; then
+    echo "FAIL: apply transaction failed — nothing changed (rollback)." >&2
+    exit 2
+  fi
+  declare -A sums=()
+  while IFS='|' read -r label n; do
+    if [[ -n "$label" ]]; then
+      sums[$label]=$(( ${sums[$label]:-0} + n ))
+    fi
+  done <<< "$out"
+  echo "scope_tag re-pointed: ${sums[scope_tag re-pointed]:-0}"
+  echo "scope_tag removed: ${sums[scope_tag removed]:-0}"
+  echo "tag removed: ${sums[tag removed]:-0}"
+  echo "post.tags rewritten: ${sums[post.tags rewritten]:-0}"
+  echo "source.bootstrap_tags rewritten: ${sums[source.bootstrap_tags rewritten]:-0}"
+  echo "consumed rulings — retire these line(s) from $MAP_FILE:"
+  local consumed=0
+  for name in ${RULINGS_ORDER[@]+"${RULINGS_ORDER[@]}"}; do
+    if [[ -n "${DB_UNKNOWN[$name]:-}" ]]; then
+      echo "$name: ${RULING_TARGET[$name]}"
+      consumed=1
+    fi
+  done
+  if [[ "$consumed" -eq 0 ]]; then
+    echo "  (none — no DB-side occurrences)"
+  fi
+}
+
+apply() {
+  local dry=0
+  if [[ "${1:-}" == "--dry-run" ]]; then
+    dry=1
+  fi
+  if [[ ! -r "$MAP_FILE" ]]; then
+    echo "FAIL: rulings file not readable: $MAP_FILE" >&2
+    echo "      Run preflight first — its first RED writes the skeleton there." >&2
+    exit 2
+  fi
+  parse_rulings
+  local db_rows
+  db_rows="$(db_inventory)"
+  validate_coverage "$db_rows"
+  load_actions
+  if [[ "$dry" -eq 1 ]]; then
+    dry_run_plan
+    return 0
+  fi
+  apply_transaction
+}
+
+# One row per postflight check: check|value. The array checks are DB-driven (no
+# static name list) and mirror the BootstrapLoader node gate's predicate on the
+# file side below.
 POSTFLIGHT_SQL="SELECT 'history84' AS chk, count(*)::text AS val
   FROM flyway_schema_history WHERE version = '84' AND success
 UNION ALL
@@ -337,12 +756,12 @@ case "$sub" in
       exit 2
     fi
     preflight ;;
-  cleanup)
+  apply)
     if [[ $# -gt 2 || ( $# -eq 2 && "$2" != "--dry-run" ) ]]; then
       usage >&2
       exit 2
     fi
-    cleanup "${2:-}" ;;
+    apply "${2:-}" ;;
   postflight)
     if [[ $# -gt 1 ]]; then
       usage >&2
