@@ -27,6 +27,7 @@ import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
@@ -35,6 +36,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
@@ -123,12 +127,22 @@ public final class SimpleXAdapter implements MessagingAdapter {
     // holder exits; the waiters are virtual threads doing one CAS per tick.
     private static final Duration RECOVERY_FLAG_POLL = Duration.ofMillis(50);
 
+    // Zero-upstream-session liveness poll (M1-890): the connected-but-deaf
+    // wedge (live D-11) fires no other detector; threshold×interval is the
+    // boot grace a fresh child needs for its first upstream connect.
+    static final Duration SMP_SESSION_POLL_INTERVAL = Duration.ofSeconds(30);
+    static final int ZERO_SESSION_THRESHOLD = 3;
+    static final Duration SESSION_POLL_ACK_TIMEOUT = Duration.ofSeconds(10);
+
     private final @Nullable SimpleXConfig config;
     private final @Nullable HttpClient httpClient;
     private final @Nullable Consumer<String> adminNotifier;
     // Peer-close rebuild pacing (M1-674); WS_RECONNECT_BACKOFF except in
     // tests, whose millisecond rungs keep the recovery tests fast.
     private final List<Duration> wsReconnectBackoff;
+    // Session-poll clock (M1-890, engineering-rules §9): production passes
+    // Clock.systemUTC() per the module pattern; tests pin a controllable one.
+    private final Clock clock;
 
     /**
      * Upper bound on tracked send-handles. Pre-M1-148 the handle and
@@ -203,6 +217,21 @@ public final class SimpleXAdapter implements MessagingAdapter {
     // flag.
     private volatile boolean closedForGood;
 
+    // -- Zero-session liveness state (M1-890) --------------------------------
+    // Mutated only on the single poll thread; the latch is volatile because
+    // connected()/requireConnected read it off-thread.
+    private volatile boolean upstreamSessionsLatchedDead;
+    private int consecutiveZeroSessionPolls;
+    private @Nullable Instant zeroSessionSince;
+    // Episode boundary: the supervisor's restartCount advancing past the
+    // latch-time snapshot — a not-RUNNING window is milliseconds wide and a
+    // sleeping poll can miss it.
+    private int restartCountAtLatch;
+    // Own scheduler thread (ticket step 5), created at the end of a
+    // successful start() and shut down by close(); null in the seams-driven
+    // tests, which call pollUpstreamSessions() directly.
+    private volatile @Nullable ScheduledExecutorService sessionPollScheduler;
+
     /**
      * Capability-only constructor. The resulting adapter can answer
      * {@link #name}, {@link #trustLevel}, {@link #capabilities}, and
@@ -220,6 +249,7 @@ public final class SimpleXAdapter implements MessagingAdapter {
         this.adminNotifier = null;
         this.wsReconnectBackoff = WS_RECONNECT_BACKOFF;
         this.outboundRate = productionRateLimiter();
+        this.clock = Clock.systemUTC();
     }
 
     /** The pacer every production instance gets: the declared cap on the system clock. */
@@ -264,6 +294,28 @@ public final class SimpleXAdapter implements MessagingAdapter {
                    Consumer<String> adminNotifier,
                    List<Duration> wsReconnectBackoff,
                    OutboundRateLimiter outboundRate) {
+        this(config, httpClient, adminNotifier, wsReconnectBackoff, outboundRate,
+                Clock.systemUTC());
+    }
+
+    // Test seam: a pinned clock for the session poll's streak stamp and WARN
+    // window (M1-890) — production wiring takes a constructor above and with
+    // it Clock.systemUTC(), per the module pattern (OutboundRateLimiter).
+    SimpleXAdapter(SimpleXConfig config,
+                   HttpClient httpClient,
+                   Consumer<String> adminNotifier,
+                   List<Duration> wsReconnectBackoff,
+                   Clock clock) {
+        this(config, httpClient, adminNotifier, wsReconnectBackoff,
+                productionRateLimiter(), clock);
+    }
+
+    SimpleXAdapter(SimpleXConfig config,
+                   HttpClient httpClient,
+                   Consumer<String> adminNotifier,
+                   List<Duration> wsReconnectBackoff,
+                   OutboundRateLimiter outboundRate,
+                   Clock clock) {
         if (wsReconnectBackoff.isEmpty()) {
             // An empty ladder would make the recovery campaign's rung lookup
             // throw IndexOutOfBounds on its first attempt, killing the campaign
@@ -276,6 +328,7 @@ public final class SimpleXAdapter implements MessagingAdapter {
         this.adminNotifier = adminNotifier;
         this.wsReconnectBackoff = List.copyOf(wsReconnectBackoff);
         this.outboundRate = outboundRate;
+        this.clock = clock;
     }
 
     @Override
@@ -371,11 +424,28 @@ public final class SimpleXAdapter implements MessagingAdapter {
                         "simplex-chat chat-server port is exposed on a"
                                 + " non-loopback interface; refusing to serve");
             }
+            // Zero-session liveness poll (M1-890), started once the transport
+            // is up; the poll re-reads the volatile fields per tick, so the
+            // one scheduler rides reconnects. close() owns the shutdown.
+            ScheduledExecutorService poller = Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "simplex-session-poll");
+                t.setDaemon(true);
+                return t;
+            });
+            var unused = poller.scheduleWithFixedDelay(this::pollUpstreamSessionsQuietly,
+                    SMP_SESSION_POLL_INTERVAL.toMillis(), SMP_SESSION_POLL_INTERVAL.toMillis(),
+                    TimeUnit.MILLISECONDS);
+            sessionPollScheduler = poller;
         } catch (MessagingException e) {
             // A failed start() must tear BOTH halves down or the subprocess and
             // the connected WebSocket client leak past the failure: the client
             // is built (rebuildWebSocket) before the readiness/FAILED checks
             // that can still abort the start.
+            ScheduledExecutorService poller = sessionPollScheduler;
+            if (poller != null) {
+                poller.shutdownNow();
+                sessionPollScheduler = null;
+            }
             SimpleXWebSocketClient ws = webSocket;
             if (ws != null) {
                 ws.close();
@@ -729,6 +799,11 @@ public final class SimpleXAdapter implements MessagingAdapter {
         // not touch `reconnecting` (that flag is reconnect()'s to manage, and
         // clearing it here only raced an in-flight reconnect).
         closedForGood = true;
+        ScheduledExecutorService poller = sessionPollScheduler;
+        if (poller != null) {
+            poller.shutdownNow();
+            sessionPollScheduler = null;
+        }
         SimpleXWebSocketClient ws = webSocket;
         if (ws != null) {
             ws.close();
@@ -781,12 +856,15 @@ public final class SimpleXAdapter implements MessagingAdapter {
      * order without its exception classification. Also consults the
      * client's own {@link SimpleXWebSocketClient#isClosed()} so a
      * peer-closed socket reads as disconnected before the supervisor
-     * notices and flips {@code reconnecting}.
+     * notices and flips {@code reconnecting}, and the zero-session
+     * liveness latch (M1-890) so a sustained-deaf child reads down for
+     * as long as the wedge episode lasts — no false green.
      */
     @Override
     public boolean connected() {
         SimpleXWebSocketClient ws = webSocket;
-        return !closedForGood && !reconnecting && ws != null && !ws.isClosed();
+        return !closedForGood && !upstreamSessionsLatchedDead && !reconnecting
+                && ws != null && !ws.isClosed();
     }
 
     /** Dispatch-queue depth, read through the live WebSocket client. */
@@ -1234,6 +1312,14 @@ public final class SimpleXAdapter implements MessagingAdapter {
                     "SimpleX transport is dead and its subprocess supervisor"
                             + " has terminally failed");
         }
+        // Zero-session latch (M1-890): a sustained-deaf child is a recoverable
+        // outage while the supervised restart is pending (TRANSIENT); terminal
+        // failure outranks it above (PERMANENT).
+        if (upstreamSessionsLatchedDead) {
+            throw new MessagingException(FailureCategory.TRANSIENT,
+                    "SimpleX upstream sessions latched dead; supervised"
+                            + " subprocess restart pending");
+        }
         // Checked BEFORE the null→PERMANENT branch: a send during the
         // restart→rebuild gap is a recoverable outage the Provider's retry
         // machinery should ride out, while an un-started adapter stays
@@ -1262,6 +1348,94 @@ public final class SimpleXAdapter implements MessagingAdapter {
 
     private String nextCorrId() {
         return "simplex-cmd-" + commandCounter.incrementAndGet();
+    }
+
+    /** One poll iteration's verdict; surfaced for the tests that drive the poll directly. */
+    enum SessionPollOutcome {
+        /** The query answered and reported zero active AND zero pending upstream subscriptions. */
+        ZERO_SESSIONS,
+        /** The query answered with at least one active or pending subscription. */
+        SESSIONS_PRESENT,
+        /** The poll did not run: adapter closed, episode latched, subprocess not RUNNING, or WS absent/dead. */
+        SKIPPED,
+        /** The query itself failed — a transport fault the existing routes own, never a zero-session reading. */
+        FAULT
+    }
+
+    /** Zero-session liveness check (M1-890): sustained zero upstream subscriptions latch
+     *  the transport dead and restart the child once per episode. */
+    SessionPollOutcome pollUpstreamSessions() {
+        if (closedForGood) {
+            return SessionPollOutcome.SKIPPED;
+        }
+        SimpleXSubprocess sub = subprocess;
+        if (sub == null || sub.state() != SimpleXSubprocess.State.RUNNING) {
+            consecutiveZeroSessionPolls = 0;
+            zeroSessionSince = null;
+            upstreamSessionsLatchedDead = false;
+            return SessionPollOutcome.SKIPPED;
+        }
+        if (upstreamSessionsLatchedDead) {
+            if (sub.restartCount() == restartCountAtLatch) {
+                return SessionPollOutcome.SKIPPED;
+            }
+            // The latched kill went through a supervised restart: new
+            // incarnation, new episode, fresh boot grace.
+            upstreamSessionsLatchedDead = false;
+            consecutiveZeroSessionPolls = 0;
+            zeroSessionSince = null;
+        }
+        SimpleXWebSocketClient ws = webSocket;
+        if (ws == null || ws.isClosed()) {
+            return SessionPollOutcome.SKIPPED;
+        }
+        SimpleXMessageCodec.AgentSubs subs;
+        try {
+            String corrId = nextCorrId();
+            subs = SimpleXMessageCodec.parseSubsCounts(ws.sendCommand(corrId,
+                    SimpleXMessageCodec.encodeGetSubsCommand(corrId),
+                    SESSION_POLL_ACK_TIMEOUT));
+        } catch (MessagingException e) {
+            LOG.debug("upstream session poll failed ({}); not a zero-session reading",
+                    e.category());
+            return SessionPollOutcome.FAULT;
+        }
+        if (subs.activeSubscriptions() > 0 || subs.pendingSubscriptions() > 0) {
+            consecutiveZeroSessionPolls = 0;
+            zeroSessionSince = null;
+            return SessionPollOutcome.SESSIONS_PRESENT;
+        }
+        if (consecutiveZeroSessionPolls == 0) {
+            zeroSessionSince = clock.instant();
+        }
+        consecutiveZeroSessionPolls++;
+        if (consecutiveZeroSessionPolls < ZERO_SESSION_THRESHOLD) {
+            return SessionPollOutcome.ZERO_SESSIONS;
+        }
+        upstreamSessionsLatchedDead = true;
+        restartCountAtLatch = sub.restartCount();
+        Instant since = zeroSessionSince;
+        long windowSeconds = since == null
+                ? 0 : Duration.between(since, clock.instant()).toSeconds();
+        // Counts and window only — no server keys, no ids, no exception
+        // messages (D37; SimpleXWebSocketClient's malformed-frame WARN is
+        // the in-module precedent).
+        LOG.warn("simplex-chat reports zero upstream SMP sessions ({} consecutive"
+                        + " polls over {}s); restarting the supervised subprocess",
+                consecutiveZeroSessionPolls, windowSeconds);
+        sub.restartHung();
+        return SessionPollOutcome.ZERO_SESSIONS;
+    }
+
+    /** Scheduler entry point: a throwing poll must not escape — an unchecked
+     *  throw suppresses every future fixed-delay run (the detector silently retires). */
+    private void pollUpstreamSessionsQuietly() {
+        try {
+            pollUpstreamSessions();
+        } catch (RuntimeException e) {
+            LOG.warn("upstream session poll threw {}; polling continues",
+                    e.getClass().getSimpleName());
+        }
     }
 
     /**

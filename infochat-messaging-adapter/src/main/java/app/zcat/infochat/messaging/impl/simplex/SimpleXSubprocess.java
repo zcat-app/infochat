@@ -104,6 +104,10 @@ final class SimpleXSubprocess {
     private volatile @Nullable Process currentProcess;
     private volatile @Nullable Thread supervisor;
     private volatile boolean stopping = false;
+    // Stamped by restartHung() before it SIGKILLs the child; supervise()
+    // consumes it to skip the healthy-uptime streak reset for a
+    // liveness-driven exit (a natural exit racing the stamp consumes it too).
+    private volatile boolean livenessKillPending = false;
     // Seeded to a no-op so the fire site never needs a null check.
     private volatile Runnable restartListener = () -> { };
     // Off-loopback bind guard (M1-430, trust boundary #7): evaluated once on the
@@ -243,6 +247,21 @@ final class SimpleXSubprocess {
                 Thread.currentThread().interrupt();
                 p.destroyForcibly();
             }
+        }
+    }
+
+    /** Force-restart a detected-deaf child (M1-890): SIGKILL routes recovery through the
+     *  supervise→backoff→cap path a crash takes; livenessKillPending keeps it counting. */
+    void restartHung() {
+        if (stopping) {
+            return;
+        }
+        Process p = currentProcess;
+        if (p != null && p.isAlive()) {
+            // SIGKILL, not SIGTERM: the child is wedged by detection, so a
+            // graceful terminate it may ignore would only delay recovery.
+            livenessKillPending = true;
+            p.destroyForcibly();
         }
     }
 
@@ -388,8 +407,13 @@ final class SimpleXSubprocess {
             // A process that ran past the healthy-uptime threshold before
             // crashing breaks the streak: "consecutive" means "without
             // intervening healthy uptime" (design §6.4.6), so the prior
-            // crashes are no longer consecutive with this one.
-            if (System.nanoTime() - startNanos >= healthyUptime.toNanos()) {
+            // crashes are no longer consecutive with this one. A liveness
+            // kill (restartHung) is exempt: the child was detected deaf,
+            // not healthy — the wedge must accumulate toward the cap.
+            boolean livenessKill = livenessKillPending;
+            livenessKillPending = false;
+            if (!livenessKill
+                    && System.nanoTime() - startNanos >= healthyUptime.toNanos()) {
                 consecutiveCrashes.set(0);
             }
             crashes = consecutiveCrashes.incrementAndGet();

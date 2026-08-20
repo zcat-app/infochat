@@ -1,15 +1,16 @@
 ---
 id: M1-890
 title: "SimpleX zero-SMP-session liveness + child restart"
-status: pending
+status: done
 created: 2026-08-20
 last_updated: 2026-08-20
 flow: tick
 reproduction: >-
-  to-be-written SimpleXSmpSessionLivenessTest.sustainedZeroSessionsLatchesAndRestarts
+  SimpleXSmpSessionLivenessTest.sustainedZeroSessionsLatchesAndRestarts
   (child of a 2+ decomposition — analysis
-  docs/plan/m1/tick-analysis/transport-liveness-instrumentation.md; `start`
-  converts the marker per workflow §0). The wrong behavior it states: a
+  docs/plan/m1/tick-analysis/transport-liveness-instrumentation.md; run RED
+  at `start` per workflow §0: compile-red against the not-yet-existing
+  poll/codec/hook APIs). The wrong behavior it states: a
   simplex-chat subprocess that is alive (supervisor RUNNING) with a healthy
   loopback WebSocket but ZERO upstream SMP sessions — connected-but-deaf,
   nothing can reach the bot — fires NO detector and NO recovery: the WS
@@ -141,7 +142,21 @@ spec_refs:
   - docs/spec/deployment.md §Health and observability
 decision_refs:
   - D37
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-20
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY FAIL, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "8 files changed, 841 insertions(+), 16 deletions(-)"
+    findings: "1 low rework item, 0 critical/high"
+    verdict_file: .scratch/tick-review-M1-890-r1.txt
+  - round: 2
+    date: 2026-08-20
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "round-2 fix hunks: 2 files changed, 28 insertions(+), 1 deletion(-) over the round-1 tree (full diff: 8 files, +869/-17)"
+    findings: "0 rework items, 0 critical/high; round-1 item SATISFIED"
+    verdict_file: .scratch/tick-review-M1-890-r2.txt
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -299,6 +314,19 @@ infochat-messaging-adapter/src/main/java/`).
 | Signal connected-but-deaf (live reader, silent channel) | defer: M1-889 (the sibling ticket) |
 | SignalJsonRpcClient reader-exit latch + timeout escalation | already exist (M1-681) — untouched |
 | InMemoryAdapter | out-of-scope: transportless SPI double — no wire to go deaf; `connected()` default true is its documented contract (MessagingAdapter.java:391-394) |
+
+## Round 1 rework
+
+REWORK ITEMS (verbatim from `.scratch/tick-review-M1-890-r1.txt`):
+
+1. Finding 1: add the latched-window TRANSIENT send assertion to
+   SimpleXSmpSessionLivenessTest.sustainedZeroSessionsLatchesAndRestarts
+   (right after the latch assertion at
+   SimpleXSmpSessionLivenessTest.java:92-93), asserting
+   adapter.send(...) throws MessagingException with
+   FailureCategory.TRANSIENT while the supervisor is still alive;
+   evaluated via the named test passing under `mvn verify` and failing
+   when SimpleXAdapter.java:1319 is flipped to PERMANENT.
 
 ## Pre-flight self-check (author-side)
 

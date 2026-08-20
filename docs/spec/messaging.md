@@ -436,7 +436,16 @@ Provider produces plain text per decision D30. The adapter:
   is adapter-specific and each adapter states its own: SimpleX rebuilds
   the WebSocket in place against the still-running daemon, while Signal
   restarts the daemon, routing recovery through the same supervised
-  backoff path a crash takes (design notes §6.5.8). Signal's restart
+  backoff path a crash takes (design notes §6.5.8). For SimpleX, a
+  sustained zero-upstream-session reading is also a transport death:
+  while the supervised subprocess runs and the WebSocket is healthy,
+  the adapter polls the agent's upstream subscription count over the
+  bot WebSocket, and when zero sessions persist across the
+  consecutive-poll threshold the adapter latches the transport dead
+  and drives recovery through a supervised restart of the subprocess —
+  the same backoff-and-cap path a crash takes, ending in the
+  supervisor's terminal failure and its operator notification when the
+  cap is exhausted. Signal's restart
   fires from either of two detectors: the
   reader-side death latch (the JSON-RPC channel died while signal-cli
   keeps running — detected from the channel's own read side, with no

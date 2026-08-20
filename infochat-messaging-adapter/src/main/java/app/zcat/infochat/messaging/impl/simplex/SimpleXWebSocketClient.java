@@ -645,6 +645,11 @@ final class SimpleXWebSocketClient {
             // into the pending future, never a log line (D37).
             case SimpleXMessageCodec.ContactAddress addr ->
                     completePending(addr.corrId(), addr.contactLink());
+            // Completes on the listener thread like ContactAddress — the
+            // dispatch hop could deadlock a caller parked in sendCommand;
+            // the payload is the counts string, never frame content (D37).
+            case SimpleXMessageCodec.AgentSubs subs ->
+                    completePending(subs.corrId(), SimpleXMessageCodec.formatSubsCounts(subs));
             case SimpleXMessageCodec.CommandError err -> failPending(err);
             // File-send completion events complete the waiting sendAttachment on the
             // listener thread, exactly like SendAck — queueing them would deadlock a

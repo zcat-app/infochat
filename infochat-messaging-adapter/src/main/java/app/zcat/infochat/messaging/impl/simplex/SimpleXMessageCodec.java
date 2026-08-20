@@ -203,6 +203,12 @@ final class SimpleXMessageCodec {
         return envelope(corrId, "/show_address");
     }
 
+    /** Encode the upstream-subscription query ({@code /get subs}) — the
+     *  zero-session liveness signal (M1-890); the command string is a constant. */
+    static String encodeGetSubsCommand(String corrId) {
+        return envelope(corrId, "/get subs");
+    }
+
     private static String targetSelector(ScopeRef scope) throws MessagingException {
         return switch (scope) {
             case ScopeRef.Dm dm -> {
@@ -366,6 +372,7 @@ final class SimpleXMessageCodec {
             case "receivedGroupInvitation" -> decodeReceivedGroupInvitation(resp);
             case "sentMessage", "apiSendMessageResponse" -> decodeSendAck(corrId, resp);
             case "userContactLink" -> decodeUserContactLink(corrId, resp);
+            case "agentSubs" -> decodeAgentSubs(corrId, resp);
             case "chatCmdError", "chatItemUpdateError" -> decodeError(corrId, resp);
             // v7's ack to an edit command — chatItemUpdated on first
             // application, chatItemNotChanged when a ladder retry re-applies
@@ -970,6 +977,59 @@ final class SimpleXMessageCodec {
         return new ContactAddress(corrId, link);
     }
 
+    /** Decode the {@code agentSubs} response (pinned-binary recording, M1-890): summed counts
+     *  only (server keys never leave the frame, D37); missing counts → CommandError, never Ignored. */
+    private static DecodedFrame decodeAgentSubs(@Nullable String corrId, JsonNode resp) {
+        if (corrId == null) {
+            return new Ignored("agentSubs-without-corrId");
+        }
+        Integer active = sumSubscriptionCounts(resp.get("activeSubs"));
+        Integer pending = sumSubscriptionCounts(resp.get("pendingSubs"));
+        if (active == null || pending == null) {
+            return new CommandError(corrId, FailureCategory.PERMANENT,
+                    "agentSubs-without-counts");
+        }
+        return new AgentSubs(corrId, active, pending);
+    }
+
+    /** Sum a server→count object's integer values; null when absent / not int-valued. */
+    private static @Nullable Integer sumSubscriptionCounts(@Nullable JsonNode node) {
+        if (node == null || !node.isObject()) {
+            return null;
+        }
+        long total = 0;
+        for (Iterator<JsonNode> values = node.elements(); values.hasNext();) {
+            JsonNode value = values.next();
+            if (!value.isIntegralNumber()) {
+                return null;
+            }
+            total += value.longValue();
+        }
+        return (int) Math.min(total, Integer.MAX_VALUE);
+    }
+
+    /** Render counts as the pending-future payload ({@code "active,pending"})
+     *  — numbers only (D37). Paired with {@link #parseSubsCounts}. */
+    static String formatSubsCounts(AgentSubs subs) {
+        return subs.activeSubscriptions() + "," + subs.pendingSubscriptions();
+    }
+
+    /** Parse the {@link #formatSubsCounts} payload (empty corrId — correlation
+     *  is already resolved); malformed is a wire-contract break, PERMANENT. */
+    static AgentSubs parseSubsCounts(String payload) throws MessagingException {
+        String[] parts = payload.split(",", -1);
+        if (parts.length != 2) {
+            throw new MessagingException(FailureCategory.PERMANENT,
+                    "malformed agentSubs counts payload");
+        }
+        try {
+            return new AgentSubs("", Integer.parseInt(parts[0]), Integer.parseInt(parts[1]));
+        } catch (NumberFormatException e) {
+            throw new MessagingException(FailureCategory.PERMANENT,
+                    "malformed agentSubs counts payload");
+        }
+    }
+
     private static DecodedFrame decodeSendAck(@Nullable String corrId, JsonNode resp) {
         // Known simplex-chat shapes only: the chat-item id lives either
         // directly on the response, on a chatItems container object, or — on
@@ -1152,7 +1212,7 @@ final class SimpleXMessageCodec {
     sealed interface DecodedFrame
             permits Inbound, GroupCandidate, ReceivedGroupInvitation, OversizeDropped,
                     SendAck, ContactAddress, CommandError, FileSendComplete,
-                    FileSendFailed, Ignored {
+                    FileSendFailed, Ignored, AgentSubs {
     }
 
     /** A direct-message inbound that should be delivered to Provider. */
@@ -1221,6 +1281,12 @@ final class SimpleXMessageCodec {
      * pending command future and must never flow into a log line.
      */
     record ContactAddress(String corrId, String contactLink) implements DecodedFrame {
+    }
+
+    /** Response to a {@code /get subs} query (M1-890): summed active/pending upstream
+     *  subscription counts; server keys dropped at decode (D37). */
+    record AgentSubs(String corrId, int activeSubscriptions, int pendingSubscriptions)
+            implements DecodedFrame {
     }
 
     /** Error response to a command, with the categorised failure. */
