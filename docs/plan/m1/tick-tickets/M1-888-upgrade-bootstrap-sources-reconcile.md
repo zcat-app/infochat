@@ -1,15 +1,16 @@
 ---
 id: M1-888
 title: "Reconcile the deployed bootstrap-sources.json in the cutover"
-status: pending
+status: done
 created: 2026-08-19
 last_updated: 2026-08-20
 flow: tick
 reproduction: >-
-  to-be-written TagTreeCutoverCheckIT.reconcileFileConvertsLegacySourceTags
-  (child of a 2+ decomposition — analysis
-  docs/plan/m1/tick-analysis/upgrade-pre-v84-cutover.md; `start` converts
-  the marker per workflow §0). The wrong behavior it states: nothing in
+  TagTreeCutoverCheckIT.reconcileFileConvertsLegacySourceTags (converted
+  at start from the to-be-written marker; run RED against the pre-change
+  script on 2026-08-20 — the unknown reconcile-file subcommand refused
+  with the usage text — log .scratch/m1-888-red-run.log; green after the
+  fix). The wrong behavior it states: nothing in
   the supported upgrade path validates or converts the DEPLOYED runtime
   bootstrap-sources.json's legacy/title-cased source tags — the Collector
   mounts that copy (docker-compose.yml:146), the wizard never clobbers an
@@ -109,11 +110,41 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-20
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY FAIL, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "5 files changed, 376 insertions(+), 15 deletions(-)"
+    rework_items: 1
+    verdict_file: .scratch/tick-review-M1-888-r1.txt
+  - round: 2
+    date: 2026-08-20
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "fix hunks: 3 files changed, 30 insertions(+), 7 deletions(-) (test leg + round-1 bookkeeping); full diff since merge-base: 5 files, 400 insertions(+), 16 deletions(-)"
+    rework_disposition: "round-1 item 1 SATISFIED (drop-ruling leg: fixture ML-Ops ruled ml-ops: drop; asserts ML-Ops -> drop table line, consumed-line printout, exact rewritten span minus the element; TagTreeCutoverCheckIT 11 tests 0 failures + BUILD SUCCESS in .scratch/tick-test-M1-888-r2.log)"
+    verdict_file: .scratch/tick-review-M1-888-r2.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-20
+  result: pass
+  note: >-
+    Start pre-flight: lint clean (0 findings — the initial
+    ANALYSIS-REF-RESOLVABLE BLOCKER was a worktree artifact: tick-analysis/
+    is gitignored, so the analysis doc was copied into the worktree's
+    private path, not a ticket defect); blocked_by M1-887 done. Citations
+    spot-checked (docker-compose.yml:146 mount, 5-bootstrap.sh:137-141
+    skip-if-present, the BootstrapLoader leaf gate + normalizer at
+    infochat-collector/.../BootstrapLoader.java:301-348 — the ticket names
+    the wrong module for that file, line substance matches). Census grep
+    re-ran clean (bootstrap-sources.json only; assets has zero "tags").
+    No replaces:. Analysis cross-read — P1/P7/P9/P11-P15 all landed in the
+    ticket. M1-887's pins traced: every TagTreeCutoverCheckIT case and the
+    UpgradeWiringTest gate wording is preserved unmodified (this ticket
+    only ADDS cases). No blocking ambiguities.
 escalation_reason:
 ---
 
@@ -337,6 +368,18 @@ reconcile-file; prod/config/bootstrap-sources.json (the wizard template)
 → out of scope (no tags). The DB-side name surfaces (tag / post.tags /
 source.bootstrap_tags / scope_tag) are M1-887's census, not this
 ticket's.
+
+## Round 1 rework
+
+1. Finding 1: add a drop-ruling leg to
+   TagTreeCutoverCheckIT.reconcileFileApplyIsDeterministicIdempotentAndBytePreserving
+   (fixture gains "ML-Ops", rulings gain "ml-ops: drop"; assert the
+   "ML-Ops -> drop (ruling)" table line, the consumed-line printout, and the
+   exact rewritten span with the element removed), evaluated via that test's
+   extended exact-content assertEquals plus
+   assertTrue(real.out().contains("ML-Ops -> drop")) — the mutation of keying
+   the rewrite skip on RESOLVED_KIND at prod/scripts/tag-tree-cutover.sh:706
+   must fail it.
 
 ## Pre-flight self-check (author-side)
 

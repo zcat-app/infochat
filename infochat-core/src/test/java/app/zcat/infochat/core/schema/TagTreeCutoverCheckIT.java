@@ -411,6 +411,118 @@ class TagTreeCutoverCheckIT extends PostgresSchemaTestBase {
         assertEquals(1, runScript(tmp, fixture, "preflight").exit(), "preflight is still RED");
     }
 
+    // ---------- reconcile-file: the D-2 runtime-file conversion (acceptance 1) ----------
+
+    @Test
+    void reconcileFileConvertsLegacySourceTags(@TempDir Path tmp) throws Exception {
+        Path fixture = writeBootstrapFixture(tmp, "Development", "Java", "AI-Image", "Video", "AI");
+        String original = Files.readString(fixture);
+
+        writeRulings(tmp);
+        ScriptResult refused = runScript(tmp, fixture, "reconcile-file");
+        assertEquals(2, refused.exit(), "an unruled unknown must refuse with exit 2: " + refused.out());
+        assertTrue(refused.out().contains("unknown name 'ai-image' has no ruling"),
+                "the refusal names the uncovered name: " + refused.out());
+        assertEquals(original, Files.readString(fixture),
+                "the refusal must leave the runtime file byte-identical");
+
+        writeRulings(tmp, "ai-image: ai");
+        ScriptResult dry = runScript(tmp, fixture, "reconcile-file", "--dry-run");
+        assertEquals(0, dry.exit(), "dry-run must succeed: " + dry.out());
+        assertTrue(dry.out().contains("Development -> software-development"),
+                "a V84 mapping key converts to its leaf: " + dry.out());
+        assertTrue(dry.out().contains("Java -> software-development"), dry.out());
+        assertTrue(dry.out().contains("Video -> drop"), "the ruled disposal: " + dry.out());
+        assertTrue(dry.out().contains("AI -> ai"), "a normalized leaf is kept: " + dry.out());
+        assertTrue(dry.out().contains("AI-Image -> ai"), "the operator's written ruling: " + dry.out());
+        assertEquals(original, Files.readString(fixture),
+                "dry-run must leave the runtime file byte-identical");
+    }
+
+    // ---------- reconcile-file: deterministic apply + idempotence (acceptance 2) ----------
+
+    @Test
+    void reconcileFileApplyIsDeterministicIdempotentAndBytePreserving(@TempDir Path tmp) throws Exception {
+        runV84();
+        Path fixture = writeBootstrapFixture(tmp, "Development", "Java", "AI-Image", "Video", "AI",
+                "ML-Ops");
+        String original = Files.readString(fixture);
+        writeRulings(tmp, "ai-image: ai", "ml-ops: drop");
+
+        ScriptResult real = runScript(tmp, fixture, "reconcile-file");
+        assertEquals(0, real.exit(), "the real run must succeed: " + real.out());
+        assertTrue(real.out().contains("Development -> software-development"),
+                "the real run prints the conversion table: " + real.out());
+        assertTrue(real.out().contains("ML-Ops -> drop"), "the drop ruling's table line: " + real.out());
+        assertTrue(real.out().contains("consumed rulings"), real.out());
+        assertTrue(real.out().contains("ai-image: ai"), "the consumed line prints for retirement: " + real.out());
+        assertTrue(real.out().contains("ml-ops: drop"),
+                "the drop ruling prints as consumed for retirement: " + real.out());
+
+        String rewritten = Files.readString(fixture);
+        String expected = original.replace(
+                "\"tags\": [\"Development\", \"Java\", \"AI-Image\", \"Video\", \"AI\", \"ML-Ops\"]",
+                "\"tags\": [\"software-development\", \"ai\"]");
+        assertEquals(expected, rewritten,
+                "exactly the tags[] span changes — mapping dedup, order-preserved, normalized forms,"
+                        + " the drop-ruled element removed; every non-tags byte survives");
+
+        ScriptResult post = runScript(tmp, fixture, "postflight");
+        assertEquals(0, post.exit(), "the postflight file predicate must be GREEN:\n" + post.out());
+        assertTrue(post.out().contains("GREEN: bootstrap-sources.json tags[] all name tag-tree nodes"),
+                post.out());
+
+        ScriptResult stale = runScript(tmp, fixture, "reconcile-file");
+        assertEquals(2, stale.exit(), "the unretired re-run must refuse the consumed line: " + stale.out());
+        assertTrue(stale.out().contains("ai-image: ai"), "the refusal names the stale line: " + stale.out());
+        assertEquals(rewritten, Files.readString(fixture), "the refusal changes nothing");
+
+        writeRulings(tmp);
+        ScriptResult retired = runScript(tmp, fixture, "reconcile-file");
+        assertEquals(0, retired.exit(), "the post-retirement run is a clean no-op: " + retired.out());
+        assertTrue(retired.out().contains("no changes"), retired.out());
+        assertEquals(rewritten, Files.readString(fixture), "the no-op changes nothing");
+    }
+
+    // ---------- reconcile-file: invalid rulings + unreadable spans (acceptance 3) ----------
+
+    @Test
+    void reconcileFileRefusesInvalidRulingsAndUnreadableSpans(@TempDir Path tmp) throws Exception {
+        Path fixture = writeBootstrapFixture(tmp, "AI-Image");
+        String original = Files.readString(fixture);
+
+        assertReconcileRefused(tmp, fixture, original, "duplicate ruling for 'ai-image'",
+                "ai-image: ai\nai-image: drop\n");
+        assertReconcileRefused(tmp, fixture, original, "ghost: drop",
+                "ai-image: ai\nghost: drop\n");
+        assertReconcileRefused(tmp, fixture, original, "malformed rulings line 1: ai-image drop",
+                "ai-image drop\n");
+        assertReconcileRefused(tmp, fixture, original, "malformed rulings line 2: *: drop",
+                "ai-image: ai\n*: drop\n");
+        assertReconcileRefused(tmp, fixture, original, "no seeded tree leaf",
+                "ai-image: sport\n");
+
+        Path multi = tmp.resolve("bootstrap-sources-multi.json");
+        Files.writeString(multi, "[\n  {\n    \"kind\": \"rss\",\n"
+                + "    \"identifier\": \"https://cutover.example.test/multi/feed.xml\",\n"
+                + "    \"name\": \"Multi-span source\",\n"
+                + "    \"category\": \"news\",\n"
+                + "    \"tags\": [\n      \"ai\"\n    ]\n  }\n]\n");
+        ScriptResult span = runScript(tmp, multi, "reconcile-file");
+        assertEquals(2, span.exit(), "an unreadable span must fail loud, never unseen: " + span.out());
+        assertTrue(span.out().contains("cannot read every \"tags\""), span.out());
+    }
+
+    /** One invalid rulings-file shape: exit 2 naming the line, the runtime file untouched. */
+    private void assertReconcileRefused(Path tmp, Path fixture, String original,
+            String expectedMessage, String rulingsContent) throws Exception {
+        Files.writeString(mapFile(tmp), rulingsContent);
+        ScriptResult r = runScript(tmp, fixture, "reconcile-file");
+        assertEquals(2, r.exit(), "the invalid shape must refuse with exit 2: " + r.out());
+        assertTrue(r.out().contains(expectedMessage), "the refusal must name the line: " + r.out());
+        assertEquals(original, Files.readString(fixture), "the runtime file stays untouched: " + r.out());
+    }
+
     // ---------- helpers ----------
 
     /** One script invocation plus its exit code and merged stdout/stderr. */

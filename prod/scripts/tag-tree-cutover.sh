@@ -16,7 +16,7 @@ CUTOVER_PGUSER="${CUTOVER_PGUSER:-infochat}"
 CUTOVER_PSQL="${CUTOVER_PSQL:-psql}"
 
 usage() {
-  echo "Usage: tag-tree-cutover.sh {preflight|apply [--dry-run]|postflight} [-h|--help]"
+  echo "Usage: tag-tree-cutover.sh {preflight|apply [--dry-run]|reconcile-file [--dry-run]|postflight} [-h|--help]"
   echo "  preflight              inventory every tag name the V84 migration cannot map, per"
   echo "                         surface with counts (tag / post.tags / source.bootstrap_tags /"
   echo "                         scope_tag / runtime file tags[]); exit 1 on any finding, writing"
@@ -28,6 +28,12 @@ usage() {
   echo "                         transaction: scope_tag re-points/removals first (the FK order),"
   echo "                         tag rows retired, arrays rewritten with order-preserving dedup."
   echo "                         --dry-run prints the plan and changes nothing."
+  echo "  reconcile-file [--dry-run]"
+  echo "                         classify the deployed runtime bootstrap-sources.json tags[]"
+  echo "                         deterministically (normalized leaves kept, V84 mapping keys"
+  echo "                         converted, nostr/video dropped, every other unmapped name taken"
+  echo "                         from its rulings-file line) and rewrite ONLY the tags spans;"
+  echo "                         --dry-run prints the table and changes nothing."
   echo "  postflight             verify the post-migration state (history at 84, tree seed,"
   echo "                         fallback marks, leftovers, array node-membership, scope_tag"
   echo "                         orphans, runtime file tags); GREEN/RED lines, exit 1 on any RED."
@@ -114,6 +120,27 @@ for _leaf in "${LEAF_NAMES[@]}"; do
   IS_LEAF[$_leaf]=1
 done
 unset _leaf
+
+# V84's frozen lookup, key -> seeded leaf (the same mirror source as KEYS/LEAF_NAMES:
+# infochat-core/src/main/resources/db/migration/V84__tag_tree_seed_and_migration.sql :156-169).
+declare -A KEY_TARGET=(
+  [claude]=ai [openai]=ai [anthropic]=ai [qwen]=ai [google]=ai
+  [zcash]=crypto
+  [malware]=cybersecurity [privacy]=cybersecurity [security]=cybersecurity
+  [quarkus]=software-development [java]=software-development [spring-io]=software-development
+  [langchain4j]=software-development [oracle]=software-development [development]=software-development
+  [comfyui]=software-development
+  [news]=world
+  [glmai]=misc [kimiai]=misc
+)
+_key=""
+for _key in "${KEYS[@]}"; do
+  if [[ -z "${KEY_TARGET[$_key]:-}" ]]; then
+    echo "FAIL: internal mirror error — mapping key '$_key' has no target leaf." >&2
+    exit 2
+  fi
+done
+unset _key
 
 # args → the ('a'),('b') SQL VALUES list (names here are mirror constants or
 # validator-approved [a-z0-9-] rulings keys — never free text).
@@ -609,6 +636,211 @@ apply() {
   apply_transaction
 }
 
+# ── reconcile-file: the runtime file's tags[] classified and rewritten —
+# deterministic, mirror-based (P12): leaves kept normalized, V84 mapping keys
+# converted, nostr/video dropped, every other name from its rulings line (M1-866).
+RESOLVED_TARGET=""
+RESOLVED_KIND=""
+resolve_tag() {
+  local lower="$1"
+  RESOLVED_TARGET=""
+  RESOLVED_KIND=""
+  if [[ -n "${IS_LEAF[$lower]:-}" ]]; then
+    RESOLVED_TARGET="$lower"
+    RESOLVED_KIND="leaf"
+  elif [[ -n "${KEY_TARGET[$lower]:-}" ]]; then
+    RESOLVED_TARGET="${KEY_TARGET[$lower]}"
+    RESOLVED_KIND="key"
+  elif [[ "$lower" == "nostr" || "$lower" == "video" ]]; then
+    RESOLVED_TARGET="drop"
+    RESOLVED_KIND="ruled"
+  else
+    RESOLVED_TARGET="${RULING_TARGET[$lower]}"
+    RESOLVED_KIND="ruling"
+  fi
+}
+
+# Rewrite ONLY the "tags": [...] spans: dedup post-mapping, order-preserved,
+# normalized forms written, every other byte untouched (P11). The span guard
+# extends the parser's fail-loud-never-unseen contract to the writer.
+rewrite_bootstrap_file() {
+  local line out="" lineno=0 term=1 read_any=0 first=1
+  local prefix inner suffix raw lower target got commas
+  local -a parsed=() mapped_out=()
+  declare -A emitted=()
+  local spans_n=0 changed=0 joined=""
+  while true; do
+    if IFS= read -r line; then
+      term=1
+    elif [[ -n "$line" ]]; then
+      term=0
+    else
+      break
+    fi
+    read_any=1
+    lineno=$((lineno + 1))
+    if [[ "$line" =~ ^(.*\"tags\"[[:space:]]*:[[:space:]]*\[)([^]]*)(\].*)$ ]]; then
+      spans_n=$((spans_n + 1))
+      prefix="${BASH_REMATCH[1]}"
+      inner="${BASH_REMATCH[2]}"
+      suffix="${BASH_REMATCH[3]}"
+      parsed=()
+      while IFS= read -r raw; do
+        if [[ -z "$raw" ]]; then
+          continue
+        fi
+        parsed+=("$raw")
+      done <<< "$(printf '%s\n' "$inner" | grep -o '"[^"]*"' | tr -d '"' || true)"
+      commas="$(printf '%s' "$inner" | tr -cd ',' | wc -c)"
+      got="${#parsed[@]}"
+      if (( got != commas + 1 )) && (( got != 0 || commas != 0 )); then
+        echo "FAIL: cannot read the \"tags\": [...] span of $BOOTSTRAP_FILE (line $lineno) —" >&2
+        echo "       the parser contract: an unreadable span fails loud, never unseen." >&2
+        exit 2
+      fi
+      mapped_out=()
+      emitted=()
+      for raw in ${parsed[@]+"${parsed[@]}"}; do
+        lower="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
+        resolve_tag "$lower"
+        if [[ "$RESOLVED_TARGET" == "drop" ]]; then
+          continue
+        fi
+        if [[ -n "${emitted[$RESOLVED_TARGET]:-}" ]]; then
+          continue
+        fi
+        emitted[$RESOLVED_TARGET]=1
+        mapped_out+=("$RESOLVED_TARGET")
+      done
+      joined=""
+      for target in ${mapped_out[@]+"${mapped_out[@]}"}; do
+        joined+="${joined:+, }\"$target\""
+      done
+      if [[ "$line" != "${prefix}${joined}${suffix}" ]]; then
+        changed=1
+      fi
+      line="${prefix}${joined}${suffix}"
+    fi
+    if [[ "$first" -eq 1 ]]; then
+      out="$line"
+      first=0
+    else
+      out+=$'\n'"$line"
+    fi
+  done < "$BOOTSTRAP_FILE"
+  if [[ "$term" -eq 1 && "$read_any" -eq 1 ]]; then
+    out+=$'\n'
+  fi
+  printf '%s' "$out" > "$BOOTSTRAP_FILE"
+  if [[ "$changed" -eq 0 ]]; then
+    echo "reconcile-file: no changes — $BOOTSTRAP_FILE already carries tree-leaf tags"
+    return 0
+  fi
+  echo "reconcile-file: rewrote $BOOTSTRAP_FILE ($spans_n tags span(s)) — the next Collector"
+  echo "  boot loads the tree-named tags via the loader's upsert"
+}
+
+reconcile_file() {
+  local dry=0
+  if [[ "${1:-}" == "--dry-run" ]]; then
+    dry=1
+  fi
+
+  local names raw lower
+  names="$(file_tag_names)"
+  declare -A FILE_TAG=() UNRESOLVED=()
+  local file_order=()
+  while IFS= read -r raw; do
+    if [[ -z "$raw" ]]; then
+      continue
+    fi
+    lower="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
+    if [[ -z "${FILE_TAG[$lower]:-}" ]]; then
+      FILE_TAG[$lower]="$raw"
+      file_order+=("$lower")
+    fi
+    if [[ -z "${IS_LEAF[$lower]:-}" && -z "${KEY_TARGET[$lower]:-}" \
+          && "$lower" != "nostr" && "$lower" != "video" ]]; then
+      UNRESOLVED[$lower]=1
+    fi
+  done <<< "$names"
+
+  if [[ "${#UNRESOLVED[@]}" -gt 0 && ! -r "$MAP_FILE" ]]; then
+    echo "FAIL: rulings file not readable: $MAP_FILE" >&2
+    echo "      Run preflight first — its first RED writes the skeleton there." >&2
+    exit 2
+  fi
+  if [[ -r "$MAP_FILE" ]]; then
+    parse_rulings
+  fi
+
+  # Coverage against the current union inventory (DB unknowns + the file's
+  # unresolved names): exactly-once coverage, extras/stale refused (P14);
+  # validation completes before any rewrite (the M1-819 posture).
+  local db_rows surface name cnt u
+  db_rows="$(db_inventory)"
+  declare -A NEEDS_RULING=() DB_NAMES=()
+  while IFS='|' read -r surface name cnt; do
+    if [[ -z "$surface" ]]; then
+      continue
+    fi
+    NEEDS_RULING[$name]=1
+    DB_NAMES[$name]=1
+  done <<< "$db_rows"
+  if [[ "${#UNRESOLVED[@]}" -gt 0 ]]; then
+    for u in "${!UNRESOLVED[@]}"; do
+      NEEDS_RULING[$u]=1
+    done
+  fi
+  if [[ "${#RULINGS_ORDER[@]}" -gt 0 ]]; then
+    for name in "${RULINGS_ORDER[@]}"; do
+      if [[ -z "${NEEDS_RULING[$name]:-}" ]]; then
+        echo "FAIL: ruling '$name: ${RULING_TARGET[$name]}' names no current unknown — extra or" >&2
+        echo "      stale (already applied? retire the consumed line from $MAP_FILE)." >&2
+        exit 2
+      fi
+    done
+  fi
+  if [[ "${#NEEDS_RULING[@]}" -gt 0 ]]; then
+    while IFS= read -r u; do
+      if [[ -z "${RULING_TARGET[$u]:-}" ]]; then
+        echo "FAIL: unknown name '$u' has no ruling in $MAP_FILE — every unknown name" >&2
+        echo "      needs exactly one line." >&2
+        exit 2
+      fi
+    done <<< "$(printf '%s\n' "${!NEEDS_RULING[@]}" | sort)"
+  fi
+
+  # The conversion table: one row per raw file tag, in file order.
+  for lower in ${file_order[@]+"${file_order[@]}"}; do
+    raw="${FILE_TAG[$lower]}"
+    resolve_tag "$lower"
+    case "$RESOLVED_KIND" in
+      leaf)   echo "$raw -> $RESOLVED_TARGET (leaf, kept)" ;;
+      key)    echo "$raw -> $RESOLVED_TARGET (mapping key)" ;;
+      ruled)  echo "$raw -> drop (ruled disposal)" ;;
+      ruling) echo "$raw -> $RESOLVED_TARGET (ruling)" ;;
+    esac
+  done
+
+  if [[ "$dry" -eq 1 ]]; then
+    echo "dry-run: $BOOTSTRAP_FILE was NOT changed"
+    return 0
+  fi
+  rewrite_bootstrap_file
+  echo "consumed rulings — retire these line(s) from $MAP_FILE:"
+  local consumed=0
+  for lower in ${file_order[@]+"${file_order[@]}"}; do
+    if [[ -n "${UNRESOLVED[$lower]:-}" && -z "${DB_NAMES[$lower]:-}" ]]; then
+      echo "$lower: ${RULING_TARGET[$lower]}"
+      consumed=1
+    fi
+  done
+  if [[ "$consumed" -eq 0 ]]; then
+    echo "  (none)"
+  fi
+}
+
 # One row per postflight check: check|value. The array checks are DB-driven (no
 # static name list) and mirror the BootstrapLoader node gate's predicate on the
 # file side below.
@@ -762,6 +994,12 @@ case "$sub" in
       exit 2
     fi
     apply "${2:-}" ;;
+  reconcile-file)
+    if [[ $# -gt 2 || ( $# -eq 2 && "$2" != "--dry-run" ) ]]; then
+      usage >&2
+      exit 2
+    fi
+    reconcile_file "${2:-}" ;;
   postflight)
     if [[ $# -gt 1 ]]; then
       usage >&2
