@@ -70,6 +70,33 @@ check, never as fact.
 
 ---
 
+## Coverage-ticket premise census (binding)
+
+A ticket whose class is "the behavior exists and is correct — only the test
+is missing" asserts a premise about production code, and verifying that
+premise is your job, not the implementor's. (The M1-896 failure: a coverage
+ticket whose first drive failed because the production branch omits a
+spec-required property — the analysis had read the branch but never
+enumerated it against the spec.)
+
+When the brief asks for coverage of existing behavior, before drafting any
+ticket:
+
+1. Enumerate the FULL set of properties/outputs the spec requires of the
+   target branch or path — one line each, with the spec citation.
+2. Enumerate the FULL set the code actually writes/produces — file:line
+   per item, the branch read end to end, not only the lines the brief
+   named.
+3. Diff the two sets in the analysis document. Any mismatch converts the
+   work from coverage to defect AT ANALYSIS TIME: say so explicitly, and
+   the ticket carries the production fix. Never file a coverage ticket
+   whose pinned behavior you have not enumerated completely.
+4. Evidence cited as premise support must cover the SAME property set: a
+   passing drive or test that asserts property A is no evidence about
+   property B — name the properties that remain unevidenced.
+
+---
+
 ## Prior-art rule (binding)
 
 The prior-art block lists existing implementations, review verdicts and
