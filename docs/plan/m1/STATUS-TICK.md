@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 2 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 111 |
+| done | 112 |
 | deferred | 0 |
 | abandoned | 3 |
 | **total** | **117** |
@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-899 — Spell out the shared cutover rulings-file lifecycle (complexity: low, risk: low)
 - M1-900 — Fix the span-parser FAIL remedy; drop dead jq advice (complexity: low, risk: low)
 - M1-902 — Make postflight's runtime-file check leaf-only (complexity: low, risk: low)
 
@@ -64,6 +63,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-901 | Liveness IT: subs responder survives reconnect swap | 2026-08-21 | round 1 APPROVE |
+| M1-899 | Spell out the shared cutover rulings-file lifecycle | 2026-08-21 | round 1 APPROVE |
 | M1-898 | Scope cutover apply to DB unknowns; refuse key rulings | 2026-08-21 | round 1 APPROVE |
 | M1-897 | Wizard wiring: pin the seeded-model reply-mode detail | 2026-08-21 | round 1 APPROVE-WITH-FIXES |
 | M1-896 | Wizard wiring: drive the ollama branch and --defaults | 2026-08-21 | round 1 APPROVE |
@@ -72,7 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-893 | Restore failed-asset wording + cold-start timeout note | 2026-08-20 | round 1 APPROVE |
 | M1-892 | Signal image completion carries the prompt echo | 2026-08-20 | round 1 APPROVE |
 | M1-891 | EXPLICIT-mode top unfollow subtracts the subtree truthfully | 2026-08-20 | round 1 APPROVE |
-| M1-890 | SimpleX zero-SMP-session liveness + child restart | 2026-08-20 | round 2 APPROVE |
 
 ---
 
@@ -236,7 +235,7 @@ M1-894 (done)
 M1-896 (done)
 M1-897 (done)
 M1-898 (done)
-  └── M1-899 (pending) ← runnable
+  └── M1-899 (done)
 M1-900 (pending) ← runnable
 M1-901 (done)
 M1-902 (pending) ← runnable

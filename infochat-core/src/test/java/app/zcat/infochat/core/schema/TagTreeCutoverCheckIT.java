@@ -125,6 +125,59 @@ class TagTreeCutoverCheckIT extends PostgresSchemaTestBase {
         assertEquals(1, runScript(tmp, fixture, "preflight").exit(), "preflight stays RED");
     }
 
+    @Test
+    void applyConsumedPrintoutKeepsLinesReconcileStillNeeds(@TempDir Path tmp) throws Exception {
+        seedTagRow("ai-image");
+        seedTagRow("ai");
+        seedTagRow("video");
+        seedPost("retire-only-post", List.of("ai", "ai-image", "video"));
+        seedFollowOnTagName(UUID.randomUUID(), "ai-image");
+        writeRulings(tmp, "ai-image: ai", "video: drop");
+
+        Path fileWithoutAiImage = writeBootstrapFixture(tmp, "AI");
+        ScriptResult fileOnlyRetire = runScript(tmp, fileWithoutAiImage, "apply");
+        assertEquals(0, fileOnlyRetire.exit(), "the apply without AI-Image must succeed: " + fileOnlyRetire.out());
+        String retireOnlySection = fileOnlyRetire.out().substring(fileOnlyRetire.out().indexOf("retire now"));
+        assertTrue(retireOnlySection.contains("ai-image: ai"),
+                "a DB-only consumed ruling must be marked retire-now: " + fileOnlyRetire.out());
+        assertTrue(retireOnlySection.contains("video: drop"), fileOnlyRetire.out());
+
+        seedTagRow("ai-image");
+        seedTagRow("video");
+        seedPost("shared-ruling-post", List.of("ai", "ai-image", "video"));
+        seedFollowOnTagName(UUID.randomUUID(), "ai-image");
+        Path fixture = writeBootstrapFixture(tmp, "AI-Image");
+
+        ScriptResult applied = runScript(tmp, fixture, "apply");
+        assertEquals(0, applied.exit(), "apply must succeed: " + applied.out());
+        assertTrue(applied.out().contains("consumed rulings"), applied.out());
+        assertTrue(applied.out().contains("keep for reconcile-file"), applied.out());
+        String keepSection = applied.out().substring(applied.out().indexOf("keep for reconcile-file"),
+                applied.out().indexOf("retire now"));
+        assertTrue(keepSection.contains("ai-image: ai"),
+                "the still-needed ruling must be in the keep group: " + applied.out());
+        String retireSection = applied.out().substring(applied.out().indexOf("retire now"));
+        assertFalse(retireSection.contains("ai-image: ai"),
+                "apply must keep the ruling needed by reconcile-file: " + applied.out());
+        assertTrue(retireSection.contains("video: drop"),
+                "the DB-only ruling must be in the retire-now group: " + applied.out());
+        assertTrue(applied.out().contains("ai-image: ai"),
+                "the consumed ruling must remain visible in the classified printout: " + applied.out());
+
+        writeRulings(tmp, "ai-image: ai");
+        ScriptResult reconciled = runScript(tmp, fixture, "reconcile-file");
+        assertEquals(0, reconciled.exit(), "reconcile-file must consume the kept ruling: " + reconciled.out());
+        assertTrue(reconciled.out().contains("ai-image: ai"), reconciled.out());
+
+        writeRulings(tmp);
+        ScriptResult applyNoOp = runScript(tmp, fixture, "apply");
+        assertEquals(0, applyNoOp.exit(), "retired rulings file must apply as a clean no-op: " + applyNoOp.out());
+        ScriptResult reconcileNoOp = runScript(tmp, fixture, "reconcile-file");
+        assertEquals(0, reconcileNoOp.exit(),
+                "retired rulings file must reconcile as a clean no-op: " + reconcileNoOp.out());
+        assertTrue(reconcileNoOp.out().contains("no changes"), reconcileNoOp.out());
+    }
+
     // ---------- generalized preflight: leftovers + skeleton (acceptance 2) ----------
 
     @Test

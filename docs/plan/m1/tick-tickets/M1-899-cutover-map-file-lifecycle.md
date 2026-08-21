@@ -1,13 +1,12 @@
 ---
 id: M1-899
 title: "Spell out the shared cutover rulings-file lifecycle"
-status: pending
+status: done
 created: 2026-08-21
 last_updated: 2026-08-21
 flow: tick
 reproduction: >-
-  to-be-written TagTreeCutoverCheckIT.applyConsumedPrintoutKeepsLinesReconcileStillNeeds
-  (child of a 2+ decomposition; `start` converts the marker per workflow §0).
+  TagTreeCutoverCheckIT.applyConsumedPrintoutKeepsLinesReconcileStillNeeds
   The wrong behavior it states (UX-2, defects log
   .scratch/V2.0.0-DEFECTS-AND-SMELLS-LOG.md; observed live in C1): a rulings
   line whose name is BOTH a DB unknown and a file-side unresolved name
@@ -93,11 +92,22 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-21
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "5 files changed, 103 insertions(+), 16 deletions(-)"
+    verdict_file: .scratch/tick-review-M1-899-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  result: clear
+  checked: 2026-08-21
+  note: >-
+    M1-898 is done; the cited apply/reconcile seams and the runbook steps are
+    present as described. No implementation ambiguity blocks execution.
 escalation_reason:
 ---
 
@@ -247,3 +257,16 @@ wording pin holds (P5).
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-899-cutover-map-file-lifecycle.md
 ```
+
+## Review observations
+
+From the round-1 review (APPROVE), a RECOMMENDED-NEW-TICKET recorded, not
+relayed (`TOUCHED-BY-THIS-DIFF: no`, no `DECIDE-BEFORE:`) — filing is the
+user's call:
+
+- `load_actions` in prod/scripts/tag-tree-cutover.sh still carries the dead
+  `lineno=0` local already flagged in M1-887's round-2 review and re-noted in
+  this family's analysis; a one-line deletion no acceptance item here
+  authorizes. WHAT: a dead variable assignment sits in a live validation
+  path. WRONG: reading load_actions today shows a `lineno` local that is set
+  and never used. EXPECTED: the function carries no unused local.

@@ -634,12 +634,44 @@ COMMIT;"
   echo "tag removed: ${sums[tag removed]:-0}"
   echo "post.tags rewritten: ${sums[post.tags rewritten]:-0}"
   echo "source.bootstrap_tags rewritten: ${sums[source.bootstrap_tags rewritten]:-0}"
-  echo "consumed rulings — retire these line(s) from $MAP_FILE:"
-  local consumed=0
+  declare -A FILE_RULING_NAMES=()
+  local raw lower
+  while IFS= read -r raw; do
+    if [[ -z "$raw" ]]; then
+      continue
+    fi
+    lower="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
+    resolve_tag "$lower"
+    if [[ "$RESOLVED_KIND" == "ruling" && -n "${RULING_TARGET[$lower]:-}" ]]; then
+      FILE_RULING_NAMES[$lower]=1
+    fi
+  done <<< "$(file_tag_names)"
+
+  echo "consumed rulings — retire these line(s) from $MAP_FILE after the indicated step:"
+  echo "  keep for reconcile-file (retire after reconcile-file):"
+  local consumed=0 kept=0
   for name in ${EXEC_ORDER[@]+"${EXEC_ORDER[@]}"}; do
-    echo "$name: ${RULING_TARGET[$name]}"
-    consumed=1
+    if [[ -n "${FILE_RULING_NAMES[$name]:-}" ]]; then
+      echo "$name: ${RULING_TARGET[$name]}"
+      consumed=1
+      kept=1
+    fi
   done
+  if [[ "$kept" -eq 0 ]]; then
+    echo "  (none)"
+  fi
+  echo "  retire now (before reconcile-file):"
+  local retire_now=0
+  for name in ${EXEC_ORDER[@]+"${EXEC_ORDER[@]}"}; do
+    if [[ -z "${FILE_RULING_NAMES[$name]:-}" ]]; then
+      echo "$name: ${RULING_TARGET[$name]}"
+      consumed=1
+      retire_now=1
+    fi
+  done
+  if [[ "$retire_now" -eq 0 ]]; then
+    echo "  (none)"
+  fi
   if [[ "$consumed" -eq 0 ]]; then
     echo "  (none — no DB-side occurrences)"
   fi
