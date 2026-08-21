@@ -1,9 +1,9 @@
 ---
 id: M1-896
 title: "Wizard wiring: drive the ollama branch and --defaults"
-status: pending
+status: done
 created: 2026-08-20
-last_updated: 2026-08-20
+last_updated: 2026-08-21
 flow: tick
 reproduction: >-
   Mutation probe (run 2026-08-20 by the driver on main @ 4b275e76, evidence
@@ -23,6 +23,7 @@ reproduction: >-
 analysis_ref: docs/plan/m1/tick-analysis/wizard-ollama-branch-coverage.md
 blocked_by: []
 files_scope:
+  - prod/scripts/4-llm.sh
   - infochat-llm-adapter/src/test/java/app/zcat/infochat/llm/wiring/LlamacppWiringTest.java
 complexity: low
 risk: low
@@ -31,9 +32,16 @@ security_relevant: false
 migration_touch: false
 out_of_scope:
   - >-
-    prod/scripts/4-llm.sh and every other production file — this is a
-    coverage gap, not a behavior defect; a defect spotted while writing the
-    drives is a follow-up ticket, not a rider (§1, analysis P6).
+    Every production file except the ONE authorized line, and every spec/
+    design doc: refined 2026-08-21 per the start-hurdle (premise-wrong,
+    trigger 1) — the ollama branch omits the D49/D54-frozen
+    `infochat.embeddings.dimension` write, so the interactive drive's
+    dimension assertion was RED against production. Per the no-defer
+    workflow rule the fix rides THIS ticket: exactly one added line,
+    `set_prop infochat.embeddings.dimension "$EMBEDDINGS_DIMENSION"` in the
+    ollama branch after the embeddings.model write (:497). No other
+    production change; any further defect spotted while driving is a new
+    hurdle, never a silent rider (§1, analysis P6 as amended).
   - >-
     RemoteLlmWiringTest.java — the seeded-model detail-print drive is the
     sibling ticket M1-897 (its drive needs the remote branch's free-text
@@ -54,7 +62,7 @@ acceptance:
   - "REPRODUCTION closed: LlamacppWiringTest.ollamaDefaultsTakesAndEchoesTheReplyModeRecommendation (to-be-written, test_plan.adds) — drive `bash prod/scripts/4-llm.sh --defaults` with EMPTY stdin over the helper's vps-profile fixture with a pre-seeded EMPTY runtime/secrets.env (the ollama branch's standalone-run guard, 4-llm.sh:463-466): rc 0; output contains `taking reply-mode recommendation for llama3.2:3b: translate`; the written application.properties carries `infochat.chat.reply-mode=translate` (exactly one line), `infochat.llm.default.base-url=http://ollama:11434/v1`, `infochat.llm.chat.model=llama3.2:3b`, and the vps timing recommendations 240000/600 + 240000/400. Non-vacuity (§8, analysis P3): the reproduction's mutation (`reply_mode=\"native\"` at :141) turns the props assertion RED — an echo-only assertion could not, because the echo prints `$rec` either way; the written props are the end-of-path assertion."
   - "Interactive ollama drive: LlamacppWiringTest.ollamaBackendPullsProfileModelsAndWiresSharedDefaults (to-be-written, test_plan.adds) — stdin `ollama\\n` + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT (analysis P1): rc 0; docker-argv.log records exactly one `up -d ollama` and exactly two `ollama pull` execs — `llama3.2:3b` once (vps security==chat, 4-llm.sh:431, deduped at :486-489) and `nomic-embed-text`; output prints `chat reply-mode recommendation for llama3.2:3b: translate (unmeasured)`; the written props carry the shared default base-url AND `infochat.embeddings.base-url` at `http://ollama:11434/v1`, `infochat.llm.security.model=llama3.2:3b`, `llama3.2:3b` on the six chat-model tasks, `infochat.embeddings.model=nomic-embed-text`, `infochat.embeddings.dimension=768`, and `infochat.chat.reply-mode=translate`."
   - "FAILURE-MODE: LlamacppWiringTest.ollamaBackendOnRemoteLlmProfileRefuses (to-be-written, test_plan.adds) — pre-seed `quarkus.profile=remote-llm` in the runtime application.properties, answer `ollama` at the backend prompt: rc non-zero, output names the mismatch (`has no local models`), and NO `infochat.chat.reply-mode` line is written — the refusal fires at 4-llm.sh:453-456 before any pull or write (a branch that proceeded would `ollama pull \"\"` and mis-wire the deployment)."
-  - "Drive-layer discipline (analysis P5): the ONLY change to pre-existing test code is (a) an ADDITIVE argv-accepting overload of runWizardCapture (the --defaults drive needs script argv; the existing ProcessBuilder at LlamacppWiringTest.java:1064 passes none — the M1-827 'authorized drive-layer addition' precedent) and (b) one class-javadoc sentence stating the ollama-branch coverage (§11 — the comment must state current truth about the class). Every pre-existing drive's stdin and assertions and the fake docker/curl script strings are byte-untouched. Verify: `git diff infochat-llm-adapter/src/test` shows no hunk inside any existing method body or fake-script string, and `git diff prod/ docs/` is empty."
+  - "Drive-layer discipline (analysis P5): the ONLY change to pre-existing test code is (a) an ADDITIVE argv-accepting overload of runWizardCapture (the --defaults drive needs script argv; the existing ProcessBuilder at LlamacppWiringTest.java:1064 passes none — the M1-827 'authorized drive-layer addition' precedent) and (b) one class-javadoc sentence stating the ollama-branch coverage (§11 — the comment must state current truth about the class). Every pre-existing drive's stdin and assertions and the fake docker/curl script strings are byte-untouched. Verify: `git diff infochat-llm-adapter/src/test` shows no hunk inside any existing method body or fake-script string, `git diff prod/` shows exactly the one authorized set_prop line in the ollama branch (post-refine), and `git diff docs/` is empty."
   - "`./mvnw -B -pl infochat-llm-adapter test -Dtest='LlamacppWiringTest,RemoteLlmWiringTest'` is green AND `mvn verify` from the repo root is green (engineering-rules §5)."
 test_plan:
   adds:
@@ -80,11 +88,16 @@ test_plan:
       current truth; no assertion or fixture changes).
   notes:
     - >-
-      Coverage-ticket RED semantics (analysis P7): the new tests are
-      expected GREEN on unmodified main at `start`; the RED evidence is the
-      reproduction's mutation probe. The workflow §0 demonstration is:
-      re-apply mutation B (reply_mode=\"native\" at 4-llm.sh:141), watch
-      item 1's test go RED, revert.
+      Coverage-ticket RED semantics, post-refine (analysis P7 as amended
+      2026-08-21): the --defaults drive is expected GREEN on unmodified
+      main at `start`; its RED evidence is the reproduction's mutation
+      probe — re-apply mutation B (reply_mode=\"native\" at 4-llm.sh:141),
+      watch item 1's test go RED, revert. The interactive drive (item 2)
+      is RED on unmodified main — the `infochat.embeddings.dimension=768`
+      assertion fails until the authorized production line lands (the
+      start-hurdle's finding, observed "expected 768, got null"); the §0
+      demonstration for item 2 is that RED run itself, captured before the
+      script change, with the GREEN captured after.
 spec_refs:
   - docs/design/07-deployment.md §7.7.2 First-run setup wizard
   - docs/spec/decisions.md §Decisions log
@@ -99,11 +112,24 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates: M1-895
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-21
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS; SECURITY PASS; TEST-ADEQUACY PASS; MAINTAINABILITY PASS; SCOPE PASS"
+    diff_stats: "4 files changed, 200 insertions(+), 48 deletions(-) (code: LlamacppWiringTest.java +90/-1, 4-llm.sh +1/-0; rest docs/plan bookkeeping)"
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-21
+  result: pass
+  note: >-
+    Start self-check passed: the acceptance items are implementable, cited
+    code and the census match the current tree, analysis pitfalls P1-P3 and
+    P5-P7 are carried into the ticket, and there are no blocked or in-flight
+    tickets. tick-lint reported WARNs for P4/P8 verification entries; those
+    pitfalls belong to sibling M1-897 and are not blockers.
 escalation_reason:
 ---
 
@@ -121,9 +147,21 @@ it (:708-711) — and **no wiring drive selects the ollama branch at all**
 llamacpp branch's embeddings-backend sub-choice; no test passes `--defaults`
 to any script). The mutation probe in `reproduction:` proves the hole: the
 arm can write the wrong value with the suite fully green. Coverage
-extension of merged behavior, not a defect in it — M1-895's review filed
+extension of merged behavior — M1-895's review filed
 exactly this observation as a RECOMMENDED-NEW-TICKET. Shared analysis:
 `analysis_ref:`.
+
+**Refine trail (2026-08-21, escalate→refine after the start-hurdle):** the
+first interactive drive failed — "expected 768, got null": the ollama
+branch writes `infochat.embeddings.model` (:497) but never
+`infochat.embeddings.dimension`, which only the llamacpp (:704) and remote
+(:879) branches write — a D49/D54 contract defect the original
+coverage-premise analysis missed (the process fix: the premise-census rule
+in docs/process/analyst-prompt.md). Per the no-defer workflow rule the
+one-line production fix rides THIS ticket (owner decision, replacing the
+hurdle report's new-ticket-and-pause recommendation); scope, pitfalls
+P6/P7, Approach, and the diff probes were amended accordingly. Everything
+else about the ticket stands as analyzed.
 
 ## Root cause
 
@@ -164,11 +202,20 @@ P1-P3, P5-P7 (P4's placement half and P8 belong to M1-897).
 - P5: no fake-docker/curl change (the ollama branch needs none) — the only
   drive-layer edit is the ADDITIVE argv overload; a "hardened" fake that
   fails `exec` would burn WAIT_TIMEOUT=120s per drive (:46).
-- P6: test-only scope (§1/§12) — no production or spec edit rides; a defect
-  spotted while driving is a follow-up ticket.
-- P7: coverage-ticket RED semantics — the new tests PASS on unmodified
-  main; the RED evidence is the reproduction's mutation probe, re-applied
-  at `start` (test_plan.notes).
+- P6: scope after the 2026-08-21 refine — EXACTLY ONE production line
+  rides: the `infochat.embeddings.dimension` write the ollama branch
+  omitted (hurdle evidence: the interactive drive failed "expected 768,
+  got null"; the branch writes embeddings.model at :497 but never the
+  D49/D54-frozen dimension — only the llamacpp :704 and remote :879
+  branches write it). Anything further spotted while driving is a new
+  hurdle, never silently absorbed (§1/§12).
+- P7: coverage-ticket RED semantics, post-refine split — the --defaults
+  drive (item 1) keeps the original semantics: GREEN on unmodified main,
+  RED evidence via the reproduction's mutation probe re-applied at `start`
+  (test_plan.notes). The interactive drive (item 2) is RED on unmodified
+  main — its dimension assertion fails until the authorized production
+  line lands in the same diff; land the script change FIRST, then the
+  drive goes GREEN.
 
 ## Approach
 
@@ -178,26 +225,39 @@ behavior contract (:810) commits to the `--defaults` non-interactive hatch;
 the D79 row (decisions.md:98) commits the recommendation rule the arm
 applies. The drives pin that existing contract.
 
-- **Files to touch:** `files_scope` — one test class.
+- **Files to touch:** `files_scope` — one test class plus the one
+  authorized production line (post-refine).
 - **Steps, in order:**
-  1. Add the additive `runWizardCapture` overload taking script argv
+  1. Capture the RED: write the interactive drive (acceptance item 2) and
+     run it against unmodified main — the
+     `infochat.embeddings.dimension=768` assertion fails
+     ("expected 768, got null", the start-hurdle's observation; capture to
+     .scratch and cite in the commit message, P7 post-refine).
+  2. The authorized production fix: add
+     `set_prop infochat.embeddings.dimension "$EMBEDDINGS_DIMENSION"` to
+     the ollama branch after the embeddings.model write (:497) — the drive
+     goes GREEN.
+  3. Add the additive `runWizardCapture` overload taking script argv
      (delegate the existing 3-arg form to it; P5) and the class-javadoc
      sentence (acceptance item 4).
-  2. Write the three drives (acceptance items 1-3), each pre-seeding an
-     empty secrets.env where the branch requires it (P2). Run them GREEN on
-     unmodified main, then demonstrate RED: re-apply mutation B
+  4. Write the remaining two drives (acceptance items 1 and 3), each
+     pre-seeding an empty secrets.env where the branch requires it (P2).
+     Item 1 runs GREEN on main, then demonstrate RED: re-apply mutation B
      (`reply_mode="native"` at 4-llm.sh:141), watch item 1 fail, revert
      (P7 — capture both runs to .scratch and cite in the commit message).
-  3. The acceptance-item-4 git-diff probes; the two mvn runs (item 5).
-- **Controls to preserve (§10):** no path rerouted — additive test code.
+  5. The acceptance-item-4 git-diff probes; the two mvn runs (item 5).
+- **Controls to preserve (§10):** no path rerouted — additive test code
+  plus one additive set_prop line matching the llamacpp (:704) and remote
+  (:879) branches' existing write of the SAME already-documented key.
   Every pre-existing drive's stdin, assertions, and the fake docker/curl
-  script strings byte-untouched; no production/spec/doc file touched; no
-  new `infochat.*` key written (DocumentedConfigKeyParityTest unaffected).
-- **Pitfall→mitigation:** P1→step 2's exact stdin strings (and the empty
-  stdin under `--defaults`); P2→step 2's pre-seed; P3→item 1's props
-  assertion as the named end-of-path check; P5→step 1's additive-only
-  overload + item 4's probes; P6→item 4's empty-`git diff prod/ docs/`
-  probe; P7→step 2's RED demonstration.
+  script strings byte-untouched; no spec/design doc touched; no NEW
+  `infochat.*` key introduced (DocumentedConfigKeyParityTest unaffected).
+- **Pitfall→mitigation:** P1→step 4's exact stdin strings (and the empty
+  stdin under `--defaults`); P2→steps 1/4's pre-seed; P3→item 1's props
+  assertion as the named end-of-path check; P5→step 3's additive-only
+  overload + item 4's probes; P6→item 4's scoped diff probe (exactly one
+  prod/ hunk); P7→steps 1-2's RED-then-GREEN pair and step 4's mutation
+  demonstration.
 
 Alternatives considered (rejected; analysis §Solution options): bundling the
 seeded-model drive here (O2 — independent seam, sibling M1-897); a model
@@ -207,16 +267,20 @@ duplication).
 
 ## Definition of done
 
-The `--defaults` drive passes: empty stdin, rc 0, the echo names
+The ollama branch writes `infochat.embeddings.dimension=768` (the one
+authorized production line, landing before the drives go green). The
+`--defaults` drive passes: empty stdin, rc 0, the echo names
 `llama3.2:3b: translate`, and the written props carry
 `infochat.chat.reply-mode=translate` plus the ollama URL and vps models/
 timing — RED under the reproduction's mutation. The interactive ollama
 drive passes, pinning the pull set, the shared-default + embeddings URLs,
 the per-task models, dimension 768, and the printed
-`translate (unmeasured)` recommendation. The remote-llm refusal drive
+`translate (unmeasured)` recommendation — RED on unmodified main before
+the production line (captured). The remote-llm refusal drive
 fails loud with nothing written. No pre-existing test code changes beyond
-the additive overload and the javadoc sentence; `git diff prod/ docs/` is
-empty; the targeted module run and repo-root `mvn verify` are green.
+the additive overload and the javadoc sentence; `git diff prod/` shows
+exactly the one authorized line and `git diff docs/` is empty; the
+targeted module run and repo-root `mvn verify` are green.
 
 ## Verification
 
@@ -229,7 +293,8 @@ empty; the targeted module run and repo-root `mvn verify` are green.
   the commit message cites the RED capture (P7).
 - P5 → item 4's git-diff probes (no hunk in the fake-script strings, no
   production hunk).
-- P6 → item 4's `git diff prod/ docs/` empty probe.
+- P6 → item 4's scoped diff probe (exactly one prod/ hunk — the authorized
+  set_prop line — and an empty docs/ diff).
 - P7 → test_plan.notes' mutation re-application at `start`.
 - Failure-mode (mandatory class) → item 3: feeds the hostile edge (a local
   backend on the no-local-models profile) and asserts loud refusal + no
@@ -238,11 +303,15 @@ empty; the targeted module run and repo-root `mvn verify` are green.
 
 ## Out-of-scope
 
-Named in `out_of_scope`: any production edit (coverage gap, not a behavior
-defect — §1); RemoteLlmWiringTest (sibling M1-897's file — the two tickets
+Named in `out_of_scope`: every production file except the ONE authorized
+line — the ollama branch's `set_prop infochat.embeddings.dimension
+"$EMBEDDINGS_DIMENSION"` (the 2026-08-21 refine: the branch's missing
+dimension write is a D49/D54 contract defect the coverage drive exposed;
+folded in per the no-defer rule, no separate ticket, no defer); no
+spec/design docs (the D79 row and §7.7.2 already carry the text; D49/D54
+already require the dimension, so no spec change rides); RemoteLlmWiringTest (sibling M1-897's file — the two tickets
 touch disjoint files so neither invalidates the other's pins); a new
-OllamaWiringTest class (harness duplication); switch-llm.sh and its test;
-all spec/design docs (the D79 row and §7.7.2 already carry the text).
+OllamaWiringTest class (harness duplication); switch-llm.sh and its test.
 Pre-existing test modification, authorized per §8 and bounded by acceptance
 item 4: ONLY the additive `runWizardCapture` overload (new method, existing
 form delegates unchanged) and one class-javadoc sentence — no existing

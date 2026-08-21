@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,6 +46,8 @@ import org.junit.jupiter.api.io.TempDir;
  *       the generative GGUF drives every LLM task, embeddings resolve to the
  *       chosen embeddings backend (a second llama.cpp instance OR Ollama nomic)
  *       and NEVER the generative GGUF, and {@code dimension=768} is preserved.</li>
+ *   <li>The generated-config layer also drives the default Ollama backend,
+ *       including its non-interactive {@code --defaults} path.</li>
  * </ul>
  *
  * <p>The live-drive layer is Linux-gated: {@code 4-llm.sh} uses GNU {@code sed -i}
@@ -568,6 +571,82 @@ class LlamacppWiringTest {
 
     @Test
     @EnabledOnOs(OS.LINUX)
+    void ollamaDefaultsTakesAndEchoesTheReplyModeRecommendation(@TempDir Path tmp) throws Exception {
+        Path runtime = Files.createDirectories(tmp.resolve("runtime"));
+        Files.writeString(runtime.resolve("secrets.env"), "");
+
+        WizardRun run = runWizardCapture(tmp, "", Map.of(), "--defaults");
+
+        assertEquals(0, run.rc, "the ollama --defaults drive must succeed:\n" + run.output);
+        assertTrue(run.output.contains("taking reply-mode recommendation for llama3.2:3b: translate"),
+                "the --defaults path must echo the recommendation:\n" + run.output);
+        Map<String, String> props = parseProps(runtime.resolve("application.properties"));
+        assertEquals(OLLAMA_URL, props.get("infochat.llm.default.base-url"));
+        assertEquals("llama3.2:3b", props.get("infochat.llm.chat.model"));
+        assertEquals("translate", props.get("infochat.chat.reply-mode"));
+        assertEquals("240000", props.get("infochat.llm.chat.timeout-ms"));
+        assertEquals("600", props.get("infochat.llm.chat.max-tokens"));
+        assertEquals("240000", props.get("infochat.llm.summarizer.timeout-ms"));
+        assertEquals("400", props.get("infochat.llm.summarizer.max-tokens"));
+        assertEquals(1L, Files.readAllLines(runtime.resolve("application.properties")).stream()
+                .filter(line -> line.equals("infochat.chat.reply-mode=translate"))
+                .count());
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void ollamaBackendPullsProfileModelsAndWiresSharedDefaults(@TempDir Path tmp) throws Exception {
+        Path runtime = Files.createDirectories(tmp.resolve("runtime"));
+        Files.writeString(runtime.resolve("secrets.env"), "");
+
+        WizardRun run = runWizardCapture(tmp, "ollama\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT, Map.of());
+
+        assertEquals(0, run.rc, "the interactive ollama drive must succeed:\n" + run.output);
+        String dockerArgv = Files.readString(tmp.resolve("docker-argv.log"));
+        assertEquals(1, composeUpInvocations(dockerArgv, "ollama").size(),
+                "the ollama service must be started exactly once:\n" + dockerArgv);
+        List<String> pulls = dockerArgv.lines()
+                .filter(line -> line.contains("exec -T ollama ollama pull "))
+                .toList();
+        assertEquals(2, pulls.size(), "the vps profile must pull two distinct models:\n" + dockerArgv);
+        assertEquals(1L, pulls.stream().filter(line -> line.endsWith("pull llama3.2:3b")).count(),
+                "the shared vps chat/security model must be pulled once:\n" + dockerArgv);
+        assertEquals(1L, pulls.stream().filter(line -> line.endsWith("pull nomic-embed-text")).count(),
+                "the vps embedding model must be pulled once:\n" + dockerArgv);
+        assertTrue(run.output.contains("chat reply-mode recommendation for llama3.2:3b: translate (unmeasured)"),
+                "the interactive path must print the unmeasured recommendation:\n" + run.output);
+
+        Map<String, String> props = parseProps(runtime.resolve("application.properties"));
+        assertEquals(OLLAMA_URL, props.get("infochat.llm.default.base-url"));
+        assertEquals(OLLAMA_URL, props.get("infochat.embeddings.base-url"));
+        assertEquals("llama3.2:3b", props.get("infochat.llm.security.model"));
+        for (String task : List.of("tagger", "entity", "classifier", "summarizer", "chat", "translator")) {
+            assertEquals("llama3.2:3b", props.get("infochat.llm." + task + ".model"),
+                    "the vps chat model must wire the " + task + " task");
+        }
+        assertEquals("nomic-embed-text", props.get("infochat.embeddings.model"));
+        assertEquals("768", props.get("infochat.embeddings.dimension"));
+        assertEquals("translate", props.get("infochat.chat.reply-mode"));
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void ollamaBackendOnRemoteLlmProfileRefuses(@TempDir Path tmp) throws Exception {
+        Path runtime = Files.createDirectories(tmp.resolve("runtime"));
+        Files.writeString(runtime.resolve("application.properties"), "quarkus.profile=remote-llm\n");
+
+        WizardRun run = runWizardCapture(tmp, "ollama\n", Map.of());
+
+        assertNotEquals(0, run.rc, "ollama must refuse a profile with no local models:\n" + run.output);
+        assertTrue(run.output.contains("has no local models"),
+                "the refusal must name the profile/backend mismatch:\n" + run.output);
+        assertFalse(Files.readAllLines(runtime.resolve("application.properties")).stream()
+                .anyMatch(line -> line.startsWith("infochat.chat.reply-mode=")),
+                "the refusal must happen before a reply-mode property is written");
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
     void fetchGgufWritesToTheVolumeComposeMounts(@TempDir Path tmp) throws Exception {
         // The drive layer no longer no-ops the `-v` argument: it captures the real
         // model volume fetch_gguf passes and asserts it equals the project-independent
@@ -1043,6 +1122,12 @@ class LlamacppWiringTest {
 
     /** Drive the wizard without the exit-0 assertion, returning the raw outcome. */
     private WizardRun runWizardCapture(Path tmp, String stdin, Map<String, String> extraEnv) throws Exception {
+        return runWizardCapture(tmp, stdin, extraEnv, new String[0]);
+    }
+
+    /** Drive the wizard with optional script arguments, returning the raw outcome. */
+    private WizardRun runWizardCapture(Path tmp, String stdin, Map<String, String> extraEnv, String... scriptArgs)
+            throws Exception {
         Path repoRoot = repoRoot();
         Path runtime = Files.createDirectories(runtimeDir(tmp));
         // Seed the profile 1-profile.sh would have written (vps has a nomic embedder),
@@ -1061,7 +1146,11 @@ class LlamacppWiringTest {
         Files.writeString(fakeCurl, fakeCurlScript());
         fakeCurl.toFile().setExecutable(true);
 
-        ProcessBuilder pb = new ProcessBuilder("bash", repoRoot.resolve("prod/scripts/4-llm.sh").toString());
+        List<String> command = new ArrayList<>(2 + scriptArgs.length);
+        command.add("bash");
+        command.add(repoRoot.resolve("prod/scripts/4-llm.sh").toString());
+        command.addAll(List.of(scriptArgs));
+        ProcessBuilder pb = new ProcessBuilder(command);
         pb.redirectErrorStream(true);
         Map<String, String> env = pb.environment();
         env.put("INFOCHAT_RUNTIME_DIR", runtime.toString());

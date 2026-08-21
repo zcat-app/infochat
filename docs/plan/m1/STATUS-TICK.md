@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 7 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 107 |
+| done | 108 |
 | deferred | 0 |
 | abandoned | 3 |
 | **total** | **117** |
@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-896 — Wizard wiring: drive the ollama branch and --defaults (complexity: low, risk: low)
 - M1-897 — Wizard wiring: pin the seeded-model reply-mode detail (complexity: low, risk: low)
 - M1-898 — Scope cutover apply to DB unknowns; refuse key rulings (complexity: medium, risk: medium)
 - M1-900 — Fix the span-parser FAIL remedy; drop dead jq advice (complexity: low, risk: low)
@@ -66,6 +65,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-896 | Wizard wiring: drive the ollama branch and --defaults | 2026-08-21 | round 1 APPROVE |
 | M1-895 | Wizard: per-model chat reply-mode recommendation (D79) | 2026-08-20 | round 1 APPROVE |
 | M1-894 | V14 header comment correction + checksum repair runbook | 2026-08-20 | round 2 APPROVE |
 | M1-893 | Restore failed-asset wording + cold-start timeout note | 2026-08-20 | round 1 APPROVE |
@@ -75,7 +75,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-889 | Signal connected-but-deaf liveness probe + silence WARN | 2026-08-20 | round 1 APPROVE |
 | M1-888 | Reconcile the deployed bootstrap-sources.json in the cutover | 2026-08-20 | round 2 APPROVE |
 | M1-887 | Generalize the pre-V84 preflight and gate upgrade.sh on it | 2026-08-20 | round 2 APPROVE |
-| M1-886 | Spec: reply-mode decisive switch amendments (D79) | 2026-08-20 | round 1 APPROVE |
 
 ---
 
@@ -236,7 +235,7 @@ M1-891 (done)
 M1-892 (done)
 M1-893 (done)
 M1-894 (done)
-M1-896 (pending) ← runnable
+M1-896 (done)
 M1-897 (pending) ← runnable
 M1-898 (pending) ← runnable
   └── M1-899 (pending)

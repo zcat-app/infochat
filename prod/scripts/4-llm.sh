@@ -496,6 +496,7 @@ case "$backend" in
       set_prop "infochat.llm.${task}.model" "$chat_model"
     done
     set_prop infochat.embeddings.model "$embedding_model"
+    set_prop infochat.embeddings.dimension "$EMBEDDINGS_DIMENSION"
     reply_mode_model="$chat_model"
     echo "ollama backend ready: models pulled, endpoint $OLLAMA_URL"
     ;;
