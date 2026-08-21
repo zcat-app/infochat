@@ -1,7 +1,7 @@
 ---
 id: M1-898
 title: "Scope cutover apply to DB unknowns; refuse key rulings"
-status: pending
+status: done
 created: 2026-08-21
 last_updated: 2026-08-21
 flow: tick
@@ -106,11 +106,35 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-21
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "5 files changed, 194 insertions(+), 37 deletions(-)"
+    verdict_file: .scratch/tick-review-M1-898-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-21
+  verdict: PASS
+  note: >-
+    start pre-flight: tick-lint 0 BLOCKERs (3 WARNs — P8/P14/P15 have no
+    Verification entry; P8/P10/P11 are siblings M1-899/M1-900's, P14/P15 are
+    M1-887 cross-references; notify-and-continue). Every Root-cause/Approach
+    citation spot-checked against the tree and holds (KEY_TARGET :126-135,
+    PREFLIGHT_SQL :161, file_inventory :196, write_skeleton :225,
+    parse_rulings :344, validate_coverage :379, load_actions :418,
+    ruled_names_sql :455, dry_run_plan :464, apply_transaction :512,
+    PGPASSWORD :976-977, 07-deployment.md:1716, the IT's :71-72 placeholder
+    pin). Census grep re-ran clean: one KEY_TARGET mirror, consumers
+    :138/:651-652/:762 only. Analysis cross-read: P1-P7 + P9 all landed in
+    the ticket; P8/P10/P11 are explicitly out_of_scope (M1-899/M1-900), P12
+    recorded open. blocked_by empty, replaces empty. Module check for
+    --parallel: M1-897 (infochat-llm-adapter) is the only in-flight ticket;
+    this ticket is infochat-core + prod/scripts + docs — no overlap, both
+    migration_touch: false. No ambiguity; no blocking question needed.
 escalation_reason:
 ---
 

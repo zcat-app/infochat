@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 109 |
+| done | 110 |
 | deferred | 0 |
 | abandoned | 3 |
 | **total** | **117** |
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-898 — Scope cutover apply to DB unknowns; refuse key rulings (complexity: medium, risk: medium)
+- M1-899 — Spell out the shared cutover rulings-file lifecycle (complexity: low, risk: low)
 - M1-900 — Fix the span-parser FAIL remedy; drop dead jq advice (complexity: low, risk: low)
 - M1-901 — Liveness IT: subs responder survives reconnect swap (complexity: low, risk: low)
 - M1-902 — Make postflight's runtime-file check leaf-only (complexity: low, risk: low)
@@ -45,7 +45,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-899 — blocked_by: M1-898 (pending)
+_(none)_
 
 ---
 
@@ -64,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-898 | Scope cutover apply to DB unknowns; refuse key rulings | 2026-08-21 | round 1 APPROVE |
 | M1-897 | Wizard wiring: pin the seeded-model reply-mode detail | 2026-08-21 | round 1 APPROVE-WITH-FIXES |
 | M1-896 | Wizard wiring: drive the ollama branch and --defaults | 2026-08-21 | round 1 APPROVE |
 | M1-895 | Wizard: per-model chat reply-mode recommendation (D79) | 2026-08-20 | round 1 APPROVE |
@@ -73,7 +74,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-891 | EXPLICIT-mode top unfollow subtracts the subtree truthfully | 2026-08-20 | round 1 APPROVE |
 | M1-890 | SimpleX zero-SMP-session liveness + child restart | 2026-08-20 | round 2 APPROVE |
 | M1-889 | Signal connected-but-deaf liveness probe + silence WARN | 2026-08-20 | round 1 APPROVE |
-| M1-888 | Reconcile the deployed bootstrap-sources.json in the cutover | 2026-08-20 | round 2 APPROVE |
 
 ---
 
@@ -236,8 +236,8 @@ M1-893 (done)
 M1-894 (done)
 M1-896 (done)
 M1-897 (done)
-M1-898 (pending) ← runnable
-  └── M1-899 (pending)
+M1-898 (done)
+  └── M1-899 (pending) ← runnable
 M1-900 (pending) ← runnable
 M1-901 (pending) ← runnable
 M1-902 (pending) ← runnable

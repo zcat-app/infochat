@@ -68,8 +68,12 @@ class TagTreeCutoverCheckIT extends PostgresSchemaTestBase {
                 "# ai-image — post.tags (1), scope_tag (1), source.bootstrap_tags (1), tag (1)"),
                 "one commented placeholder per unknown name with per-surface counts:\n" + skeleton);
         assertTrue(skeleton.contains("# ai-image: drop"), "the placeholder is commented:\n" + skeleton);
-        assertTrue(skeleton.contains("# development — file (1) — raw file form(s): Development"),
-                "the file-side finding keys on the normalized form, quoting the raw form:\n" + skeleton);
+        assertFalse(skeleton.lines().anyMatch(l -> l.startsWith("# development")),
+                "a V84 mapping key gets NO placeholder/ruling line — it converts deterministically:\n"
+                        + skeleton);
+        assertTrue(skeleton.contains("# V84 mapping keys seen: development")
+                        && skeleton.contains("takes NO ruling"),
+                "the informational comment names the key and the deterministic conversion:\n" + skeleton);
         assertTrue(skeleton.lines().anyMatch(l -> l.equals("video: drop")),
                 "the standing disposal ruling is pre-filled ACTIVE:\n" + skeleton);
         assertTrue(r.out().contains(mapFile.toString()), "the RED output names the rulings-file path");
@@ -80,6 +84,45 @@ class TagTreeCutoverCheckIT extends PostgresSchemaTestBase {
         assertEquals(1, r2.exit(), "the second preflight is still RED");
         assertEquals(edited, Files.readString(mapFile),
                 "the skeleton never clobbers an operator edit");
+    }
+
+    // ---------- D-13: file-only mapping-key rulings refuse loud, zero mutation ----------
+
+    @Test
+    void fileOnlyMappingKeyRulingsRefuseLoudWithZeroMutation(@TempDir Path tmp) throws Exception {
+        // The C1-rehearsal trap shape: every seeded name is V84-mappable key data, so the
+        // DB inventory is clean and the file fixture is what flags the key names.
+        seedTagRow("development");
+        seedTagRow("java");
+        seedPost("key-post", List.of("openai", "ai", "development"));
+        seedSource("key-src", List.of("development"));
+        Path fixture = writeBootstrapFixture(tmp, "Development", "Java", "AI");
+        String developmentRowBefore = tagRowSnapshot("development");
+        String javaRowBefore = tagRowSnapshot("java");
+        writeRulings(tmp, "development: drop", "java: drop");
+
+        ScriptResult refused = runScript(tmp, fixture, "apply");
+        assertEquals(2, refused.exit(), "a ruling naming a V84 mapping key must refuse: " + refused.out());
+        assertTrue(refused.out().contains("mapping key 'development'"),
+                "the refusal names the key ruling: " + refused.out());
+        assertTrue(refused.out().contains("line 1"), "the refusal names the line: " + refused.out());
+        assertTrue(refused.out().contains("reconcile-file"),
+                "the refusal names the deterministic paths (V84 DB-side, reconcile-file file-side): "
+                        + refused.out());
+
+        ScriptResult dryRefused = runScript(tmp, fixture, "apply", "--dry-run");
+        assertEquals(2, dryRefused.exit(), "--dry-run refuses identically: " + dryRefused.out());
+        assertTrue(dryRefused.out().contains("mapping key 'development'"), dryRefused.out());
+
+        assertEquals(developmentRowBefore, tagRowSnapshot("development"),
+                "zero mutation — the development tag row survives byte-identical");
+        assertEquals(javaRowBefore, tagRowSnapshot("java"),
+                "zero mutation — the java tag row survives byte-identical");
+        assertEquals(List.of("openai", "ai", "development"), postTagsArray("key-post"),
+                "zero mutation — the witness post array is byte-identical");
+        assertEquals(List.of("development"), sourceBootstrapTagsArray("key-src"),
+                "zero mutation — the witness source array is byte-identical");
+        assertEquals(1, runScript(tmp, fixture, "preflight").exit(), "preflight stays RED");
     }
 
     // ---------- generalized preflight: leftovers + skeleton (acceptance 2) ----------
@@ -178,6 +221,73 @@ class TagTreeCutoverCheckIT extends PostgresSchemaTestBase {
         assertTrue(retired.out().contains("tag removed: 0"), retired.out());
         assertTrue(retired.out().contains("post.tags rewritten: 0"), retired.out());
         assertTrue(retired.out().contains("source.bootstrap_tags rewritten: 0"), retired.out());
+    }
+
+    // ---------- apply coverage = DB unknowns only; file-only rulings never execute ----------
+
+    @Test
+    void applyDemandsRulingsForDbUnknownsOnly(@TempDir Path tmp) throws Exception {
+        seedTagRow("ai");
+        seedTagRow("ai-image");
+        seedPost("dbu-post", List.of("ai", "ai-image"));
+        UUID scopeAiImage = UUID.randomUUID();
+        seedFollowOnTagName(scopeAiImage, "ai-image");
+        // V84-mappable key elements the apply must never touch (V84 maps them itself).
+        seedPost("dbu-witness", List.of("openai", "ai", "development"));
+        seedSource("dbu-src", List.of("development"));
+        Path fixture = writeBootstrapFixture(tmp, "Development", "Java", "AI-Image");
+        writeRulings(tmp, "ai-image: ai");
+
+        ScriptResult dry = runScript(tmp, fixture, "apply", "--dry-run");
+        assertEquals(0, dry.exit(), "no ruling is demanded for the file-only key names: " + dry.out());
+        assertFalse(dry.out().contains("has no ruling"), dry.out());
+        assertTrue(dry.out().contains("plan: ai-image -> ai"),
+                "the plan lists exactly the executed ruling: " + dry.out());
+        assertFalse(dry.out().contains("plan: development"),
+                "a file-only key name is never a plan line: " + dry.out());
+        assertFalse(dry.out().contains("plan: java"), dry.out());
+        assertTrue(dry.out().contains("dry-run: scope_tag rows: 1"), dry.out());
+        assertTrue(dry.out().contains("dry-run: tag rows: 1"), dry.out());
+        assertTrue(dry.out().contains("dry-run: post.tags rows: 1"), dry.out());
+        assertTrue(dry.out().contains("dry-run: source.bootstrap_tags rows: 0"), dry.out());
+
+        ScriptResult real = runScript(tmp, fixture, "apply");
+        assertEquals(0, real.exit(), "apply succeeds with rulings for the DB unknowns only: " + real.out());
+        assertTrue(real.out().contains("ai-image: ai"), "the consumed name prints: " + real.out());
+        assertEquals(List.of("ai"), postTagsArray("dbu-post"), "the executed ruling maps the element");
+        assertEquals(Set.of("ai"), scopeTagNames(scopeAiImage), "the follow re-points at ai");
+        assertEquals(0, scalarInt("SELECT count(*) FROM tag WHERE name = 'ai-image'"),
+                "the retired tag row is gone");
+        assertEquals(List.of("openai", "ai", "development"), postTagsArray("dbu-witness"),
+                "the V84-mappable witness post is byte-identical");
+        assertEquals(List.of("development"), sourceBootstrapTagsArray("dbu-src"),
+                "the V84-mappable witness source is byte-identical");
+
+        // The staleness/extras guard still runs against the union inventory (P2).
+        writeRulings(tmp, "ai-image: ai", "ghost: drop");
+        ScriptResult stale = runScript(tmp, fixture, "apply");
+        assertEquals(2, stale.exit(), "a ruling naming no current inventory still refuses: " + stale.out());
+        assertTrue(stale.out().contains("ghost: drop"), "the refusal names the stale line: " + stale.out());
+        assertEquals(List.of("openai", "ai", "development"), postTagsArray("dbu-witness"),
+                "the refusal changes nothing");
+
+        // A file-only non-key ruling is tolerated, never executed, never retired by apply.
+        writeRulings(tmp, "ai-image: ai");
+        ScriptResult tolerated = runScript(tmp, fixture, "apply");
+        assertEquals(0, tolerated.exit(), "the file-only ruling is tolerated: " + tolerated.out());
+        assertTrue(tolerated.out().contains("tag removed: 0"), "nothing executes: " + tolerated.out());
+        assertTrue(tolerated.out().contains("post.tags rewritten: 0"), tolerated.out());
+        String consumedSection = tolerated.out().substring(tolerated.out().indexOf("consumed rulings"));
+        assertFalse(consumedSection.contains("ai-image"),
+                "the file-only ruling is never printed under the retire-now instruction: " + tolerated.out());
+        assertTrue(tolerated.out().contains("'ai-image: ai' has no DB-side occurrences")
+                        && tolerated.out().contains("reconcile-file's business"),
+                "the tolerated ruling is reported as reconcile-file's business: " + tolerated.out());
+
+        ScriptResult dryAgain = runScript(tmp, fixture, "apply", "--dry-run");
+        assertEquals(0, dryAgain.exit(), dryAgain.out());
+        assertFalse(dryAgain.out().contains("plan: ai-image"),
+                "no plan line for a file-only ruling: " + dryAgain.out());
     }
 
     // ---------- the full rehearsal (acceptance 4) ----------

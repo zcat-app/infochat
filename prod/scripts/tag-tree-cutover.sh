@@ -21,8 +21,9 @@ usage() {
   echo "                         surface with counts (tag / post.tags / source.bootstrap_tags /"
   echo "                         scope_tag / runtime file tags[]); exit 1 on any finding, writing"
   echo "                         the rulings skeleton unless CUTOVER_SKELETON=0."
-  echo "  apply [--dry-run]      execute the rulings file (one line per unknown name,"
-  echo "                         'name: <tree-leaf>' or 'name: drop'): validate totally (exit 2"
+  echo "  apply [--dry-run]      execute the rulings file (one line per DB-unknown name,"
+  echo "                         'name: <tree-leaf>' or 'name: drop'; a V84 mapping key is never"
+  echo "                         ruled and refuses): validate totally (exit 2"
   echo "                         naming the line on any invalid shape — a map target must be a"
   echo "                         seeded leaf whose row already exists — zero mutation), then one"
   echo "                         transaction: scope_tag re-points/removals first (the FK order),"
@@ -221,7 +222,8 @@ file_inventory() {
 
 # On RED, write the rulings skeleton IFF the file is absent — the rulings file is
 # the review artifact, so an existing one (operator edits included) is never
-# clobbered. Ruled names get ACTIVE drop lines, other unknowns commented placeholders.
+# clobbered. Ruled names get ACTIVE drop lines, other unknowns commented placeholders,
+# V84 mapping keys an informational note (no placeholder — a key ruling refuses).
 write_skeleton() {
   local db_rows="$1"
   if [[ -e "$MAP_FILE" ]]; then
@@ -264,13 +266,18 @@ write_skeleton() {
 # identity leaves ai/crypto/research or your own coinages) — any other tree leaf's
 # row only exists after the migration: map to an existing leaf or drop instead.
 
-# Complete every commented placeholder below (one per unknown name), review with
-# `tag-tree-cutover.sh apply --dry-run`, then `tag-tree-cutover.sh apply`. Retire each
-# consumed line after a successful apply (the apply prints them) — stale lines refuse.
+# Complete every commented placeholder below (one per unknown name that needs a
+# ruling), review with `tag-tree-cutover.sh apply --dry-run`, then `tag-tree-cutover.sh
+# apply`. Retire each consumed line after a successful apply — stale lines refuse.
 SKELETON_HEADER
     local n ruled
+    local keys_seen=()
     for n in ${order[@]+"${order[@]}"}; do
       if [[ "$n" == "nostr" || "$n" == "video" ]]; then
+        continue
+      fi
+      if [[ -n "${KEY_TARGET[$n]:-}" ]]; then
+        keys_seen+=("$n")
         continue
       fi
       printf '\n# %s — %s%s\n' "$n" "${surf_seen[$n]}" \
@@ -284,9 +291,14 @@ SKELETON_HEADER
         printf '%s: drop\n' "$ruled"
       fi
     done
+    if [[ "${#keys_seen[@]}" -gt 0 ]]; then
+      printf '\n# V84 mapping keys seen: %s — a mapping key converts deterministically (DB\n' "${keys_seen[*]}"
+      printf '# side: the V84 migration itself; file side: reconcile-file) and takes NO ruling\n'
+      printf '# line — a ruling naming one is refused. No placeholder above: none needed.\n'
+    fi
   } > "$MAP_FILE"
   echo "rulings skeleton written: $MAP_FILE — complete every commented placeholder"
-  echo "  (one per unknown name), then review: tag-tree-cutover.sh apply --dry-run"
+  echo "  (one per unknown name that needs a ruling), then review: tag-tree-cutover.sh apply --dry-run"
 }
 
 preflight() {
@@ -340,6 +352,7 @@ preflight() {
 # extra/stale, uncovered, non-leaf target, or a ruled-name map each refuses exit 2.
 declare -A RULING_TARGET=() IN_INVENTORY=() DB_UNKNOWN=() TARGET_EXISTS=() ACTION=()
 RULINGS_ORDER=()
+EXEC_ORDER=()
 
 parse_rulings() {
   local lineno=0 line name target
@@ -359,6 +372,12 @@ parse_rulings() {
       echo "FAIL: duplicate ruling for '$name' (line $lineno) — one line per name." >&2
       exit 2
     fi
+    if [[ -n "${KEY_TARGET[$name]:-}" ]]; then
+      echo "FAIL: line $lineno rules the V84 mapping key '$name' — a mapping key is never ruled:" >&2
+      echo "      the DB side converts in the V84 migration itself, the file side in" >&2
+      echo "      reconcile-file (deterministic). Remove the line: '$name: $target'." >&2
+      exit 2
+    fi
     if [[ ( "$name" == "nostr" || "$name" == "video" ) && "$target" != "drop" ]]; then
       echo "FAIL: line $lineno maps the ruled name '$name' — its standing ruling is disposal;" >&2
       echo "      write '$name: drop'." >&2
@@ -373,9 +392,9 @@ parse_rulings() {
   done < "$MAP_FILE"
 }
 
-# Coverage against the CURRENT union inventory (four DB surfaces + runtime file):
-# a ruling for a name no longer unknown is extra/stale (consumed lines are retired
-# between runs); an unknown without a ruling is uncovered.
+# The staleness/extras refusal runs against the CURRENT union inventory (four DB
+# surfaces + runtime file); the coverage DEMAND is DB unknowns only — a file-only
+# name is reconcile-file's business: tolerated, reported, never executed.
 validate_coverage() {
   local db_rows="$1" surface name cnt fraw fcnt lower u
   while IFS='|' read -r surface name cnt; do
@@ -401,14 +420,28 @@ validate_coverage() {
       fi
     done
   fi
-  if [[ "${#IN_INVENTORY[@]}" -gt 0 ]]; then
+  if [[ "${#DB_UNKNOWN[@]}" -gt 0 ]]; then
     while IFS= read -r u; do
       if [[ -z "${RULING_TARGET[$u]:-}" ]]; then
         echo "FAIL: unknown name '$u' has no ruling in $MAP_FILE — every unknown name" >&2
         echo "      needs exactly one line." >&2
         exit 2
       fi
-    done <<< "$(printf '%s\n' "${!IN_INVENTORY[@]}" | sort)"
+    done <<< "$(printf '%s\n' "${!DB_UNKNOWN[@]}" | sort)"
+  fi
+  # The executed set: rulings with current DB-unknown occurrences. A ruled name
+  # whose only findings are file-side is tolerated (reconcile-file consumes it),
+  # never executed against DB surfaces and never a plan line.
+  EXEC_ORDER=()
+  if [[ "${#RULINGS_ORDER[@]}" -gt 0 ]]; then
+    for name in "${RULINGS_ORDER[@]}"; do
+      if [[ -n "${DB_UNKNOWN[$name]:-}" ]]; then
+        EXEC_ORDER+=("$name")
+      else
+        echo "note: '$name: ${RULING_TARGET[$name]}' has no DB-side occurrences —"
+        echo "      reconcile-file's business; the apply does not execute it."
+      fi
+    done
   fi
 }
 
@@ -416,7 +449,7 @@ validate_coverage() {
 # leaves, operator coinages): the follow-preserving rename is undeliverable
 # pre-migrate, so an absent target refuses here, naming the working alternatives.
 load_actions() {
-  local name target maps=() rows row lineno=0
+  local name target maps=() rows row
   for name in ${RULINGS_ORDER[@]+"${RULINGS_ORDER[@]}"}; do
     target="${RULING_TARGET[$name]}"
     if [[ "$target" != "drop" ]]; then
@@ -454,7 +487,7 @@ load_actions() {
 # row restriction and the dry-run counts).
 ruled_names_sql() {
   local arr="" vals="" name
-  for name in ${RULINGS_ORDER[@]+"${RULINGS_ORDER[@]}"}; do
+  for name in ${EXEC_ORDER[@]+"${EXEC_ORDER[@]}"}; do
     arr+="${arr:+,}'$name'"
     vals+="${vals:+,}('$name')"
   done
@@ -464,14 +497,14 @@ ruled_names_sql() {
 dry_run_plan() {
   local name target ruled arr vals counts label n
   echo "dry-run (no changes):"
-  for name in ${RULINGS_ORDER[@]+"${RULINGS_ORDER[@]}"}; do
+  for name in ${EXEC_ORDER[@]+"${EXEC_ORDER[@]}"}; do
     target="${RULING_TARGET[$name]}"
     case "${ACTION[$name]}" in
       drop)    echo "plan: $name -> drop" ;;
       repoint) echo "plan: $name -> $target (scope_tag re-pointed, tag row retired)" ;;
     esac
   done
-  if [[ "${#RULINGS_ORDER[@]}" -eq 0 ]]; then
+  if [[ "${#EXEC_ORDER[@]}" -eq 0 ]]; then
     echo "dry-run: scope_tag rows: 0"
     echo "dry-run: tag rows: 0"
     echo "dry-run: post.tags rows: 0"
@@ -511,7 +544,7 @@ SELECT 'source.bootstrap_tags', count(*) FROM source WHERE bootstrap_tags && $ar
 # The array rewrite is V84's order-preserving dedup restricted to rows with a ruled name.
 apply_transaction() {
   local sql="BEGIN;" name target ruled arr map_vals="" drop_vals="" map_join="" map_expr="e.name" drop_filter=""
-  for name in ${RULINGS_ORDER[@]+"${RULINGS_ORDER[@]}"}; do
+  for name in ${EXEC_ORDER[@]+"${EXEC_ORDER[@]}"}; do
     target="${RULING_TARGET[$name]}"
     case "${ACTION[$name]}" in
       repoint)
@@ -529,7 +562,7 @@ WITH d AS (DELETE FROM scope_tag WHERE tag_id IN (SELECT id FROM tag WHERE name 
 SELECT 'scope_tag removed|' || count(*) FROM d;" ;;
     esac
   done
-  for name in ${RULINGS_ORDER[@]+"${RULINGS_ORDER[@]}"}; do
+  for name in ${EXEC_ORDER[@]+"${EXEC_ORDER[@]}"}; do
     target="${RULING_TARGET[$name]}"
     case "${ACTION[$name]}" in
       repoint|drop)
@@ -538,10 +571,10 @@ WITH d AS (DELETE FROM tag WHERE name = '$name' RETURNING 1)
 SELECT 'tag removed|' || count(*) FROM d;" ;;
     esac
   done
-  if [[ "${#RULINGS_ORDER[@]}" -gt 0 ]]; then
+  if [[ "${#EXEC_ORDER[@]}" -gt 0 ]]; then
     ruled="$(ruled_names_sql)"
     arr="${ruled%%|*}"
-    for name in ${RULINGS_ORDER[@]+"${RULINGS_ORDER[@]}"}; do
+    for name in ${EXEC_ORDER[@]+"${EXEC_ORDER[@]}"}; do
       target="${RULING_TARGET[$name]}"
       if [[ "$target" == "drop" ]]; then
         drop_vals+="${drop_vals:+,}('$name')"
@@ -603,11 +636,9 @@ COMMIT;"
   echo "source.bootstrap_tags rewritten: ${sums[source.bootstrap_tags rewritten]:-0}"
   echo "consumed rulings — retire these line(s) from $MAP_FILE:"
   local consumed=0
-  for name in ${RULINGS_ORDER[@]+"${RULINGS_ORDER[@]}"}; do
-    if [[ -n "${DB_UNKNOWN[$name]:-}" ]]; then
-      echo "$name: ${RULING_TARGET[$name]}"
-      consumed=1
-    fi
+  for name in ${EXEC_ORDER[@]+"${EXEC_ORDER[@]}"}; do
+    echo "$name: ${RULING_TARGET[$name]}"
+    consumed=1
   done
   if [[ "$consumed" -eq 0 ]]; then
     echo "  (none — no DB-side occurrences)"
