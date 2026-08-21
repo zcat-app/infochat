@@ -1,23 +1,18 @@
 ---
 id: M1-897
 title: "Wizard wiring: pin the seeded-model reply-mode detail"
-status: pending
+status: done
 created: 2026-08-20
-last_updated: 2026-08-20
+last_updated: 2026-08-21
 flow: tick
 reproduction: >-
-  Mutation probe (run 2026-08-20 by the driver on main @ 4b275e76, evidence
-  not prediction; tree verified clean afterwards): invert the seeded
-  per-language detail MODEL_REPLYMODE_DETAIL[gemma-4-26b-a4b]
-  (prod/scripts/4-llm.sh:60) to "en/es PASS, cs/ru/tr FAIL", then
-  `./mvnw -B -pl infochat-llm-adapter test -Dtest='LlamacppWiringTest,RemoteLlmWiringTest'`
-  — observed: Tests run: 45, Failures: 0, BUILD SUCCESS. No drive ever
-  selects the one measured model gemma-4-26b-a4b, so the detail print at
-  4-llm.sh:149 never executes and wrong advice ("en/es PASS") ships
-  invisible to the suite. Closing test (to-be-written; GREEN on unmodified
-  main — it pins merged M1-895 behavior — RED under the named mutation,
-  analysis P7):
-  RemoteLlmWiringTest.seededModelReplyModePrintsThePerLanguageDetail.
+  RemoteLlmWiringTest.seededModelReplyModePrintsThePerLanguageDetail — GREEN
+  on the unmodified script; under the reproduction mutation that changes
+  MODEL_REPLYMODE_DETAIL[gemma-4-26b-a4b] at prod/scripts/4-llm.sh:60 to
+  "en/es PASS, cs/ru/tr FAIL", the test is RED because the captured wizard
+  output no longer contains the committed detail. The driver observed the
+  pre-test mutation probe on main @ 4b275e76 as 45 tests, 0 failures, BUILD
+  SUCCESS because no drive selected gemma-4-26b-a4b.
 analysis_ref: docs/plan/m1/tick-analysis/wizard-ollama-branch-coverage.md
 blocked_by: []
 files_scope:
@@ -46,8 +41,8 @@ out_of_scope:
     (decisions.md:98) already carries the wizard-recommendation sentence
     and §7.7.2 already documents the step-4 contract.
 acceptance:
-  - "REPRODUCTION closed: RemoteLlmWiringTest.seededModelReplyModePrintsThePerLanguageDetail (to-be-written, test_plan.adds) — the remote drive (backend=remote, provider Enter = openai-compatible, base-url, model `gemma-4-26b-a4b` at the free-text model prompt 4-llm.sh:808, API key, ACCEPT_TIMING_DEFAULTS, reply-mode Enter) asserts the output contains the exact fragment `chat reply-mode recommendation for gemma-4-26b-a4b: translate (cs/ru/tr PASS, en/es FAIL)` (the :149 line) AND the written props carry `infochat.chat.reply-mode=translate`. Non-vacuity (§8, analysis P3): the reproduction's mutation (inverted detail at :60) turns the output assertion RED; a mutation recommending `native` for the seeded model (:56) turns the props assertion RED. The recommendation is advice, never a gate — an informed override stays operator-owned (D79), and this drive asserts the advice is TRUTHFUL."
-  - "EDGE (the fallback arm of the same print): RemoteLlmWiringTest.unmeasuredRemoteModelPrintsTheUnmeasuredDetail (to-be-written, test_plan.adds) — an arbitrary operator-typed model (e.g. the existing REMOTE_MODEL) drives the same prompt and asserts the output carries `(unmeasured)` and the props carry `translate` — pinning the `:-unmeasured` fallback at 4-llm.sh:139, the half of the line the seeded drive cannot see (a mutation that drops the fallback or prints an empty detail fails here)."
+  - "REPRODUCTION closed: RemoteLlmWiringTest.seededModelReplyModePrintsThePerLanguageDetail — the remote drive (backend=remote, provider Enter = openai-compatible, base-url, model `gemma-4-26b-a4b` at the free-text model prompt 4-llm.sh:808, API key, ACCEPT_TIMING_DEFAULTS, reply-mode Enter) asserts the output contains the exact fragment `chat reply-mode recommendation for gemma-4-26b-a4b: translate (cs/ru/tr PASS, en/es FAIL)` (the :149 line) AND the written props carry `infochat.chat.reply-mode=translate`. Non-vacuity (§8, analysis P3): the reproduction's mutation (inverted detail at :60) turns the output assertion RED; a mutation recommending `native` for the seeded model (:56) turns the props assertion RED. The recommendation is advice, never a gate — an informed override stays operator-owned (D79), and this drive asserts the advice is TRUTHFUL."
+  - "EDGE (the fallback arm of the same print): RemoteLlmWiringTest.unmeasuredRemoteModelPrintsTheUnmeasuredDetail — an arbitrary operator-typed model (the existing REMOTE_MODEL) drives the same prompt and asserts the output carries `(unmeasured)` and the props carry `translate` — pinning the `:-unmeasured` fallback at 4-llm.sh:139, the half of the line the seeded drive cannot see (a mutation that drops the fallback or prints an empty detail fails here)."
   - "Record fidelity (analysis P8): the pinned detail string equals BOTH the script's seed and the committed bar-clearing matrix. Verify: `grep -n 'cs/ru/tr PASS, en/es FAIL' prod/scripts/4-llm.sh` hits the :60 seed, and docs/measurement/direct-chat-e2e.md:547-555 shows gemma × cs/ru/tr PASS, × en/es FAIL. A future re-measurement re-seeds the table deliberately — this test is the intended tripwire, never edited to match a drifted seed without the record moving first."
   - "Test-only (analysis P6): `git diff` is confined to RemoteLlmWiringTest.java and adds whole new methods only — every pre-existing drive's stdin and assertions byte-untouched (no modification of the existing replyModeAskedAndWrittenForRemoteModel; item 2 is a NEW method). Verify: `git diff prod/ docs/` is empty and `git diff infochat-llm-adapter/src/test` shows no hunk inside any existing method body."
   - "`./mvnw -B -pl infochat-llm-adapter test -Dtest='LlamacppWiringTest,RemoteLlmWiringTest'` is green AND `mvn verify` from the repo root is green (engineering-rules §5)."
@@ -56,7 +51,7 @@ test_plan:
     - >-
       RemoteLlmWiringTest.seededModelReplyModePrintsThePerLanguageDetail
       (reproduction closure — the seeded-model detail print),
-      .unmeasuredRemoteModelPrintsTheUnmeasuredDetail (the `:-unmeasured`
+      RemoteLlmWiringTest.unmeasuredRemoteModelPrintsTheUnmeasuredDetail (the `:-unmeasured`
       fallback arm of the same line).
   preserves:
     - all tests currently green on main
@@ -85,11 +80,24 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates: M1-895
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-21
+    verdict: APPROVE-WITH-FIXES
+    checks: "SPEC-TRUTHNESS PASS; SECURITY PASS; TEST-ADEQUACY PASS; MAINTAINABILITY WARN; SCOPE PASS"
+    diff_stats: "3 files changed, 52 insertions(+), 24 deletions(-) (code: RemoteLlmWiringTest.java +28/-0, two whole new methods; rest docs/plan bookkeeping)"
+    fixes: "1 comment-only item applied: stdin dialect-Enter trap comment above each new drive's runWizardCapturingOutput call (RemoteLlmWiringTest.java:279,297). Probes: `grep -n 'shifting' RemoteLlmWiringTest.java` → 2 hits (lines 280, 298, one per new method); `./mvnw -B -pl infochat-llm-adapter -am test-compile` → BUILD SUCCESS (45 test sources recompiled, .scratch/tick-fixes-M1-897-testcompile.log). Green log of record: target/tick-test-M1-897-r1.log."
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-21
+  lint: pass-with-warnings
+  result: pass
+  notes: >-
+    0 blockers. Live census resolves the seeded detail row and unmeasured
+    fallback. All acceptance items are implementable from the existing remote
+    helper; P2/P5 are explicitly assigned to sibling M1-896.
 escalation_reason:
 ---
 

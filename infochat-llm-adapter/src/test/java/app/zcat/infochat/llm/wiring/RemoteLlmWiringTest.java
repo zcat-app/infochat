@@ -273,6 +273,42 @@ class RemoteLlmWiringTest {
                 "an unmeasured remote model must get translate written");
     }
 
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void seededModelReplyModePrintsThePerLanguageDetail(@TempDir Path tmp) throws Exception {
+        // stdin: backend=remote, dialect Enter (openai-compatible — answering
+        // deepseek pins the model at 4-llm.sh:807 and reads none, shifting
+        // every later answer off by one), base-url, model, API key, timing
+        // defaults, reply-mode Enter.
+        WizardRun run = runWizardCapturingOutput(tmp,
+                "remote\n" + "\n" + REMOTE_BASE_URL + "\n" + "gemma-4-26b-a4b\n"
+                        + REMOTE_API_KEY + "\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT);
+
+        assertTrue(run.output().contains(
+                "chat reply-mode recommendation for gemma-4-26b-a4b: translate (cs/ru/tr PASS, en/es FAIL)"),
+                "the seeded model's recommendation must include the measured detail:\n" + run.output());
+        assertEquals("translate", run.props().get("infochat.chat.reply-mode"),
+                "the seeded model must write its recommendation");
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void unmeasuredRemoteModelPrintsTheUnmeasuredDetail(@TempDir Path tmp) throws Exception {
+        // stdin: backend=remote, dialect Enter (openai-compatible — answering
+        // deepseek pins the model at 4-llm.sh:807 and reads none, shifting
+        // every later answer off by one), base-url, model, API key, timing
+        // defaults, reply-mode Enter.
+        WizardRun run = runWizardCapturingOutput(tmp,
+                "remote\n" + "\n" + REMOTE_BASE_URL + "\n" + REMOTE_MODEL + "\n"
+                        + REMOTE_API_KEY + "\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT);
+
+        assertTrue(run.output().contains(
+                "chat reply-mode recommendation for " + REMOTE_MODEL + ": translate (unmeasured)"),
+                "an unmeasured model must disclose the fallback detail:\n" + run.output());
+        assertEquals("translate", run.props().get("infochat.chat.reply-mode"),
+                "an unmeasured model must write the conservative recommendation");
+    }
+
     // --- helpers (trimmed mirror of LlamacppWiringTest) -------------------------
 
     /** Run prod/scripts/4-llm.sh with a fake docker on PATH; return generated props. */
