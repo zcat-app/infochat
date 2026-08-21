@@ -676,6 +676,23 @@ class TagTreeCutoverCheckIT extends PostgresSchemaTestBase {
         assertTrue(span.out().contains("cannot read every \"tags\""), span.out());
     }
 
+    @Test
+    void prettyPrintedRuntimeFileFailsWithTheRealRemedy(@TempDir Path tmp) throws Exception {
+        Path fixture = writePrettyBootstrapFixture(tmp);
+
+        runV84();
+        ScriptResult post = runScript(tmp, fixture, "postflight");
+        ScriptResult reconcile = runScript(tmp, fixture, "reconcile-file", "--dry-run");
+
+        for (ScriptResult refused : List.of(post, reconcile)) {
+            assertEquals(2, refused.exit(), "a pretty-printed tags span must fail loud: " + refused.out());
+            assertTrue(refused.out().contains("cannot read every \"tags\""), refused.out());
+            assertTrue(refused.out().contains("restore the one-array-per-line shape"), refused.out());
+            assertTrue(refused.out().contains("every \"tags\": [...] span on a single line"), refused.out());
+            assertFalse(refused.out().contains("install jq"), refused.out());
+        }
+    }
+
     /** One invalid rulings-file shape: exit 2 naming the line, the runtime file untouched. */
     private void assertReconcileRefused(Path tmp, Path fixture, String original,
             String expectedMessage, String rulingsContent) throws Exception {
@@ -751,6 +768,18 @@ class TagTreeCutoverCheckIT extends PostgresSchemaTestBase {
                         + "    \"name\": \"Cutover IT source\",\n"
                         + "    \"category\": \"news\",\n"
                         + "    \"tags\": [" + tagList + "]\n  }\n]\n");
+        return fixture;
+    }
+
+    /** A valid bootstrap-sources.json fixture whose tags[] span defeats the cutover parser. */
+    private Path writePrettyBootstrapFixture(Path tmp) throws Exception {
+        Path fixture = tmp.resolve("bootstrap-sources-pretty.json");
+        Files.writeString(fixture,
+                "[\n  {\n    \"kind\": \"rss\",\n"
+                        + "    \"identifier\": \"https://cutover.example.test/pretty/feed.xml\",\n"
+                        + "    \"name\": \"Pretty Cutover IT source\",\n"
+                        + "    \"category\": \"news\",\n"
+                        + "    \"tags\": [\n      \"ai\",\n      \"world\"\n    ]\n  }\n]\n");
         return fixture;
     }
 

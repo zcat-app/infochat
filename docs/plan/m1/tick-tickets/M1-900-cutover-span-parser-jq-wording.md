@@ -1,13 +1,12 @@
 ---
 id: M1-900
 title: "Fix the span-parser FAIL remedy; drop dead jq advice"
-status: pending
+status: done
 created: 2026-08-21
 last_updated: 2026-08-21
 flow: tick
 reproduction: >-
-  to-be-written TagTreeCutoverCheckIT.prettyPrintedRuntimeFileFailsWithTheRealRemedy
-  (child of a 2+ decomposition; `start` converts the marker per workflow §0).
+  TagTreeCutoverCheckIT.prettyPrintedRuntimeFileFailsWithTheRealRemedy
   The wrong behavior it states (D-14 + UX-1, defects log
   .scratch/V2.0.0-DEFECTS-AND-SMELLS-LOG.md; observed live): postflight on
   the test instance's own deployed bootstrap-sources.json exits 2 with
@@ -92,7 +91,13 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-21
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "5 files changed, 39 insertions(+), 11 deletions(-)"
+    verdict_file: .scratch/tick-review-M1-900-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []

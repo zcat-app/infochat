@@ -87,7 +87,9 @@ file_tag_names() {
   span_count="$(printf '%s\n' "$extracted" | grep -c . || true)"
   if [[ "$span_count" -ne "$declared" ]]; then
     echo "FAIL: cannot read every \"tags\": [...] span of $BOOTSTRAP_FILE (a tags array spans" >&2
-    echo "       multiple lines) — keep the one-array-per-line shape or install jq." >&2
+    echo "       multiple lines) — restore the one-array-per-line shape (every \"tags\": [...] span on a single line)," >&2
+    echo "       the shape modeled by prod/config/bootstrap-sources.json; the Collector reads either shape," >&2
+    echo "       but this cutover tooling requires the one-array-per-line shape." >&2
     exit 2
   fi
   printf '%s\n' "$extracted" \
