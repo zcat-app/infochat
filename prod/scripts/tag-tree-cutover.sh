@@ -1000,11 +1000,11 @@ postflight() {
     red=1
   fi
 
-  # File side: the BootstrapLoader gate's own predicate (file tag names an
-  # existing node after the same lower-casing the loader's normalizer applies).
+  # File side: mirror the BootstrapLoader leaf-membership gate (file tag names
+  # an existing source-eligible leaf tag-tree node after the same lower-casing).
   local file_names nodes missing f lower
   file_names="$(file_tag_names)"
-  nodes="$(psql_seam -qAt -c 'SELECT name FROM tag ORDER BY name')"
+  nodes="$(psql_seam -qAt -c "SELECT name FROM tag WHERE node_kind = 'leaf' ORDER BY name")"
   missing=""
   while IFS= read -r f; do
     if [[ -z "$f" ]]; then
@@ -1022,7 +1022,7 @@ postflight() {
   if [[ -z "$missing" ]]; then
     echo "GREEN: bootstrap-sources.json tags[] all name tag-tree nodes"
   else
-    echo "RED: bootstrap-sources.json tags[] name(s) not tag-tree nodes: $missing"
+    echo "RED: bootstrap-sources.json tags[] name(s) not source-eligible leaf tag-tree nodes: $missing"
     red=1
   fi
 

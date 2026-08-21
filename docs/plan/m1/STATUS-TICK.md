@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 113 |
+| done | 114 |
 | deferred | 0 |
 | abandoned | 3 |
 | **total** | **117** |
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-902 — Make postflight's runtime-file check leaf-only (complexity: low, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -61,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-902 | Make postflight's runtime-file check leaf-only | 2026-08-21 | round 2 APPROVE |
 | M1-901 | Liveness IT: subs responder survives reconnect swap | 2026-08-21 | round 1 APPROVE |
 | M1-900 | Fix the span-parser FAIL remedy; drop dead jq advice | 2026-08-21 | round 1 APPROVE |
 | M1-899 | Spell out the shared cutover rulings-file lifecycle | 2026-08-21 | round 1 APPROVE |
@@ -70,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-895 | Wizard: per-model chat reply-mode recommendation (D79) | 2026-08-20 | round 1 APPROVE |
 | M1-894 | V14 header comment correction + checksum repair runbook | 2026-08-20 | round 2 APPROVE |
 | M1-893 | Restore failed-asset wording + cold-start timeout note | 2026-08-20 | round 1 APPROVE |
-| M1-892 | Signal image completion carries the prompt echo | 2026-08-20 | round 1 APPROVE |
 
 ---
 
@@ -237,5 +237,5 @@ M1-898 (done)
   └── M1-899 (done)
 M1-900 (done)
 M1-901 (done)
-M1-902 (pending) ← runnable
+M1-902 (done)
 ```

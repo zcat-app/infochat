@@ -404,6 +404,35 @@ class TagTreeCutoverCheckIT extends PostgresSchemaTestBase {
                 postGreen.out());
     }
 
+    @Test
+    void postflightFileCheckIsLeafOnly(@TempDir Path tmp) throws Exception {
+        runV84();
+
+        Path topNamed = writeBootstrapFixture(tmp, "ai", "news");
+        ScriptResult topRed = runScript(tmp, topNamed, "postflight");
+        assertEquals(1, topRed.exit(), "a top-node file tag must RED the postflight:\n" + topRed.out());
+        assertTrue(topRed.out().contains("RED: bootstrap-sources.json tags[]"), topRed.out());
+        assertTrue(topRed.out().contains("news"), topRed.out());
+        assertTrue(topRed.out().contains("source-eligible leaf tag-tree node"), topRed.out());
+
+        Path leafNamed = writeBootstrapFixture(tmp, "ai", "world");
+        ScriptResult leafGreen = runScript(tmp, leafNamed, "postflight");
+        assertEquals(0, leafGreen.exit(), "all-leaf file tags must GREEN the postflight:\n" + leafGreen.out());
+        assertTrue(leafGreen.out().contains("GREEN: bootstrap-sources.json tags[] all name tag-tree nodes"),
+                leafGreen.out());
+
+        // A rename keeps the census rows (9 tops / 53 leaves / 8 fallback) intact while
+        // putting a mirror-unknown leaf name on the live DB: only the live-query
+        // predicate GREENs this leg — the IS_LEAF mirror REDs it (P4 mutation trap).
+        renameSeededLeaf("football", "rugby");
+        Path operatorLeafNamed = writeBootstrapFixture(tmp, "ai", "rugby");
+        ScriptResult operatorLeafGreen = runScript(tmp, operatorLeafNamed, "postflight");
+        assertEquals(0, operatorLeafGreen.exit(),
+                "a live operator leaf must GREEN the postflight:\n" + operatorLeafGreen.out());
+        assertTrue(operatorLeafGreen.out().contains("GREEN: bootstrap-sources.json tags[] all name tag-tree nodes"),
+                operatorLeafGreen.out());
+    }
+
     // ---------- mirror completeness: GREEN preflight ⇒ the real V84 executes clean ----------
 
     @Test
@@ -808,6 +837,18 @@ class TagTreeCutoverCheckIT extends PostgresSchemaTestBase {
                                 + "ON CONFLICT (name) DO NOTHING")) {
             ps.setString(1, name);
             ps.setString(2, name);
+            ps.executeUpdate();
+        }
+    }
+
+    /** An operator RENAME of a seeded leaf to a mirror-unknown name: the row keeps
+     *  node_kind/parent/fallback, so the postflight census rows are untouched while the
+     *  live leaf set gains a name the script's frozen IS_LEAF mirror does not know. */
+    private void renameSeededLeaf(String from, String to) throws Exception {
+        try (Connection conn = newConnection();
+                PreparedStatement ps = conn.prepareStatement("UPDATE tag SET name = ? WHERE name = ?")) {
+            ps.setString(1, to);
+            ps.setString(2, from);
             ps.executeUpdate();
         }
     }

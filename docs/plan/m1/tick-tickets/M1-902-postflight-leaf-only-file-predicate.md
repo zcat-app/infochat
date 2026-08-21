@@ -1,15 +1,15 @@
 ---
 id: M1-902
 title: "Make postflight's runtime-file check leaf-only"
-status: pending
+status: done
 created: 2026-08-21
 last_updated: 2026-08-21
 flow: tick
 reproduction: >-
-  to-be-written TagTreeCutoverCheckIT.postflightFileCheckIsLeafOnly
-  (marker form per workflow §0 — the top-name-through-standalone-postflight
-  shape was reasoned at the M1-887-r1 review, not driven live; `start`
-  converts the marker: write the test, run it RED, before any fix code).
+  app.zcat.infochat.core.schema.TagTreeCutoverCheckIT.postflightFileCheckIsLeafOnly
+  (written and run RED before the fix: the top-name-through-standalone-
+  postflight shape was reasoned at the M1-887-r1 review, not driven live
+  before `start`).
   The wrong behavior it states: on a post-migrate database (V84 applied),
   with the runtime bootstrap-sources.json carrying a TOP name — `news` is a
   tag-tree top node (V84__tag_tree_seed_and_migration.sql:52) —
@@ -101,11 +101,37 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates: M1-887
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-21
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY FAIL, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "5 files changed, 44 insertions(+), 17 deletions(-)"
+    verdict_file: .scratch/tick-review-M1-902-r1.txt
+    note: >-
+      Medium: leg (b) of postflightFileCheckIsLeafOnly seeds/feeds
+      `football` — a name on the script's 53-name IS_LEAF mirror and
+      V84-seeded — so the P4 mirror-mutation greens the leg; the leg does
+      not discriminate live-DB query from mirror. Fix: seed/feed a leaf
+      outside the mirror (e.g. `rugby` under `sport`).
+  - round: 2
+    date: 2026-08-21
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "5 files changed, 88 insertions(+), 18 deletions(-)"
+    verdict_file: .scratch/tick-review-M1-902-r2.txt
+    note: >-
+      r1 item SATISFIED via a documented deviation: the named seed-a-54th-leaf
+      mechanics were undeliverable (they trip the pinned 9/53 census row), so
+      leg (b) discriminates via a census-neutral rename of the seeded
+      `football` row to the mirror-unknown `rugby`; mirror-mutation probe REDs
+      the leg, live query GREENs it, full mvn verify green.
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  lint: "PASS with WARN NEGATIVE-TESTS; no BLOCKER"
+  developer: "PASS — acceptance is implementable; cited code and spec refs resolve; census returns the two classified SELECT sites; M1-898/M1-899/M1-900 are done, so no in-flight file conflict; no blocked_by tests require tracing"
 escalation_reason:
 ---
 
@@ -367,3 +393,19 @@ site has a disposition; the class has exactly one defective site.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-902-postflight-leaf-only-file-predicate.md
 ```
+
+## Round 1 rework
+
+REWORK ITEMS (verbatim from .scratch/tick-review-M1-902-r1.txt):
+1. Finding 1: make leg (b) of
+   TagTreeCutoverCheckIT.postflightFileCheckIsLeafOnly discriminate the
+   data source — seed and feed a parented leaf whose name is outside the
+   script's frozen known-set (e.g. `rugby` under `sport`) at
+   TagTreeCutoverCheckIT.java:424-425. Verified by: (a)
+   `sed -n '103,118p' prod/scripts/tag-tree-cutover.sh | grep -w rugby`
+   returns nothing and the test source names `rugby` in
+   seedParentedOperatorLeaf; (b) `mvn verify` green with
+   postflightFileCheckIsLeafOnly passing, and the same test failing on
+   the leg-(b) exit assertion when the live query at
+   prod/scripts/tag-tree-cutover.sh:1007 is locally replaced by the
+   IS_LEAF mirror membership.
