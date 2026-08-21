@@ -1,7 +1,7 @@
 ---
 id: M1-901
 title: "Liveness IT: subs responder survives reconnect swap"
-status: pending
+status: done
 created: 2026-08-21
 last_updated: 2026-08-21
 flow: tick
@@ -133,7 +133,14 @@ test_plan:
     - all tests currently green on main
 spec_refs: []
 decision_refs: []
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-21
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "4 files changed, 133 insertions(+), 35 deletions(-)"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-901-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []

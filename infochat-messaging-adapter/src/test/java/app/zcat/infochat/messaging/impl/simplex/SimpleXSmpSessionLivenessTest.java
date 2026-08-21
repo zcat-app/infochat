@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -26,6 +27,7 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
@@ -73,7 +75,8 @@ class SimpleXSmpSessionLivenessTest {
             SimpleXAdapter adapter = newAdapter(fake, clock, List.of(Duration.ofMillis(50)));
             SimpleXSubprocess sub = newStayAliveSubprocess(5, Duration.ofSeconds(30));
             sub.start();
-            Thread responder = startSubsResponder(fake, ZERO_SUBS_FRAME);
+            AtomicReference<Throwable> responderFailure = new AtomicReference<>();
+            Thread responder = startSubsResponder(fake, ZERO_SUBS_FRAME, responderFailure);
             try {
                 adapter.attachSubprocess(sub);
                 adapter.rebuildWebSocket();
@@ -81,14 +84,14 @@ class SimpleXSmpSessionLivenessTest {
                 assertTrue(adapter.connected(), "precondition: a live transport reads connected");
 
                 // Below the consecutive threshold nothing fires (boot grace).
-                pollExpectingZero(adapter, THRESHOLD - 1);
+                pollExpectingZero(adapter, THRESHOLD - 1, responderFailure);
                 assertTrue(adapter.connected(),
                         "sub-threshold zero readings must not latch the transport");
                 assertEquals(0, sub.restartCount(),
                         "sub-threshold zero readings must not restart the child");
 
                 // The threshold-th consecutive zero latches and restarts once.
-                pollExpectingZero(adapter, 1);
+                pollExpectingZero(adapter, 1, responderFailure);
                 assertFalse(adapter.connected(),
                         "a sustained zero-session reading must latch the transport dead");
                 // Latched-pending-restart window: the supervisor is still RUNNING,
@@ -119,7 +122,7 @@ class SimpleXSmpSessionLivenessTest {
                 // poll frame can race the fake's clientSocket swap.
                 awaitSubprocessState(sub, SimpleXSubprocess.State.RUNNING, WAIT);
                 fake.awaitClientGeneration(2, WAIT);
-                pollExpectingZero(adapter, THRESHOLD);
+                pollExpectingZero(adapter, THRESHOLD, responderFailure);
                 awaitRestartCountAtLeast(sub, 2, WAIT);
                 assertEquals(2, countZeroSessionWarns(logs),
                         "each wedged incarnation latches and restarts exactly once");
@@ -128,6 +131,59 @@ class SimpleXSmpSessionLivenessTest {
                 adapter.close();
                 sub.stop();
                 logs.detach();
+            }
+        }
+    }
+
+    @Test
+    void subsResponderSurvivesFakeReaderErrorMarker() throws Exception {
+        try (FakeSimpleXProcess fake = new FakeSimpleXProcess()) {
+            fake.start();
+            TestClock clock = new TestClock(Instant.parse("2026-08-20T00:00:00Z"));
+            SimpleXAdapter adapter = newAdapter(fake, clock, List.of(Duration.ofMillis(50)));
+            SimpleXSubprocess sub = newStayAliveSubprocess(5, Duration.ofSeconds(30));
+            sub.start();
+            AtomicReference<Throwable> responderFailure = new AtomicReference<>();
+            Thread responder = startSubsResponder(fake, ZERO_SUBS_FRAME, responderFailure);
+            try {
+                adapter.attachSubprocess(sub);
+                adapter.rebuildWebSocket();
+                fake.awaitClient(WAIT);
+                fake.enqueueReceivedFrame("__READER_ERROR__:IOException");
+                assertEquals(SimpleXAdapter.SessionPollOutcome.ZERO_SESSIONS,
+                        adapter.pollUpstreamSessions());
+            } finally {
+                responder.interrupt();
+                adapter.close();
+                sub.stop();
+            }
+        }
+    }
+
+    @Test
+    void deadSubsResponderFailsFastNamingTheHarnessFault() throws Exception {
+        try (FakeSimpleXProcess fake = new FakeSimpleXProcess()) {
+            fake.start();
+            TestClock clock = new TestClock(Instant.parse("2026-08-20T00:00:00Z"));
+            SimpleXAdapter adapter = newAdapter(fake, clock, List.of(Duration.ofMillis(50)));
+            SimpleXSubprocess sub = newStayAliveSubprocess(5, Duration.ofSeconds(30));
+            sub.start();
+            AtomicReference<Throwable> responderFailure = new AtomicReference<>();
+            Thread responder = startSubsResponder(fake, ZERO_SUBS_FRAME, responderFailure);
+            try {
+                adapter.attachSubprocess(sub);
+                adapter.rebuildWebSocket();
+                fake.awaitClient(WAIT);
+                fake.enqueueReceivedFrame("{not-json");
+                AssertionError failure = assertThrows(AssertionError.class,
+                        () -> pollExpectingZero(adapter, 1, responderFailure));
+                assertTrue(failure.getMessage() != null
+                                && failure.getMessage().contains("subs responder"),
+                        failure.toString());
+            } finally {
+                responder.interrupt();
+                adapter.close();
+                sub.stop();
             }
         }
     }
@@ -144,18 +200,19 @@ class SimpleXSmpSessionLivenessTest {
             SimpleXAdapter adapter = newAdapter(fake, clock, List.of(Duration.ofMillis(50)));
             SimpleXSubprocess sub = newStayAliveSubprocess(5, Duration.ofSeconds(30));
             sub.start();
-            Thread responder = startSubsResponder(fake, ZERO_SUBS_FRAME);
+            AtomicReference<Throwable> responderFailure = new AtomicReference<>();
+            Thread responder = startSubsResponder(fake, ZERO_SUBS_FRAME, responderFailure);
             try {
                 adapter.attachSubprocess(sub);
                 adapter.rebuildWebSocket();
                 fake.awaitClient(WAIT);
-                pollExpectingZero(adapter, THRESHOLD - 1);
+                pollExpectingZero(adapter, THRESHOLD - 1, responderFailure);
                 assertTrue(adapter.connected());
                 assertEquals(0, sub.restartCount());
                 assertEquals(0, countZeroSessionWarns(logs),
                         "the grace window must not WARN — a slow first connect is normal");
 
-                pollExpectingZero(adapter, 1);
+                pollExpectingZero(adapter, 1, responderFailure);
                 assertFalse(adapter.connected());
                 awaitRestartCountAtLeast(sub, 1, WAIT);
                 assertEquals(1, countZeroSessionWarns(logs),
@@ -181,7 +238,8 @@ class SimpleXSmpSessionLivenessTest {
             SimpleXAdapter adapter = newAdapter(fake, clock, List.of(Duration.ofSeconds(30)));
             SimpleXSubprocess sub = newStayAliveSubprocess(5, Duration.ofSeconds(30));
             sub.start();
-            Thread responder = startSubsResponder(fake, ZERO_SUBS_FRAME);
+            AtomicReference<Throwable> responderFailure = new AtomicReference<>();
+            Thread responder = startSubsResponder(fake, ZERO_SUBS_FRAME, responderFailure);
             try {
                 adapter.attachSubprocess(sub);
                 adapter.rebuildWebSocket();
@@ -218,7 +276,8 @@ class SimpleXSmpSessionLivenessTest {
             SimpleXAdapter adapter = newAdapter(fake, clock, List.of(Duration.ofMillis(50)));
             SimpleXSubprocess sub = newStayAliveSubprocess(5, Duration.ofSeconds(30));
             sub.start();
-            Thread responder = startSubsResponder(fake, CMD_ERROR_FRAME);
+            AtomicReference<Throwable> responderFailure = new AtomicReference<>();
+            Thread responder = startSubsResponder(fake, CMD_ERROR_FRAME, responderFailure);
             try {
                 adapter.attachSubprocess(sub);
                 adapter.rebuildWebSocket();
@@ -260,19 +319,20 @@ class SimpleXSmpSessionLivenessTest {
                     new Random(0L),
                     Duration.ZERO);
             sub.start();
-            Thread responder = startSubsResponder(fake, ZERO_SUBS_FRAME);
+            AtomicReference<Throwable> responderFailure = new AtomicReference<>();
+            Thread responder = startSubsResponder(fake, ZERO_SUBS_FRAME, responderFailure);
             try {
                 adapter.attachSubprocess(sub);
                 adapter.rebuildWebSocket();
                 fake.awaitClient(WAIT);
 
-                pollExpectingZero(adapter, THRESHOLD);
+                pollExpectingZero(adapter, THRESHOLD, responderFailure);
                 awaitRestartCountAtLeast(sub, 1, WAIT);
                 awaitSubprocessState(sub, SimpleXSubprocess.State.RUNNING, WAIT);
                 // Land the rebuilt client's handshake before episode 2 — see
                 // sustainedZeroSessionsLatchesAndRestarts.
                 fake.awaitClientGeneration(2, WAIT);
-                pollExpectingZero(adapter, THRESHOLD);
+                pollExpectingZero(adapter, THRESHOLD, responderFailure);
                 awaitSubprocessState(sub, SimpleXSubprocess.State.FAILED, WAIT);
                 assertEquals(2, sub.consecutiveCrashes(),
                         "both liveness kills must count toward the cap");
@@ -308,16 +368,17 @@ class SimpleXSmpSessionLivenessTest {
             SimpleXAdapter adapter = newAdapter(fake, clock, List.of(Duration.ofMillis(50)));
             SimpleXSubprocess sub = newStayAliveSubprocess(5, Duration.ofSeconds(30));
             sub.start();
-            Thread responder = startSubsResponder(fake, ZERO_SUBS_FRAME);
+            AtomicReference<Throwable> responderFailure = new AtomicReference<>();
+            Thread responder = startSubsResponder(fake, ZERO_SUBS_FRAME, responderFailure);
             try {
                 adapter.attachSubprocess(sub);
                 adapter.rebuildWebSocket();
                 fake.awaitClient(WAIT);
-                pollExpectingZero(adapter, 1);
+                pollExpectingZero(adapter, 1, responderFailure);
                 clock.advance(Duration.ofSeconds(30));
-                pollExpectingZero(adapter, 1);
+                pollExpectingZero(adapter, 1, responderFailure);
                 clock.advance(Duration.ofSeconds(30));
-                pollExpectingZero(adapter, 1);
+                pollExpectingZero(adapter, 1, responderFailure);
                 awaitRestartCountAtLeast(sub, 1, WAIT);
                 String captured = logs.formatted();
                 assertTrue(captured.contains("zero upstream SMP sessions")
@@ -411,33 +472,60 @@ class SimpleXSmpSessionLivenessTest {
 
     /** Background responder: answer every {@code /get subs} poll frame with the
      *  given recorded response (corrId echoed); other frames are ignored. */
-    private static Thread startSubsResponder(FakeSimpleXProcess fake, String responseTemplate) {
+    private static Thread startSubsResponder(FakeSimpleXProcess fake, String responseTemplate,
+                                             AtomicReference<Throwable> failure) {
         return Thread.ofVirtual().name("fake-simplex-subs-responder").start(() -> {
-            try {
-                while (!Thread.currentThread().isInterrupted()) {
-                    String envelope = fake.awaitFrame(Duration.ofSeconds(15));
-                    JsonNode root = MAPPER.readTree(envelope);
-                    JsonNode corrId = root.get("corrId");
-                    JsonNode cmd = root.get("cmd");
-                    if (corrId == null || cmd == null || !cmd.asText().startsWith("/get subs")) {
-                        continue;
-                    }
-                    fake.sendFrame(responseTemplate.formatted(corrId.asText()));
+            while (!Thread.currentThread().isInterrupted()) {
+                String envelope;
+                try {
+                    envelope = fake.awaitFrame(Duration.ofSeconds(15));
+                } catch (InterruptedException e) {
+                    return;
+                } catch (IllegalStateException e) {
+                    failure.compareAndSet(null, e);
+                    return;
                 }
-            } catch (Exception e) {
-                // awaitFrame timeout / interrupt / teardown IO — done.
+                if (!envelope.startsWith("{")) {
+                    continue;
+                }
+                JsonNode corrId;
+                JsonNode cmd;
+                try {
+                    JsonNode root = MAPPER.readTree(envelope);
+                    corrId = root.get("corrId");
+                    cmd = root.get("cmd");
+                } catch (JsonProcessingException | RuntimeException e) {
+                    failure.compareAndSet(null, e);
+                    return;
+                }
+                if (corrId == null || cmd == null || !cmd.asText().startsWith("/get subs")) {
+                    continue;
+                }
+                try {
+                    fake.sendFrame(responseTemplate.formatted(corrId.asText()));
+                } catch (java.io.IOException e) {
+                    // The answer raced the client-generation swap; the new
+                    // generation will issue the poll again.
+                    continue;
+                } catch (RuntimeException e) {
+                    failure.compareAndSet(null, e);
+                    return;
+                }
             }
         });
     }
 
     /** Drive the poll until {@code zeros} ZERO_SESSIONS outcomes accumulate,
      *  tolerating SKIPPED (WS rebuild / restart in flight) with a short retry. */
-    private static void pollExpectingZero(SimpleXAdapter adapter, int zeros)
+    private static void pollExpectingZero(SimpleXAdapter adapter, int zeros,
+                                          AtomicReference<Throwable> responderFailure)
             throws InterruptedException {
         int seen = 0;
         long deadline = System.nanoTime() + WAIT.toNanos();
         while (seen < zeros && System.nanoTime() < deadline) {
+            assertResponderAlive(responderFailure);
             SimpleXAdapter.SessionPollOutcome outcome = adapter.pollUpstreamSessions();
+            assertResponderAlive(responderFailure);
             if (outcome == SimpleXAdapter.SessionPollOutcome.ZERO_SESSIONS) {
                 seen++;
             } else if (outcome == SimpleXAdapter.SessionPollOutcome.SKIPPED) {
@@ -446,9 +534,17 @@ class SimpleXSmpSessionLivenessTest {
                 throw new AssertionError("expected a zero-session poll outcome, got " + outcome);
             }
         }
+        assertResponderAlive(responderFailure);
         if (seen < zeros) {
             throw new AssertionError("only " + seen + " of " + zeros
                     + " expected zero-session polls landed within " + WAIT);
+        }
+    }
+
+    private static void assertResponderAlive(AtomicReference<Throwable> responderFailure) {
+        Throwable failure = responderFailure.get();
+        if (failure != null) {
+            throw new AssertionError("subs responder failed: " + failure, failure);
         }
     }
 

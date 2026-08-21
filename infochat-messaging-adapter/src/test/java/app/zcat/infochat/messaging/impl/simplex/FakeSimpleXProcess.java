@@ -154,6 +154,10 @@ public final class FakeSimpleXProcess implements AutoCloseable {
         return frame;
     }
 
+    void enqueueReceivedFrame(String frame) {
+        received.add(frame);
+    }
+
     @Override
     public void close() {
         closed = true;
