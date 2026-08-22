@@ -1,13 +1,13 @@
 ---
 id: M1-903
 title: "/summary over-limit advice names a non-vocabulary tag"
-status: pending
+status: done
 created: 2026-08-22
 last_updated: 2026-08-22
 flow: tick
 reproduction: >-
   BundleLoaderTest.overLimitAdviceExampleTagIsInTheTagSeedVocabulary
-  (to-be-written) — extracts the `/summary <tag> -w` example from each
+  — extracts the `/summary <tag> -w` example from each
   shipped bundle's reply.summary.window_too_large_notice and asserts the tag
   is in the V84 seed vocabulary parsed from the classpath; RED today because
   all five bundles name `technology`, which the seed does not contain.
@@ -66,11 +66,21 @@ spec_refs:
   - docs/spec/commands.md §Content
 decision_refs:
   - D43
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-22
+    verdict: APPROVE
+    checks:
+      SPEC-TRUTHNESS-CHECK: PASS
+      SECURITY-CHECK: PASS
+      TEST-ADEQUACY-CHECK: PASS
+      MAINTAINABILITY-CHECK: PASS
+      SCOPE-CHECK: PASS
+    diff_stats: "9 files, +226/-82 (reviewed round-1 diff incl. the owner-approved M1-905 amendment, committed separately by the user as 139ef11f mid-review)"
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check: "start 2026-08-22 pass — citations re-verified (bundle lines en:203/cs:201/es:222/ru:228/tr:217, 'technology' only in the notice values; V84 tech top :50 + leaves :98-104, zero 'technology' in seed; SummaryCommandHandler unknown-tag check :250-263; EligiblePostQuery readVocabulary :532-545 / expansion :352-355; BundleLoaderTest guards :82/:120/:158); census re-run clean (only window_too_large_notice + help.cmd.summary.examples, both have rows); analysis P1/P2/P3 all present; provider test classpath sees core main resources (pom dependency + TagTreeCutoverCheckIT:819 precedent); no blocked_by tests to trace"
 ---
 
 # M1-903: /summary over-limit advice names a non-vocabulary tag

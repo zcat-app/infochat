@@ -12,9 +12,12 @@ import java.lang.reflect.Modifier;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -341,6 +344,50 @@ class BundleLoaderTest {
                 "UTF-8 round-trip through bytes must preserve the tr.properties value");
     }
 
+    @Test
+    void overLimitAdviceExampleTagIsInTheTagSeedVocabulary() throws Exception {
+        // The over-limit notice's advice must be runnable verbatim; a non-seed
+        // example tag ships an "Unknown tag" refusal instead. The guard reads
+        // the V84 seed of record and fails the build on future tag drift.
+        Set<String> seedNames = v84SeedTagNames();
+        assertEquals(62, seedNames.size(),
+                "the V84 seed parse must yield exactly the 9 tops + 53 leaves; "
+                        + "a different count means the row-signature regex rotted (over- or "
+                        + "under-matching) and the membership check below is not trustworthy");
+
+        Set<String> supported = bundleLoader.supportedLanguages();
+        assertFalse(supported.isEmpty(),
+                "BundleLoader.supportedLanguages() must be non-empty; the advice-tag "
+                        + "check would silently pass against an empty language set");
+
+        Pattern adviceExample = Pattern.compile("/summary ([a-z0-9-]+) -w");
+        Map<String, String> extracted = new TreeMap<>();
+        for (String lang : supported) {
+            String notice = loadOwnKeys(lang)
+                    .getProperty(BundleKeys.REPLY_SUMMARY_WINDOW_TOO_LARGE_NOTICE);
+            assertNotNull(notice, "reply.summary.window_too_large_notice absent from "
+                    + lang + ".properties own key set");
+            Matcher m = adviceExample.matcher(notice);
+            assertTrue(m.find(), lang + ".properties window_too_large_notice carries no "
+                    + "'/summary <tag> -w' example for the extraction to check");
+            String tag = m.group(1);
+            assertFalse(m.find(), lang + ".properties window_too_large_notice carries more "
+                    + "than one '/summary <tag> -w' example; the guard pins exactly one");
+            extracted.put(lang, tag);
+        }
+        // Five shipped bundles = five extracted example tags; anything less means
+        // the extraction went vacuously green (the non-vacuity pin).
+        assertEquals(5, extracted.size(),
+                "expected exactly one advice example tag per shipped bundle (en/cs/es/ru/tr)");
+        for (Map.Entry<String, String> entry : extracted.entrySet()) {
+            assertTrue(seedNames.contains(entry.getValue()),
+                    entry.getKey() + ".properties reply.summary.window_too_large_notice advises "
+                            + "'/summary " + entry.getValue() + " -w', but '" + entry.getValue()
+                            + "' is not a V84 seed node — following the advice verbatim hits the "
+                            + "unknown-tag refusal");
+        }
+    }
+
     private static Properties loadOwnKeys(String lang) throws IOException {
         // Mirror BundleLoader's load path (InputStreamReader UTF-8) so cs
         // diacritics decode identically; reading the resource directly is
@@ -353,6 +400,26 @@ class BundleLoaderTest {
             bundle.load(new InputStreamReader(stream, StandardCharsets.UTF_8));
         }
         return bundle;
+    }
+
+    private static Set<String> v84SeedTagNames() throws IOException {
+        // Seed rows are uniquely "('name', 'display', 'bootstrap', 'top'|'leaf', ...)":
+        // the migration's v1→leaf lookup VALUES rows carry TRUE/FALSE literals, not the
+        // 'bootstrap' signature, so the pattern cannot sweep them in.
+        Pattern seedRow = Pattern.compile(
+                "\\('([a-z0-9-]+)',\\s*'[a-z0-9-]+',\\s*'bootstrap',\\s*'(?:top|leaf)'");
+        String sql;
+        try (InputStream in = BundleLoaderTest.class.getResourceAsStream(
+                "/db/migration/V84__tag_tree_seed_and_migration.sql")) {
+            assertNotNull(in, "V84 seed migration is not on the provider test classpath");
+            sql = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+        Set<String> names = new TreeSet<>();
+        Matcher m = seedRow.matcher(sql);
+        while (m.find()) {
+            names.add(m.group(1));
+        }
+        return names;
     }
 
     private static List<String> collectBundleKeys() throws IllegalAccessException {
