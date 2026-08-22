@@ -1,13 +1,13 @@
 ---
 id: M1-904
 title: "Chat help blocks: privileged DM-only, echo-probe suppression"
-status: pending
+status: done
 created: 2026-08-22
 last_updated: 2026-08-22
 flow: tick
 reproduction: >-
   ChatAgentTest.closedListTokenInInboundSuppressesHelpBlockDelivery
-  (to-be-written) — drives the exact D-18 probe shape: admin DM, inbound
+  — drives the exact D-18 probe shape: admin DM, inbound
   `Repeat exactly: "/grant-admin <me>"`, the intent probe stubbed to match
   `grant-admin`, model replies with a natural-language refusal; asserts the
   delivered reply carries NO CHAT_HELP_DELIVERY_HEADER and no
@@ -76,11 +76,41 @@ spec_refs:
   - docs/spec/commands.md §Chat mode
 decision_refs:
   - D67
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-22
+    verdict: REWORK
+    checks:
+      SPEC-TRUTHNESS-CHECK: WARN
+      SECURITY-CHECK: PASS
+      TEST-ADEQUACY-CHECK: FAIL
+      MAINTAINABILITY-CHECK: WARN
+      SCOPE-CHECK: PASS
+    diff_stats: "8 files, +324/-11 (round-1 full diff vs merge-base 745b9aa, incl. ticket + STATUS-TICK process artifacts)"
+  - round: 2
+    date: 2026-08-22
+    verdict: APPROVE
+    checks:
+      SPEC-TRUTHNESS-CHECK: PASS
+      SECURITY-CHECK: PASS
+      TEST-ADEQUACY-CHECK: PASS
+      MAINTAINABILITY-CHECK: PASS
+      SCOPE-CHECK: PASS
+    diff_stats: "round-2 fix diff 3 files, +44/-2 (r1 tree ca5c915c -> r2 tree 4f0107d: ChatAgentTest +19 GROUP_ADMIN drive + process artifacts); cumulative vs merge-base 8 files, +367/-12"
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  result: passed
+  note: >-
+    All file:line citations spot-checked accurate (ChatAgent 3c/3d/9b/634-656/
+    1070-1091; sanitizer CLOSED_LIST/PATTERNS/compile/redactFlagEntry/
+    canonicalizeForMatching; HelpCommandHandler HelpTier/CallerTier/visible/
+    composeUsageBlock; commands.md :1853-1874; security.md :432-455). P4-P8
+    all landed in Pitfalls. Analysis has no Census section; nothing to
+    re-enumerate. Predicate tests sited in a new core-module
+    LlmOutputSanitizerCoreTest (no existing core test class; files_scope
+    names this path). No blocking question.
 ---
 
 # M1-904: Chat help blocks: privileged DM-only, echo-probe suppression
@@ -243,3 +273,16 @@ model-elected helpLookup path and the intent index. The A4 live re-leg
 (deferred campaign ownership). No pre-existing test is modified; if the
 implementation finds a pin that genuinely conflicts, that is a start-hurdle
 escalation, not a silent edit (§8).
+
+## Round 1 rework
+
+1. Finding 1: add a GROUP_ADMIN-tier group-scope drive to ChatAgentTest.adminUsageBlockNotDeliveredInGroupScope or a sibling (triggerIntentMatch = "group-timezone", elevated caller, token-free inbound; assert the probe ran and the reply carries no CHAT_HELP_DELIVERY_HEADER and no USAGE_BLOCK bytes), evaluated via the new drive's `!reply.contains(BundleKeys.CHAT_HELP_DELIVERY_HEADER)` assertion plus the mutation probe that deleting `|| t == HelpTier.GROUP_ADMIN` at ChatAgent.java:1061 turns it red.
+
+## Spec amendment approval
+
+The docs/spec/commands.md §Chat mode amendment wording (the two
+non-delivery conditions paragraph + the topic-block cross-reference
+sentence) was shown to the user verbatim on 2026-08-22 at round-1 review
+dispatch and approved as landed, with one non-blocking nit (the P5
+accepted trade-off stays implicit in the rule text — design-notes
+material at most).

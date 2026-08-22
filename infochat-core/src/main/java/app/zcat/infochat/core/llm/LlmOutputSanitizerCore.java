@@ -988,6 +988,48 @@ public final class LlmOutputSanitizerCore {
         return new ClosedListStripResult(neutralizeResidualLinkSyntax(current), matches);
     }
 
+    /** Whether {@code input} contains a closed-list command token: the
+     * match-only read of the strip pass's per-entry rules on the canonical
+     * form — no rewrite, no audit (docs/spec/commands.md §Chat mode). */
+    public static boolean containsClosedListToken(String input) {
+        if (input == null || input.isEmpty()) {
+            return false;
+        }
+        String canonical = canonicalizeForMatching(input);
+        for (int i = 0; i < CLOSED_LIST.size(); i++) {
+            Pattern pattern = CLOSED_LIST_PATTERNS.get(i);
+            if (pattern == FLAG_ENTRY_TOKENIZED) {
+                if (flagEntryPresent(canonical, CLOSED_LIST.get(i))) {
+                    return true;
+                }
+            } else if (pattern.matcher(canonical).find()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Match-only form of {@link #redactFlagEntry}: same command-word and
+     * flag-token boundary scans, answering whether the entry occurs
+     * instead of rewriting it. */
+    private static boolean flagEntryPresent(String input, String token) {
+        int space = token.indexOf(' ');
+        String commandWord = token.substring(0, space);
+        String flag = token.substring(space + 1);
+        int search = 0;
+        while (true) {
+            int command = findCommandToken(input, commandWord, commandWord.length(), search);
+            if (command < 0) {
+                return false;
+            }
+            int afterCommand = command + commandWord.length();
+            if (findFlagToken(input, flag, flag.length(), afterCommand) >= 0) {
+                return true;
+            }
+            search = afterCommand;
+        }
+    }
+
     /**
      * The representation the closed-list pass matches against: NFKC,
      * then the bidi-control and zero-width strip. This MUST stay the

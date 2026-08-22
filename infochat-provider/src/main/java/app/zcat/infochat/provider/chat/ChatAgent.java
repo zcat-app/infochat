@@ -5,6 +5,7 @@ import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
+import app.zcat.infochat.core.llm.LlmOutputSanitizerCore;
 import app.zcat.infochat.core.util.JsonEscaper;
 import app.zcat.infochat.llm.EmbeddingProvider;
 import app.zcat.infochat.llm.EmbeddingResult;
@@ -22,6 +23,7 @@ import app.zcat.infochat.provider.help.HelpTopicCorpus;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.messaging.HelpCommandHandler;
 import app.zcat.infochat.provider.messaging.HelpCommandHandler.CallerTier;
+import app.zcat.infochat.provider.messaging.HelpCommandHandler.HelpTier;
 import app.zcat.infochat.provider.messaging.InboundContext;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -561,7 +563,11 @@ public class ChatAgent {
         // block delivered).
         String deliveredTopicSlug = null;
         String deliveredCommandName = null;
-        if (!breakerRegistry.wouldShortCircuit(ModelTask.CHAT_AGENT)) {
+        // Echo-probe gate (docs/spec/commands.md §Chat mode): an inbound
+        // carrying a closed-list command token delivers no help block —
+        // both probes are skipped, so the M1-685 directive stays un-armed.
+        if (!breakerRegistry.wouldShortCircuit(ModelTask.CHAT_AGENT)
+                && !LlmOutputSanitizerCore.containsClosedListToken(userMessage)) {
             Optional<String> deliveryVector = embedDeliveryQueryLiteral(userMessage, userId);
             if (deliveryVector.isPresent()) {
                 deliveredTopicSlug =
@@ -569,6 +575,13 @@ public class ChatAgent {
                 if (deliveredTopicSlug == null) {
                     deliveredCommandName = lookupIntentForDelivery(
                             deliveryVector.get(), userId, scopeKind, scopeId).orElse(null);
+                    // Privileged-tier usage is DM-only: a BOT_ADMIN or
+                    // GROUP_ADMIN match in a group would disclose admin
+                    // syntax to every member; USER_OR_GROUP_ADMIN is fine.
+                    if (deliveredCommandName != null && "group".equals(scopeKind)
+                            && privilegedTier(helpHandler.tierOf(deliveredCommandName))) {
+                        deliveredCommandName = null;
+                    }
                 }
             }
         }
@@ -1040,6 +1053,12 @@ public class ChatAgent {
                     + "; no topic block will be delivered", e);
             return Optional.empty();
         }
+    }
+
+    /** Whether the matched command's catalogue tier is BOT_ADMIN or
+     * GROUP_ADMIN — privileged usage a group scope must not receive. */
+    private static boolean privilegedTier(Optional<HelpTier> tier) {
+        return tier.map(t -> t == HelpTier.BOT_ADMIN || t == HelpTier.GROUP_ADMIN).orElse(false);
     }
 
     /**

@@ -480,6 +480,19 @@ public class HelpCommandHandler implements CommandHandler {
         return Optional.empty();
     }
 
+    /** The catalogue tier of a command name, with the same normalization
+     * {@link #composeUsageBlock} applies — a pure CATALOGUE walk with no
+     * visibility check; stateless w.r.t. the instance. */
+    public Optional<HelpTier> tierOf(String commandName) {
+        String name = normalizeCommandName(commandName);
+        for (CommandHelp entry : CATALOGUE) {
+            if (entry.command().equals(name)) {
+                return Optional.of(entry.tier());
+            }
+        }
+        return Optional.empty();
+    }
+
     private void appendEnabledAssets(StringBuilder body) {
         String language = inboundContext.effectiveLanguage();
         for (AssetRegistry.AssetEntry asset : assetRegistry.getEnabledAssets()) {

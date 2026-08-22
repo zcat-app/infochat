@@ -1873,6 +1873,19 @@ path is one of the two authorized post-sanitize accretions under the
 security.md §LLM output sanitizer amendment (the other is the D69 topic
 answer block below; at most one of the two appears in any reply).
 
+Two deterministic conditions suppress delivery, decided at the emission
+point itself rather than at append time (so the model's context is never
+told to defer to a block that will not arrive): a caller whose own inbound
+text contains a closed-list command token receives no help block of either
+kind — neither the usage block nor the topic answer block — with the token
+test running on the sanitizer's canonical form under the closed list's
+per-entry matching rules, so a canonical-equivalent spelling (zero-width or
+fullwidth variants) cannot evade it, while a bare mention of a command
+whose closed-list forms are all flag-bearing (`/list-sources` without a
+flag) does not suppress; and a usage block for a command of the
+catalogue's `BOT_ADMIN` or `GROUP_ADMIN` tier is delivered in DM scope
+only — a group delivery would expose the admin syntax to every member.
+
 **Conversational refinement recovers a weak or ambiguous first answer.**
 In a plain-text messaging surface there are no buttons or facets, so a
 follow-up question or an offered pivot is the only recovery UX. When the
@@ -1933,7 +1946,10 @@ probe (`CommandIntentIndex.lookupTopic`, doc_kind-scoped, tier-flat per
 D68) running FIRST. A topic match short-circuits the command probe —
 topic-over-command precedence: a caller whose question trips both wants
 the explanation, not a bare usage block — so AT MOST ONE help block (of
-either kind) appears in any reply. The answer is served from the
+either kind) appears in any reply. The closed-list token condition
+recorded under D67 above suppresses this block too: an inbound quoting a
+closed-list command token delivers no topic answer block either. The
+answer is served from the
 in-memory corpus's bundle key at the scope's `/lang` (match-not-assert:
 the probe returns a slug pointer, never stored text; a stale pointer
 degrades to no block) and passes through neither `TranslationPipeline`
