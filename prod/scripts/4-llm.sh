@@ -639,12 +639,25 @@ case "$backend" in
       *) echo "FAIL: INFOCHAT_LLAMACPP_GPU must be on|off (got '$llamacpp_gpu')." >&2; exit 1 ;;
     esac
     LLAMACPP_COMPOSE_FILES=(-f "$COMPOSE_FILE")
+    # Serving shape + caps follow the GPU probe — computed and printed, never
+    # prompted (the probe's own posture). GPU class is the campaign-measured
+    # prod candidate; CPU class pins the tested single-slot posture (M1-905).
     if [[ "$gpu_on" -eq 1 ]]; then
       LLAMACPP_COMPOSE_FILES+=(-f "$GPU_OVERLAY")
       gpu_build="Vulkan build (docker-compose.gpu.yml merged)"
       gpu_rootless_acl_gate
+      set_secret INFOCHAT_LLAMACPP_PARALLEL "3"
+      set_secret INFOCHAT_LLAMACPP_CTX "32768"
+      # GTT pages pin to the container cgroup, so the base 7g/3.0 caps OOM the
+      # GPU model class — the cap writes ride the same gpu_on condition (P14).
+      set_secret INFOCHAT_LLAMACPP_MEMORY "40g"
+      set_secret INFOCHAT_LLAMACPP_CPUS "12"
+      echo "GPU serving class: parallel=3, ctx=32768, memory=40g, cpus=12 (measured prod candidate)"
     else
       gpu_build="CPU build (base file only)"
+      set_secret INFOCHAT_LLAMACPP_PARALLEL "1"
+      set_secret INFOCHAT_LLAMACPP_CTX "4096"
+      echo "CPU serving class: parallel=1, ctx=4096"
     fi
     echo "GPU probe: /dev/dri render nodes ${render_nodes}; INFOCHAT_LLAMACPP_GPU=${llamacpp_gpu} -> llama.cpp ${gpu_build}"
     echo "+ docker compose ${LLAMACPP_COMPOSE_FILES[*]} --env-file $SECRETS_FILE --profile prod --profile llamacpp up -d llamacpp"
@@ -898,6 +911,12 @@ esac
 if [[ "$backend" == "remote" ]]; then
   chat_timeout_default=60000;  chat_maxtok_default=1024
   summ_timeout_default=60000;  summ_maxtok_default=1024
+elif [[ "$backend" == "llamacpp" && "${gpu_on:-0}" -eq 1 ]]; then
+  # GPU/benchmark class: 600 tokens at the P3 worst case 31.4 tok/s/stream
+  # ≈ 19.1s decode + ≤ ~7s prompt ≈ 26s ≪ 60s, and idle slots cost nothing —
+  # 60s cannot hide a wedged turn the way 240s did (the D-16 lesson).
+  chat_timeout_default=60000;  chat_maxtok_default=600
+  summ_timeout_default=60000;  summ_maxtok_default=400
 else
   case "$profile" in
     pi) chat_timeout_default=480000; chat_maxtok_default=400
@@ -924,3 +943,12 @@ set_prop infochat.llm.summarizer.timeout-ms "$summ_timeout"
 set_prop infochat.llm.summarizer.max-tokens "$summ_maxtok"
 set_prop infochat.chat.reply-mode "$reply_mode"
 echo "+ wrote LLM timing: chat ${chat_timeout} ms / ${chat_maxtok} tokens; summarizer ${summ_timeout} ms / ${summ_maxtok} tokens"
+# D-15: CPU-class local serving is the only class with ingest-timeout failure
+# evidence (101 failures/3h at 2.9 tok/s); the benchmark class holds at the
+# 30s in-app default (~8x margin, measured) and remote is sized by M1-550.
+if [[ "$backend" != "remote" && "${gpu_on:-0}" -ne 1 ]]; then
+  for task in security tagger entity classifier translator; do
+    set_prop "infochat.llm.${task}.timeout-ms" "$chat_timeout"
+  done
+  echo "+ scaled ingest-role timeouts to the answered chat timeout (${chat_timeout} ms)"
+fi

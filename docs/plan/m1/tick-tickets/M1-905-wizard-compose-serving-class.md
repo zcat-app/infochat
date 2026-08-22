@@ -1,7 +1,7 @@
 ---
 id: M1-905
 title: "Compose+wizard llamacpp serving keys and GPU timing class"
-status: pending
+status: done
 created: 2026-08-22
 last_updated: 2026-08-22
 flow: tick
@@ -72,7 +72,7 @@ acceptance:
   - "D-15 NIT — CPU-CLASS-ONLY INGEST WRITE (P12): on CPU-class local backends (llamacpp with gpu_on=0, and the ollama branch on laptop/vps/pi), the wizard writes infochat.llm.{security,tagger,entity,classifier,translator}.timeout-ms at the ANSWERED chat timeout value (the prose slider the D-15 recommendation names) via set_prop, no new prompts. GPU-class and remote write NOTHING for ingest roles: 30s is measured adequate ~8x on the benchmark class (93/93 attempt=1, worst 3.76s — `.scratch/v2-fix-d15-measurement-20260822.md`) and remote was sized deliberately by M1-550. LlamacppWiringTest gains a CPU-class drive asserting the five keys at the answered value and the GPU drive asserts their ABSENCE (failure-mode: the measured-adequate class must not inherit the slow-class write)."
   - "FAILURE-MODE: LlamacppWiringTest.forcedGpuOffKeepsCpuServingClass (test_plan.adds) — INFOCHAT_LLAMACPP_GPU=off on the llamacpp branch yields serving secrets 1/4096, NO memory/cpus cap secrets, the 240000/600 + 240000/400 timing, and the CPU-class ingest writes: a GPU branch that leaks its serving class, caps, or timing onto a CPU-forced host fails this drive."
   - "DOCS: docs/design/07-deployment.md §7.8.3's env-key table gains INFOCHAT_LLAMACPP_PARALLEL and INFOCHAT_LLAMACPP_CTX rows (defaults, what they map to, the LLAMA_ARG_N_PARALLEL naming trap) and records the GPU-class cap writes through the existing INFOCHAT_LLAMACPP_MEMORY/CPUS keys plus the overlay's unconditional LLAMA_ARG_N_GPU_LAYERS=999 pin; §7.7.2's step-4 row records the GPU-class serving-key writes, cap writes, and timing recommendations; docs/design/05-llm-and-embeddings.md's timeout paragraph (:202-206) records that CPU-class wizard runs scale the five ingest-role timeouts with the prose slider and why (30s in-app default fits fast backends only). Verification: `git diff --stat docs/` shows exactly these two design files."
-  - "Drive-layer discipline (P13): every pre-existing LlamacppWiringTest drive's stdin, assertions, and fake docker/curl scripts are byte-untouched — `git diff` shows no hunk inside any existing test method body or fake-script string (the M1-896 discipline); the overlay's pre-existing image/devices/group_add assertions (gpuOverlayPinsVulkanImageAndDeviceKeysForBothServices) stay green against the extended overlay."
+  - "Drive-layer discipline (P13): every pre-existing LlamacppWiringTest drive's stdin, assertions, and fake docker/curl scripts are byte-untouched — `git diff` shows no hunk inside any existing test method body or fake-script string (the M1-896 discipline); the overlay's pre-existing image/devices/group_add assertions (gpuOverlayPinsVulkanImageAndDeviceKeysForBothServices) stay green against the extended overlay. ONE carve-out (owner-approved 2026-08-22 at /tick start): llamacppEmbeddingsShapePointsAtEmbeddingsServiceNeverGenerativeGguf's runWizard call gains `INFOCHAT_LLAMACPP_GPU=off` — the verify host's real /dev/dri makes `auto` GPU-class there, and the new GPU timing branch would otherwise render 60000 against the drive's untouched 240000 pins; the added env pins the CPU class the drive was written against and is the only hunk inside a pre-existing drive body."
   - "`./mvnw -B -pl infochat-llm-adapter test -Dtest='LlamacppWiringTest,RemoteLlmWiringTest'` is green AND mvn verify from the repo root is green (engineering-rules §5)."
 test_plan:
   adds:
@@ -86,11 +86,34 @@ spec_refs:
   - docs/design/05-llm-and-embeddings.md
 decision_refs:
   - D49
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-22
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "8 files changed, 228 insertions(+), 19 deletions(-)"
+    verdict_file: .scratch/tick-review-M1-905-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-22
+  result: pass-with-one-owner-approved-refinement
+  notes: >-
+    All file:line citations spot-checked and accurate. b9776 --help verified
+    on the pinned image (docker run --rm ghcr.io/ggml-org/llama.cpp:server-b9776
+    --help): --parallel default is -1 (auto; env LLAMA_ARG_N_PARALLEL) — the
+    :-1 compose default stands as the authorized deliberate pin; --ctx-size
+    default is 0 (loaded from model; env LLAMA_ARG_CTX_SIZE), NOT 4096 —
+    acceptance-1's contingency applied: the compose ctx default lands at :-0
+    (byte-equivalent to today's unset render), correction recorded in the
+    commit message. Verify host has /dev/dri/renderD128 (confirmed by probe),
+    so under INFOCHAT_LLAMACPP_GPU=auto the pre-existing
+    llamacppEmbeddingsShapePointsAtEmbeddingsServiceNeverGenerativeGguf drive
+    runs GPU-class and the new GPU timing branch would break its untouched
+    240000 pins; owner approved at /tick start (2026-08-22) the acceptance-9
+    carve-out: that one drive's runWizard call gains INFOCHAT_LLAMACPP_GPU=off
+    (class pin only — stdin, assertions, fake scripts byte-identical).
 ---
 
 # M1-905: Compose+wizard llamacpp serving keys and GPU timing class
@@ -293,8 +316,10 @@ overlay's image/devices and ngl pin, which is offload posture, not sizing).
 A new profile (the GPU signal is the wizard's own probe). In-app defaults,
 the resource-cap KEYS, and their base-file default values — CPU-class and
 remote/ollama write nothing through the cap keys. New prompts of any kind.
-Re-tuning the 10b/campaign numbers. No pre-existing test is modified; a
-drive that genuinely conflicts is a start-hurdle escalation, not a silent
-edit (§8). Note for the implementor: the remote branch keeps its M1-550
+Re-tuning the 10b/campaign numbers. No pre-existing test is modified except
+the single acceptance-9 carve-out (the class-pinning env on
+llamacppEmbeddingsShapePointsAtEmbeddingsServiceNeverGenerativeGguf,
+owner-approved 2026-08-22); any OTHER genuinely conflicting drive is a
+start-hurdle escalation, not a silent edit (§8). Note for the implementor: the remote branch keeps its M1-550
 60000/1024 prose values and 30s-default ingest roles — this ticket adds
 nothing there.

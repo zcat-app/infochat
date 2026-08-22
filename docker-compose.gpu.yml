@@ -29,6 +29,11 @@
 services:
   llamacpp:
     image: ghcr.io/ggml-org/llama.cpp:server-vulkan-b9776
+    # All-layers offload pin (M1-905): fit-to-device auto can degrade SILENTLY
+    # into partial offload; an explicit 999 fails loud at model load if the
+    # model does not fit. Unconditional — the overlay is GPU-only by definition.
+    environment:
+      LLAMA_ARG_N_GPU_LAYERS: "999"
     devices:
       - /dev/dri:/dev/dri
     group_add:
@@ -37,6 +42,9 @@ services:
 
   llamacpp-embeddings:
     image: ghcr.io/ggml-org/llama.cpp:server-vulkan-b9776
+    # Same fail-loud offload pin as the generative service (M1-905).
+    environment:
+      LLAMA_ARG_N_GPU_LAYERS: "999"
     devices:
       - /dev/dri:/dev/dri
     group_add:

@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
@@ -200,6 +201,21 @@ class LlamacppWiringTest {
     }
 
     @Test
+    void gpuOverlayPinsAllLayersOffloadAndBaseStaysFree() throws IOException {
+        // M1-905 amendment b: the explicit all-layers pin fails LOUD at model
+        // load where b9776's fit-to-device auto offload would degrade SILENTLY
+        // into partial offload; the overlay is GPU-only by definition.
+        for (String service : new String[] {"llamacpp", "llamacpp-embeddings"}) {
+            String block = composeServiceBlock("docker-compose.gpu.yml", service);
+            assertTrue(block.contains("LLAMA_ARG_N_GPU_LAYERS: \"999\""),
+                    "GPU overlay " + service + " must pin all-layers offload:\n" + block);
+        }
+        assertFalse(Files.readString(repoRoot().resolve("docker-compose.yml")).contains("LLAMA_ARG_N_GPU_LAYERS"),
+                "the base file must declare no ngl key — GPU wiring stays overlay-only so the base"
+                        + " file stays startable on GPU-less hosts (M1-744)");
+    }
+
+    @Test
     void baseComposeDeclaresNoDevicePassthrough() throws IOException {
         // Docker fails container creation when a `devices:` path is absent, so a
         // devices: key in the BASE file would break every host without an iGPU
@@ -226,6 +242,34 @@ class LlamacppWiringTest {
                         + " (F-live-8, M1-560)");
     }
 
+    @Test
+    void composeExposesParallelAndCtxKeysWithSafeDefaults() throws IOException {
+        // M1-905: serving shape is operator-settable on the generative service
+        // only. parallel default 1 = deliberate pin (image default is 4 auto
+        // slots); ctx default 0 = b9776's own --ctx-size default (from model).
+        String gen = composeServiceBlock("llamacpp");
+        assertTrue(gen.contains("LLAMA_ARG_N_PARALLEL: \"${INFOCHAT_LLAMACPP_PARALLEL:-1}\""),
+                "generative llamacpp must expose operator-settable slots:\n" + gen);
+        assertTrue(gen.contains("LLAMA_ARG_CTX_SIZE: \"${INFOCHAT_LLAMACPP_CTX:-0}\""),
+                "generative llamacpp must expose operator-settable ctx (default 0 = b9776 from-model default):\n" + gen);
+        String emb = composeServiceBlock("llamacpp-embeddings");
+        assertFalse(emb.contains("LLAMA_ARG_N_PARALLEL"),
+                "embeddings service stays single-slot (M1-905 out-of-scope):\n" + emb);
+        assertFalse(emb.contains("LLAMA_ARG_CTX_SIZE"),
+                "embeddings service carries no ctx key (M1-905 out-of-scope):\n" + emb);
+        // P9: LLAMA_ARG_PARALLEL is silently IGNORED by llama-server and is NOT
+        // a substring of LLAMA_ARG_N_PARALLEL, so a plain scan is exact — the
+        // wrong name must appear nowhere on the compose/wizard surface.
+        List<String> surfaces = new ArrayList<>(List.of("docker-compose.yml", "docker-compose.gpu.yml"));
+        try (Stream<Path> scripts = Files.list(repoRoot().resolve("prod/scripts"))) {
+            scripts.forEach(p -> surfaces.add("prod/scripts/" + p.getFileName()));
+        }
+        for (String surface : surfaces) {
+            assertFalse(Files.readString(repoRoot().resolve(surface)).contains("LLAMA_ARG_PARALLEL"),
+                    "the silently-ignored wrong env name LLAMA_ARG_PARALLEL must appear nowhere: " + surface);
+        }
+    }
+
     // --- Generated config (drive the real wizard) -------------------------------
 
     @Test
@@ -234,7 +278,11 @@ class LlamacppWiringTest {
             throws Exception {
         // stdin: backend=llamacpp, generative=pinned (Enter), embeddings=llamacpp
         // (Enter), embeddings GGUF=pinned (Enter), timing defaults (4× Enter).
-        Map<String, String> props = runWizard(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT);
+        // GPU forced OFF (M1-905 carve-out): `auto` is GPU-class on a /dev/dri
+        // host, which the GPU timing branch would render 60000 against this
+        // drive's vps-class pins — the env pins the CPU class it was written for.
+        Map<String, String> props = runWizard(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "off"));
 
         assertEquals(GEN_GGUF, props.get("infochat.llm.chat.model"),
                 "every LLM task must use the generative GGUF");
@@ -631,6 +679,26 @@ class LlamacppWiringTest {
 
     @Test
     @EnabledOnOs(OS.LINUX)
+    void cpuClassIngestTimeoutsTrackTheAnsweredChatTimeout(@TempDir Path tmp) throws Exception {
+        // D-15: CPU-class local backends scale the five ingest-role timeouts to
+        // the ANSWERED chat timeout. The ollama arm is CPU-class by
+        // construction (gpu_on is unset there), so this drive needs no seam.
+        Files.writeString(Files.createDirectories(tmp.resolve("runtime")).resolve("secrets.env"), "");
+        Map<String, String> props = runWizard(tmp,
+                "ollama\n300000\n600\n360000\n400\n" + ACCEPT_REPLYMODE_DEFAULT);
+
+        assertEquals("300000", props.get("infochat.llm.chat.timeout-ms"),
+                "the answered chat timeout must be written");
+        assertEquals("360000", props.get("infochat.llm.summarizer.timeout-ms"),
+                "the answered summarizer timeout must be written");
+        for (String task : List.of("security", "tagger", "entity", "classifier", "translator")) {
+            assertEquals("300000", props.get("infochat.llm." + task + ".timeout-ms"),
+                    "ingest role " + task + " must track the answered CHAT timeout, not the summarizer's");
+        }
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
     void ollamaBackendOnRemoteLlmProfileRefuses(@TempDir Path tmp) throws Exception {
         Path runtime = Files.createDirectories(tmp.resolve("runtime"));
         Files.writeString(runtime.resolve("application.properties"), "quarkus.profile=remote-llm\n");
@@ -890,6 +958,72 @@ class LlamacppWiringTest {
             assertEquals(1, ups.size(), "exactly one compose up for " + service + ":\n" + argv);
             assertTrue(ups.get(0).contains(base),
                     service + " up must keep the base compose file:\n" + ups.get(0));
+        }
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void gpuHostGetsBenchmarkServingClassAndTiming(@TempDir Path tmp) throws Exception {
+        // M1-905: the GPU class is the campaign-measured prod candidate —
+        // parallel=3 / ctx 32768 with memory 40g / cpus 12 (the caps ride the
+        // same gpu_on condition: GTT pages pin to the cgroup — P14).
+        Map<String, String> props = runWizard(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "on"));
+
+        assertEquals("60000", props.get("infochat.llm.chat.timeout-ms"),
+                "GPU class recommends the 60s chat timeout (M1-548 derivation from the P3 worst case)");
+        assertEquals("600", props.get("infochat.llm.chat.max-tokens"),
+                "GPU class keeps the 600-token chat cap");
+        assertEquals("60000", props.get("infochat.llm.summarizer.timeout-ms"),
+                "GPU class recommends the 60s summarizer timeout");
+        assertEquals("400", props.get("infochat.llm.summarizer.max-tokens"),
+                "GPU class keeps the 400-token summarizer cap");
+
+        String secrets = Files.readString(tmp.resolve("runtime/secrets.env"));
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_PARALLEL=\"3\""),
+                "GPU class must write the measured 3-slot serving secret:\n" + secrets);
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_CTX=\"32768\""),
+                "GPU class must write the measured 32768 ctx secret:\n" + secrets);
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_MEMORY=\"40g\""),
+                "GPU class must write the 40g memory cap through the M1-744 key:\n" + secrets);
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_CPUS=\"12\""),
+                "GPU class must write the 12-cpu cap through the M1-744 key:\n" + secrets);
+
+        for (String task : List.of("security", "tagger", "entity", "classifier", "translator")) {
+            assertFalse(props.containsKey("infochat.llm." + task + ".timeout-ms"),
+                    "GPU class writes NO ingest-role override (30s default measured adequate ~8x — D-15): " + task);
+        }
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void forcedGpuOffKeepsCpuServingClass(@TempDir Path tmp) throws Exception {
+        // M1-905 failure-mode: a GPU-class leak (serving values, caps, timing)
+        // onto a CPU-forced host must fail here — the base defaults ARE the
+        // intended CPU-class posture (P15 absence twins).
+        Map<String, String> props = runWizard(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "off"));
+
+        assertEquals("240000", props.get("infochat.llm.chat.timeout-ms"),
+                "CPU-forced host must keep the vps-class chat timing");
+        assertEquals("600", props.get("infochat.llm.chat.max-tokens"));
+        assertEquals("240000", props.get("infochat.llm.summarizer.timeout-ms"),
+                "CPU-forced host must keep the vps-class summarizer timing");
+        assertEquals("400", props.get("infochat.llm.summarizer.max-tokens"));
+
+        String secrets = Files.readString(tmp.resolve("runtime/secrets.env"));
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_PARALLEL=\"1\""),
+                "CPU class must pin the acceptance-tested single-slot posture:\n" + secrets);
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_CTX=\"4096\""),
+                "CPU class must write the 4096 ctx secret:\n" + secrets);
+        assertFalse(secrets.lines().anyMatch(l -> l.startsWith("INFOCHAT_LLAMACPP_MEMORY=")),
+                "CPU-forced host must get NO GPU memory-cap write (P15):\n" + secrets);
+        assertFalse(secrets.lines().anyMatch(l -> l.startsWith("INFOCHAT_LLAMACPP_CPUS=")),
+                "CPU-forced host must get NO GPU cpus-cap write (P15):\n" + secrets);
+
+        for (String task : List.of("security", "tagger", "entity", "classifier", "translator")) {
+            assertEquals("240000", props.get("infochat.llm." + task + ".timeout-ms"),
+                    "CPU class scales the ingest roles to the answered chat timeout (D-15): " + task);
         }
     }
 

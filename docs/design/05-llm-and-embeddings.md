@@ -205,8 +205,15 @@ The default fits a fast backend; prose tasks (chat, summarizer) on a slow
 local host need far more (a timed-out call is cancelled client-side while the
 server keeps decoding, and the retries congest it — F-live-5). The setup
 wizard (step 4, `4-llm.sh`) collects both keys for chat and summarizer as a
-pair, with recommended defaults keyed on backend (remote vs local) then
-profile, per the invariant above.
+pair, with recommended defaults keyed on backend (remote vs local, and a
+GPU-class llamacpp host getting the benchmark timing) then profile, per the
+invariant above. CPU-class local wizard runs also scale the five ingest-role
+timeouts (`security`, `tagger`, `entity`, `classifier`, `translator`) to the
+answered chat timeout: the 30s in-app default fits fast backends only, and
+CPU-class serving is the measured failing class (a 338-token tagger prompt
+alone needs ~11s of prompt processing there), while the benchmark class
+keeps the default (~8x measured margin) and remote keeps its deliberate
+sizing.
                                                                                  
 AnthropicProvider                                                                                                                                                                                                                                     
                                                                                  
