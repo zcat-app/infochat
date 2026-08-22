@@ -441,11 +441,10 @@ requires more than deterministic bytes: it requires a deterministic
 and deterministic while the decision to emit it is the model's does
 **not** qualify — that shape is inside the sanitizer's mandate, not
 the exemption, and passes through the outbound regex pass like any
-other LLM-authored output (motivating finding:
-`docs/plan/m1/redteam/M1-648-2026-07-19-r2.md` — a post-sanitize,
-model-elected append of privileged command usage into a chat reply,
-byte-true against the old exemption's prose and contract-false under
-this one). The "driven by the parsed user request" qualifier is
+other LLM-authored output (the motivating finding: a
+post-sanitize, model-elected append of privileged command usage
+into a chat reply — byte-true against the old exemption's prose,
+contract-false under this one). The "driven by the parsed user request" qualifier is
 load-bearing: the caller's own inbound text is the same trust grade
 `/help` itself runs on, whereas the model's context is
 attacker-influenced by this threat model's own admission
