@@ -15,6 +15,9 @@
 #
 # Embedding-backend probe: an absent embedding backend is a SUPPORTED degraded mode; this
 # leg SURFACES, never fails (WARN line, exit unchanged). Direct probe = liveness; scan = build outcome.
+# Config-freshness leg: a runtime config file newer than a service's last start means
+# that service booted before the rewrite — config is read at boot only (spec §Bootstrap
+# behavior on startup) — a WARN, never a failure.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,6 +51,8 @@ usage() {
   echo "  elapses, probe the embedding backend, then print a green/red summary."
   echo "  Exits non-zero on timeout; a degraded embedding backend is a WARN,"
   echo "  never a failure (supported degraded mode)."
+  echo "  Also WARNs when a runtime config file is newer than the last start of a"
+  echo "  service that reads it — config is read at boot (never a failure)."
   echo "  --defaults  accepted no-op (this step has no prompts)."
 }
 
@@ -116,13 +121,13 @@ provider_health_body="$last_health_body"
 # Embedding-backend probe — WARN-only: a dead embedder is a supported degraded
 # mode, never a wizard failure (M1-818 P6) — restore.sh propagates a non-zero verify exit as a
 # cutover blocker, which would wrongly block a legitimate degraded clone.
-embedding_probe_note() {
+warn_note() {
   summary+=("WARN      $1")
   warn_count=$((warn_count + 1))
 }
 
 if [[ ! -f "$CONFIG_FILE" ]]; then
-  embedding_probe_note "embedding probe skipped — $CONFIG_FILE not found; cannot classify the embedding backend."
+  warn_note "embedding probe skipped — $CONFIG_FILE not found; cannot classify the embedding backend."
 else
   embed_url="$(read_prop 'infochat.embeddings.base-url')"
   embed_model="$(read_prop 'infochat.embeddings.model')"
@@ -130,12 +135,12 @@ else
     "$OLLAMA_EMBED_URL")
       echo "+ docker compose exec ollama ollama list (embedding-backend probe)"
       if [[ -z "$embed_model" ]]; then
-        embedding_probe_note "embedding probe skipped — infochat.embeddings.model is unset in $CONFIG_FILE."
+        warn_note "embedding probe skipped — infochat.embeddings.model is unset in $CONFIG_FILE."
       elif model_list="$(docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod --profile ollama exec -T ollama ollama list 2>/dev/null)" \
           && printf '%s' "$model_list" | grep -qF "$embed_model"; then
         summary+=("GREEN     embedding backend (ollama) — serving model $embed_model")
       else
-        embedding_probe_note "embedding backend (ollama) is absent or not serving model $embed_model — free-text help matching and topic answers are degraded (safe degraded mode; commands and every security control keep working). Recovery: SETUP_GUIDE.md row 'Bot runs, but free-text help is dead'."
+        warn_note "embedding backend (ollama) is absent or not serving model $embed_model — free-text help matching and topic answers are degraded (safe degraded mode; commands and every security control keep working). Recovery: SETUP_GUIDE.md row 'Bot runs, but free-text help is dead'."
       fi
       ;;
     "$LLAMACPP_EMBED_URL")
@@ -146,14 +151,14 @@ else
           curl -fsS "http://llamacpp-embeddings:8080/v1/models" >/dev/null 2>&1; then
         summary+=("GREEN     embedding backend (llama.cpp) — /v1/models answers")
       else
-        embedding_probe_note "embedding backend (llama.cpp) is absent or not serving — free-text help matching and topic answers are degraded (safe degraded mode; commands and every security control keep working). Recovery: SETUP_GUIDE.md row 'Bot runs, but free-text help is dead'."
+        warn_note "embedding backend (llama.cpp) is absent or not serving — free-text help matching and topic answers are degraded (safe degraded mode; commands and every security control keep working). Recovery: SETUP_GUIDE.md row 'Bot runs, but free-text help is dead'."
       fi
       ;;
     "")
-      embedding_probe_note "embedding probe skipped — infochat.embeddings.base-url is unset in $CONFIG_FILE."
+      warn_note "embedding probe skipped — infochat.embeddings.base-url is unset in $CONFIG_FILE."
       ;;
     *)
-      embedding_probe_note "embedding probe skipped — unrecognized infochat.embeddings.base-url '$embed_url' (expected $OLLAMA_EMBED_URL or $LLAMACPP_EMBED_URL)."
+      warn_note "embedding probe skipped — unrecognized infochat.embeddings.base-url '$embed_url' (expected $OLLAMA_EMBED_URL or $LLAMACPP_EMBED_URL)."
       ;;
   esac
 
@@ -162,8 +167,72 @@ else
   # help-corpora entries (a failed corpus build reports false).
   if [[ -n "$provider_health_body" ]] \
       && printf '%s' "$provider_health_body" | grep -Eq '"(command_intent|topic)": *false'; then
-    embedding_probe_note "Provider readiness reports a failed help-corpus build — free-text help matching and/or topic answers are degraded (safe degraded mode). Recovery: SETUP_GUIDE.md row 'Bot runs, but free-text help is dead'."
+    warn_note "Provider readiness reports a failed help-corpus build — free-text help matching and/or topic answers are degraded (safe degraded mode). Recovery: SETUP_GUIDE.md row 'Bot runs, but free-text help is dead'."
   fi
+fi
+
+# A runtime config file newer than a service's last start was rewritten after
+# that service booted; config is read at boot only (spec §Bootstrap behavior
+# on startup) — the health polls above vouch for the PRE-rewrite file.
+service_start_epoch() {
+  # Echo a service's container start as epoch seconds; return 1 when the
+  # start time is unobservable (absent container, ps/inspect/date failure) —
+  # the caller degrades to a note, never a RED or a fabricated WARN.
+  local service="$1" cid started epoch
+  echo "+ docker compose ps -q $service + docker inspect .State.StartedAt (config-freshness leg)" >&2
+  if ! cid=$(docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" --profile prod ps -q "$service" 2>/dev/null) \
+      || [[ -z "$cid" ]]; then
+    return 1
+  fi
+  if ! started=$(docker inspect --format '{{.State.StartedAt}}' "$cid" 2>/dev/null) \
+      || [[ -z "$started" ]] \
+      || ! epoch=$(date -d "$started" +%s 2>/dev/null); then
+    return 1
+  fi
+  echo "$epoch"
+}
+
+# WARN-only (the exit contract is non-zero iff a service never reaches UP)
+# and never mutating — the operator owns service cycling; the imperative
+# rule lives in docs/testing/USER_TEST_PLAN.md.
+declare -A START_EPOCH=()
+if epoch=$(service_start_epoch infochat-collector); then START_EPOCH[infochat-collector]="$epoch"; fi
+if epoch=$(service_start_epoch infochat-provider); then START_EPOCH[infochat-provider]="$epoch"; fi
+
+# File → services that read it, mirroring the real mounts (docker-compose.yml):
+# both apps read application.properties, secrets.env (--env-file) and
+# bootstrap-assets.json; bootstrap-sources.json is Collector-only.
+FRESHNESS_MAP=(
+  "application.properties:infochat-collector infochat-provider"
+  "secrets.env:infochat-collector infochat-provider"
+  "bootstrap-sources.json:infochat-collector"
+  "bootstrap-assets.json:infochat-collector infochat-provider"
+)
+freshness_gap=0
+for entry in "${FRESHNESS_MAP[@]}"; do
+  file="${entry%%:*}"
+  services="${entry#*:}"
+  path="$RUNTIME_DIR/$file"
+  if [[ ! -f "$path" ]]; then
+    continue # absence is legitimate (optional files; a missing CONFIG_FILE already warns above)
+  fi
+  if ! file_epoch=$(stat -c %Y "$path" 2>/dev/null); then
+    freshness_gap=1
+    continue
+  fi
+  affected=()
+  for service in $services; do
+    start="${START_EPOCH[$service]:-}"
+    if [[ -n "$start" ]] && (( file_epoch > start )); then
+      affected+=("$service")
+    fi
+  done
+  if (( ${#affected[@]} > 0 )); then
+    warn_note "$path is newer than the last start of ${affected[*]} — config is read at boot (spec §Bootstrap behavior on startup), so the running process still uses the pre-rewrite file. Restart the affected service and re-run 8-verify.sh to boot-verify the rewrite."
+  fi
+done
+if [[ ${#START_EPOCH[@]} -lt 2 || "$freshness_gap" -eq 1 ]]; then
+  echo "note: config freshness not checked — a container start time or file mtime was unobservable (docker compose ps / docker inspect / stat); the health summary is unaffected."
 fi
 
 echo

@@ -72,6 +72,16 @@ walkthrough in [SETUP_GUIDE.md](../../SETUP_GUIDE.md) and design detail in
 - **Watch for:** the data problem (below) — a freshly-set-up bot has *no posts*
   until the collector has fetched and evaluated a feed, so usage-phase commands
   look empty until then. Seed data (#2) or a short wait makes this concrete.
+- **Boot-verify after any runtime-config rewrite:** the runtime config files
+  (`prod/runtime/application.properties`, `bootstrap-sources.json`,
+  `bootstrap-assets.json`, `secrets.env`) are read at boot
+  ([deployment spec §Bootstrap behavior on startup](../spec/deployment.md)) and
+  never hot-reloaded. After ANY rewrite of one of them on a live stack, restart
+  the affected service and re-run `prod/scripts/8-verify.sh` before declaring
+  the step done — a green health poll of the pre-rewrite process says nothing
+  about the rewritten file. `8-verify.sh`'s config-freshness leg is the
+  detector: it WARNs when a runtime file is newer than the last start of a
+  service that reads it.
 
 ## Phase 2 — Admin config
 

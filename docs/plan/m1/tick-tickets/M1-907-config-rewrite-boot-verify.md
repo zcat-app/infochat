@@ -1,26 +1,24 @@
 ---
 id: M1-907
 title: 8-verify.sh config-freshness leg + boot-verify rule
-status: pending
+status: done
 created: 2026-08-22
-last_updated: 2026-08-22
+last_updated: 2026-08-23
 flow: tick
 reproduction: >-
-  to-be-written VerifyWiringTest#staleRuntimeFileWarnsAndNamesServiceAndFile
-  (child of a 2-ticket decomposition — analysis
-  docs/plan/m1/tick-analysis/d17-restore-retention-and-bootverify.md; `start`
-  converts the marker per workflow §0). Statically checkable absence (both
-  greps run at analysis time, empty results verified): `grep -n
-  'StartedAt\|mtime\|stat \|restart' prod/scripts/8-verify.sh` returns nothing
-  — the verify step polls the CURRENTLY RUNNING processes' /q/health and has
-  no config-freshness or boot check; `grep -in 'rewrite\|re-verify\|boot-verify\|config.*newer'
-  docs/testing/USER_TEST_PLAN.md` hits only the unrelated stale-RAW reaper
-  lines (:246-247) — no committed procedure encodes "a config rewrite is not
-  done until a boot proves it". Observed campaign sequence (final report §3,
-  /home/infochat/infochat/.scratch/V2.0.0-FIX-VERIFICATION-FINAL-REPORT-2026-08-22.md:78-83):
-  B4b's boot-fatal JSON-lines rewrite of bootstrap-sources.json (01:01Z) went
+  VerifyWiringTest#staleRuntimeFileWarnsAndNamesServiceAndFile — run RED at
+  start 2026-08-22 against the pre-change script (.scratch/tick-red-M1-907.log:
+  1953 run, 2 failures, both this ticket's — the stale case fails "exactly one
+  WARN line per stale file", the inspect case fails the skip-note assertion;
+  no staleness output exists today; fresh/absent pins pass as expected).
+  Original campaign evidence (final report §3,
+  .scratch/V2.0.0-FIX-VERIFICATION-FINAL-REPORT-2026-08-22.md:78-83): B4b's
+  boot-fatal JSON-lines rewrite of bootstrap-sources.json (01:01Z) went
   undetected until the next restart 11.5 h later (12:29Z crash-loop,
-  RestartCount 16) — "the postflight never boot-verified".
+  RestartCount 16) — "the postflight never boot-verified". Analysis-time
+  absence greps (both empty): 'StartedAt|mtime|stat |restart' absent from
+  prod/scripts/8-verify.sh; no boot-verify rule in
+  docs/testing/USER_TEST_PLAN.md.
 analysis_ref: docs/plan/m1/tick-analysis/d17-restore-retention-and-bootverify.md
 blocked_by: []
 files_scope:
@@ -93,11 +91,25 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-23
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY WARN (5-line comment block in VerifyWiringTest over the 3-line cap — informational, does not gate), SCOPE PASS"
+    diff_stats: "6 files changed, 406 insertions(+), 31 deletions(-)"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-907-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check: >-
+  2026-08-22 start self-check: census rows added for apps.sh (restart helper,
+  restart re-reads config; compliant) and pack.sh (reads runtime into a
+  bundle, never rewrites; compliant) with user approval — the enumeration now
+  re-runs clean. restore.sh line citations shifted by M1-906 landing at HEAD
+  (out-of-scope file; substance re-verified in-tree). The USER_TEST_PLAN
+  absence-grep transcription dropped the analysis's '|stale' term; absence
+  re-verified (0 hits as written; exactly :246-247 with 'stale' added).
 escalation_reason:
 ---
 
@@ -300,6 +312,13 @@ prod/scripts/*.sh` —
 - `prod/scripts/upgrade.sh` — its core function IS a rebuild + restart; an
   upgrade cannot declare done on a pre-rewrite process. Compliant by
   construction; untouched.
+- `prod/scripts/apps.sh` — start/stop/restart helper; names
+  bootstrap-sources.json in help text only and never rewrites config — its
+  `restart` IS the boot that re-reads mounted config. Compliant by
+  construction; untouched.
+- `prod/scripts/pack.sh` — packs the runtime dir INTO a bundle (`cp -p`
+  FROM `$RUNTIME_DIR` into staging); reads only, never rewrites a live
+  stack's config. Compliant; untouched.
 - docs/testing/ playbooks — the rule lands in USER_TEST_PLAN.md (this
   ticket); the campaign procedure itself is untracked `.scratch/` (nothing to
   edit; P16 forbids referencing it).
