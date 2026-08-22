@@ -1194,6 +1194,23 @@ for it; the manual steps 1-5 above remain the under-the-hood description of what
   the clone is faithful and the inherited state is legitimate source-host history
   (the D42 fetch ladder tripped there), so the WARN reports and the operator
   recovers — the restore never fails or auto-resets inherited failure state.
+  The same probe pass applies a **derivative retention floor**: when the restored
+  `post_embedding` / `post_entity` / `post_reference` partitions are older than the
+  effective retention (shipped default 4 days), the first prune tick after the
+  Collector start would DROP them — surfaces that never regenerate — so `restore.sh`
+  APPENDS raised derivative retention keys (`infochat.partitions.retention-days.post-embedding`
+  and its `post-entity` / `post-reference` siblings) to the placed
+  `application.properties` under a marker comment, each set to
+  the oldest restored partition's age (ceil, dated by partition END) plus a 30-day
+  grace, and only when that exceeds the effective value (raise-only — an operator's
+  higher override is never lowered). The WARN block names each table's oldest
+  partition, applied floor, lapse date, and the two operator actions (keep the
+  floor; lower the key back to the prior value to accept the drop); the final
+  banner repeats that a floor was applied, and a probe failure degrades to a
+  WARN-and-continue naming the manual check. A MANUAL §7.10 restore of a backup
+  older than the derivative horizon needs the same floor applied by hand before
+  the Collector starts, or the same prune tick drops those partitions on the
+  manually restored host.
 - **`shred-bundle.sh [-y|--yes] <target>`** — the closing step of the migration
   lifecycle: pack → transfer → restore → verify → **dispose**. Once the
   clone is verified healthy and the source decommissioned, the bundle — and any

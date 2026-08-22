@@ -785,6 +785,91 @@ if [[ "$failed_pair_rows" -gt 0 || "$failed_source_count" -gt 0 ]]; then
   fi
 fi
 
+# ── derivative retention floor (§7.10.1) ─────────────────────────────────
+# A bundle older than the shipped derivative retention (4d) would let the first
+# prune tick DROP the restored derivative partitions — never regenerated.
+
+# Raise the placed config's three derivative retention-days keys to cover the
+# restored age (+30d grace, raise-only — never lowering an operator override)
+# BEFORE the Collector start below; read-only probe, WARN-and-continue.
+
+DERIVATIVE_AGE_FILE="$STAGING/derivative-partition-ages.psv"
+RETENTION_FLOOR_APPLIED=0
+if docker compose -f "$COMPOSE_FILE" --env-file "$SECRETS_FILE" exec -T postgres \
+  sh -c 'PGPASSWORD="$INFOCHAT_DB_PASSWORD" psql -h 127.0.0.1 -U infochat -d infochat -tAq -v derivative_age_probe=1' \
+  <<'SQL' > "$DERIVATIVE_AGE_FILE" 2>/dev/null
+SELECT p.relname || '|' || c.relname
+  FROM pg_inherits i
+  JOIN pg_class c ON c.oid = i.inhrelid
+  JOIN pg_class p ON p.oid = i.inhparent
+  JOIN pg_namespace n ON n.oid = p.relnamespace
+ WHERE p.relname = ANY (ARRAY['post_embedding','post_entity','post_reference'])
+   AND n.nspname = current_schema()
+ ORDER BY 1;
+SQL
+then
+  declare -A oldest_part=()
+  while IFS='|' read -r parent child; do
+    [[ "$child" =~ ^${parent}_[0-9]{6}$ ]] || continue
+    if [[ -z "${oldest_part[$parent]:-}" || "$child" < "${oldest_part[$parent]}" ]]; then
+      oldest_part[$parent]="$child"
+    fi
+  done < "$DERIVATIVE_AGE_FILE"
+  now_epoch="$(date -u +%s)"
+  floor_keys=()
+  for parent in post_embedding post_entity post_reference; do
+    child="${oldest_part[$parent]:-}"
+    [[ -n "$child" ]] || continue
+    suffix="${child: -6}"
+    end_epoch="$(date -u -d "${suffix:0:4}-${suffix:4:2}-01 +1 month" +%s)"
+    age_days=$(( (now_epoch - end_epoch + 86399) / 86400 ))
+    # current/future-month partitions are pruner-protected already (the
+    # active-month floor guard) — only a positive age needs a raised horizon.
+    [[ "$age_days" -gt 0 ]] || continue
+    required=$((age_days + 30))
+    key="infochat.partitions.retention-days.${parent//_/-}"
+    effective="$(read_prop "$key")"
+    [[ -n "$effective" ]] || effective=4
+    if [[ "$required" -gt "$effective" ]]; then
+      lapse="$(date -u -d "@$((end_epoch + required * 86400))" +%Y-%m-%d)"
+      floor_keys+=("$key=$required")
+      echo "WARN: derivative retention floor applied to $CONFIG_FILE — the restored" >&2
+      echo "      $parent partitions (oldest: $child) are ${age_days}d past their partition" >&2
+      echo "      end; the effective retention ${effective}d would let the Collector's first" >&2
+      echo "      prune tick DROP them (dropped derivative partitions never regenerate, and" >&2
+      echo "      restored in-flight rows retry their embedding INSERTs into them every tick" >&2
+      echo "      — on remote profiles that burns the paid embedding API):" >&2
+      echo "        $key=$required (raise-only; the floor lapses $lapse, after which the" >&2
+      echo "        oldest partition becomes prunable again)" >&2
+      echo "        - keep the floor to preserve the restored $parent partitions, or" >&2
+      echo "        - lower $key back to ${effective} to accept the drop" >&2
+      RETENTION_FLOOR_APPLIED=1
+    fi
+  done
+  if [[ "${#floor_keys[@]}" -gt 0 ]]; then
+    # an unterminated staged config would fuse its last line with the marker —
+    # # mid-line is not a comment in a properties file
+    if [[ -n "$(tail -c1 "$CONFIG_FILE")" ]]; then
+      printf '\n' >> "$CONFIG_FILE"
+    fi
+    {
+      printf '# derivative retention floor applied by restore.sh (§7.10.1) — raise-only; keep, or lower to accept pruning\n'
+      for entry in "${floor_keys[@]}"; do
+        printf '%s\n' "$entry"
+      done
+    } >> "$CONFIG_FILE"
+  fi
+else
+  echo "WARN: derivative-age probe failed (informational) — the restore-time derivative" >&2
+  echo "      retention floor was NOT evaluated; if this bundle is older than the derivative" >&2
+  echo "      retention (4d shipped), the Collector's first prune tick may DROP its restored" >&2
+  echo "      derivative partitions. List them manually (likewise post_entity," >&2
+  echo "      post_reference), then raise the retention-days keys on $CONFIG_FILE by hand" >&2
+  echo "      (§7.10.1):" >&2
+  echo "        docker compose -f $COMPOSE_FILE --env-file $SECRETS_FILE exec -T postgres \\" >&2
+  echo "          sh -c 'PGPASSWORD=\"\$INFOCHAT_DB_PASSWORD\" psql -h 127.0.0.1 -U infochat -d infochat -c \"\\d post_embedding\"'" >&2
+fi
+
 # ── re-provision models from the RESTORED backend config ────────────────
 # Idempotent, and WITHOUT re-running the interactive 4-llm.sh (which would
 # re-prompt and rewrite the config restore just laid down). The backend is read
@@ -1001,6 +1086,14 @@ DONE
 if [[ "$failed_pair_rows" -gt 0 || "$failed_source_count" -gt 0 ]]; then
   echo "  NOTE: this clone inherited $failed_pair_rows failed asset pair(s) and $failed_source_count failed source(s)" >&2
   echo "        from the source host — the WARN block above names the recovery actions (/asset-enable; §10.8b UPDATE fallback; /source-enable)." >&2
+fi
+
+# Same late-reading discipline for the retention floor: the note prints only
+# when a floor was applied — a clean clone stays silent.
+if [[ "$RETENTION_FLOOR_APPLIED" -eq 1 ]]; then
+  echo "  NOTE: a derivative retention floor was applied to $CONFIG_FILE for this bundle's age" >&2
+  echo "        — the WARN block above names the tables, floors, lapse dates, and how to lower" >&2
+  echo "        a key back to accept the drop." >&2
 fi
 
 if [[ "$verify_status" -ne 0 ]]; then

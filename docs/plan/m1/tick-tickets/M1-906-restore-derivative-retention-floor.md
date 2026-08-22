@@ -1,15 +1,19 @@
 ---
 id: M1-906
 title: Restore-time derivative retention floor + old-bundle WARN
-status: pending
+status: done
 created: 2026-08-22
 last_updated: 2026-08-22
 flow: tick
 reproduction: >-
-  to-be-written RestoreWiringTest#restoredOldDerivativePartitionsRaiseTheRetentionFloor
+  RestoreWiringTest#restoredOldDerivativePartitionsRaiseTheRetentionFloor
   (child of a 2-ticket decomposition — analysis
-  docs/plan/m1/tick-analysis/d17-restore-retention-and-bootverify.md; `start`
-  converts the marker per workflow §0). Probe against the current tree:
+  docs/plan/m1/tick-analysis/d17-restore-retention-and-bootverify.md; the
+  to-be-written marker was converted at start: the four cases were written
+  and this one run RED, with the failure-mode case, in
+  .scratch/tick-test-M1-906-r1-RED.log before any script change — the two
+  negative cases are vacuously green pre-fix and guard the post-fix shape).
+  Probe against the current tree:
   `grep -n 'retention' prod/scripts/restore.sh` returns nothing — the restore
   never adjusts retention for the bundle's age. Observed live (C-RT leg,
   2026-08-22, durable reproduction text
@@ -72,6 +76,7 @@ test_plan:
     - RestoreWiringTest.freshBundleLeavesRetentionConfigUntouched
     - RestoreWiringTest.highOperatorRetentionIsNeverLowered
     - RestoreWiringTest.derivativeAgeProbeFailureWarnsAndContinues
+    - RestoreWiringTest.unterminatedConfigFloorMarkerStartsOnOwnLine
   preserves:
     - all tests currently green on main
     - >-
@@ -96,11 +101,34 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-22
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS FAIL, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "5 files changed, 412 insertions(+), 13 deletions(-)"
+    rework_items: 1
+    verdict_file: .scratch/tick-review-M1-906-r1.txt
+  - round: 2
+    date: 2026-08-22
+    verdict: APPROVE
+    checks: "round-1 item 1 SATISFIED (newline guard at restore.sh:850-854 + RestoreWiringTest.unterminatedConfigFloorMarkerStartsOnOwnLine, RED-recorded); all five checks PASS"
+    diff_stats: "fix hunks: 4 files, +57/-2 (full: 5 files, +468/-14)"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-906-r2.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  checked: 2026-08-22
+  result: >-
+    All Root cause/Approach citations spot-checked and hold (restore.sh :451,
+    :212-216, :444-446, :671-731, :733-786, :892-893, :998-1004;
+    PartitionDdl.java:128-149 pruner predicate; EmbeddingWorker pickup floor;
+    docker-compose.yml:140 mount + no PARTITIONS pass-through;
+    07-deployment.md §7.10.1 :1126-1192, §7.10 :1082-1096). Census re-run
+    caught a draft gap — pack.sh (:204, comment-only pg_restore mention) had
+    no row; row added (out-of-class, no scope change). No blocking ambiguity.
 escalation_reason:
 ---
 
@@ -323,11 +351,28 @@ shipped derivative retention in force.** Re-runnable enumeration:
   backup is same-age by construction; nothing is old enough to prune).
 - `prod/scripts/backup.sh` (:8) — a dump-format comment; backup.sh has no
   restore path (M1-570's frozen contract). Out-of-class.
+- `prod/scripts/pack.sh` (:204) — a dump-format comment ("pg_restore-able")
+  on the READ-ONLY source-side packer; no restore path and no Collector
+  boot. Out-of-class (row added at start: the analysis-time enumeration
+  missed it; disposition same class as backup.sh).
 Plus the non-script site: the §7.10 MANUAL restore runbook
 (docs/design/07-deployment.md:1082-1096 — operator-hand pg_restore of an
 arbitrary-age backup) — disposition: covered by the §7.10.1 amendment's
 manual-path sentence (acceptance item 6); no script change is possible for a
 hand-driven path.
+
+## Round 1 rework
+
+1. Finding 1: in prod/scripts/restore.sh (before the append at :849-855),
+   guarantee the placed config ends with a newline so the floor's marker
+   comment always starts on its own line and the operator's last line survives
+   byte-identical, and add the RestoreWiringTest case pinning an unterminated
+   staged config — evaluated via the new
+   RestoreWiringTest.unterminatedConfigFloorMarkerStartsOnOwnLine case
+   (placed file starts with the staged bytes + `\n`; marker matches
+   `(?m)^# derivative retention floor`) plus the existing
+   restoredOldDerivativePartitionsRaiseTheRetentionFloor
+   `placed.startsWith(appProps)` assertion staying green.
 
 ## Pre-flight self-check (author-side)
 

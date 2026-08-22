@@ -9,8 +9,12 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.time.YearMonth;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 import java.util.zip.CRC32;
 
 import org.junit.jupiter.api.Test;
@@ -34,7 +38,9 @@ import org.junit.jupiter.api.io.TempDir;
  * bring-up) PLUS the M1-584 data-dir boundary refusals (a system-prefix or colon
  * value refused in the DATA_DIR validation loop, before any mount is built) PLUS the
  * M1-819 post-pg_restore Flyway-history gate (restored flyway_schema_history checksums vs
- * the checkout's migrations; drift fails loud BEFORE model rehydration/image build).</b>
+ * the checkout's migrations; drift fails loud BEFORE model rehydration/image build)
+ * PLUS the M1-906 restore-time derivative-retention floor (an old bundle's partitions
+ * raise the config's retention-days keys, raise-only, before the Collector start).</b>
  * The gate cases fail before the identity extraction, so they never mutate the host or
  * exercise Docker for real — the fake {@code docker} only has to satisfy
  * {@code command -v docker} and the one {@code docker volume ls} probe the fresh-volume gate
@@ -69,9 +75,10 @@ class RestoreWiringTest {
     // this restricted PATH.
     // awk: the M1-819 Flyway-history gate recomputes each checkout migration's
     // checksum with a dependency-free awk CRC32 (flyway_checksum).
+    // date: the M1-906 retention floor's epoch arithmetic (partition end, lapse date).
     private static final String[] REAL_TOOLS =
             {"bash", "dirname", "mktemp", "tar", "gzip", "grep", "tail", "rm",
-             "mkdir", "cp", "chmod", "tee", "sed", "cat", "sort", "awk"};
+             "mkdir", "cp", "chmod", "tee", "sed", "cat", "sort", "awk", "date"};
     private static final String[] TOOL_DIRS = {"/usr/bin", "/bin", "/usr/local/bin"};
 
     // The gates need only `command -v docker` to resolve and
@@ -96,6 +103,8 @@ class RestoreWiringTest {
     // (FAKE_COLLECTOR_LOGS_FILE/_FAIL), and the `--entrypoint ls` GGUF probe (FAKE_MODEL_LS_ABSENT).
     // M1-822 adds the inherited-failed-state probe (`inherited_failed_probe` psql variable in
     // argv; FAKE_INHERITED_STATE_FILE/_EXIT).
+    // M1-906 adds the derivative-age probe (`derivative_age_probe` psql variable in argv;
+    // FAKE_DERIVATIVE_AGE_FILE/_EXIT; unset file = empty probe = clean shape).
     // Every invocation's argv is appended to FAKE_DOCKER_ARGV_LOG so tests can assert
     // which docker steps ran (e.g. that no image build/bring-up followed a failed gate).
     // Each recognized in-container exec (role-reconstruct psql, pg_restore, table probe)
@@ -149,6 +158,10 @@ class RestoreWiringTest {
             + "      echo \"FAKE-DOCKER: exec inherited-failed-state probe psql (M1-822)\"\n"
             + "      [[ -n \"${FAKE_INHERITED_STATE_FILE:-}\" ]] && printf '%s\\n' \"$(<\"$FAKE_INHERITED_STATE_FILE\")\"\n"
             + "      exit \"${FAKE_INHERITED_STATE_EXIT:-0}\" ;;\n"
+            + "    *derivative_age_probe*)\n"
+            + "      echo \"FAKE-DOCKER: exec derivative-age probe psql (M1-906)\"\n"
+            + "      [[ -n \"${FAKE_DERIVATIVE_AGE_FILE:-}\" ]] && printf '%s\\n' \"$(<\"$FAKE_DERIVATIVE_AGE_FILE\")\"\n"
+            + "      exit \"${FAKE_DERIVATIVE_AGE_EXIT:-0}\" ;;\n"
             + "    *-tAqc*)\n"
             + "      echo \"FAKE-DOCKER: exec table-presence probe psql\"\n"
             + "      [[ \"${FAKE_DB_TABLES:-absent}\" == present ]] && echo \"public|flyway_schema_history|table|infochat\"\n"
@@ -1040,6 +1053,222 @@ class RestoreWiringTest {
                 "the final banner must repeat the inherited-failure count:\n" + bannerTail);
     }
 
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void restoredOldDerivativePartitionsRaiseTheRetentionFloor(@TempDir Path tmp) throws Exception {
+        // M1-906 reproduction (live D-17): restoring a bundle whose derivative partitions
+        // are months older than the shipped 4d retention let the Collector's first prune
+        // tick DROP them — surfaces that never regenerate.
+
+        // The restore must RAISE the three derivative retention keys on the placed
+        // config (raise-only, age+30d grace) BEFORE booting the Collector, and WARN.
+        YearMonth oldMonth = YearMonth.now(ZoneOffset.UTC).minusMonths(3);
+        String oldSuffix = String.format("%04d%02d", oldMonth.getYear(), oldMonth.getMonthValue());
+        long endEpoch = partitionEndEpoch(oldMonth);
+        long minFloor = requiredFloorDays(endEpoch) + 30;
+        Path ageFixture = tmp.resolve("derivative-age.txt");
+        Files.writeString(ageFixture, oldPartitionRows(oldSuffix));
+        String appProps = bringUpAppProps();
+        Path bundle = buildRetentionBundle(tmp, appProps);
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false, Map.of(
+                "FAKE_DB_TABLES", "present",
+                "FAKE_DERIVATIVE_AGE_FILE", ageFixture.toString()), "--source-stopped");
+
+        assertEquals(0, r.exitCode, "the floor must not change the restore's exit path (P3):\n" + r.output);
+        // (a) + P5: staged lines survive byte-identical, appended-only, under the marker.
+        String placed = Files.readString(tmp.resolve("runtime/application.properties"));
+        assertTrue(placed.startsWith(appProps),
+                "the staged config lines must survive byte-identical (P5):\n" + placed);
+        assertTrue(placed.contains("7.10.1"),
+                "the appended block must carry the §7.10.1 design anchor as its marker (P5):\n" + placed);
+        // (b) per table: applied floor inside the runtime-recomputed [age+30, age+31]
+        // envelope (P1 — start-vs-end or floor-vs-ceil mutations fall outside), and a
+        // WARN naming the oldest partition, the floor, the lapse date, the actions.
+        for (String table : List.of("post-embedding", "post-entity", "post-reference")) {
+            long applied = appendedFloorValue(placed, table);
+            assertTrue(applied >= minFloor && applied <= minFloor + 1,
+                    table + " floor " + applied + " must sit in the runtime-recomputed envelope ["
+                            + minFloor + ", " + (minFloor + 1) + "] (P1):\n" + placed);
+            String key = "infochat.partitions.retention-days." + table;
+            String oldest = table.replace('-', '_') + "_" + oldSuffix;
+            assertTrue(r.output.contains(oldest),
+                    "the WARN must name the table's oldest restored partition (P1):\n" + r.output);
+            assertTrue(r.output.contains(key + "=" + applied),
+                    "the WARN must name the applied floor (P1):\n" + r.output);
+            assertTrue(r.output.contains(lapseDateUtc(endEpoch, applied)),
+                    "the WARN must name the date the floor lapses (P1):\n" + r.output);
+            assertTrue(r.output.contains("keep"),
+                    "the WARN must name keeping the floor as the preserve action:\n" + r.output);
+            assertTrue(r.output.contains("back to 4"),
+                    "the WARN must name lowering the key back to the prior value to accept"
+                            + " the drop:\n" + r.output);
+        }
+        assertTrue(r.output.contains("paid"),
+                "the WARN must name the paid-retry consequence the floor prevents:\n" + r.output);
+        assertTrue(r.output.contains("runtime/application.properties"),
+                "the WARN must name the floor's file so a hand-added override stays"
+                        + " discoverable (P6):\n" + r.output);
+        // (c) P4: the floor write precedes the Collector bring-up — argv order, console
+        // order, and source order all pin it (the boot tick is the trigger).
+        String argvLog = Files.readString(tmp.resolve("docker-argv.log"));
+        int probeIdx = argvLog.indexOf("derivative_age_probe=1");
+        // the Postgres bring-up (3-postgres.sh) also logs `up -d --wait` EARLIER than
+        // the probe, so anchor the Collector start after the probe and pin its service.
+        int collectorIdx = argvLog.indexOf("up -d --wait --wait-timeout", probeIdx);
+        assertTrue(probeIdx >= 0, "the derivative-age probe must reach the fake docker:\n" + argvLog);
+        assertTrue(collectorIdx > probeIdx
+                        && argvLog.substring(collectorIdx, Math.min(argvLog.length(), collectorIdx + 140))
+                                .contains("infochat-collector"),
+                "the probe (and its floor write) must precede the Collector bring-up (P4):\n"
+                        + argvLog);
+        int warnIdx = r.output.indexOf("derivative retention floor");
+        int bringUpMarkerIdx = r.output.indexOf("FAKE-DOCKER: collector bring-up");
+        assertTrue(warnIdx >= 0 && warnIdx < bringUpMarkerIdx,
+                "the floor WARN must precede the Collector start (P4):\n" + r.output);
+        String script = Files.readString(repoRoot().resolve("prod/scripts/restore.sh"));
+        assertTrue(script.indexOf("retention-days") >= 0
+                        && script.indexOf("retention-days") < script.indexOf("compose up -d --wait"),
+                "the floor write must sit before the Collector start in the script (P4)");
+        // (d) the restore continues to completion; the banner repeats the floor (the
+        // operator reads the banner at cutover, possibly long after the WARN scrolled).
+        String bannerTail = r.output.substring(r.output.indexOf("CLONE RECONSTRUCTED"));
+        assertTrue(bannerTail.contains("derivative retention floor"),
+                "the final banner must repeat that a floor was applied:\n" + bannerTail);
+        // (e) P7: partition names, day counts, dates only — no secret values.
+        assertFalse(r.output.contains("SENTINEL-DB-7f3a"),
+                "no secret value may appear in the floor output (P7):\n" + r.output);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void unterminatedConfigFloorMarkerStartsOnOwnLine(@TempDir Path tmp) throws Exception {
+        // Round-1 rework: a staged config with NO trailing newline must not fuse its
+        // last line with the floor marker — # mid-line is not a comment in a
+        // properties file, so every profile-scoped key would silently go inert.
+
+        String unterminated = bringUpAppProps().replaceFirst("\\n$", "");
+        String oldSuffix = String.format("%04d%02d",
+                YearMonth.now(ZoneOffset.UTC).minusMonths(3).getYear(),
+                YearMonth.now(ZoneOffset.UTC).minusMonths(3).getMonthValue());
+        Path ageFixture = tmp.resolve("derivative-age.txt");
+        Files.writeString(ageFixture, oldPartitionRows(oldSuffix));
+        Path bundle = buildRetentionBundle(tmp, unterminated);
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false, Map.of(
+                "FAKE_DB_TABLES", "present",
+                "FAKE_DERIVATIVE_AGE_FILE", ageFixture.toString()), "--source-stopped");
+
+        assertEquals(0, r.exitCode, "the floor path must not change the exit semantics:\n" + r.output);
+        String placed = Files.readString(tmp.resolve("runtime/application.properties"));
+        assertTrue(placed.startsWith(unterminated + "\n"),
+                "the staged bytes must survive byte-identical and gain the missing"
+                        + " terminator:\n" + placed);
+        assertTrue(Pattern.compile("(?m)^# derivative retention floor").matcher(placed).find(),
+                "the marker comment must start on its own line:\n" + placed);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void freshBundleLeavesRetentionConfigUntouched(@TempDir Path tmp) throws Exception {
+        // Acceptance 2: a probe result carrying only current/next-month partitions is
+        // the fresh-bundle shape — the pruner's active-month guard already protects
+        // those, so the placed config must stay BYTE-IDENTICAL, no WARN.
+
+        // A mutation that always floors fails this — the clean clone stays silent.
+        YearMonth current = YearMonth.now(ZoneOffset.UTC);
+        String cur = String.format("%04d%02d", current.getYear(), current.getMonthValue());
+        String next = String.format("%04d%02d", current.plusMonths(1).getYear(),
+                current.plusMonths(1).getMonthValue());
+        StringBuilder rows = new StringBuilder();
+        for (String parent : List.of("post_embedding", "post_entity", "post_reference")) {
+            rows.append(parent).append('|').append(parent).append('_').append(cur).append('\n');
+            rows.append(parent).append('|').append(parent).append('_').append(next).append('\n');
+        }
+        Path ageFixture = tmp.resolve("derivative-age.txt");
+        Files.writeString(ageFixture, rows.toString());
+        String appProps = bringUpAppProps();
+        Path bundle = buildRetentionBundle(tmp, appProps);
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false, Map.of(
+                "FAKE_DB_TABLES", "present",
+                "FAKE_DERIVATIVE_AGE_FILE", ageFixture.toString()), "--source-stopped");
+
+        assertEquals(0, r.exitCode, "the clean run must complete:\n" + r.output);
+        assertEquals(appProps, Files.readString(tmp.resolve("runtime/application.properties")),
+                "a fresh bundle must leave the placed config byte-identical:\n" + r.output);
+        assertFalse(r.output.contains("derivative retention floor"),
+                "current-month partitions must not raise a floor or WARN:\n" + r.output);
+        String bannerTail = r.output.substring(r.output.indexOf("CLONE RECONSTRUCTED"));
+        assertFalse(bannerTail.contains("derivative retention floor"),
+                "the clean run's banner must not repeat a floor note:\n" + bannerTail);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void highOperatorRetentionIsNeverLowered(@TempDir Path tmp) throws Exception {
+        // P2: a staged config carrying a deliberate high override keeps it — the floor
+        // writes only when the computed requirement EXCEEDS the effective value.
+
+        // A floor that lowers a 400d override re-creates D-17 with the operator's
+        // own value; all three derivative keys staged at the bench-override 400 so
+        // the no-write assertion is per-table meaningful.
+        String oldSuffix = String.format("%04d%02d",
+                YearMonth.now(ZoneOffset.UTC).minusMonths(3).getYear(),
+                YearMonth.now(ZoneOffset.UTC).minusMonths(3).getMonthValue());
+        Path ageFixture = tmp.resolve("derivative-age.txt");
+        Files.writeString(ageFixture, oldPartitionRows(oldSuffix));
+        String appProps = bringUpAppProps()
+                + "infochat.partitions.retention-days.post-embedding=400\n"
+                + "infochat.partitions.retention-days.post-entity=400\n"
+                + "infochat.partitions.retention-days.post-reference=400\n";
+        Path bundle = buildRetentionBundle(tmp, appProps);
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false, Map.of(
+                "FAKE_DB_TABLES", "present",
+                "FAKE_DERIVATIVE_AGE_FILE", ageFixture.toString()), "--source-stopped");
+
+        assertEquals(0, r.exitCode, "the override run must complete:\n" + r.output);
+        assertEquals(appProps, Files.readString(tmp.resolve("runtime/application.properties")),
+                "an operator override must never be written over or lowered (P2):\n" + r.output);
+        assertFalse(r.output.contains("derivative retention floor"),
+                "no floor WARN may print when the effective value already covers the"
+                        + " age (P2):\n" + r.output);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void derivativeAgeProbeFailureWarnsAndContinues(@TempDir Path tmp) throws Exception {
+        // P3 failure-mode: the probe is read-only instrumentation — a failed psql must
+        // yield a loud skip WARN naming the unevaluated check plus the manual command,
+        // and the restore continues.
+
+        // Neither the partial-state note nor any config write may follow —
+        // instrumentation must not abort or impersonate a failure.
+        String appProps = bringUpAppProps();
+        Path bundle = buildRetentionBundle(tmp, appProps);
+
+        RunResult r = runRestore(tmp, bundle, /* pgdataVolumePresent= */ false, Map.of(
+                "FAKE_DB_TABLES", "present",
+                "FAKE_DERIVATIVE_AGE_EXIT", "1"), "--source-stopped");
+
+        assertEquals(0, r.exitCode,
+                "a failed derivative-age probe must not abort the restore (P3):\n" + r.output);
+        assertTrue(r.output.contains("derivative-age probe failed"),
+                "the skip WARN must name the unevaluated check (P3):\n" + r.output);
+        assertTrue(r.output.contains("psql -h 127.0.0.1") && r.output.contains("post_embedding"),
+                "the skip WARN must print the manual check command (P3):\n" + r.output);
+        assertFalse(r.output.contains("PARTIAL RESTORE"),
+                "an informational probe failure must NOT print the partial-state note"
+                        + " (P3):\n" + r.output);
+        assertEquals(appProps, Files.readString(tmp.resolve("runtime/application.properties")),
+                "no config write may follow a failed probe (P3):\n" + r.output);
+        String argvLog = Files.readString(tmp.resolve("docker-argv.log"));
+        assertTrue(argvLog.contains("llamacpp-embeddings"),
+                "the restore must continue to model rehydration after the skip note"
+                        + " (P3):\n" + argvLog);
+    }
+
     // --- helpers ----------------------------------------------------------------
 
     /** Drive the real restore.sh under a controlled PATH; return exit code + combined output. */
@@ -1333,6 +1562,85 @@ class RestoreWiringTest {
         Path bundle = tmp.resolve("custom-gguf-bundle.tgz");
         run(staging, "tar", "-czf", bundle.toString(), ".");
         return bundle;
+    }
+
+    /** The bring-up-shaped application.properties body the M1-906 floor cases stage —
+     *  remote generative (no model step) + llama.cpp embeddings (GGUF present), the
+     *  same shape buildBringUpBundle stages, so a consented run completes end to end. */
+    private static String bringUpAppProps() {
+        return "quarkus.profile=vps\n"
+                + "infochat.llm.chat.base-url=https://api.example.com/v1\n"
+                + "infochat.embeddings.base-url=http://llamacpp-embeddings:8080/v1\n";
+    }
+
+    /** As buildBringUpBundle (TempDir-sandboxed identity dir) with a caller-supplied
+     *  application.properties body and SENTINEL password material, so the floor cases
+     *  can byte-compare the placed config and assert no secret leaks into the WARN. */
+    private Path buildRetentionBundle(Path tmp, String appProps) throws Exception {
+        String dataDirAbs = tmp.resolve("idroot/signal-cli").toString();
+        String dataRel = dataDirAbs.substring(1);       // "${dir#/}" — strip the leading '/'
+        Path staging = Files.createDirectories(tmp.resolve("rsrc"));
+        Files.createDirectories(staging.resolve("db"));
+        Files.createDirectories(staging.resolve("runtime"));
+        Files.writeString(staging.resolve("db/infochat.pgc"), "PGDMP-dummy");
+        Files.writeString(staging.resolve("runtime/secrets.env"),
+                "INFOCHAT_DB_PASSWORD=\"SENTINEL-DB-7f3a\"\n"
+                        + "INFOCHAT_SIGNAL_DATA_DIR=\"" + dataDirAbs + "\"\n");
+        Files.writeString(staging.resolve("runtime/application.properties"), appProps);
+        Files.writeString(staging.resolve("runtime/bootstrap-sources.json"), "[]\n");
+
+        Path idsrc = Files.createDirectories(tmp.resolve("rid"));
+        Files.createDirectories(idsrc.resolve(dataRel));
+        Files.writeString(idsrc.resolve(dataRel).resolve("keyfile"), "id");
+        run(idsrc, "tar", "-czpf", staging.resolve("identities.tgz").toString(), dataRel);
+
+        Path bundle = tmp.resolve("retention-bundle.tgz");
+        run(staging, "tar", "-czf", bundle.toString(), ".");
+        return bundle;
+    }
+
+    /** Probe fixture rows: each derivative parent's oldest restored partition at
+     *  {@code yyyyMM} — the partition-name shape the pruner's monthOf round-trip
+     *  accepts. */
+    private static String oldPartitionRows(String yyyyMM) {
+        StringBuilder rows = new StringBuilder();
+        for (String parent : List.of("post_embedding", "post_entity", "post_reference")) {
+            rows.append(parent).append('|').append(parent).append('_').append(yyyyMM).append('\n');
+        }
+        return rows.toString();
+    }
+
+    /** The appended {@code infochat.partitions.retention-days.<table>=N} value from the
+     *  placed config, failing the test when the key is absent. */
+    private static long appendedFloorValue(String placedConfig, String table) {
+        String prefix = "infochat.partitions.retention-days." + table + "=";
+        for (String line : placedConfig.split("\n", -1)) {
+            if (line.startsWith(prefix)) {
+                return Long.parseLong(line.substring(prefix.length()));
+            }
+        }
+        throw new AssertionError("floor key absent from the placed config: " + prefix
+                + "\n" + placedConfig);
+    }
+
+    /** Epoch seconds of a yyyyMM partition's END (first day of the next month, UTC) —
+     *  the instant PartitionDdl.prunablePartitions dates partitions by. */
+    private static long partitionEndEpoch(YearMonth month) {
+        return month.plusMonths(1).atDay(1).atStartOfDay(ZoneOffset.UTC).toEpochSecond();
+    }
+
+    /** ceil((now - end)/86400): the retention that keeps a partition ending at
+     *  {@code endEpoch} exactly unprunable under the pruner's
+     *  {@code end < now - retentionDays} predicate (P1 fidelity). */
+    private static long requiredFloorDays(long endEpoch) {
+        return (Instant.now().getEpochSecond() - endEpoch + 86399) / 86400;
+    }
+
+    /** The UTC yyyy-MM-dd an applied floor of {@code appliedDays} lapses on (partition
+     *  end + floor): the date the oldest partition becomes prunable again. */
+    private static String lapseDateUtc(long endEpoch, long appliedDays) {
+        return Instant.ofEpochSecond(endEpoch + appliedDays * 86400L)
+                .atZone(ZoneOffset.UTC).toLocalDate().toString();
     }
 
     /** Run a host command in {@code cwd}, failing the test on a non-zero exit. */

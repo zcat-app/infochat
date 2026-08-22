@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 117 |
+| done | 118 |
 | deferred | 0 |
 | abandoned | 3 |
 | **total** | **122** |
@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-906 — Restore-time derivative retention floor + old-bundle WARN (complexity: medium, risk: medium)
 - M1-907 — 8-verify.sh config-freshness leg + boot-verify rule (complexity: low, risk: low)
 
 ---
@@ -62,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-906 | Restore-time derivative retention floor + old-bundle WARN | 2026-08-22 | round 2 APPROVE |
 | M1-905 | Compose+wizard llamacpp serving keys and GPU timing class | 2026-08-22 | round 1 APPROVE |
 | M1-904 | Chat help blocks: privileged DM-only, echo-probe suppression | 2026-08-22 | round 2 APPROVE |
 | M1-903 | /summary over-limit advice names a non-vocabulary tag | 2026-08-22 | round 1 APPROVE |
@@ -71,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-899 | Spell out the shared cutover rulings-file lifecycle | 2026-08-21 | round 1 APPROVE |
 | M1-898 | Scope cutover apply to DB unknowns; refuse key rulings | 2026-08-21 | round 1 APPROVE |
 | M1-897 | Wizard wiring: pin the seeded-model reply-mode detail | 2026-08-21 | round 1 APPROVE-WITH-FIXES |
-| M1-896 | Wizard wiring: drive the ollama branch and --defaults | 2026-08-21 | round 1 APPROVE |
 
 ---
 
@@ -242,6 +241,6 @@ M1-902 (done)
 M1-903 (done)
 M1-904 (done)
 M1-905 (done)
-M1-906 (pending) ← runnable
+M1-906 (done)
 M1-907 (pending) ← runnable
 ```
