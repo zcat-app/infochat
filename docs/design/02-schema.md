@@ -848,6 +848,11 @@ CREATE TABLE post (
   reposts         INT,                               -- source-reported; NULL when unreported or
                                                      --   when the source has no repost concept
                                                      --   (reddit). Never derived from a reply count.
+  comments        INT,                               -- reddit num_comments; the reply-count ranking
+                                                     --   input. NULL for every other kind = "no
+                                                     --   such signal", DISTINCT from 0 = "seen,
+                                                     --   zero replies" (the engagement NULL rule
+                                                     --   above). Never part of social_score (V85).
   search_tsv      tsvector
     GENERATED ALWAYS AS (
       to_tsvector('english',

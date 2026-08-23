@@ -2107,16 +2107,19 @@ larger co-tag). Sections render with an UPPERCASE header
 D30), ordered by assigned-cluster count descending, ties
 alphabetical, Other always last. **Within each section, clusters
 are prominence-ordered (D71):** clusters carrying the `urgent`
-ingest classification sort first, then a weighted sum of four
-integer-percentile terms — corroboration, reposts, likes, source
-scarcity — computed in integer arithmetic over columns already on
+ingest classification sort first, then a weighted sum of five
+integer-percentile terms — corroboration, reposts, likes, comments,
+source scarcity — computed in integer arithmetic over columns already on
 `post` (no LLM, byte-identical on replay, D19), with the
 denominator covering only the terms actually PRESENT on the
 cluster (a NULL social column drops the term rather than scoring
 it zero, so an editorial cluster is not structurally beaten by a
 social one), and the existing recency key as the final tiebreak.
+The comments term is the reddit reply count (`post.comments`);
+every kind that reports no reply count carries NULL and never
+competes on the term.
 Within Other, personal clusters sort AFTER non-personal ones — a
-bottom gate ahead of the urgent gate and the score, not a fifth
+bottom gate ahead of the urgent gate and the score, not a sixth
 weighted term: Other competes for the section budget like any
 category, and the budget must cut personal clusters before it
 cuts genuinely-uncategorizable news. The reorder never moves a

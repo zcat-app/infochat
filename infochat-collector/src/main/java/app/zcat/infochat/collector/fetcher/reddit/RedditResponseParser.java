@@ -141,16 +141,20 @@ final class RedditResponseParser {
             // Reddit's "score" is the net vote count, which maps to
             // likes. Reddit exposes no repost count — "num_comments" is
             // a reply count, not a repost, so reposts stays null rather
-            // than being fabricated from it (M1-723).
+            // than being fabricated from it (M1-723). The reply count
+            // itself is the typed comments ranking input (M1-914).
             intOrNull(data, "score"),
-            null
+            null,
+            intOrNull(data, "num_comments")
         );
     }
 
     private static Map<String, String> buildRawMetadata(JsonNode data) {
+        // num_comments moved to the typed field (M1-914); author and
+        // subreddit stay string-map entries — they are display hints,
+        // not ranking inputs.
         Map<String, String> metadata = new LinkedHashMap<>(4);
         metadata.put("author", data.path("author").asText(""));
-        metadata.put("num_comments", String.valueOf(data.path("num_comments").asInt(0)));
         metadata.put("subreddit", data.path("subreddit").asText(""));
         return Map.copyOf(metadata);
     }

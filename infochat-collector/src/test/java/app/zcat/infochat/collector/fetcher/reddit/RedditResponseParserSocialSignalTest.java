@@ -57,8 +57,8 @@ class RedditResponseParserSocialSignalTest {
         assertNull(post.reposts(), "num_comments must not become reposts");
         assertEquals(4, post.socialScore(),
             "the 900 comments must not inflate the social score");
-        assertEquals("900", post.rawMetadata().get("num_comments"),
-            "num_comments stays in rawMetadata untouched");
+        assertEquals(900, post.comments(),
+            "num_comments is now the typed comments field (M1-914), never reposts");
     }
 
     @Test

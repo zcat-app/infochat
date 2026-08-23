@@ -11,10 +11,10 @@
 | Status | Count |
 |---|---|
 | pending | 9 |
-| in-progress | 1 |
+| in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 122 |
+| done | 123 |
 | deferred | 1 |
 | abandoned | 4 |
 | **total** | **137** |
@@ -38,7 +38,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 | ID | Title | Status | Last review |
 |---|---|---|---|
-| M1-914 | Persist post.comments and rank reddit replies in the digest | in-progress | (none) |
+
+_(none)_
 
 ---
 
@@ -67,6 +68,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-914 | Persist post.comments and rank reddit replies in the digest | 2026-08-23 | round 2 APPROVE |
 | M1-913 | Digest v1 shape: count header, 10 headlines, drill-down close | 2026-08-23 | round 1 APPROVE-WITH-FIXES |
 | M1-912 | Bound digest render volume in FULL and degraded modes | 2026-08-23 | round 1 APPROVE |
 | M1-908 | Tracked llamacpp speculative-decoding compose keys, off by default | 2026-08-23 | round 1 APPROVE |
@@ -76,7 +78,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-904 | Chat help blocks: privileged DM-only, echo-probe suppression | 2026-08-22 | round 2 APPROVE |
 | M1-903 | /summary over-limit advice names a non-vocabulary tag | 2026-08-22 | round 1 APPROVE |
 | M1-902 | Make postflight's runtime-file check leaf-only | 2026-08-21 | round 2 APPROVE |
-| M1-901 | Liveness IT: subs responder survives reconnect swap | 2026-08-21 | round 1 APPROVE |
 
 ---
 
@@ -260,7 +261,7 @@ M1-908 (done)
 M1-910 (abandoned)
 M1-912 (done)
   └── M1-913 (done)
-M1-914 (in-progress)
+M1-914 (done)
 M1-915 (pending) ← runnable
 M1-916 (pending) ← runnable
 M1-917 (pending) ← runnable

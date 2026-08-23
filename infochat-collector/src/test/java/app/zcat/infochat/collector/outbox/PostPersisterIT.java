@@ -247,6 +247,82 @@ class PostPersisterIT {
     }
 
     @Test
+    @Order(10)
+    void persistRoundTripsCommentsAndNullStaysNull() throws Exception {
+        // M1-914: a reddit-shaped post round-trips its reply count, and
+        // a no-signal post keeps SQL NULL (never 0). Neighbour columns
+        // are asserted so a mis-numbered bind shows as a shifted value
+        // (the M1-723 round-trip precedent).
+        UUID sourceUuid = seedRssSource(
+            "https://persister-it.example.test/feed-comments.xml",
+            "Persister IT comments source");
+
+        NormalizedPost redditShaped = new NormalizedPost(
+            /* sourceId dispatch key */ 1L,
+            /* upstreamIdentifier */ "urn:persister-it:post:comments",
+            "Reply-rich title",
+            "Reply-rich body",
+            "https://persister-it.example.test/posts/comments",
+            PUBLISHED_AT,
+            FETCHED_AT,
+            Map.of(),
+            /* likes */ 120,
+            /* reposts */ null,
+            /* comments */ 57
+        );
+
+        Optional<PostPersister.PersistedPostKey> key =
+            postPersister.persist(sourceUuid, redditShaped);
+        assertTrue(key.isPresent(), "comments-bearing persist must INSERT");
+
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT likes, reposts, social_score, comments, title, body, status "
+                 + "FROM post WHERE id = ?")) {
+            ps.setObject(1, key.get().id());
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "persisted comments post row must exist");
+                assertEquals(120, rs.getInt("likes"));
+                assertNull(rs.getObject("reposts"), "Reddit reports no repost count");
+                assertEquals(120, rs.getInt("social_score"),
+                    "comments does not enter the social_score formula");
+                assertEquals(57, rs.getInt("comments"),
+                    "the reply count round-trips the widened column list");
+                assertEquals("Reply-rich title", rs.getString("title"));
+                assertEquals("Reply-rich body", rs.getString("body"));
+                assertEquals("RAW", rs.getString("status"));
+            }
+        }
+
+        // The no-signal shape: comments persists as SQL NULL, not 0.
+        NormalizedPost noSignal = new NormalizedPost(
+            1L,
+            "urn:persister-it:post:comments-null",
+            "No-signal title",
+            "No-signal body",
+            "https://persister-it.example.test/posts/comments-null",
+            PUBLISHED_AT,
+            FETCHED_AT,
+            Map.of()
+        );
+        Optional<PostPersister.PersistedPostKey> nullKey =
+            postPersister.persist(sourceUuid, noSignal);
+        assertTrue(nullKey.isPresent());
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT comments, likes FROM post WHERE id = ?")) {
+            ps.setObject(1, nullKey.get().id());
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                assertNull(rs.getObject("comments"),
+                    "no-signal source persists NULL comments, not 0 — getObject, "
+                        + "so a coerced 0 cannot pass either way");
+                assertNull(rs.getObject("likes"));
+            }
+        }
+    }
+
+    @Test
     @Order(2)
     void persistIsNoOpOnDuplicateSourceUpstreamFetchedAt() throws Exception {
         // Re-use the same source identifier as test (1), but a new

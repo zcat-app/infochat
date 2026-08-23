@@ -131,9 +131,11 @@ public class DigestPostCollector {
                 // M1-724 prominence signals. getObject(Integer.class), never
                 // getInt — SQL NULL must survive as null (absent term), not
                 // collapse to 0 (present term, bottom percentile): M1-723
-                // §Absent is not zero.
+                // §Absent is not zero. comments joins the same discipline
+                // as the fifth ranking term (M1-914).
                 rs.getObject("reposts", Integer.class),
                 rs.getObject("likes", Integer.class),
+                rs.getObject("comments", Integer.class),
                 rs.getString("kind"),
                 rs.getObject("source_window_posts", Integer.class),
                 // Declared per source (V7, NOT NULL DEFAULT 'en'), never
@@ -166,7 +168,7 @@ public class DigestPostCollector {
     private static final String POSTS_ALL_SQL = """
             SELECT p.id, p.uid, p.source_id, s.display_name, p.title,
                    p.url, p.body, p.published_at, p.tags, p.classification,
-                   p.reposts, p.likes, s.kind, s.language,
+                   p.reposts, p.likes, p.comments, s.kind, s.language,
                    p.title_en, p.body_en,
                    COUNT(*) OVER (PARTITION BY p.source_id)::int AS source_window_posts
               FROM post p
@@ -187,7 +189,7 @@ public class DigestPostCollector {
     private static final String POSTS_EXPLICIT_SQL = """
             SELECT p.id, p.uid, p.source_id, s.display_name, p.title,
                    p.url, p.body, p.published_at, p.tags, p.classification,
-                   p.reposts, p.likes, s.kind, s.language,
+                   p.reposts, p.likes, p.comments, s.kind, s.language,
                    p.title_en, p.body_en,
                    COUNT(*) OVER (PARTITION BY p.source_id)::int AS source_window_posts
               FROM post p

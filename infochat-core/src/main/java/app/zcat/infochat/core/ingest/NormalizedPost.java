@@ -34,13 +34,15 @@ import java.util.Map;
  *       to string by design: richer per-element metadata that sources
  *       want to carry must be serialized (e.g. JSON-in-string) into
  *       one entry rather than smuggled through as {@code Object}.</li>
- *   <li>{@code likes} / {@code reposts} — engagement counts as reported
- *       by the source, or null when the source has no such signal.
- *       <strong>Null is not zero</strong>: an RSS article has no like
- *       count, while a Bluesky post with {@code likeCount: 0} was seen
- *       and ignored. Only the bluesky and reddit fetchers populate
- *       them; nitter, youtube, odysee, RSS and Nostr leave both null,
- *       which is the common path (M1-723).</li>
+ *   <li>{@code likes} / {@code reposts} / {@code comments} — engagement
+ *       counts as reported by the source, or null when the source has no
+ *       such signal. <strong>Null is not zero</strong>: an RSS article has
+ *       no like count, while a Bluesky post with {@code likeCount: 0} was
+ *       seen and ignored. Only the bluesky and reddit fetchers populate
+ *       {@code likes}/{@code reposts}; {@code comments} is reddit-only
+ *       (its {@code num_comments}); nitter, youtube, odysee, RSS and Nostr
+ *       leave all three null, which is the common path (M1-723,
+ *       M1-914).</li>
  *   <li>{@code socialScore} — derived, never caller-supplied; see
  *       below.</li>
  * </ul>
@@ -58,16 +60,17 @@ import java.util.Map;
  * stays distinguishable from a social post nobody engaged with.</p>
  *
  * <h2>Count bound</h2>
- * <p>{@code likes} and {@code reposts} arrive from untrusted upstream
- * JSON and are clamped to ±{@link #MAX_ENGAGEMENT_COUNT} before the
- * multiply, so an upstream-supplied count cannot overflow
- * {@code 2 * reposts + likes} into a negative score. This is
- * system-boundary validation on fetcher input, not internal defensive
- * code: the record is where an untrusted JSON number first becomes a
- * typed domain value, and doing it here covers every present and future
- * fetcher in one place instead of trusting each parser to remember.
- * Sign is preserved — Reddit's {@code score} is a net vote count and is
- * legitimately negative, so only magnitude is bounded.</p>
+ * <p>{@code likes}, {@code reposts} and {@code comments} arrive from
+ * untrusted upstream JSON and are clamped to
+ * ±{@link #MAX_ENGAGEMENT_COUNT} — {@code comments} for the same
+ * magnitude bound as its siblings even though it never enters the
+ * {@code socialScore} multiply. This is system-boundary validation on
+ * fetcher input, not internal defensive code: the record is where an
+ * untrusted JSON number first becomes a typed domain value, and doing it
+ * here covers every present and future fetcher in one place instead of
+ * trusting each parser to remember. Sign is preserved — Reddit's
+ * {@code score} is a net vote count and is legitimately negative, so only
+ * magnitude is bounded.</p>
  *
  * <p><strong>The bound holds only for a value that reached {@code int}
  * intact.</strong> A parser reading an untrusted numeric MUST saturate
@@ -94,6 +97,7 @@ public record NormalizedPost(
         Map<String, String> rawMetadata,
         @Nullable Integer likes,
         @Nullable Integer reposts,
+        @Nullable Integer comments,
         @Nullable Integer socialScore
 ) {
 
@@ -108,16 +112,19 @@ public record NormalizedPost(
     public NormalizedPost {
         likes = clampCount(likes);
         reposts = clampCount(reposts);
+        comments = clampCount(comments);
         // Derived, not accepted: see the class javadoc. The incoming
         // socialScore argument is deliberately discarded so the
-        // invariant cannot be bypassed by a caller.
+        // invariant cannot be bypassed by a caller. comments does NOT
+        // enter the formula — it is a ranking input, not an
+        // amplification count (M1-914).
         socialScore = deriveSocialScore(likes, reposts);
     }
 
     /**
      * Construct a post from a source that carries no engagement
      * signals — the nitter, youtube, odysee, RSS and Nostr path. All
-     * three social columns stay null, the documented "no social signal
+     * four social columns stay null, the documented "no social signal
      * available" state.
      */
     public NormalizedPost(
@@ -130,14 +137,14 @@ public record NormalizedPost(
             Instant fetchedAt,
             Map<String, String> rawMetadata) {
         this(dispatchKey, upstreamIdentifier, title, body, url, publishedAt, fetchedAt,
-            rawMetadata, null, null, null);
+            rawMetadata, null, null, null, null);
     }
 
     /**
      * Construct a post from a source that reports engagement counts —
-     * the bluesky and reddit path. {@code socialScore} is derived from
-     * the two counts; either may be null when that particular source
-     * does not expose it (Reddit has no repost count).
+     * the bluesky path and the pre-M1-914 reddit path. {@code socialScore}
+     * is derived from the two counts; either may be null when that
+     * particular source does not expose it (Reddit has no repost count).
      */
     public NormalizedPost(
             long dispatchKey,
@@ -151,7 +158,28 @@ public record NormalizedPost(
             @Nullable Integer likes,
             @Nullable Integer reposts) {
         this(dispatchKey, upstreamIdentifier, title, body, url, publishedAt, fetchedAt,
-            rawMetadata, likes, reposts, null);
+            rawMetadata, likes, reposts, null, null);
+    }
+
+    /**
+     * Construct a post from a source that also reports a reply count —
+     * the reddit path since M1-914. {@code comments} is a ranking
+     * input only; it never enters the derived {@code socialScore}.
+     */
+    public NormalizedPost(
+            long dispatchKey,
+            String upstreamIdentifier,
+            @Nullable String title,
+            String body,
+            @Nullable String url,
+            @Nullable Instant publishedAt,
+            Instant fetchedAt,
+            Map<String, String> rawMetadata,
+            @Nullable Integer likes,
+            @Nullable Integer reposts,
+            @Nullable Integer comments) {
+        this(dispatchKey, upstreamIdentifier, title, body, url, publishedAt, fetchedAt,
+            rawMetadata, likes, reposts, comments, null);
     }
 
     private static @Nullable Integer clampCount(@Nullable Integer count) {

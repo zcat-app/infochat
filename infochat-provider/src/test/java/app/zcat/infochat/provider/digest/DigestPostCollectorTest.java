@@ -178,12 +178,39 @@ class DigestPostCollectorTest {
         }
     }
 
+    @Test
+    void collectForGroup_projectsCommentsInBothTagModes() throws SQLException {
+        // M1-914, the M1-756/M1-759 both-blocks discipline: a block that
+        // forgets p.comments ranks reddit differently per group shape
+        // with no error anywhere.
+        for (String tagMode : List.of("ALL", "EXPLICIT")) {
+            StubDataSource dataSource = new StubDataSource(
+                    tagMode, 1L, 1L,
+                    List.of(new PostRow(UUID.randomUUID(), "uid-reddit", UUID.randomUUID(),
+                            "r/example", "Discussed headline", "https://reddit.example/1",
+                            "body", Instant.parse("2026-05-25T10:00:00Z"),
+                            new String[]{"security"}, new String[]{"factual"},
+                            null, 7, 57, "reddit", null, "en", null, null)));
+            collector.dataSource = dataSource;
+
+            DigestPostCollector.CollectionResult result =
+                    collector.collectForGroup(GROUP_ID, SINCE);
+
+            assertEquals(1, result.posts().size());
+            assertEquals(57, result.posts().getFirst().comments(),
+                    "mode " + tagMode + ": the reply count reaches the Post");
+            assertTrue(dataSource.lastPostsSql().contains("p.comments"),
+                    "mode " + tagMode + ": the post SELECT must project p.comments; got: "
+                            + dataSource.lastPostsSql());
+        }
+    }
+
     // ----- JDBC stubs (no Mockito) -----------------------------------------
 
     record PostRow(UUID id, String uid, UUID sourceId, String displayName,
                    String title, String url, String body, Instant publishedAt,
                    String[] tags, String[] classification,
-                   Integer reposts, Integer likes, String kind,
+                   Integer reposts, Integer likes, Integer comments, String kind,
                    Integer sourceWindowPosts, String language,
                    String titleEn, String bodyEn) {
         /** Pre-M1-724 shape: no prominence signals (all NULL). */
@@ -191,7 +218,20 @@ class DigestPostCollectorTest {
                 String title, String url, String body, Instant publishedAt,
                 String[] tags) {
             this(id, uid, sourceId, displayName, title, url, body, publishedAt,
-                    tags, new String[]{"unknown"}, null, null, null, null, "en");
+                    tags, new String[]{"unknown"}, null, null, null, null, null,
+                    "en", null, null);
+        }
+
+        /** Pre-M1-914 shape: no reply count. */
+        PostRow(UUID id, String uid, UUID sourceId, String displayName,
+                String title, String url, String body, Instant publishedAt,
+                String[] tags, String[] classification,
+                Integer reposts, Integer likes, String kind,
+                Integer sourceWindowPosts, String language,
+                String titleEn, String bodyEn) {
+            this(id, uid, sourceId, displayName, title, url, body, publishedAt,
+                    tags, classification, reposts, likes, null, kind,
+                    sourceWindowPosts, language, titleEn, bodyEn);
         }
 
         /** Pre-M1-759 shape: no English anchor. */
@@ -201,8 +241,8 @@ class DigestPostCollectorTest {
                 Integer reposts, Integer likes, String kind,
                 Integer sourceWindowPosts, String language) {
             this(id, uid, sourceId, displayName, title, url, body, publishedAt,
-                    tags, classification, reposts, likes, kind, sourceWindowPosts,
-                    language, null, null);
+                    tags, classification, reposts, likes, null, kind,
+                    sourceWindowPosts, language, null, null);
         }
 
         /** Pre-M1-756 shape: no declared source language. */
@@ -212,7 +252,8 @@ class DigestPostCollectorTest {
                 Integer reposts, Integer likes, String kind,
                 Integer sourceWindowPosts) {
             this(id, uid, sourceId, displayName, title, url, body, publishedAt,
-                    tags, classification, reposts, likes, kind, sourceWindowPosts, "en");
+                    tags, classification, reposts, likes, null, kind,
+                    sourceWindowPosts, "en", null, null);
         }
     }
 
@@ -332,6 +373,7 @@ class DigestPostCollectorTest {
                                 case "source_id" -> row.sourceId();
                                 case "reposts" -> row.reposts();
                                 case "likes" -> row.likes();
+                                case "comments" -> row.comments();
                                 case "source_window_posts" -> row.sourceWindowPosts();
                                 default -> throw new UnsupportedOperationException(
                                         "getObject(" + col + ")");

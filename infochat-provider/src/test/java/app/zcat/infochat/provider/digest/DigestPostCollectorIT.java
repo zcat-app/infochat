@@ -294,6 +294,34 @@ class DigestPostCollectorIT {
     }
 
     @Test
+    void collectedRowSetIsUnchangedAndCommentsRideAlong() throws Exception {
+        // M1-914: projecting p.comments must not alter WHICH rows return
+        // (same set, same order) while the column reaches the Post with
+        // its NULL-vs-0 discipline intact.
+        collector.clusterCap = 10;
+        Instant now = PINNED_NOW;
+        insertPost("cm-replied", sourceId, "Replied", now.minus(Duration.ofMinutes(1)));
+        insertPost("cm-zero", sourceId, "Zero replies", now.minus(Duration.ofMinutes(2)));
+        insertPost("cm-silent", sourceId, "Silent", now.minus(Duration.ofMinutes(3)));
+        execUpdate("UPDATE post SET comments = 57 WHERE uid = ?", PREFIX + "cm-replied");
+        execUpdate("UPDATE post SET comments = 0 WHERE uid = ?", PREFIX + "cm-zero");
+
+        DigestPostCollector.CollectionResult result =
+                collector.collectForGroup(groupId, now.minus(Duration.ofHours(1)));
+
+        assertEquals(3, result.posts().size(),
+                "the row SET is unchanged by the added projection");
+        assertEquals(List.of("Replied", "Zero replies", "Silent"),
+                result.posts().stream().map(p -> p.title()).toList(),
+                "the row ORDER is unchanged by the added projection");
+        assertEquals(57, result.posts().get(0).comments(), "the reply count rides along");
+        assertEquals(0, result.posts().get(1).comments(),
+                "a present zero was seen and reported, not coerced to NULL");
+        assertNull(result.posts().get(2).comments(),
+                "a no-signal kind keeps SQL NULL, not 0");
+    }
+
+    @Test
     void collectForGroupQueriesRunUnderStatementTimeout() throws Exception {
         RecordingDataSource recordingDataSource = new RecordingDataSource(dataSource);
         collector.dataSource = recordingDataSource;
@@ -487,6 +515,15 @@ class DigestPostCollectorIT {
 
     private static void exec(Connection conn, String sql) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.executeUpdate();
+        }
+    }
+
+    /** Runs one parameterized UPDATE (the comments seeding above). */
+    private void execUpdate(String sql, String param) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, param);
             ps.executeUpdate();
         }
     }

@@ -107,6 +107,7 @@ class ScanWindowFixtureGuardTest {
             "app.zcat.infochat.collector.fetch.FetchSchedulerPersistFailureIT",
             "app.zcat.infochat.collector.fetcher.bluesky.BlueskyFetcherTest",
             "app.zcat.infochat.collector.fetcher.bluesky.BlueskyResponseParserTest",
+            "app.zcat.infochat.collector.fetcher.reddit.RedditResponseParserCommentsTest",
             "app.zcat.infochat.collector.fetcher.reddit.RedditResponseParserItemCapTest",
             "app.zcat.infochat.collector.fetcher.reddit.RedditResponseParserNameValidationTest",
             "app.zcat.infochat.collector.fetcher.reddit.RedditResponseParserPermalinkTest",

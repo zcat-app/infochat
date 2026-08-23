@@ -1781,7 +1781,7 @@ rendering already covers the no-roll-up outcome (M1-743). Both keys live in
 membership and section order stay D62 tag arithmetic; what changes is
 the order of clusters WITHIN a section. The ordering is (1) clusters
 carrying the `urgent` ingest classification first, (2) a weighted sum of
-four terms, each an integer percentile 0–100 within its own population,
+five terms, each an integer percentile 0–100 within its own population,
 (3) the existing `COALESCE(published_at, fetched_at) DESC, id DESC`
 recency key as the final tiebreak:
 
@@ -1790,6 +1790,7 @@ recency key as the final tiebreak:
 | corroboration | distinct sources in the cluster ÷ distinct sources active under its assigned tag in the window (Other-bucket clusters: the digest-wide active-source count) | the other clusters in this digest | `infochat.digest.weight.corroboration` (7) |
 | reposts | max `post.reposts` in the cluster | clusters of the SAME source kind | `infochat.digest.weight.reposts` (2) |
 | likes | max `post.likes` in the cluster | clusters of the SAME source kind | `infochat.digest.weight.likes` (1) |
+| comments | max `post.comments` in the cluster (reddit reply count; NULL for kinds that report no replies) | clusters of the SAME source kind | `infochat.digest.weight.comments` (1) |
 | scarcity | inverse window post volume of the least-prolific member source (`COUNT(*) OVER (PARTITION BY source_id)`, pre-LIMIT) | the other clusters in this digest | `infochat.digest.weight.scarcity` (2) |
 
 The denominator is the sum of the weights of the terms actually PRESENT
@@ -1800,7 +1801,7 @@ sharing a value, computed in integer arithmetic only — no float
 participates in any comparison, preserving the D19 byte-identical-replay
 property `/retry --digest` depends on. The ranking is pure arithmetic
 over columns already on `post`: no LLM participation, no fitted or
-learned weights — the four keys are hand-chosen defaults, tuned later
+learned weights — the five keys are hand-chosen defaults, tuned later
 against the live corpus by reading the per-term components
 `ClusterProminence` returns alongside the ordering. The reorder never
 moves a cluster between sections and never reorders sections, so a

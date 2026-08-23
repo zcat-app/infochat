@@ -1,7 +1,7 @@
 ---
 id: M1-914
 title: "Persist post.comments and rank reddit replies in the digest"
-status: pending
+status: done
 created: 2026-08-23
 last_updated: 2026-08-23
 flow: tick
@@ -139,6 +139,37 @@ decision_refs:
   - D19
   - D33
   - D71
+reviews:
+  - round: 2
+    date: 2026-08-23
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: NOT-APPLICABLE (round-2 hunks doc prose + whitespace-only Java; round-1 full-suite log remains log of record, test-compile green newer than every touched file); MAINTAINABILITY: WARN (1 comment-cap hit, carried informational from round 1 — same javadoc text, shifted columns); SCOPE: PASS. Round-1 REWORK items 1-3 all SATISFIED; verify-skip for the doc+whitespace rework round user-directed, falsified as legal under the byte-identity carve-out"
+    diff_stats: "round 1: 26 files, +924/−132 (log of record tick-test-M1-914-r1.log, BUILD SUCCESS); round 2 fix hunks: 4 files, +92/−64 (two one-word doc edits, whitespace-only re-indent, ticket bookkeeping)"
+clarity_check:
+  parallel-refusal-sequential-anyway: >-
+    --parallel refused 2026-08-23 on the mechanical module check: in-flight
+    M1-917 shares infochat-provider (plus application.properties and
+    docs/spec/commands.md directly). User chose a sequential start in the
+    main checkout anyway, accepting the same-module concurrency and the
+    merge-time conflict risk it carries (M1-790/M1-796 precedent);
+    M1-914's commit must stage only its own files — M1-917's uncommitted
+    status edits stay out of it.
+  acceptance-9-commands-md-weight-clause-relaxed: >-
+    User-approved at implementation (2026-08-23): the commands.md D71
+    paragraph names the comments term but not its weight — the existing
+    paragraph names no weights at all, and a lone weight there would be
+    asymmetric. The weight is named in the D71 row, design 03-commands
+    §3.12, and design 07-deployment §7.4. The same approval folded in the
+    two stale D71 sentence fixes (NULL-droppable social set extended to
+    reposts/likes/comments; "the two inputs" → "the engagement inputs")
+    and the (V85) inline annotation in design 02-schema.
+  round1-rework-spec-ordinal-fix: >-
+    User-approved 2026-08-23 (round-1 rework item 2, §12): one-word spec
+    amendment at docs/spec/commands.md §Periodic group digests — "not a
+    fifth weighted term" → "not a sixth weighted term", aligning the
+    bottom-gate sentence with the five-term enumeration the same passage
+    now names and with ClusterProminence's "not a sixth weighted term"
+    comment.
 ---
 
 # M1-914: reddit reply counts as a ranking signal
@@ -267,3 +298,18 @@ Enumerated:
 | RedditResponseParser | **fix** — typed mapping; rawMetadata entry removed |
 | Bluesky / nitter / youtube / odysee / RSS parsers | unchanged — comments=NULL |
 | NostrEvent.toNormalizedPost | unchanged — engagement-less constructor; kind-6 rawMetadata keys untouched |
+
+## Round 1 rework
+
+1. FINDING 1: change "the four keys" to "the five keys" at
+   docs/design/03-commands.md:1804, evaluated via
+   `grep -n 'four keys' docs/design/03-commands.md` → no output.
+2. FINDING 2: change "not a fifth weighted term" to "not a sixth weighted
+   term" at docs/spec/commands.md:2122 (show the user the one-word wording
+   per the spec-amendment approval convention; driver records the approval),
+   evaluated via `grep -n 'not a fifth' docs/spec/commands.md` → no output.
+3. FINDING 3: re-indent EligiblePostQuery.java:189-263 to the file's
+   8-space member indent, evaluated via `grep -nE '^ {10}public '
+   infochat-provider/src/main/java/app/zcat/infochat/provider/summary/
+   EligiblePostQuery.java` → no output, plus `mvn -B -pl infochat-provider
+   -am test-compile` green.

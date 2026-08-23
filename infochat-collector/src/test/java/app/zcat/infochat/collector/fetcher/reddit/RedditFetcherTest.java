@@ -184,7 +184,8 @@ class RedditFetcherTest {
         // rawMetadata
         Map<String, String> meta = first.rawMetadata();
         assertEquals("user1", meta.get("author"));
-        assertEquals("10", meta.get("num_comments"));
+        assertNull(meta.get("num_comments"),
+            "num_comments moved off rawMetadata onto the typed comments column (M1-914)");
         assertEquals("testsub", meta.get("subreddit"));
         // M1-723: score moved off rawMetadata onto the typed likes column.
         // Retargeted rather than dropped so the end-to-end fetch path keeps
@@ -192,6 +193,8 @@ class RedditFetcherTest {
         assertEquals(42, first.likes());
         assertNull(first.reposts());
         assertEquals(42, first.socialScore());
+        // M1-914: the reply count retargets the same way.
+        assertEquals(10, first.comments());
 
         // Link-only post: selftext is empty
         assertEquals("", posts.get(1).body());

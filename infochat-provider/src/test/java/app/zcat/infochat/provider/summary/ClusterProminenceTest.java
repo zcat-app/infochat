@@ -178,11 +178,15 @@ class ClusterProminenceTest {
 
     @Test
     void comparatorIsATotalOrderOverThe200ClusterFixture() {
+        // The fixture carries comments values on its social half since
+        // M1-914 (i % 3 spread so the term's ties and strict splits both
+        // occur); every validity assertion below is unchanged.
         List<Cluster> clusters = new ArrayList<>();
         Map<Cluster, String> tags = new IdentityHashMap<>();
         for (int i = 1; i <= 200; i++) {
             Post p = post(UUID.randomUUID(), i % 2 == 0 ? "bluesky" : "rss",
                     i % 2 == 0 ? i : null, i % 2 == 0 ? 200 - i : null,
+                    i % 2 == 0 ? (i % 3) * 11 : null,
                     i, List.of("tag" + (i % 7)), List.of("factual"));
             Cluster c = new Cluster("t-o" + i, List.of(p));
             clusters.add(c);
@@ -303,6 +307,77 @@ class ClusterProminenceTest {
         assertEquals(50, scored.get(1).likesPercentile());
         assertTrue(scored.get(1).score() > scored.get(0).score(),
                 "higher likes → higher score, all else equal");
+    }
+
+    @Test
+    void commentsTermRanksWithinKindAndDropsWhenNull() {
+        // M1-914 fifth term: reddit clusters rank by their comments
+        // percentile within the reddit population; a Bluesky cluster
+        // with the SAME count ranks against Bluesky only. Hand math:
+        // corrob/scarcity 28 (2-of-7 below the "high" quintet); reddit
+        // likes {10,10,10,500} → tied 10s at 0; comments {0,10,500} →
+        // 0/33/66; Bluesky populations of one → 0.
+        Cluster fillerA = singlePostCluster("rss", null, null, null, 300,
+                List.of("low"), List.of("factual"));
+        Cluster fillerB = singlePostCluster("rss", null, null, null, 300,
+                List.of("low"), List.of("factual"));
+        Cluster redditNull = singlePostCluster("reddit", null, 10, null, 2,
+                List.of("high", "low"), List.of("factual"));
+        Cluster redditZero = singlePostCluster("reddit", null, 10, 0, 2,
+                List.of("high", "low"), List.of("factual"));
+        Cluster redditLow = singlePostCluster("reddit", null, 10, 10, 2,
+                List.of("high", "low"), List.of("factual"));
+        Cluster redditHigh = singlePostCluster("reddit", null, 500, 500, 2,
+                List.of("high", "low"), List.of("factual"));
+        Cluster bskySame = singlePostCluster("bluesky", null, 10, 10, 2,
+                List.of("high", "low"), List.of("factual"));
+        List<Cluster> clusters = List.of(fillerA, fillerB, redditNull, redditZero,
+                redditLow, redditHigh, bskySame);
+        Map<Cluster, String> tags = new IdentityHashMap<>();
+        tags.put(fillerA, "low");
+        tags.put(fillerB, "low");
+        tags.put(redditNull, "high");
+        tags.put(redditZero, "high");
+        tags.put(redditLow, "high");
+        tags.put(redditHigh, "high");
+        tags.put(bskySame, "high");
+
+        List<ScoredCluster> scored = prominence.score(clusters, tags);
+        ScoredCluster sNull = scored.get(2);
+        ScoredCluster sZero = scored.get(3);
+        ScoredCluster sLow = scored.get(4);
+        ScoredCluster sHigh = scored.get(5);
+        ScoredCluster sBsky = scored.get(6);
+
+        assertNull(sNull.commentsPercentile(), "NULL comments: the term is ABSENT");
+        assertEquals(0, sZero.commentsPercentile(), "0 comments: present at the bottom percentile");
+        assertEquals(33, sLow.commentsPercentile(),
+                "10 ranks at floor(100/3) of the reddit population {0,10,500}");
+        assertEquals(66, sHigh.commentsPercentile(),
+                "500 ranks at floor(100*2/3) of the reddit population");
+        assertEquals(0, sBsky.commentsPercentile(),
+                "the Bluesky 10 ranks against Bluesky only — a merged population "
+                        + "would rank it at 25");
+        assertNull(scored.get(0).commentsPercentile(), "an RSS cluster never carries the term");
+        assertEquals(10, sNull.denominator(), "NULL comments drops OUT of the denominator");
+        assertEquals(11, sZero.denominator(), "0 comments keeps the weight in the denominator");
+        // (7·28 + 1·0 + 2·28)/10 = 252/10 → 25; same numerator over
+        // 11 → 22 — absent and zero score DIFFERENTLY.
+        assertEquals(252, sNull.numerator());
+        assertEquals(25, sNull.score());
+        assertEquals(22, sZero.score());
+        assertTrue(sNull.score() != sZero.score(), "absent and zero score DIFFERENTLY");
+        assertEquals(7, sNull.weightCorroboration(), "owner direction 2: corroboration stays heaviest");
+        assertEquals(1, sNull.weightComments(), "the new term ships at default weight 1");
+
+        List<ScoredCluster> ordered = new ArrayList<>(scored);
+        ordered.sort(ClusterProminence.totalOrder());
+        assertTrue(ordered.indexOf(sHigh) < ordered.indexOf(sLow),
+                "500 replies outranks 10, all else equal");
+        assertTrue(ordered.indexOf(sLow) < ordered.indexOf(sNull),
+                "a present low count beats dropping the term here (exact rational order)");
+        assertTrue(ordered.indexOf(sNull) < ordered.indexOf(sZero),
+                "a dropped term never sinks below a present zero observation");
     }
 
     @Test
@@ -627,12 +702,15 @@ class ClusterProminenceTest {
     @Test
     void componentsReproduceScoreByHandArithmetic() {
         // For an arbitrary fixture, score == floor(numerator/denominator)
-        // and numerator == Σ weight·percentile over present terms.
+        // and numerator == Σ weight·percentile over present terms — the
+        // comments arm included since M1-914 (odd clusters are reddit
+        // with a reply count; even are RSS with the term absent).
         List<Cluster> clusters = new ArrayList<>();
         Map<Cluster, String> tags = new IdentityHashMap<>();
         for (int i = 1; i <= 10; i++) {
-            Cluster c = singlePostCluster(i % 2 == 0 ? "bluesky" : "rss",
-                    i % 2 == 0 ? i * 3 : null, i % 2 == 0 ? i : null,
+            Cluster c = singlePostCluster(i % 2 == 1 ? "reddit" : "rss",
+                    i % 2 == 1 ? null : i * 3, i % 2 == 1 ? i : null,
+                    i % 2 == 1 ? i * 9 : null,
                     i * 7, List.of("tag" + i), List.of("factual"));
             clusters.add(c);
             tags.put(c, "tag" + i);
@@ -647,6 +725,10 @@ class ClusterProminenceTest {
             if (sc.likesPercentile() != null) {
                 expectedNum += (long) sc.weightLikes() * sc.likesPercentile();
                 expectedDen += sc.weightLikes();
+            }
+            if (sc.commentsPercentile() != null) {
+                expectedNum += (long) sc.weightComments() * sc.commentsPercentile();
+                expectedDen += sc.weightComments();
             }
             if (sc.scarcityPercentile() != null) {
                 expectedNum += (long) sc.weightScarcity() * sc.scarcityPercentile();
@@ -670,9 +752,18 @@ class ClusterProminenceTest {
     }
 
     private static Cluster singlePostCluster(String kind, Integer reposts, Integer likes,
-                                             Integer windowPosts) {
+                                              Integer windowPosts) {
         return singlePostCluster(kind, reposts, likes, windowPosts,
                 List.of("security"), List.of("factual"));
+    }
+
+    /** M1-914 shape: the comments signal rides between likes and volume. */
+    private static Cluster singlePostCluster(String kind, Integer reposts, Integer likes,
+                                              Integer comments, Integer windowPosts,
+                                              List<String> tags, List<String> classification) {
+        return new Cluster("t-" + UID_COUNTER.incrementAndGet(),
+                List.of(post(UUID.randomUUID(), kind, reposts, likes, comments, windowPosts,
+                        tags, classification)));
     }
 
     private static Cluster singlePostCluster(String kind, Integer reposts, Integer likes,
@@ -691,5 +782,16 @@ class ClusterProminenceTest {
                 "Title " + n, "https://example.com/" + n, "body",
                 Instant.parse("2026-07-30T00:00:00Z").plusSeconds(n), tags, classification,
                 reposts, likes, kind, windowPosts);
+    }
+
+    /** M1-914 shape: comments sits between likes and the window count. */
+    private static Post post(UUID sourceId, String kind, Integer reposts, Integer likes,
+                             Integer comments, Integer windowPosts, List<String> tags,
+                             List<String> classification) {
+        long n = UID_COUNTER.incrementAndGet();
+        return new Post(UUID.randomUUID(), "uid-" + n, sourceId, "Src-" + n,
+                "Title " + n, "https://example.com/" + n, "body",
+                Instant.parse("2026-07-30T00:00:00Z").plusSeconds(n), tags, classification,
+                reposts, likes, comments, kind, windowPosts);
     }
 }

@@ -116,15 +116,17 @@ public class EligiblePostQuery {
      * ready_at) are unused by /summary and intentionally omitted to
      * keep the row narrow.
      *
-     * <p>The last four components are the M1-724 prominence signals:
-     * {@code reposts}/{@code likes} stay NULL-distinct-from-0 end to end
-     * (M1-723 §Absent is not zero — an RSS article has no like count; a
-     * Bluesky post with 0 was seen and ignored), {@code sourceKind}
-     * populations the social percentiles, and {@code sourceWindowPosts}
-     * is the pre-LIMIT per-source window count the scarcity term inverts
-     * (the window function evaluates before LIMIT, like
-     * {@code total_count}). Only {@link ClusterProminence} reads them;
-     * the /summary render is unchanged.
+     * <p>The prominence signals are the M1-724 set plus the M1-914
+     * reply count: {@code reposts}/{@code likes}/{@code comments} stay
+     * NULL-distinct-from-0 end to end (M1-723 §Absent is not zero — an
+     * RSS article has no like count; a Bluesky post with 0 was seen and
+     * ignored), {@code sourceKind} populations the social percentiles,
+     * and {@code sourceWindowPosts} is the pre-LIMIT per-source window
+     * count the scarcity term inverts (the window function evaluates
+     * before LIMIT, like {@code total_count}). {@code comments} is
+     * reddit-only — NULL is the documented no-signal state for every
+     * other kind. Only {@link ClusterProminence} reads them; the
+     * /summary render is unchanged.
      *
      * <p>The last two components are the M1-759 English anchor
      * ({@code post.title_en}/{@code post.body_en}, V74). Projected RAW
@@ -148,6 +150,7 @@ public class EligiblePostQuery {
             List<String> classification,
             @Nullable Integer reposts,
             @Nullable Integer likes,
+            @Nullable Integer comments,
             @Nullable String sourceKind,
             @Nullable Integer sourceWindowPosts,
             @Nullable String sourceLanguage,
@@ -172,7 +175,7 @@ public class EligiblePostQuery {
                     List<String> classification) {
             this(id, uid, sourceId, sourceDisplayName, title, url, body,
                     publishedAt, tags, classification, null, null, null, null,
-                    null);
+                    null, null, null, null);
         }
 
         /**
@@ -198,8 +201,8 @@ public class EligiblePostQuery {
                     @Nullable String sourceKind,
                     @Nullable Integer sourceWindowPosts) {
             this(id, uid, sourceId, sourceDisplayName, title, url, body,
-                    publishedAt, tags, classification, reposts, likes,
-                    sourceKind, sourceWindowPosts, null);
+                    publishedAt, tags, classification, reposts, likes, null,
+                    sourceKind, sourceWindowPosts, null, null, null);
         }
 
         /**
@@ -230,8 +233,62 @@ public class EligiblePostQuery {
                     @Nullable Integer sourceWindowPosts,
                     @Nullable String sourceLanguage) {
             this(id, uid, sourceId, sourceDisplayName, title, url, body,
-                    publishedAt, tags, classification, reposts, likes,
+                    publishedAt, tags, classification, reposts, likes, null,
                     sourceKind, sourceWindowPosts, sourceLanguage, null, null);
+        }
+
+        /**
+         * M1-914 shape: the M1-724 signal set plus the reddit reply
+         * count, English anchor absent. The ranking-only consumer
+         * ({@link ClusterProminence}) and its fixtures construct here.
+         */
+        public Post(UUID id,
+                    String uid,
+                    UUID sourceId,
+                    String sourceDisplayName,
+                    String title,
+                    String url,
+                    String body,
+                    @Nullable Instant publishedAt,
+                    List<String> tags,
+                    List<String> classification,
+                    @Nullable Integer reposts,
+                    @Nullable Integer likes,
+                    @Nullable Integer comments,
+                    @Nullable String sourceKind,
+                    @Nullable Integer sourceWindowPosts) {
+            this(id, uid, sourceId, sourceDisplayName, title, url, body,
+                    publishedAt, tags, classification, reposts, likes, comments,
+                    sourceKind, sourceWindowPosts, null, null, null);
+        }
+
+        /**
+         * Pre-M1-914 full shape: the M1-759 canonical without the reply
+         * count. Keeps the one production construction site that renders
+         * (never re-ranks) — {@code RetryCommandHandler}'s replay fetch —
+         * compiling unchanged; its prominence signals stay all-NULL by
+         * design, comments included.
+         */
+        public Post(UUID id,
+                    String uid,
+                    UUID sourceId,
+                    String sourceDisplayName,
+                    String title,
+                    String url,
+                    String body,
+                    @Nullable Instant publishedAt,
+                    List<String> tags,
+                    List<String> classification,
+                    @Nullable Integer reposts,
+                    @Nullable Integer likes,
+                    @Nullable String sourceKind,
+                    @Nullable Integer sourceWindowPosts,
+                    @Nullable String sourceLanguage,
+                    @Nullable String titleEn,
+                    @Nullable String bodyEn) {
+            this(id, uid, sourceId, sourceDisplayName, title, url, body,
+                    publishedAt, tags, classification, reposts, likes, null,
+                    sourceKind, sourceWindowPosts, sourceLanguage, titleEn, bodyEn);
         }
     }
 
@@ -328,7 +385,7 @@ public class EligiblePostQuery {
         StringBuilder sql = new StringBuilder();
         sql.append("SELECT p.id, p.uid, p.source_id, s.display_name, p.title, ")
            .append("       p.url, p.body, p.published_at, p.tags, p.classification, ")
-           .append("       p.reposts, p.likes, s.kind, s.language, ")
+           .append("       p.reposts, p.likes, p.comments, s.kind, s.language, ")
            .append("       p.title_en, p.body_en, ")
            .append("       COUNT(*) OVER (PARTITION BY p.source_id)::int AS source_window_posts, ")
            .append("       COUNT(*) OVER () AS total_count ")
@@ -412,6 +469,7 @@ public class EligiblePostQuery {
                     // distinction the prominence ranking depends on.
                     Integer reposts = rs.getObject("reposts", Integer.class);
                     Integer likes = rs.getObject("likes", Integer.class);
+                    Integer comments = rs.getObject("comments", Integer.class);
                     String sourceKind = rs.getString("kind");
                     Integer sourceWindowPosts = rs.getObject("source_window_posts", Integer.class);
                     // Declared per source (V74, NOT NULL DEFAULT 'en'), never
@@ -428,7 +486,7 @@ public class EligiblePostQuery {
                     totalBeforeCap = rs.getInt("total_count");
                     out.add(new Post(id, uid, sourceId, displayName, title, url, body,
                             publishedAt, tags, classification,
-                            reposts, likes, sourceKind, sourceWindowPosts,
+                            reposts, likes, comments, sourceKind, sourceWindowPosts,
                             sourceLanguage, titleEn, bodyEn));
                 }
                 return new Selection(out, totalBeforeCap);

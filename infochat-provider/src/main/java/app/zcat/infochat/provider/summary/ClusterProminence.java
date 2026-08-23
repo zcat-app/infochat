@@ -18,8 +18,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 
 /**
  * Ranks the clusters of ONE digest by significance (M1-724): each cluster
- * is scored as a weighted sum over four percentile-normalized terms —
- * corroboration, reposts, likes, source scarcity — gated by the
+ * is scored as a weighted sum over five percentile-normalized terms —
+ * corroboration, reposts, likes, comments, source scarcity — gated by the
  * {@code urgent} ingest classification and tie-broken by the input
  * (recency) order. The full ordering is (0) PERSONAL clusters behind
  * non-personal (the M1-727 bottom gate — an all-personal cluster is
@@ -28,7 +28,7 @@ import jakarta.enterprise.context.ApplicationScoped;
  * non-urgent, (2) descending weighted score, (3) ascending input index —
  * the collector's {@code COALESCE(published_at, fetched_at) DESC, id DESC}
  * at cluster granularity — so the order is total without relying on sort
- * stability. The bottom gate is NOT a fifth weighted term: it reads no
+ * stability. The bottom gate is NOT a sixth weighted term: it reads no
  * score component, exactly as the {@code urgent} top gate reads none.
  *
  * <p>Every term is an INTEGER percentile 0–100 within its own population,
@@ -36,8 +36,9 @@ import jakarta.enterprise.context.ApplicationScoped;
  * to five figures, so a weighted sum over raw values would be a like-count
  * ranking with rounding noise from the other terms. Populations are
  * like-with-like: corroboration and scarcity rank against the other
- * clusters in this digest; reposts and likes rank against clusters of the
- * SAME source kind (Bluesky against Bluesky, never against RSS).
+ * clusters in this digest; reposts, likes and comments rank against
+ * clusters of the SAME source kind (Bluesky against Bluesky, reddit
+ * against reddit, never against RSS).
  *
  * <p>A MISSING term (NULL column) drops out of the denominator — it does
  * not score zero. An RSS cluster is scored out of 7 + 2 = 9, which is what
@@ -67,6 +68,11 @@ public class ClusterProminence {
     @ConfigProperty(name = "infochat.digest.weight.likes", defaultValue = "1")
     int weightLikes = 1;
 
+    // The reddit reply count's own term (M1-914): default 1 keeps
+    // corroboration (7) the heaviest single weight, per owner direction.
+    @ConfigProperty(name = "infochat.digest.weight.comments", defaultValue = "1")
+    int weightComments = 1;
+
     @ConfigProperty(name = "infochat.digest.weight.scarcity", defaultValue = "2")
     int weightScarcity = 2;
 
@@ -87,10 +93,12 @@ public class ClusterProminence {
             int corroborationPercentile,
             @Nullable Integer repostsPercentile,
             @Nullable Integer likesPercentile,
+            @Nullable Integer commentsPercentile,
             @Nullable Integer scarcityPercentile,
             int weightCorroboration,
             int weightReposts,
             int weightLikes,
+            int weightComments,
             int weightScarcity,
             long numerator,
             int denominator,
@@ -169,6 +177,9 @@ public class ClusterProminence {
         long[] maxLikes = new long[n];
         boolean[] hasLikes = new boolean[n];
         String[] likesKind = new String[n];
+        long[] maxComments = new long[n];
+        boolean[] hasComments = new boolean[n];
+        String[] commentsKind = new String[n];
         long[] scarcityVolume = new long[n];
         boolean[] hasScarcity = new boolean[n];
 
@@ -204,6 +215,11 @@ public class ClusterProminence {
                     maxLikes[i] = p.likes();
                     likesKind[i] = p.sourceKind();
                 }
+                if (p.comments() != null && (!hasComments[i] || p.comments() > maxComments[i])) {
+                    hasComments[i] = true;
+                    maxComments[i] = p.comments();
+                    commentsKind[i] = p.sourceKind();
+                }
                 // Scarcity ranks the INVERSE posting volume of the cluster's
                 // least-prolific member source, so the value kept is the MIN
                 // window count; lower volume ranks better (below, the negated
@@ -229,8 +245,10 @@ public class ClusterProminence {
         percentilesByRatio(corrobNum, corrobDen, corrobPercentile);
         Integer[] repostsPercentile = new Integer[n];
         Integer[] likesPercentile = new Integer[n];
+        Integer[] commentsPercentile = new Integer[n];
         percentilesByKind(maxReposts, hasReposts, repostsKind, repostsPercentile);
         percentilesByKind(maxLikes, hasLikes, likesKind, likesPercentile);
+        percentilesByKind(maxComments, hasComments, commentsKind, commentsPercentile);
         Integer[] scarcityPercentile = new Integer[n];
         percentilesByValue(scarcityVolume, hasScarcity, true, allIndices(n), scarcityPercentile);
 
@@ -246,6 +264,10 @@ public class ClusterProminence {
                 numerator += (long) weightLikes * likesPercentile[i];
                 denominator += weightLikes;
             }
+            if (commentsPercentile[i] != null) {
+                numerator += (long) weightComments * commentsPercentile[i];
+                denominator += weightComments;
+            }
             if (scarcityPercentile[i] != null) {
                 numerator += (long) weightScarcity * scarcityPercentile[i];
                 denominator += weightScarcity;
@@ -253,8 +275,9 @@ public class ClusterProminence {
             out.add(new ScoredCluster(
                     digestOrderClusters.get(i), i, urgent[i], personal[i],
                     corrobPercentile[i], repostsPercentile[i], likesPercentile[i],
-                    scarcityPercentile[i],
-                    weightCorroboration, weightReposts, weightLikes, weightScarcity,
+                    commentsPercentile[i], scarcityPercentile[i],
+                    weightCorroboration, weightReposts, weightLikes, weightComments,
+                    weightScarcity,
                     numerator, denominator, (int) (numerator / denominator)));
         }
         return out;
