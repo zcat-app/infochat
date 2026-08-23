@@ -30,15 +30,15 @@ import java.util.List;
  *
  * <p><b>Gap-filling replay (M1-652, D65).</b> A retry for a slot with
  * persisted sections (written by {@link DigestWorker} at render time)
- * replays those bytes — no re-collection, no render, no LLM call — sending
+ * that rendered healthy replays those bytes — no re-collection, no
+ * render, no LLM call — sending
  * ONLY the categories with no delivery record, sequentially in stored
  * position order, through {@link DigestDelivery#deliver} (which routes
  * through {@code OutboundDelivery.deliverSequenceToGroup} and records each
- * accepted category). A slot with NO persisted sections (pre-V61 row,
- * degraded slot, zero-post slot, or a crash-stranded cache row) falls back
+ * accepted category). A slot flagged degraded — whatever branch produced
+ * the flag (M1-912) — or with NO persisted sections (pre-V61 row,
+ * zero-post slot, or a crash-stranded cache row) falls back
  * to today's full re-run path. The fallback's render budget is bounded by
- * the configured digest window width, never by the 24-hour replay-retention
- * horizon, so a retry never acquires a many-hours LLM timeout.
  *
  * <p><b>System budget (M1-767).</b> The fallback re-run is the retry's ONLY
  * LLM-spending leg, so it binds the deployment-wide {@link SystemLlmBudget}
@@ -56,7 +56,7 @@ import java.util.List;
 public class DigestRetryService {
 
     private static final String SELECT_LATEST_CACHE =
-            "SELECT slot_kind, slot_fired_at, expires_at"
+            "SELECT slot_kind, slot_fired_at, expires_at, is_degraded"
                     + " FROM summary_cache"
                     + " WHERE group_id = ?"
                     + " ORDER BY slot_fired_at DESC LIMIT 1";
@@ -111,7 +111,9 @@ public class DigestRetryService {
      * Retry the most recent digest for the given group. Gate order is
      * preserved from pre-M1-652: cooldown first, then per-group in-flight,
      * then cache-row existence. Only the cache-row path is widened — a
-     * live, section-bearing row now replays instead of re-running.
+     * live, section-bearing, non-degraded row now replays instead of
+     * re-running; a degraded row re-runs even when it bears sections
+     * (M1-912).
      *
      * <p>Cooldown stamping: stamped on REPLAYED_MISSING and the fallback
      * SUCCESS (both sent messages); NOT stamped on ALL_ALREADY_DELIVERED
@@ -135,10 +137,10 @@ public class DigestRetryService {
             if (meta == null) {
                 return RetryResult.NO_PRIOR_DIGEST;
             }
-            // Replay path: a non-expired cache row with persisted sections
-            // replays the exact delivery bytes. Expired row OR missing
-            // sections → fallback to the full re-run (clamped window).
-            if (coords.expiresAt.isAfter(now)) {
+            // Replay path (M1-912): non-expired + NON-degraded + persisted
+            // sections replays the bytes; a degraded row re-runs — replay
+            // never repeats a completed quality failure.
+            if (coords.expiresAt.isAfter(now) && !coords.degraded()) {
                 List<RenderedSection> sections;
                 try {
                     sections = sectionRepository.findOrderedSections(groupId, coords.slotFiredAt);
@@ -280,7 +282,8 @@ public class DigestRetryService {
                 return new SlotCoordinates(
                         rs.getString("slot_kind"),
                         rs.getTimestamp("slot_fired_at").toInstant(),
-                        rs.getTimestamp("expires_at").toInstant());
+                        rs.getTimestamp("expires_at").toInstant(),
+                        rs.getBoolean("is_degraded"));
             }
         } catch (SQLException e) {
             throw new IllegalStateException(
@@ -313,7 +316,8 @@ public class DigestRetryService {
     /**
      * Which leg {@link #retryDigest} would take for this group right now,
      * computed with the same reads {@code retryDigest} performs (latest
-     * cache row + persisted-section presence). M1-767 redteam rounds 3-5:
+     * cache row + is_degraded + persisted-section presence). M1-767 redteam
+     * rounds 3-5:
      * this is the pre-charge gate's input — {@code RetryCommandHandler}
      * refuses with the system-budget reply when the window is at/over its
      * ceiling AND the leg is {@link RetryLeg#FALLBACK}, so a refused
@@ -337,7 +341,10 @@ public class DigestRetryService {
         if (coords == null || lookupGroupForReplay(groupId) == null) {
             return RetryLeg.NO_PRIOR;
         }
-        if (coords.expiresAt.isAfter(clock.instant())) {
+        // Same leg rule as retryDigest: a degraded row re-runs even with
+        // persisted sections (M1-912) — the pre-charge probe must agree
+        // with the run or a refused re-run could shadow a replay.
+        if (coords.expiresAt.isAfter(clock.instant()) && !coords.degraded()) {
             try {
                 if (!sectionRepository.findOrderedSections(groupId, coords.slotFiredAt).isEmpty()) {
                     return RetryLeg.REPLAY;
@@ -363,7 +370,7 @@ public class DigestRetryService {
     public enum RetryLeg {
         /** A live cache row with persisted sections — zero LLM calls. */
         REPLAY,
-        /** The section-less/expired fallback re-run — the retry's only LLM-spending leg. */
+        /** The section-less/expired/degraded fallback re-run — the retry's only LLM-spending leg; a degraded row lands here even with sections (M1-912). */
         FALLBACK,
         /** No prior digest to retry. */
         NO_PRIOR
@@ -372,7 +379,8 @@ public class DigestRetryService {
     record SlotCoordinates(
             String slotKind,
             Instant slotFiredAt,
-            Instant expiresAt) {
+            Instant expiresAt,
+            boolean degraded) {
     }
 
     record GroupReplayMeta(

@@ -298,6 +298,16 @@ infochat.digest.tick-interval=60s                # DigestScheduler: due-group ch
 # not redistributed; one overflow line names how many categories were
 # omitted. Digest broadcast only: /summary caps no sections.
 infochat.digest.max-categories=8
+# Digest render volume bounds (M1-912): degraded-member-cap is the max
+# member posts a degraded cluster lists on the digest render path, and
+# degraded-max-entries the max post entries of the whole-digest degraded
+# fallback — past each bound one +N accounting line names the rest. They
+# bound the RENDER of what was collected (the collector's LIMIT is the
+# pre-clustering capacity guard) and the digest broadcast only: /summary's
+# degraded forms stay uncapped (/summary --full is the reader-pulled
+# escape). The @ConfigProperty defaults carry the same values.
+infochat.digest.degraded-member-cap=3
+infochat.digest.degraded-max-entries=50
 # Prominence weights (M1-724, D71): the within-section cluster order is a
 # weighted sum of four integer-percentile terms — corroboration, reposts,
 # likes, source scarcity — gated by the urgent classification, tie-broken by

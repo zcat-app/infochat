@@ -1715,15 +1715,33 @@ selects how each category body renders: `brief` — a header carrying the
 section's TRUE cluster count plus one `CategoryRollupGenerator` roll-up;
 `normal` (the default) — the same plus up to
 `infochat.digest.category-headline-count` (default 5) bare headlines
-(sanitized `DisplayHeadline` title + URL, no prose); `full` — the
-pre-M1-732 per-cluster prose with `infochat.digest.category-item-cap`
-lifted (a render-local effective cap, not a re-tune of the key).
+(sanitized `DisplayHeadline` title + URL, no prose); `full` — per-cluster
+prose bounded at `infochat.digest.category-item-cap` per section (the
+prominence head; a render-local effective cap, not a re-tune of the key),
+with one localized demotion line per capped section steering readers to
+`/summary <tag> --full`.
 `brief` and `normal` make one LLM call per surviving category (the
 roll-up) and zero `SummaryProseGenerator` calls. A NULL or unrecognized
 value resolves to `normal` with one WARN at the SQL-deserialization
 boundary (`DigestWorker.readGroupMetadata`). The user-facing
 `/digest brief|normal|full` command is M1-733; delivery batching is
 M1-734.
+
+**Render volume bounds (M1-912).** Three bounds keep a digest's size
+tied to configuration rather than window size: the `full` item cap
+above; `infochat.digest.degraded-member-cap` (default 3) — the max
+member posts a degraded cluster lists on the digest render path, a
+`+N more` suffix closing the listing (digest broadcast only; the
+`/summary` render forms stay uncapped, `/summary --full` being the
+reader-pulled escape); and `infochat.digest.degraded-max-entries`
+(default 50) — the max post entries of the whole-digest degraded
+fallback (D17), followed by one localized accounting line naming the
+rest and steering to `/summary`. The same ticket made `is_degraded`
+honest and gave it its first production reader: a render that
+completed with zero generated synthesis is flagged degraded, and
+`/retry --digest` re-runs every degraded row (over the frozen cluster
+set) instead of replaying its sections — replay is reserved for
+interrupted deliveries of healthy renders.
 
 **Roll-up prompt shape (M1-728).** The roll-up's prompt carries post
 **titles only** — no bodies, no URLs — each bounded via

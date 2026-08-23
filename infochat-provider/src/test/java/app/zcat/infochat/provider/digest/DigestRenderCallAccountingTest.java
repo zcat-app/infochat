@@ -128,7 +128,7 @@ class DigestRenderCallAccountingTest {
                 "control: the breaker is OPEN before the render starts");
 
         List<DigestRenderer.RenderedSection> sections =
-                renderer.renderSections(taggedPosts(4, "ai"), "en", DigestMode.FULL, GROUP_ID);
+                renderer.renderSections(taggedPosts(4, "ai"), "en", DigestMode.FULL, GROUP_ID).sections();
 
         assertEquals(0, chain.providerCalls(),
                 "control: an OPEN breaker short-circuits every call without an HTTP attempt");
@@ -156,7 +156,7 @@ class DigestRenderCallAccountingTest {
         budget.ceiling = 3;
 
         List<DigestRenderer.RenderedSection> sections =
-                renderer.renderSections(taggedPosts(9, "ai"), "en", DigestMode.FULL, GROUP_ID);
+                renderer.renderSections(taggedPosts(9, "ai"), "en", DigestMode.FULL, GROUP_ID).sections();
 
         assertEquals(3, budget.callsInWindow(),
                 "spend stops AT the ceiling, however many clusters remain");

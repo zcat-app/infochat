@@ -1692,7 +1692,13 @@ rules:
   (c)). That costs no LLM call — the anchor is a column computed at
   ingest, which is what makes it affordable on the one path defined
   by having no usable model — so the "no LLM calls" property of this
-  form is unchanged. The friendly
+  form is unchanged. On the digest surfaces this degraded shape is
+  entry-bounded: a degraded cluster's member listing and the
+  whole-digest fallback each render at most a configured number of
+  entries (member posts, or post entries respectively), with one
+  localized accounting line naming the rest. The bound limits how
+  many entries render; the shape itself — headlines + URLs + post
+  UIDs, no LLM calls — is unchanged. The friendly
   notice is a localization-bundle string (D43); the user is not
   shown a hung response. `/retry` after recovery re-rolls the
   prose with the original frozen post selection. See

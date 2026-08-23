@@ -77,7 +77,7 @@ class DigestRendererTest {
 
     private String renderJoined(List<Post> posts, DigestMode mode, String langCode) {
         return String.join("\n\n",
-                renderer.renderSections(posts, langCode, mode, GROUP_ID).stream()
+                renderer.renderSections(posts, langCode, mode, GROUP_ID).sections().stream()
                         .map(DigestRenderer.RenderedSection::text)
                         .toList());
     }
@@ -139,10 +139,10 @@ class DigestRendererTest {
     }
 
     @Test
-    void fullModeLiftsItemCapAndEmitsNoOverflowLine() {
-        // M1-732: full keeps the pre-M1-732 per-cluster prose but lifts the
-        // item cap to a LOCAL Integer.MAX_VALUE — categoryItemCap is shared
-        // @ApplicationScoped state, so the lift must never touch the field.
+    void fullModeAppliesTheItemCapLocallyAndEmitsTheDemotionLine() {
+        // §8-authorized update (M1-912): was M1-732's cap-LIFT pin
+        // (fullModeLiftsItemCapAndEmitsNoOverflowLine) — the expectation
+        // inverts now FULL is bounded again.
         renderer.categoryItemCap = 2;
         proseGenerator.setResponseText("capped story prose");
         List<Post> posts = List.of(
@@ -153,13 +153,13 @@ class DigestRendererTest {
 
         String result = renderJoined(posts, DigestMode.FULL);
 
-        assertEquals(4, proseGenerator.callCount(),
-                "full renders ALL clusters — the field's 2-per-section value is not applied");
+        assertEquals(2, proseGenerator.callCount(),
+                "full renders at most the per-section item cap of clusters");
         assertEquals(2, renderer.categoryItemCap,
-                "the cap lift is local to the render pass — the shared field is never mutated");
-        assertFalse(result.contains("+2 more"),
-                "the +N more overflow line is gone in every mode (its bundle keys are deleted): "
-                        + result);
+                "the cap is applied locally to the render pass — the shared field is never mutated");
+        assertTrue(result.contains("+2 more stories — /summary ai --full"),
+                "a capped section carries the demotion line steering to the tag's "
+                        + "uncapped pull surface: " + result);
     }
 
     @Test
@@ -253,7 +253,7 @@ class DigestRendererTest {
                 post("s3", "Sec 3", List.of("security")));
 
         List<DigestRenderer.RenderedSection> sections =
-                renderer.renderSections(posts, "en", DigestMode.FULL, GROUP_ID);
+                renderer.renderSections(posts, "en", DigestMode.FULL, GROUP_ID).sections();
 
         assertFalse(sections.isEmpty(), "fixture: at least one section rendered");
         for (DigestRenderer.RenderedSection section : sections) {
@@ -333,7 +333,7 @@ class DigestRendererTest {
                 post("s3", "Sec 3", List.of("security")));
 
         List<DigestRenderer.RenderedSection> sections =
-                renderer.renderSections(posts, "en", DigestMode.FULL, GROUP_ID);
+                renderer.renderSections(posts, "en", DigestMode.FULL, GROUP_ID).sections();
 
         assertFalse(sections.isEmpty(), "fixture: at least one section rendered");
         String text = sections.stream()

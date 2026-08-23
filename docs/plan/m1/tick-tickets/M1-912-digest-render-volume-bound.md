@@ -1,9 +1,15 @@
 ---
 id: M1-912
 title: "Bound digest render volume in FULL and degraded modes"
-status: in-progress
+status: done
 created: 2026-08-23
 last_updated: 2026-08-23
+reviews:
+  - round: 1
+    date: 2026-08-23
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS: WARN (§12 spec-wording approval record missing — confirm at commit); SECURITY: PASS; TEST-ADEQUACY: PASS; MAINTAINABILITY: WARN (11 comment runs over advisory cap, DigestRendererVolumeBoundTest only, informational); SCOPE: PASS"
+    diff_stats: "25 files changed, 1015 insertions(+), 129 deletions(-)"
 clarity_check: "start 2026-08-23: all file:line citations re-verified on this checkout (DigestRenderer:124/:256-263/:407-415/:459-463; SummaryProseGenerator:300-346; DigestWorker:226,244,289 + admission gates at :241-244; DegradedDigestRenderer:78-119; DigestRoundtripIT:110,192,225; DigestRetryConcurrencyIT:109,131; GoldenPathJourneyIT:348; spec commands.md:2126-2132 item-cap/overflow text standing); §Census re-run clean (eight digest render paths, eight rows); analysis pitfalls P1-P7 all landed in this ticket (P8-P14 are siblings); DigestRendererTest pin exists as renderSections_stripsAdminCommandTokens_beforePersistenceAndReplay (:228); plural-shape precedent reply.digest.categories.more verified in en.properties:889; no blocked_by, no replaces:"
 flow: tick
 reproduction: >-

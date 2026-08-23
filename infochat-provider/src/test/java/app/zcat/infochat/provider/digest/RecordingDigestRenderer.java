@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.digest;
 
 import app.zcat.infochat.provider.digest.DigestRenderer.DigestMode;
+import app.zcat.infochat.provider.digest.DigestRenderer.RenderResult;
 import app.zcat.infochat.provider.digest.DigestRenderer.RenderedSection;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 
@@ -16,7 +17,7 @@ import java.util.concurrent.CountDownLatch;
  * <p>Overrides {@link DigestRenderer#renderSections} — the entry point
  * {@link DigestWorker} calls — so the latch, the {@code calls}
  * counter, and the canned-response return all live there. The stub ignores
- * the {@link DigestMode} argument: worker tests pin orchestration, not
+ * the {@code DigestMode} argument: worker tests pin orchestration, not
  * per-mode rendering (that is DigestRendererTest/SectionsTest's surface).
  * A single-section list makes the worker's {@code "\n\n"} join equal the
  * configured response verbatim (the property {@code DigestWorkerClockTest:86}
@@ -25,6 +26,9 @@ import java.util.concurrent.CountDownLatch;
  * <p>The {@code groupId} argument (M1-756) is ignored for the same reason
  * as the mode: it selects the display-hit translation cache partition,
  * which is rendering, not orchestration.
+ *
+ * <p>Synthesis accounting (M1-912) defaults to 0/0 — nothing attempted —
+ * which the worker's zero-prose rule reads as non-degraded.
  */
 final class RecordingDigestRenderer extends DigestRenderer {
     private String response = "default prose";
@@ -32,9 +36,17 @@ final class RecordingDigestRenderer extends DigestRenderer {
     private CountDownLatch entered;
     private CountDownLatch release;
     private List<RenderedSection> multiSections;
+    private int synthesisTotal;
+    private int synthesisDegraded;
 
     void setResponse(String r) { this.response = r; }
     int callCount() { return calls; }
+
+    /** Configures the {@link RenderResult} synthesis counts (M1-912). */
+    void setSynthesisAccounting(int total, int degraded) {
+        this.synthesisTotal = total;
+        this.synthesisDegraded = degraded;
+    }
 
     /**
      * Override the default single-section response with a multi-section
@@ -50,8 +62,8 @@ final class RecordingDigestRenderer extends DigestRenderer {
     }
 
     @Override
-    public List<RenderedSection> renderSections(List<Post> posts, String langCode,
-                                                DigestMode mode, UUID groupId) {
+    public RenderResult renderSections(List<Post> posts, String langCode,
+                                        DigestMode mode, UUID groupId) {
         calls++;
         if (entered != null) {
             entered.countDown();
@@ -61,6 +73,8 @@ final class RecordingDigestRenderer extends DigestRenderer {
                 Thread.currentThread().interrupt();
             }
         }
-        return multiSections != null ? multiSections : List.of(new RenderedSection(null, response));
+        List<RenderedSection> sections =
+                multiSections != null ? multiSections : List.of(new RenderedSection(null, response));
+        return new RenderResult(sections, synthesisTotal, synthesisDegraded);
     }
 }

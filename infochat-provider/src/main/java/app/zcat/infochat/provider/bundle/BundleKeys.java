@@ -2141,6 +2141,20 @@ public final class BundleKeys {
     /** Section-cap overflow line, appended ONCE to the last section of a digest whose category count exceeded {@code infochat.digest.max-categories} (M1-721). Token {@code {0}} = the number of categories not shown; both values carry a {@code {0,choice,...}} plural shape. Names no tags — it steers to {@code /summary}, which caps no sections. */
     public static final String REPLY_DIGEST_CATEGORIES_MORE = "reply.digest.categories.more";
 
+    /** FULL-mode per-section demotion line (M1-912): {0} = capped-out cluster count ({0,choice}), {1} = the raw tag {@code /summary <tag> --full} takes. */
+    public static final String REPLY_DIGEST_CATEGORY_MORE = "reply.digest.category.more";
+
+    /** {@link #REPLY_DIGEST_CATEGORY_MORE} for the Other bucket — no tag in the vocabulary, so the steer names bare {@code /summary --full}; {0} = count. */
+    public static final String REPLY_DIGEST_CATEGORY_OTHER_MORE = "reply.digest.category.other_more";
+
+    /** Suffix closing a bounded degraded cluster's member listing (M1-912): {0} = capped-out member count ({0,choice}). */
+    public static final String REPLY_DIGEST_DEGRADED_MEMBER_MORE =
+            "reply.digest.degraded.member_more";
+
+    /** The whole-digest degraded fallback's accounting line (M1-912): {0} = capped-out post count ({0,choice}). */
+    public static final String REPLY_DIGEST_DEGRADED_ENTRIES_MORE =
+            "reply.digest.degraded.entries_more";
+
     /** One closing affordance line ending every non-degraded digest (group scope, so it steers to @mention). No tokens; resolved via the 2-arg accessor. */
     public static final String REPLY_DIGEST_CLOSING_AFFORDANCE = "reply.digest.closing_affordance";
 

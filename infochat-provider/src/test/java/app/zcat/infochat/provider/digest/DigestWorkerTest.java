@@ -14,6 +14,7 @@ import app.zcat.infochat.provider.messaging.AdapterRegistry;
 import app.zcat.infochat.provider.messaging.OutboundDelivery;
 import app.zcat.infochat.provider.summary.EligiblePostQuery.Post;
 import app.zcat.infochat.provider.digest.DigestRenderer.DigestMode;
+import app.zcat.infochat.provider.digest.DigestRenderer.RenderResult;
 import app.zcat.infochat.provider.digest.DigestRenderer.RenderedSection;
 import org.jboss.logmanager.LogContext;
 import org.junit.jupiter.api.BeforeEach;
@@ -109,6 +110,58 @@ class DigestWorkerTest {
         digestDelivery.outboundDelivery = worker.outboundDelivery;
         digestDelivery.deliveryRepository = new RecordingCategoryDeliveryRepository();
         worker.digestDelivery = digestDelivery;
+    }
+
+    @Test
+    void execute_zeroGeneratedSynthesis_renderCompleted_flagsDegraded() {
+        // M1-912 zero-prose rule, FULL shape: completed with every unit
+        // degraded → is_degraded=TRUE though no gate tripped.
+        worker.dataSource = new StubGroupDataSource(ADAPTER_NAME, UPSTREAM_GROUP_ID, "en", "full");
+        postCollector.seed(testPosts(), 1, 1);
+        digestRenderer.setResponse("all-reference-lines digest");
+        digestRenderer.setSynthesisAccounting(12, 12);
+        DigestSlot slot = futureSlot();
+
+        worker.execute(slot);
+
+        assertEquals(1, digestRenderer.callCount(), "the render ran to completion");
+        assertTrue(cacheRepository.lastIsDegraded(),
+                "a completed zero-prose render is degraded, not healthy");
+        assertEquals("all-reference-lines digest", cacheRepository.lastContent(),
+                "the completed render's bytes still deliver and cache");
+        assertEquals(1, sectionRepository.replaceCalls().size(),
+                "a completed zero-prose render persists its sections — replay keys on them");
+    }
+
+    @Test
+    void execute_zeroGeneratedSynthesis_normalModeAllRollupsFailed_flagsDegraded() {
+        // The brief/normal shape of the same rule: every roll-up failed —
+        // zero generated synthesis is degraded on the prose-less mode too.
+        postCollector.seed(testPosts(), 1, 1);
+        digestRenderer.setResponse("headers-only digest");
+        digestRenderer.setSynthesisAccounting(8, 8);
+        DigestSlot slot = futureSlot();
+
+        worker.execute(slot);
+
+        assertTrue(cacheRepository.lastIsDegraded(),
+                "every roll-up failed — zero generated synthesis is degraded");
+    }
+
+    @Test
+    void execute_partiallyDegradedRenderStaysNonDegraded() {
+        // The rule's other edge: SOME synthesis generated means not
+        // flagged — the flag means ZERO synthesis, not "any degraded
+        // unit"; the 0/0 stub default (nothing attempted) stays FALSE too.
+        postCollector.seed(testPosts(), 1, 1);
+        digestRenderer.setResponse("mostly healthy digest");
+        digestRenderer.setSynthesisAccounting(12, 3);
+        DigestSlot slot = futureSlot();
+
+        worker.execute(slot);
+
+        assertFalse(cacheRepository.lastIsDegraded(),
+                "partial degradation is not the zero-prose case");
     }
 
     @Test
@@ -689,8 +742,8 @@ class DigestWorkerTest {
         private final AtomicInteger completedCalls = new AtomicInteger();
 
         @Override
-        public List<RenderedSection> renderSections(List<Post> posts, String langCode,
-                                                    DigestMode mode, UUID groupId) {
+        public RenderResult renderSections(List<Post> posts, String langCode,
+                                            DigestMode mode, UUID groupId) {
             renderStarted.countDown();
             try {
                 for (int i = 0; i < CALL_SITES; i++) {
@@ -706,7 +759,7 @@ class DigestWorkerTest {
             } finally {
                 renderFinished.countDown();
             }
-            return List.of(new RenderedSection(null, "orphaned prose"));
+            return new RenderResult(List.of(new RenderedSection(null, "orphaned prose")), 0, 0);
         }
 
         /** One generative call, with the interruptibility of the real LLM floor. */

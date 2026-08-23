@@ -1,14 +1,18 @@
 package app.zcat.infochat.provider.digest;
 
+import java.text.MessageFormat;
 import java.util.List;
 
 
+import app.zcat.infochat.provider.bundle.BundleKeys;
+import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.render.DisplayHeadline;
 import app.zcat.infochat.provider.summary.EligiblePostQuery;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -75,9 +79,19 @@ public class DegradedDigestRenderer {
     @Inject
     LlmOutputSanitizer llmOutputSanitizer;
 
+    // Localizes the over-cap accounting line (M1-912) — a resource reader,
+    // not a provider seam (the no-LLM pin in DegradedDigestRendererTest).
+    @Inject
+    BundleLoader bundleLoader;
+
+    /** Max post entries the degraded fallback renders (M1-912); one accounting line names the rest. At/under the cap: byte-identical. */
+    @ConfigProperty(name = "infochat.digest.degraded-max-entries", defaultValue = "50")
+    int maxEntries = 50;
+
     public String render(List<EligiblePostQuery.Post> posts, String scopeLanguage) {
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < posts.size(); i++) {
+        int shown = Math.min(posts.size(), maxEntries);
+        for (int i = 0; i < shown; i++) {
             if (i > 0) sb.append("\n\n");
             EligiblePostQuery.Post p = posts.get(i);
             // sourceDisplayName (and the url below) are NOT sanitized here: the
@@ -114,6 +128,13 @@ public class DegradedDigestRenderer {
             if (p.url() != null && !p.url().isEmpty()) {
                 sb.append('\n').append(p.url());
             }
+        }
+        // M1-912: the entry bound's accounting — renderer-authored line,
+        // so it reaches no sanitizer, same as every header it siblings with.
+        if (posts.size() > shown) {
+            sb.append("\n\n").append(MessageFormat.format(
+                    bundleLoader.get(BundleKeys.REPLY_DIGEST_DEGRADED_ENTRIES_MORE, scopeLanguage),
+                    posts.size() - shown));
         }
         return sb.toString();
     }

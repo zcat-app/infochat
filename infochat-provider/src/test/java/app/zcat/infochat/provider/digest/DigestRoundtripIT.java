@@ -261,6 +261,45 @@ class DigestRoundtripIT {
                 "Step (h): one retry must be rejected as already in progress. Got: " + results);
     }
 
+    @Test
+    void zeroGeneratedProseRenderIsFlaggedDegradedAndItsRetryReRuns() throws Exception {
+        // M1-912: zero-synthesis completion → is_degraded=TRUE, and the
+        // corrected retry rule re-runs it: with the provider healthy the
+        // retry regenerates prose — zero new LLM calls would be the bug.
+        movePostTo(Instant.now().minusSeconds(600));
+        testLlmProvider.setThrowOnCall(true);
+        DigestSlot slot = new DigestSlot(GROUP_1, "UTC", "morning",
+                Instant.now().minusSeconds(1800), Instant.now().plusSeconds(1800));
+
+        worker.execute(slot);
+
+        var cache = readCacheRow(GROUP_1, "morning", slot.windowStart());
+        assertTrue(cache.isPresent(), "the zero-prose render writes its cache row");
+        assertTrue(cache.get().isDegraded(),
+                "a completed zero-synthesis render records is_degraded=TRUE — the "
+                        + "flag is honest about a reference-lines digest");
+        assertTrue(cache.get().content().contains("Test Digest Post"),
+                "the reference-line body still delivers (headline, no prose)");
+        assertFalse(cache.get().content().contains("Full prose"),
+                "no synthesis text in a zero-prose render");
+
+        testLlmProvider.setThrowOnCall(false);
+        testLlmProvider.setResponseText("Fresh retry full prose.");
+        int callsBeforeRetry = testLlmProvider.callCount();
+
+        adapter.deliverGroupMention(UPSTREAM_G1, ADMIN_CONTACT, "/retry --digest");
+
+        assertTrue(testLlmProvider.callCount() > callsBeforeRetry,
+                "the retry takes the RE-RUN leg over the frozen cluster set — a "
+                        + "degraded row never replays its reference lines");
+        var after = readCacheRow(GROUP_1, "morning", slot.windowStart());
+        assertTrue(after.isPresent(), "the retry replaced the cache row");
+        assertFalse(after.get().isDegraded(),
+                "the re-run with a healthy pool writes a healthy row");
+        assertTrue(after.get().content().contains("Fresh retry full prose."),
+                "the re-run regenerated prose: " + after.get().content());
+    }
+
     // -- helpers ----------------------------------------------------------------
 
     private void awaitDispatches(List<Future<?>> dispatches) throws Exception {
@@ -449,10 +488,17 @@ class DigestRoundtripIT {
         exec(conn, "DELETE FROM source_subscription WHERE scope_id IN (?, ?, ?)", GROUP_1, GROUP_2, GROUP_3);
         exec(conn, "DELETE FROM scope_tag WHERE scope_id IN (?, ?, ?)", GROUP_1, GROUP_2, GROUP_3);
         exec(conn, "DELETE FROM scope_preferences WHERE scope_id IN (?, ?, ?)", GROUP_1, GROUP_2, GROUP_3);
-        exec(conn,
-                "DELETE FROM audit_log WHERE scope_id IN (?, ?, ?)"
-                        + " OR (actor_user_id = ? AND action IN ('DIGEST_RETRY', 'DIGEST_SLOT_MISSED'))",
-                GROUP_1, GROUP_2, GROUP_3, USER_1);
+        // audit_log cleanup (M1-912): the append-only row trigger
+        // (Invariant 10) raises only when the earlier test's DIGEST_RETRY
+        // rows match; inert here, so swallowed.
+        try {
+            exec(conn,
+                    "DELETE FROM audit_log WHERE scope_id IN (?, ?, ?)"
+                            + " OR (actor_user_id = ? AND action IN ('DIGEST_RETRY', 'DIGEST_SLOT_MISSED'))",
+                    GROUP_1, GROUP_2, GROUP_3, USER_1);
+        } catch (SQLException appendOnlyIgnored) {
+            // append-only trigger — see the comment above
+        }
         exec(conn, "DELETE FROM group_membership WHERE group_id IN (?, ?, ?)", GROUP_1, GROUP_2, GROUP_3);
         exec(conn, "DELETE FROM post WHERE id = ?", POST_1);
     }

@@ -97,7 +97,7 @@ class DigestRetryServiceTest {
 
     @Test
     void retryDigest_regeneratesFullProseFromDegraded() {
-        // Cache row has isDegraded=true — fallback still calls worker.
+        // Cache row has is_degraded=true — fallback still calls worker.
         service.dataSource = stubDataSource(true);
 
         RetryResult result = service.retryDigest(GROUP_ID);
@@ -105,6 +105,26 @@ class DigestRetryServiceTest {
         assertEquals(RetryResult.SUCCESS, result);
         assertEquals(1, digestWorker.executeCount,
                 "worker must be called to regenerate full prose on the fallback path");
+    }
+
+    @Test
+    void degradedRowWithPersistedSectionsReRunsInsteadOfReplaying() {
+        // M1-912: replay finishes interrupted deliveries of HEALTHY
+        // renders; a degraded row re-runs even with sections.
+        service.dataSource = stubDataSource(true);
+        pinClockToLiveRow();
+        sectionRepository.seedSections(List.of(
+                new RenderedSection("security", "degraded reference lines")));
+        assertEquals(DigestRetryService.RetryLeg.FALLBACK, service.retryLeg(GROUP_ID),
+                "the pre-charge probe must agree: a degraded row probes FALLBACK");
+
+        RetryResult result = service.retryDigest(GROUP_ID);
+
+        assertEquals(RetryResult.SUCCESS, result, "the re-run leg runs the worker");
+        assertEquals(1, digestWorker.executeCount,
+                "a degraded row re-renders even with persisted sections");
+        assertEquals(0, digestDelivery.deliverCalls.size(),
+                "DigestDelivery is never invoked for a degraded row — no replay");
     }
 
     @Test

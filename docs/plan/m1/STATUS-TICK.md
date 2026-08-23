@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 9 |
-| in-progress | 1 |
+| pending | 13 |
+| in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 119 |
+| done | 120 |
 | deferred | 0 |
 | abandoned | 3 |
-| **total** | **132** |
+| **total** | **136** |
 
 ---
 
@@ -28,10 +28,12 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-908 — Tracked llamacpp speculative-decoding compose keys, off by default (complexity: low, risk: low)
 - M1-910 — Rootless IPv6 compose enablement, capability-derived (complexity: medium, risk: medium)
 - M1-911 — No-IPv6-host fallback: image getaddrinfo IPv4 preference (complexity: low, risk: medium)
+- M1-913 — Digest v1 shape: count header, 10 headlines, drill-down close (complexity: medium, risk: medium)
 - M1-914 — Persist post.comments and rank reddit replies in the digest (complexity: high, risk: medium)
 - M1-915 — Migrate reddit feeds from kind=rss to kind=reddit in place (complexity: medium, risk: medium)
 - M1-916 — Route temporal/top-news chat intents to searchPosts (complexity: low, risk: medium)
 - M1-917 — Widen and diversity-cap the semanticSearch window (complexity: medium, risk: medium)
+- M1-918 — Chat prompt token budget + deterministic compaction ladder (complexity: medium, risk: medium)
 
 ---
 
@@ -39,7 +41,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 | ID | Title | Status | Last review |
 |---|---|---|---|
-| M1-912 | Bound digest render volume in FULL and degraded modes | in-progress | (none) |
+
+_(none)_
 
 ---
 
@@ -48,7 +51,9 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-909 — blocked_by: M1-908 (pending)
-- M1-913 — blocked_by: M1-912 (in-progress)
+- M1-919 — blocked_by: M1-918 (pending)
+- M1-920 — blocked_by: M1-909 (pending)
+- M1-921 — blocked_by: M1-918 (pending), M1-920 (pending)
 
 ---
 
@@ -67,6 +72,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-912 | Bound digest render volume in FULL and degraded modes | 2026-08-23 | round 1 APPROVE |
 | M1-907 | 8-verify.sh config-freshness leg + boot-verify rule | 2026-08-23 | round 1 APPROVE |
 | M1-906 | Restore-time derivative retention floor + old-bundle WARN | 2026-08-22 | round 2 APPROVE |
 | M1-905 | Compose+wizard llamacpp serving keys and GPU timing class | 2026-08-22 | round 1 APPROVE |
@@ -76,7 +82,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-901 | Liveness IT: subs responder survives reconnect swap | 2026-08-21 | round 1 APPROVE |
 | M1-900 | Fix the span-parser FAIL remedy; drop dead jq advice | 2026-08-21 | round 1 APPROVE |
 | M1-899 | Spell out the shared cutover rulings-file lifecycle | 2026-08-21 | round 1 APPROVE |
-| M1-898 | Scope cutover apply to DB unknowns; refuse key rulings | 2026-08-21 | round 1 APPROVE |
 
 ---
 
@@ -251,12 +256,17 @@ M1-906 (done)
 M1-907 (done)
 M1-908 (pending) ← runnable
   └── M1-909 (pending)
+        └── M1-920 (pending)
+              └── M1-921 (pending)
 M1-910 (pending) ← runnable
 M1-911 (pending) ← runnable
-M1-912 (in-progress)
-  └── M1-913 (pending)
+M1-912 (done)
+  └── M1-913 (pending) ← runnable
 M1-914 (pending) ← runnable
 M1-915 (pending) ← runnable
 M1-916 (pending) ← runnable
 M1-917 (pending) ← runnable
+M1-918 (pending) ← runnable
+  ├── M1-919 (pending)
+  └── M1-921 (pending) [see above]
 ```

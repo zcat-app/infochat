@@ -38,8 +38,9 @@ import org.jspecify.annotations.Nullable;
  * The category body is mode-dependent ({@code groups.digest_mode}, V67,
  * M1-732): {@code brief} renders a true-count header + roll-up per
  * category, {@code normal} adds bare headlines, and {@code full} keeps the
- * per-cluster LLM prose (sanitized and translated) with the item cap
- * lifted. The {@code /summary} render forms below are mode-independent.
+ * per-cluster LLM prose (sanitized and translated) bounded by the
+ * per-section item cap, with a demotion line accounting for the rest
+ * (M1-912). The {@code /summary} render forms below are mode-independent.
  *
  * <p>A non-{@code brief} digest with at least {@code infochat.digest.lead-minimum}
  * clusters opens with a LEAD section (M1-725): the top
@@ -121,9 +122,13 @@ public class DigestRenderer {
     app.zcat.infochat.provider.summary.TagTreeExpansion tagTreeExpansion =
             new app.zcat.infochat.provider.summary.TagTreeExpansion();
 
-    /** Max clusters rendered per category section in FULL mode is unbounded; in the pre-M1-732 render the overflow became a localized "+N more" line. Still the cap /summary's render forms use. */
+    /** Max clusters rendered per FULL-mode category section (M1-912): the prominence head; a capped section appends a localized demotion line steering to {@code /summary <tag> --full}. */
     @ConfigProperty(name = "infochat.digest.category-item-cap", defaultValue = "12")
     int categoryItemCap;
+
+    /** Max member posts listed per degraded cluster on the digest render path (M1-912), {@code +M more} accounting for the rest — digest-only; /summary's degraded forms stay uncapped, and the per-member sanitize unit (M1-697) is unchanged. */
+    @ConfigProperty(name = "infochat.digest.degraded-member-cap", defaultValue = "3")
+    int degradedMemberCap = 3;
 
     /**
      * Max bare headlines per category section in NORMAL mode (M1-732).
@@ -254,13 +259,9 @@ public class DigestRenderer {
      * {@link CategoryRollupGenerator} roll-up per surviving section, and
      * (normal only) up to {@link #categoryHeadlineCount} bare headlines —
      * and make ZERO {@link SummaryProseGenerator} calls. {@code full}
-     * keeps the pre-M1-732 per-cluster prose with the item cap lifted to a
-     * LOCAL {@code Integer.MAX_VALUE} effective cap ({@code categoryItemCap}
-     * is shared {@code @ApplicationScoped} state — mutating it per render
-     * would race concurrent slot renders on the virtual-thread executor;
-     * the local-cap precedent is {@code renderSummarySections}' M1-700
-     * {@code effectiveCap}), so the old {@code +N more} overflow line can
-     * never appear and its bundle keys are deleted.
+     * keeps the per-cluster prose bounded at a LOCAL {@code categoryItemCap}
+     * per section — the prominence head, prose only for the shown, one
+     * demotion line for the rest (M1-912; the M1-700 effectiveCap precedent).
      *
      * <p>M1-725 lead: a non-{@code brief} digest with at least
      * {@link #leadMinimum} clusters returns a LEAD section FIRST — the top
@@ -289,10 +290,10 @@ public class DigestRenderer {
      * beneath it draws, and every call issued anywhere else in the
      * deployment does not. See {@link #renderSectionsUnderBudget}.
      */
-    public List<RenderedSection> renderSections(List<EligiblePostQuery.Post> posts,
-                                                String langCode,
-                                                DigestMode mode,
-                                                UUID groupId) {
+    public RenderResult renderSections(List<EligiblePostQuery.Post> posts,
+                                       String langCode,
+                                       DigestMode mode,
+                                       UUID groupId) {
         return LlmCallBudget.callWith(systemLlmBudget.forRender(groupId),
                 () -> renderSectionsUnderBudget(posts, langCode, mode, groupId));
     }
@@ -318,10 +319,10 @@ public class DigestRenderer {
      * not. The generative helpers below are shared with those routes;
      * the binding, not the helper, decides what draws.
      */
-    private List<RenderedSection> renderSectionsUnderBudget(List<EligiblePostQuery.Post> posts,
-                                                            String langCode,
-                                                            DigestMode mode,
-                                                            UUID groupId) {
+    private RenderResult renderSectionsUnderBudget(List<EligiblePostQuery.Post> posts,
+                                                    String langCode,
+                                                    DigestMode mode,
+                                                    UUID groupId) {
         List<Cluster> clusters = clusterTraversal.cluster(posts);
         Map<String, String> sectionKeys = tagTreeExpansion.sectionKeyByLeaf("group", groupId);
         List<CategorySection> allSections = digestCategorizer.categorize(clusters, Set.of(), sectionKeys);
@@ -398,19 +399,24 @@ public class DigestRenderer {
         List<CategorySection> sections = digestCategorizer.capSections(rankedSections);
         int droppedCategories = allSections.size() - sections.size();
 
-        // FULL: ONE generate() call covering every cluster of every
-        // surviving section (the cap is lifted — there is no capped-out
-        // cluster to spare), so per-call behavior (e.g. degraded fallback)
-        // stays uniform across sections. brief/normal render no per-cluster
-        // prose at all, so the generator is never invoked.
+        // FULL (M1-912): ONE generate() call over each section's capped
+        // cluster list in render order — capping BEFORE generate() keeps
+        // D62's prose-only-for-shown and the positional pairing intact.
+        List<List<Cluster>> shownPerSection;
         List<ClusterProse> proseList;
         if (mode == DigestMode.FULL) {
+            shownPerSection = new ArrayList<>(sections.size());
             List<Cluster> shownClusters = new ArrayList<>();
             for (CategorySection section : sections) {
-                shownClusters.addAll(section.clusters());
+                List<Cluster> shown = section.clusters().size() <= categoryItemCap
+                        ? section.clusters()
+                        : section.clusters().subList(0, categoryItemCap);
+                shownPerSection.add(shown);
+                shownClusters.addAll(shown);
             }
             proseList = summaryProseGenerator.generate(shownClusters, langCode);
         } else {
+            shownPerSection = List.of();
             proseList = List.of();
         }
         // Lead prose (M1-725): ONE generate() call over exactly the
@@ -441,6 +447,23 @@ public class DigestRenderer {
             rendered.add(new RenderedSection(LEAD_TAG, leadSb.toString()));
         }
         int proseIndex = 0;
+        // Synthesis accounting (M1-912): attempted vs degraded synthesis
+        // units, so DigestWorker can flag a render that COMPLETED with
+        // zero generated prose.
+        int synthesisTotal = 0;
+        int synthesisDegraded = 0;
+        for (ClusterProse cp : proseList) {
+            synthesisTotal++;
+            if (cp.degraded()) {
+                synthesisDegraded++;
+            }
+        }
+        for (ClusterProse cp : leadProse) {
+            synthesisTotal++;
+            if (cp.degraded()) {
+                synthesisDegraded++;
+            }
+        }
         // ONE generative translator budget for the WHOLE render, not one
         // per section: the bound this exists to enforce is on the digest a
         // group receives, and a per-section budget would multiply by the
@@ -457,9 +480,14 @@ public class DigestRenderer {
                     ? sectionHeader(section, langCode)
                     : sectionCountHeader(section, langCode));
             if (mode == DigestMode.FULL) {
-                for (int i = 0; i < section.clusters().size(); i++) {
+                List<Cluster> shown = shownPerSection.get(sectionIdx);
+                for (int i = 0; i < shown.size(); i++) {
                     sb.append("\n\n");
                     appendClusterProse(sb, proseList.get(proseIndex++), langCode);
+                }
+                int overflow = section.clusters().size() - shown.size();
+                if (overflow > 0) {
+                    sb.append("\n\n").append(demotionLine(section, overflow, langCode));
                 }
             } else {
                 // The roll-up sees ALL clusters in the section (its existing
@@ -468,11 +496,14 @@ public class DigestRenderer {
                 // section with header (+ headlines) + footer but no
                 // synthesis line (CategoryRollupGenerator's existing failure
                 // containment, same as renderShortBody).
+                synthesisTotal++;
                 Optional<String> rollup =
                         categoryRollupGenerator.generateRollup(
                                 section.clusters(), section.tag(), langCode);
                 if (rollup.isPresent()) {
                     sb.append("\n\n").append(rollup.get());
+                } else {
+                    synthesisDegraded++;
                 }
                 if (mode == DigestMode.NORMAL) {
                     translationBudget =
@@ -503,7 +534,24 @@ public class DigestRenderer {
             }
             rendered.add(new RenderedSection(section.tag(), sb.toString()));
         }
-        return rendered;
+        return new RenderResult(rendered, synthesisTotal, synthesisDegraded);
+    }
+
+    /** Result of {@link #renderSections}: the delivery section list (D65 replay bytes, unchanged) plus synthesis counts — every unit degraded means zero generated prose, which DigestWorker flags (M1-912). */
+    public record RenderResult(List<RenderedSection> sections,
+                               int synthesisTotal,
+                               int synthesisDegraded) {}
+
+    /** The FULL-mode per-section demotion line (M1-912): raw tag steers to {@code /summary <tag> --full}; the Other bucket (no tag) to bare {@code /summary --full} — the {@link #shortFooter} split. */
+    private String demotionLine(CategorySection section, int overflow, String langCode) {
+        if (section.tag() == null) {
+            return MessageFormat.format(
+                    bundleLoader.get(BundleKeys.REPLY_DIGEST_CATEGORY_OTHER_MORE, langCode),
+                    overflow);
+        }
+        return MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_DIGEST_CATEGORY_MORE, langCode),
+                overflow, section.tag());
     }
 
     /**
@@ -893,7 +941,8 @@ public class DigestRenderer {
      * same structural-trust rule as {@link #renderSummarySections}:
      * {@code degradedProseFor} re-composes and sanitizes each post's title
      * (one author's field per call). Non-degraded prose skips nothing:
-     * sanitizer-1 (one LLM-authored value), then the translator.
+     * sanitizer-1 (one LLM-authored value), then the translator. The
+     * degraded arm is member-capped (M1-912) — see {@link #degradedMemberCap}.
      */
     private void appendClusterProse(StringBuilder sb, ClusterProse cp, String langCode) {
         if (cp.degraded()) {
@@ -905,8 +954,23 @@ public class DigestRenderer {
             // cost argument would NOT carry on its own — the translator is
             // a different ModelTask.TRANSLATOR route than the summarizer
             // whose failure produced this branch, and a cache hit makes no
-            // provider call at all.
-            sb.append(SummaryProseGenerator.degradedProseFor(cp.cluster(), llmOutputSanitizer, langCode));
+            // provider call at all. Member cap (M1-912): capped members
+            // are dropped BEFORE degradedProseFor via a head-only Cluster;
+            // the suffix is renderer-authored — neither reaches a sanitizer.
+            List<EligiblePostQuery.Post> members = cp.cluster().posts();
+            if (members.size() > degradedMemberCap) {
+                Cluster head =
+                        new Cluster(cp.cluster().topicId(),
+                                members.subList(0, degradedMemberCap));
+                sb.append(SummaryProseGenerator.degradedProseFor(
+                        head, llmOutputSanitizer, langCode));
+                sb.append('\n').append(MessageFormat.format(
+                        bundleLoader.get(BundleKeys.REPLY_DIGEST_DEGRADED_MEMBER_MORE, langCode),
+                        members.size() - degradedMemberCap));
+            } else {
+                sb.append(SummaryProseGenerator.degradedProseFor(
+                        cp.cluster(), llmOutputSanitizer, langCode));
+            }
         } else {
             String sanitized = llmOutputSanitizer.sanitize(cp.prose());
             // No draw here (M1-769): the en-scope short-circuit and a cache

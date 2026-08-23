@@ -12,6 +12,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
+import static app.zcat.infochat.provider.testsupport.TranslationFixtures.newRealBundleLoader;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -20,11 +21,16 @@ class DegradedDigestRendererTest {
 
     private final DegradedDigestRenderer renderer = new DegradedDigestRenderer();
 
-    {
+    @org.junit.jupiter.api.BeforeEach
+    void setUp() throws Exception {
         // Real closed-list sanitizer with the audit write stubbed out (no DB) —
         // exercises the actual redaction logic. Field-injected in production;
         // set directly here (same package). M1-675.
         renderer.llmOutputSanitizer = SanitizerTestDoubles.noAuditSanitizer();
+        // M1-912: the over-cap accounting line resolves a bundle key; under-cap
+        // renders never touch the loader, so the pre-existing cases are
+        // unaffected either way.
+        renderer.bundleLoader = newRealBundleLoader();
     }
 
     @Test
@@ -299,6 +305,70 @@ class DegradedDigestRendererTest {
     }
 
     @Test
+    void render_overCapRendersMaxEntriesPlusOneAccountingLine() {
+        // M1-912: 60 posts over the default cap of 50 — exactly 50 entries
+        // + one accounting line; an 804-post window would otherwise put
+        // ~72k chars through this spec'd fallback.
+        List<EligiblePostQuery.Post> posts = new java.util.ArrayList<>();
+        for (int i = 1; i <= 60; i++) {
+            posts.add(post("uid-" + i, "Headline " + i, "Feed" + i,
+                    "https://f.example/" + i));
+        }
+
+        String result = renderer.render(posts, "en");
+
+        String[] blocks = result.split("\n\n");
+        assertEquals(51, blocks.length,
+                "50 post entries + one accounting line: " + result.length() + " chars");
+        assertTrue(result.contains("+10 more posts — /summary"),
+                "the accounting line names the remainder and steers to /summary: "
+                        + result.substring(result.lastIndexOf("\n\n")));
+        assertTrue(blocks[0].startsWith("Headline 1 — Feed1"),
+                "entries keep recency order: " + blocks[0]);
+        assertTrue(blocks[49].startsWith("Headline 50"),
+                "the 50th entry is the last rendered: " + blocks[49]);
+        assertFalse(result.contains("Headline 51"),
+                "an entry past the cap never renders");
+    }
+
+    @Test
+    void render_oneOverCapUsesTheSingularAccountingForm() {
+        // The en boundary: 51 posts = 50 rendered + the SINGULAR "1 more
+        // post" — proves the accounting line is a real plural, not a
+        // copied count.
+        List<EligiblePostQuery.Post> posts = new java.util.ArrayList<>();
+        for (int i = 1; i <= 51; i++) {
+            posts.add(post("uid-" + i, "Headline " + i, "Feed" + i,
+                    "https://f.example/" + i));
+        }
+
+        String result = renderer.render(posts, "en");
+
+        assertTrue(result.contains("+1 more post — /summary"),
+                "the singular form renders at the boundary: "
+                        + result.substring(result.lastIndexOf("\n\n")));
+    }
+
+    @Test
+    void render_atCapIsByteIdenticalToTheUncappedShape() throws Exception {
+        // M1-912: at or under the cap NOTHING changes — byte-identical to
+        // the same render against a renderer whose bound cannot bind,
+        // which is exactly the pre-change output shape.
+        List<EligiblePostQuery.Post> posts = new java.util.ArrayList<>();
+        for (int i = 1; i <= 50; i++) {
+            posts.add(post("uid-" + i, "Headline " + i, "Feed" + i,
+                    "https://f.example/" + i));
+        }
+        DegradedDigestRenderer uncapped = new DegradedDigestRenderer();
+        uncapped.llmOutputSanitizer = SanitizerTestDoubles.noAuditSanitizer();
+        uncapped.bundleLoader = newRealBundleLoader();
+        uncapped.maxEntries = Integer.MAX_VALUE;
+
+        assertEquals(uncapped.render(posts, "en"), renderer.render(posts, "en"),
+                "at-cap output is byte-identical to the uncapped shape");
+    }
+
+    @Test
     void renderer_hasNoCollaboratorThatCouldReachAProvider() {
         // ZERO PROVIDER CALLS, pinned structurally rather than by counting on a
         // spy: this renderer has no LLM seam to count. It reaches the anchor
@@ -310,15 +380,19 @@ class DegradedDigestRendererTest {
         // @Inject TranslationPipeline here to "translate the degraded digest
         // too". That edit is exactly what docs/spec/security.md §Failure
         // handling forbids on this path.
+        //
+        // §8-authorized update (M1-912): BundleLoader joined the list — a
+        // resource reader, not a provider seam; primitives are config.
         List<String> collaborators = Arrays.stream(DegradedDigestRenderer.class.getDeclaredFields())
                 .filter(f -> !f.isSynthetic() && !Modifier.isStatic(f.getModifiers()))
+                .filter(f -> !f.getType().isPrimitive())
                 .map(f -> f.getType().getSimpleName())
                 .toList();
 
-        assertEquals(List.of("LlmOutputSanitizer"), collaborators,
-                "the degraded renderer's only collaborator is the sanitizer — anything else "
-                        + "is a potential provider call on the path that exists BECAUSE no model "
-                        + "is available; got: " + collaborators);
+        assertEquals(List.of("LlmOutputSanitizer", "BundleLoader"), collaborators,
+                "the degraded renderer's only collaborators are the sanitizer and the "
+                        + "bundle loader — anything else is a potential provider call on the "
+                        + "path that exists BECAUSE no model is available; got: " + collaborators);
     }
 
     /** A post whose stored language is non-English and which carries a title anchor. */

@@ -305,10 +305,13 @@ class DigestBudgetScopingTest {
                     case "executeUpdate" -> 1;
                     case "executeQuery" -> {
                         if (cacheQuery) {
+                            // is_degraded: false — the leg-selection read
+                            // (M1-912); this stub's rows replay healthy.
                             yield singleRow(Map.of(
                                     "slot_kind", SLOT_KIND,
                                     "slot_fired_at", Timestamp.from(SLOT_FIRED_AT),
-                                    "expires_at", Timestamp.from(expiresAt)));
+                                    "expires_at", Timestamp.from(expiresAt),
+                                    "is_degraded", false));
                         }
                         if (groupQuery) {
                             yield singleRow(Map.of(
@@ -340,6 +343,10 @@ class DigestBudgetScopingTest {
                         yield true;
                     }
                     case "getString", "getTimestamp", "getObject" -> columns.get((String) args[0]);
+                    case "getBoolean" -> {
+                        Object v = columns.get((String) args[0]);
+                        yield v instanceof Boolean b ? b : Boolean.FALSE;
+                    }
                     case "close" -> null;
                     case "toString" -> "singleRow";
                     case "hashCode" -> System.identityHashCode(proxy);

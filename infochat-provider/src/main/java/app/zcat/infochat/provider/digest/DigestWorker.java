@@ -34,6 +34,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.digest.DigestPostCollector.CollectionResult;
 import app.zcat.infochat.provider.digest.DigestRenderer.DigestMode;
+import app.zcat.infochat.provider.digest.DigestRenderer.RenderResult;
 import app.zcat.infochat.provider.digest.DigestRenderer.RenderedSection;
 import app.zcat.infochat.provider.messaging.AdapterRegistry;
 import app.zcat.infochat.provider.messaging.OutboundDelivery;
@@ -223,6 +224,9 @@ public class DigestWorker {
         // per-category delivery branch at the bottom.
         List<RenderedSection> renderedSections = null;
         String content;
+        // Flag semantics (M1-912): TRUE = "not a full synthesis" (D17
+        // degraded, missed-slot sentinel, or zero-synthesis completion
+        // below). Read by DigestRetryService's leg selection.
         boolean isDegraded = false;
 
         if (collection.posts().isEmpty()) {
@@ -250,19 +254,27 @@ public class DigestWorker {
                 // overrunning render kept spending LLM calls to completion.
                 // submit() hands back the executor's own Future, whose
                 // cancel(true) interrupts the render thread. (M1-763)
-                Future<List<RenderedSection>> renderFuture = renderExecutor.submit(
+                Future<RenderResult> renderFuture = renderExecutor.submit(
                         () -> digestRenderer.renderSections(
                                 collection.posts(), meta.language(), meta.digestMode(),
                                 slot.groupId()));
                 try {
-                    renderedSections = renderFuture.get(remaining.toMillis(), TimeUnit.MILLISECONDS);
+                    RenderResult render = renderFuture.get(remaining.toMillis(), TimeUnit.MILLISECONDS);
                     // NEVER re-render after renderSections() — a second render
                     // pass re-runs the whole LLM pipeline and lets the cached
                     // prose silently diverge from the delivered bytes (the
                     // hand-wired stubs cannot catch it). The cache stores the
                     // join of the section list already in hand.
+                    renderedSections = render.sections();
                     content = String.join("\n\n", renderedSections.stream()
                             .map(RenderedSection::text).toList());
+                    // M1-912 zero-prose rule: completed with every unit
+                    // degraded → reference lines, flag it. 0/0 (nothing
+                    // attempted) stays FALSE.
+                    if (render.synthesisTotal() > 0
+                            && render.synthesisDegraded() == render.synthesisTotal()) {
+                        isDegraded = true;
+                    }
                 } catch (TimeoutException | ExecutionException | InterruptedException e) {
                     if (e instanceof InterruptedException) {
                         Thread.currentThread().interrupt();

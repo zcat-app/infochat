@@ -1461,10 +1461,15 @@ and makes the digest query depend on row presence.
   persisted at the original slot's fire time (decision D65). This
   is deterministic: the replay delivers the digest it is retrying
   (the originally rendered bytes), not a re-collection that could
-  sweep in posts published since the crash. A slot with no
-  persisted sections (a degraded slot, a zero-post slot, a pre-V61
-  cache row, or a crash-stranded cache row) falls back to today's
-  full re-run. The "posts a *new* message" commitment is preserved
+  sweep in posts published since the crash. Replay belongs to
+  slots that rendered healthy: a cache row flagged degraded — by
+  the admission gate, a render timeout, or a render that completed
+  with zero generated synthesis — falls back to today's full
+  re-run over the frozen cluster set, as does a slot with no
+  persisted sections (a zero-post slot, a pre-V61
+  cache row, or a crash-stranded cache row). Replaying a degraded
+  row would re-send exactly the bytes the reader already has.
+  The "posts a *new* message" commitment is preserved
   verbatim — this narrows which categories are posted, it never
   edits and never silently suppresses the whole message. See
   decision D36, D65, and `messaging.md` §Failure handling for
@@ -2122,15 +2127,19 @@ head. `/summary` stays publication-ordered: it is a pull where
 the reader asked for a specific tag and a stable
 reverse-chronological list is the right answer; the digest is a
 push where the reader asked for nothing. Under each header the
-existing per-cluster prose + links render unchanged. Each section
-(including Other) shows at most a per-section **item cap** of
-clusters (operator-configurable, default 12); a capped section
-appends a localized "+N more" line steering readers to
-`/summary <tag> --full` for real categories (the token is the
-category's raw controlled-vocabulary tag, e.g. `ai`), or to bare
-`/summary --full` for the Other bucket whose tag is not in the
-controlled vocabulary; per-cluster LLM prose is generated only
-for the clusters actually shown. The **number of sections** is
+existing per-cluster prose + links render unchanged. In `full`
+mode each section (including Other) shows at most a per-section
+**item cap** of clusters (operator-configurable, default 12); the
+prominence order (D71) decides which clusters render, so the head
+is what survives the cap. A capped section appends one localized
+`+N more` line steering readers to `/summary <tag> --full` — the
+token is the category's raw controlled-vocabulary tag, such as
+`ai` — or, for the Other bucket whose tag is not in the
+controlled vocabulary, to bare `/summary --full`. Per-cluster LLM
+prose is generated only for the clusters actually shown. The
+`brief` and `normal` bodies carry no item cap and no demotion
+line: the roll-up names what the capped headline list hides. The
+**number of sections** is
 bounded too, by a separate operator-configurable **section cap**
 (default 8): a digest's section count tracks the tag vocabulary,
 which grows with every source an operator adds, so without this
@@ -2157,8 +2166,18 @@ clusters and tags,
 the assignment and section order are byte-identical — the LLM
 touches only the per-cluster prose, extending the D19
 determinism boundary to the digest's structure. The degraded
-(headlines-only) digest (D17) is unchanged: no category headers,
-  no affordance. `/summary` renders the same categorized form by
+  (headlines-only) digest (D17) keeps its shape — no category
+  headers, no affordance — but is entry-bounded: it renders at
+  most a configured number of post entries (default 50) in
+  recency order, followed by one localized accounting line naming
+  the rest and steering readers to `/summary`. On the per-cluster
+  degraded path — a render whose prose call failed or was
+  refused — each cluster lists at most a configured number of
+  member posts (default 3), with a `+N more` suffix closing the
+  listing. These bounds apply to the digest broadcast only;
+  `/summary`'s degraded forms stay uncapped, `/summary --full`
+  being the reader-pulled escape. `/summary` renders the same
+  categorized form by
   default and keeps its flat per-cluster format behind `--flat`
   (§Content), with `--full` reclaimed for categorized-uncapped and
   `--short` adding a roll-up overview. It uses its own
@@ -2229,11 +2248,24 @@ healthy at that point. A degraded slot writes to the same
 `summary_cache` row as a full-prose slot would, with the **same
 TTL**, so a follow-up `/summary` during the cache window is served
 from the degraded cache (no silent re-render). `/retry --digest`
-on a degraded slot regenerates **full prose** if the worker pool
-is now free (the retry replaces the cached digest per D17 and the
-cluster set is the frozen original), and degrades again to
-headlines+sources only if the retry itself hits the same
-saturation. There is no saturation back-off across slots — a
+on a degraded slot regenerates **full prose** if the worker pool is
+  now free (the retry replaces the cached digest per D17 and the
+  cluster set is the frozen original), and degrades again to
+  headlines+sources only if the retry itself hits the same
+  saturation. This re-run rule covers every degraded row alike:
+  a slot whose render **completed** with zero generated synthesis —
+  every per-cluster prose call and every roll-up degraded in place,
+  so the delivered body is reference lines rather than prose — is
+  recorded in `summary_cache` with `is_degraded` set, the same flag
+  the admission and timeout branches write, and a later
+  `/retry --digest` treats it like any degraded slot: a re-run over
+  the frozen cluster set that regenerates prose if the worker pool
+  has recovered, never a byte-faithful replay of the reference
+  lines. Replay finishes interrupted deliveries of healthy
+  renders; it does not repeat a completed quality failure. Such a
+  slot still persists its rendered sections, so a crash between
+  its persist and delivery loses nothing the re-run cannot
+  regenerate. There is no saturation back-off across slots — a
 sustained-overload signal is the throttled admin notification
 already in `security.md` §Failure handling, not a per-group
 slot-skipping policy.
