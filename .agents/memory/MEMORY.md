@@ -73,6 +73,7 @@ and this store is the shared one both worlds read.
 
 ## Codebase couplings and design facts
 
+- [Reddit rides .rss, not .json](reddit-rss-transport-not-json.md) — `www` `.rss` + shared UA is the only anonymous endpoint from prod egress; `.json` is 403 for every UA/token (RedditFetcher's `.json` URL was prod-dead code no gate caught); `oauth.reddit.com` reachable but deferred 2026-08-23, so reddit engagement stays NULL and D71 social terms stay starved; `.rss` Atom `<id>t3_…</id>` pre-aligns uids with a future OAuth switch.
 - [Title/headline doctrine](title-headline-doctrine.md) — LLM-generated titles were rejected; ingest normalizes the stored title (untitled sentinel, 200-char cap) and DisplayHeadline derives per-post headlines deterministically. New surfaces reuse it, never re-derive; LLM-prompt inputs are the one deliberate split.
 - [Handler input is not always normalized](handler-input-not-always-normalized.md) — the router's NFKC pass exempts fenced code while routing reads only line 1, so normalize at the check; never enumerate blank-rendering codepoints.
 - [The reflection guard is error-scoped by design](reflection-guard-is-error-scoped-by-design.md) — a green guard does NOT mean reflection is impossible; the reply/success blind spot is disclosed, not overlooked. Don't re-litigate widening it.
