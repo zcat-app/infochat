@@ -270,6 +270,41 @@ class LlamacppWiringTest {
         }
     }
 
+    @Test
+    void composeExposesSpecDecodeKeysWithOffDefaults() throws IOException {
+        String gen = composeServiceBlock("llamacpp");
+        assertTrue(gen.contains("LLAMA_ARG_SPEC_TYPE: \"${INFOCHAT_LLAMACPP_SPEC_TYPE:-none}\""),
+                "generative llamacpp must expose speculative-decoding type with none default:\n" + gen);
+        assertTrue(gen.contains("LLAMA_ARG_SPEC_DRAFT_MODEL: \"${INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF:+/models/${INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF}}\""),
+                "draft model must be empty when unset and /models/<filename> when set:\n" + gen);
+        assertTrue(gen.contains("LLAMA_ARG_SPEC_DRAFT_N_MAX: \"${INFOCHAT_LLAMACPP_SPEC_N_MAX:-4}\""),
+                "generative llamacpp must expose draft n-max with 4 default:\n" + gen);
+        assertFalse(gen.contains("LLAMA_ARG_SPEC_DRAFT_MODEL: /models/"),
+                "the off render must not make llama-server load the /models/ directory:\n" + gen);
+
+        String emb = composeServiceBlock("llamacpp-embeddings");
+        assertFalse(emb.contains("LLAMA_ARG_SPEC_"),
+                "speculative-decoding keys belong only on the generative service:\n" + emb);
+
+        List<String> surfaces = new ArrayList<>(List.of("docker-compose.yml", "docker-compose.gpu.yml"));
+        try (Stream<Path> scripts = Files.list(repoRoot().resolve("prod/scripts"))) {
+            scripts.forEach(p -> surfaces.add("prod/scripts/" + p.getFileName()));
+        }
+        for (String surface : surfaces) {
+            String content = Files.readString(repoRoot().resolve(surface));
+            assertFalse(content.contains("LLAMA_ARG_SPEC_N_MAX"),
+                    "the silently-ignored wrong env name must appear nowhere: " + surface);
+            assertFalse(content.contains("LLAMA_ARG_SPEC_MODEL"),
+                    "the wrong draft-model env name must appear nowhere: " + surface);
+            assertFalse(content.contains("LLAMA_ARG_DRAFT_MODEL"),
+                    "the legacy wrong draft-model env name must appear nowhere: " + surface);
+            assertFalse(content.contains("mtp-gemma"),
+                    "the shipped surface must not pin a Gemma-specific draft head: " + surface);
+            assertFalse(content.contains("draft-mtp"),
+                    "the shipped surface must not pin a speculative type: " + surface);
+        }
+    }
+
     // --- Generated config (drive the real wizard) -------------------------------
 
     @Test

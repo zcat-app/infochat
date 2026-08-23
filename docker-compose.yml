@@ -329,6 +329,11 @@ services:
       # 0 is llama-server b9776's own documented --ctx-size default (loaded
       # from the model), verified on the pinned image's --help.
       LLAMA_ARG_CTX_SIZE: "${INFOCHAT_LLAMACPP_CTX:-0}"
+      # Speculative decoding is opt-in: `none` plus an empty draft path leaves
+      # existing deployments inert; an operator filename maps into the volume.
+      LLAMA_ARG_SPEC_TYPE: "${INFOCHAT_LLAMACPP_SPEC_TYPE:-none}"
+      LLAMA_ARG_SPEC_DRAFT_MODEL: "${INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF:+/models/${INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF}}"
+      LLAMA_ARG_SPEC_DRAFT_N_MAX: "${INFOCHAT_LLAMACPP_SPEC_N_MAX:-4}"
     volumes:
       - infochat-llamacpp-models:/models
     healthcheck:

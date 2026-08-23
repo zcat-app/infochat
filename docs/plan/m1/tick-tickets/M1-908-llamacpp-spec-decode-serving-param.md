@@ -1,7 +1,7 @@
 ---
 id: M1-908
 title: "Tracked llamacpp speculative-decoding compose keys, off by default"
-status: pending
+status: done
 created: 2026-08-23
 last_updated: 2026-08-23
 flow: tick
@@ -57,10 +57,10 @@ out_of_scope:
     (docker-compose.yml:324); analysis Q4 found no shipped-surface
     obligation.
 acceptance:
-  - "REPRODUCTION closed: LlamacppWiringTest.composeExposesSpecDecodeKeysWithOffDefaults (test_plan.adds) passes — the generative `llamacpp` service in docker-compose.yml gains exactly three interpolated keys: `LLAMA_ARG_SPEC_TYPE: \"${INFOCHAT_LLAMACPP_SPEC_TYPE:-<off>}\"`, `LLAMA_ARG_SPEC_DRAFT_MODEL: /models/${INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF:-}`, `LLAMA_ARG_SPEC_DRAFT_N_MAX: \"${INFOCHAT_LLAMACPP_SPEC_N_MAX:-4}\"`. The test asserts all three forms on the generative service, their ABSENCE on llamacpp-embeddings (P4), and the absence of the plausible wrong names `LLAMA_ARG_SPEC_N_MAX` / `LLAMA_ARG_SPEC_MODEL` / `LLAMA_ARG_DRAFT_MODEL` across docker-compose.yml, docker-compose.gpu.yml and prod/scripts/ (P1; the surface-scan pattern of composeExposesParallelAndCtxKeysWithSafeDefaults, LlamacppWiringTest:263-270)."
-  - "OFF-DEFAULT VERIFICATION (P2, ASSUMPTION the implementor verifies and records BEFORE landing the default): on the pinned image `ghcr.io/ggml-org/llama.cpp:server-vulkan-b9776`, a `llama-server --help` probe documents `--spec-type` / `--spec-draft-model` / `--spec-draft-n-max` (names + defaults), AND a boot probe with the off render (SPEC_TYPE at its off value, DRAFT_MODEL rendering `/models/`, N_MAX 4) starts the server with NO speculative init in the log and baseline decode; the recorded probe output rides the commit message. `<off>` is `none` if --help lists it as a --spec-type value (preferred — explicit), else the empty interpolation form. If verification disagrees with the drafted encoding, the default follows the verified server behavior and the correction is recorded in the commit message; the acceptance-1 test asserts the landed literal so a later edit flipping the default to an ACTIVE spec type fails the build (the non-vacuity mutation)."
+  - "REPRODUCTION closed: LlamacppWiringTest.composeExposesSpecDecodeKeysWithOffDefaults (test_plan.adds) passes — the generative `llamacpp` service in docker-compose.yml gains exactly three interpolated keys: `LLAMA_ARG_SPEC_TYPE: \"${INFOCHAT_LLAMACPP_SPEC_TYPE:-none}\"`, `LLAMA_ARG_SPEC_DRAFT_MODEL: \"${INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF:+/models/${INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF}}\"`, `LLAMA_ARG_SPEC_DRAFT_N_MAX: \"${INFOCHAT_LLAMACPP_SPEC_N_MAX:-4}\"`. The test asserts all three forms on the generative service, that the draft-model value renders empty when the filename is unset and `/models/<filename>` when set, their ABSENCE on llamacpp-embeddings (P4), and the absence of the plausible wrong names `LLAMA_ARG_SPEC_N_MAX` / `LLAMA_ARG_SPEC_MODEL` / `LLAMA_ARG_DRAFT_MODEL` across docker-compose.yml, docker-compose.gpu.yml and prod/scripts/ (P1; the surface-scan pattern of composeExposesParallelAndCtxKeysWithSafeDefaults, LlamacppWiringTest:263-270)."
+  - "OFF-DEFAULT VERIFICATION (P2, verified before refinement): on the pinned image `ghcr.io/ggml-org/llama.cpp:server-vulkan-b9776`, `llama-server --help` documents `--spec-type none`, `--spec-draft-model`, and `--spec-draft-n-max`; a boot probe with `--spec-type none`, an empty draft-model value, and n-max 4 starts the server with no speculative implementation and completes a baseline decode. The originally drafted `/models/` off render was falsified because the server attempts to load `/models/` and exits; the refined conditional interpolation is therefore the landed encoding and the probe output rides the commit message. The acceptance-1 test asserts the landed literals so a later edit flipping the default to an ACTIVE spec type or restoring the invalid `/models/` empty render fails the build."
   - "GENERIC SURFACE (P3, binding user steer): nothing model-specific ships — the acceptance-1 test asserts the literals `mtp-gemma` and `draft-mtp` appear nowhere in docker-compose.yml / docker-compose.gpu.yml / prod/scripts/ assignment lines, and a `grep -n 'LLAMACPP_SPEC' prod/scripts/4-llm.sh` probe confirms no head URL/SHA/filename constant is added anywhere. There is deliberately NO pinned-default head (contrast the LLAMACPP_GEN_GGUF_* constants): the operator owns the head choice."
-  - "FAILURE-MODE (P2, negative): the acceptance-1 test asserts the OFF render is the unset-default render — a deployment that sets none of the three keys resolves SPEC_TYPE to the off value, so upgrading an existing llamacpp deployment cannot silently change its serving shape; the test fails if the `:-<off>` default is deleted or defaulted to an active type. Existing deployments gain three inert env entries only."
+  - "FAILURE-MODE (P2, negative): the acceptance-1 test asserts the OFF render is the unset-default render — a deployment that sets none of the three keys resolves SPEC_TYPE to `none`, DRAFT_MODEL to an empty value, and N_MAX to 4, so upgrading an existing llamacpp deployment cannot silently change its serving shape or attempt to load `/models/`; the test fails if the conditional draft-path expression is replaced by the invalid `/models/` empty render or the type defaults to an active implementation. Existing deployments gain three inert env entries only."
   - "FAILURE-MODE (P1, negative): the acceptance-1 wrong-name scan fails the build if an edit introduces the silently-ignored `LLAMA_ARG_SPEC_N_MAX` (without DRAFT) anywhere on the compose/wizard surface — llama-server itself would say nothing."
   - "DOCS (docs/design/07-deployment.md §7.8.3, §7.5): §7.8.3's operator-key table gains rows for INFOCHAT_LLAMACPP_SPEC_TYPE (off default; maps to LLAMA_ARG_SPEC_TYPE; names live-verified on the pinned image, P1 trap note), INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF (draft-head FILENAME in the shared models volume; maps to LLAMA_ARG_SPEC_DRAFT_MODEL at /models/<file>; empty = no head), and INFOCHAT_LLAMACPP_SPEC_N_MAX (default 4, the probe-recommended draft depth; inert when off); the §7.5 env table gains the matching row noting the keys are llamacpp-only (ollama has no spec-decode knobs) and off-by-default. Verification: `git diff --stat docs/` shows exactly docs/design/07-deployment.md."
   - "Controls preserved (§10): every pre-existing LlamacppWiringTest drive and static pin is byte-untouched — `git diff` on the test file shows only the new test method — and the M1-905 serving-key pins, M1-744 render pins, REASONING=off pin, and anti-downgrade image pins stay green (`./mvnw -B -pl infochat-llm-adapter test -Dtest='LlamacppWiringTest'`)."
@@ -77,11 +77,33 @@ spec_refs:
   - docs/design/07-deployment.md §7.5
 decision_refs:
   - D49
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-23
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "5 files changed, 88 insertions(+), 33 deletions(-)"
+    verdict_file: .scratch/tick-review-M1-908-r1.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check: >-
+  start 2026-08-23 after refine: tick-lint 0 findings/0 BLOCKERs; the
+  readiness self-check found all acceptance items implementable after the
+  P2 refinement. Spot-checked docker-compose.yml:288-361, including the
+  M1-905 serving keys and the refined spec keys at :334-336; the GPU overlay
+  remains image/devices/ngl-only at docker-compose.gpu.yml:29-52; the wiring
+  test helper and pre-existing method region hold at
+  LlamacppWiringTest.java:246-270. The analysis was cross-read; P1/P2/P3/P4
+  and P6/P9/P10 are represented in this ticket, with P2 amended to the
+  probe-verified empty draft path. The required start probe falsified the
+  original /models/ off render and verified empty-path boot plus baseline
+  decode; the reproduction then ran RED before the compose edit and GREEN
+  afterward (50 tests). §Census N/A (not a class-scoped parity/reconcile
+  ticket); blocked_by is empty, so no predecessor tests require tracing. No
+  replaces field and no superseded implementation of this surface is held by
+  an in-flight worktree. The mechanical parallel check found no other tick
+  ticket in-progress or in-review and migration_touch is false.
 ---
 
 # M1-908: Tracked llamacpp speculative-decoding compose keys, off by default
@@ -120,10 +142,11 @@ Numbered with the analysis document:
   ignored (the M1-905 `LLAMA_ARG_PARALLEL` lesson). Names here are
   live-verified by the probe; the test still pins exact names + wrong-name
   absence.
-- P2: **the OFF encoding is unverified** — whether b9776 accepts
-  `--spec-type none` (or tolerates an empty env value) is not in the
-  evidence; acceptance 2 gates the default on a --help + boot probe on the
-  pinned image, and the test pins the landed literal.
+- P2: **the OFF encoding was corrected by the start probe** — b9776 accepts
+  `--spec-type none`, but an empty draft-model path rendered as `/models/`
+  makes the server attempt to load that directory. The refined conditional
+  expression renders an empty draft value when unset and `/models/<file>` when
+  enabled; acceptance 2 and the test pin the verified literals.
 - P3: **gemma-specific leakage** — binding user steer: no shipped default
   head. The test greps the literals out of the shipped surface.
 - P4: **keys on the embeddings service** — no nomic draft head exists;
@@ -150,13 +173,17 @@ local-backend serving choices).
   `infochat-llm-adapter/.../LlamacppWiringTest.java`,
   `docs/design/07-deployment.md`.
 - **Steps, in order:**
-  1. Run the acceptance-2 verification on the pinned image (--help value
-     list/defaults; off-render boot probe) and record the output in the
-     commit message. This decides the `<off>` literal BEFORE any file edit.
+  1. Record the completed acceptance-2 verification on the pinned image
+     (--help value list/defaults; off-render boot and baseline-decode probe)
+     in the commit message. It established `none` as the type default and
+     an empty draft-model value when the filename is unset; `/models/` was
+     falsified because the server attempts to load it.
   2. Add the three interpolated keys to the generative `llamacpp` service,
      beside the M1-905 serving keys, with a comment in the M1-905 style
-     (off-by-default rationale + the env-name trap pointer). Nothing else in
-     the file changes.
+     (off-by-default rationale + the env-name trap pointer). Use `none` for
+     the type default and `${INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF:+/models/${INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF}}`
+     for the draft path, so unset renders empty while an enabled filename
+     renders `/models/<filename>`. Nothing else in the file changes.
   3. Write `composeExposesSpecDecodeKeysWithOffDefaults` (RED before step 2
      lands, per workflow §0 — the ticket's reproduction), asserting: the
      three exact forms; embeddings-service absence; wrong-name absence
@@ -173,8 +200,9 @@ local-backend serving choices).
 - **Pitfall→mitigation:** P1 → step 3's exact-name + wrong-name assertions;
   P2 → step 1 + acceptance 2 + the landed-literal pin; P3 → step 3's literal
   grep + no constants; P4 → step 3's embeddings-absence assertions; P6 →
-  step 2's `/models/${...}` filename shape (restore-compatible, P7 for
-  M1-909); P9/P10 → out_of_scope + the zero-diff guards.
+  step 2's conditional `/models/<filename>` shape with an empty off-state
+  (restore-compatible, P7 for M1-909); P9/P10 → out_of_scope + the zero-diff
+  guards.
 
 ## Definition of done
 
