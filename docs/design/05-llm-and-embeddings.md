@@ -550,6 +550,29 @@ temporal questions back to `searchPosts`. The guidance lives only in the
 two catalog strings (`ChatToolCatalog`), single-sourced into both the
 instruction table and the wire declarations.                                                                                                                                                       
 
+**Prompt budget and compaction ladder.** `infochat.chat.prompt-token-budget`
+(default 6144, base-only) bounds the ASSEMBLED first-call prompt (system
+template + language directive + tool instructions + memory + history +
+retrieval block + message), estimated with `ChatSessionRepository.estimateTokens`
+(chars/4) for unit consistency with session accounting. Derivation: shipped
+GPU-class slot 11,008 tokens − ~600-token reply budget = 10,408 fit ceiling;
+6,144 tolerates ~1.7× estimator underestimation (6,144 × 1.7 ≈ 10,444). The
+ledger absorbs sibling growth by kind: M1-916's +~90 tokens/turn rides inside
+the TOOL_INSTRUCTIONS table — never-drop scaffolding — so it is absorbed by
+the headroom; M1-917's 16-entry semantic injection (~800 tokens ≈ 13% of
+budget) drops whole at ladder step 2 before history does — no separate window
+bound is added. Over budget, the ladder compacts in fixed order: (1) history
+oldest-first against min(`infochat.context-window`, budget remainder after
+fixed parts); (2) the whole retrieval block, never mid-JSON; (3) memory hits
+oldest-first, then the whole memory block. The injection-defence scaffolding,
+wrapper rules, tool table, and language/delivery directives are never
+compaction candidates. Mid-loop, each tool-result fold-back admits WHOLE JSON
+array entries only (uid/url lines intact, prefix order) within the remaining
+budget, and a conversation still over budget at the next iteration routes to
+the existing iteration-cap final call (base system prompt) early instead of
+growing. A truncating turn is never silent: dropped counts plus before/after
+estimates log at INFO.
+
 **Digest-first semantic retrieval.** On every chat turn the agent
 dispatches `semanticSearch` **deterministically** with the user's message as
 the query (the D28 "always runs, folded in" pre-fetch pattern — never left to
@@ -1163,7 +1186,9 @@ owed, not retired intent:
 │ infochat.context-window                 │ 16384            │ 8192             │ 4096           │ 32768                  │
 ├─────────────────────────────────────────┼──────────────────┼──────────────────┼────────────────┼────────────────────────┤                                                                                                                           
 │ infochat.context-compress-at            │ 12288            │ 6144             │ 3072           │ 24576                  │
-├─────────────────────────────────────────┼──────────────────┼──────────────────┼────────────────┼────────────────────────┤                                                                                                                           
+├─────────────────────────────────────────┼──────────────────┼──────────────────┼────────────────┼────────────────────────┤
+│ infochat.chat.prompt-token-budget       │ 6144             │ 6144             │ 6144           │ 6144 (base-only)       │
+├─────────────────────────────────────────┼──────────────────┼──────────────────┼────────────────┼────────────────────────┤
 │ infochat.context-hard-limit             │ 15360            │ 7680             │ 3840           │ 30720                  │
 ├─────────────────────────────────────────┼──────────────────┼──────────────────┼────────────────┼────────────────────────┤                                                                                                                           
 │ infochat.llm.security.max-concurrency   │ 4                │ 2                │ 1              │ 8                      │

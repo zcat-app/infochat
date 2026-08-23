@@ -474,12 +474,8 @@ public class ChatAgent {
                     bundleLoader.get(BundleKeys.ERROR_COMPRESS_FAILED, scopeLanguage), null, null);
         }
 
-        // 1. Build prompt (pre-fetches memory internally)
-        ChatPromptBuilder.BuiltPrompt prompt =
-                promptBuilder.build(userId, scopeKind, scopeId, userMessage);
-
-        // 2. Audit the chat-mode intent before the LLM call.
-        // No user-authored prose in the audit row — only actor + scope.
+        // 1. Audit the chat-mode intent before any LLM-backed work. No
+        // user-authored prose in the audit row — only actor + scope.
         writeAuditRow(userId, scopeKind, scopeId);
 
         // 3. Digest-first semantic retrieval (M1-589): dispatched
@@ -611,14 +607,28 @@ public class ChatAgent {
         // in the scope language and skips the leg. Never flips mid-turn.
         ChatReplyMode replyMode = inboundContext.replyMode();
 
-        // 5. Run multi-turn tool loop. The language pin rides the BASE
-        // prompt so both the tool-loop turns and the iteration-cap final
-        // call (which is handed baseSystemPrompt alone) inherit it.
+        // 5. Build the budgeted prompt: it runs after the semantic pre-fetch
+        // and directive resolution so every part of the assembled turn is
+        // sized (and, on the ladder, dropped) against the configured budget.
         String languageDirective = replyMode == ChatReplyMode.NATIVE
                 ? nativeReplyDirective(scopeLanguage)
                 : REPLY_LANGUAGE_DIRECTIVE;
+        int systemSuffixTokens = ChatSessionRepository.estimateTokens(
+                languageDirective + TOOL_INSTRUCTIONS);
+        ChatPromptBuilder.BuiltPrompt prompt = promptBuilder.build(
+                userId, scopeKind, scopeId, userMessage,
+                semanticBlock, turnDirective, systemSuffixTokens);
         String baseSystemPrompt = prompt.systemPrompt() + languageDirective;
         String augmentedSystemPrompt = baseSystemPrompt + TOOL_INSTRUCTIONS;
+
+        // A WHOLE-dropped retrieval block is the general-knowledge path: no
+        // directive may reference posts that were not folded in. (Delivery
+        // steering points at the post-reply block, so it survives.)
+        boolean semanticDropped = prompt.compaction().semanticBlockDropped();
+        String effectiveDirective =
+                deterministicDelivery ? DETERMINISTIC_DELIVERY_DIRECTIVE
+                        : (semanticDropped ? "" : refinementDirective);
+
         // 4b. Live-text eligibility combines transport/mode and LLM support;
         // null reveal preserves today's stage-label path.
         ChatLiveTextStreamer.LiveTextReveal reveal = null;
@@ -634,9 +644,9 @@ public class ChatAgent {
                         == LlmRouter.ToolTransport.NATIVE;
 
         String finalText = runToolLoop(provider, augmentedSystemPrompt, baseSystemPrompt,
-                prompt.userPrompt() + semanticBlock + turnDirective,
+                prompt.userPrompt() + (semanticDropped ? "" : semanticBlock) + effectiveDirective,
                 userId, scopeKind, scopeId, turnContext, retrievedPostUids, reveal,
-                nativeToolsTransport);
+                nativeToolsTransport, prompt.compaction().tokenBudget());
 
         // 6. Sanitize first: everything below evaluates the sanitized text
         // — sanitize itself can surface a protocol token (security.md
@@ -762,10 +772,14 @@ public class ChatAgent {
         // is a narrowing question, not an answer grounded in specific posts,
         // so a "based on N posts" claim would misrepresent it — the router
         // omits a null notice exactly as it does for the degrade paths.
+        // When the ladder dropped the retrieval block, its uids never
+        // reached the prompt: the claim must reflect what was actually
+        // folded in, so only then does the grounded wording apply.
         String provenanceNotice;
-        if (clarifyTurn) {
+        boolean groundedInPrompt = !retrievedPostUids.isEmpty() && !semanticDropped;
+        if (clarifyTurn && !semanticDropped) {
             provenanceNotice = null;
-        } else if (retrievedPostUids.isEmpty()) {
+        } else if (!groundedInPrompt) {
             provenanceNotice =
                     bundleLoader.get(BundleKeys.CHAT_PROVENANCE_GENERAL_KNOWLEDGE, scopeLanguage);
         } else {
@@ -893,7 +907,9 @@ public class ChatAgent {
      * iteration cap is reached; a non-null reveal observes streamed deltas.
      * The native transport reads the reply's structured tool calls; the
      * text transport parses the reply — both funnel the SAME dispatch
-     * boundary with the shared TurnContext.
+     * boundary with the shared TurnContext. Whole requests stay under
+     * {@code promptTokenBudget}: fold-backs admit WHOLE JSON-array entries
+     * only; an over-budget iteration routes to the final call instead.
      */
     String runToolLoop(LlmProvider provider, String systemPrompt,
                        String baseSystemPrompt, String userPrompt,
@@ -901,10 +917,15 @@ public class ChatAgent {
                        ChatToolDispatcher.TurnContext turnContext,
                        Set<String> retrievedPostUids,
                        ChatLiveTextStreamer.@Nullable LiveTextReveal reveal,
-                       boolean nativeToolsTransport) {
+                       boolean nativeToolsTransport, int promptTokenBudget) {
         StringBuilder conversation = new StringBuilder(userPrompt);
+        int systemTokens = ChatSessionRepository.estimateTokens(systemPrompt);
 
         for (int i = 0; i < MAX_TOOL_ITERATIONS; i++) {
+            if (systemTokens + ChatSessionRepository.estimateTokens(conversation.toString())
+                    > promptTokenBudget) {
+                break;
+            }
             LlmResponse response;
             if (reveal != null) {
                 response = provider.generateStreaming(ModelTask.CHAT_AGENT, systemPrompt,
@@ -963,19 +984,23 @@ public class ChatAgent {
                 case ChatToolDispatcher.ToolResult.ValidationError v -> "Error: " + v.reason();
             };
 
-            // Wrap tool results in UNTRUSTED_CONTENT delimiters — tool
-            // output is external data and gets the same injection defense
-            // as user messages and memory hits in ChatPromptBuilder
+            // Same injection defense as ChatPromptBuilder's blocks; the
+            // fold-back fits the next request in the budget with WHOLE
+            // entries only (prefix order), never a mid-entry cut.
             String resultMarker = UUID.randomUUID().toString();
-            String wrappedResult =
-                    String.format(ChatPromptBuilder.UNTRUSTED_CONTENT_OPEN_FORMAT, resultMarker)
-                    + "\n" + resultText + "\n"
-                    + String.format(ChatPromptBuilder.UNTRUSTED_CONTENT_CLOSE_FORMAT, resultMarker);
+            String scaffoldHead = "\n\nAssistant: " + text
+                    + "\n\nTool result for " + toolName + ":\n"
+                    + String.format(ChatPromptBuilder.UNTRUSTED_CONTENT_OPEN_FORMAT,
+                            resultMarker) + "\n";
+            String scaffoldTail = "\n"
+                    + String.format(ChatPromptBuilder.UNTRUSTED_CONTENT_CLOSE_FORMAT,
+                            resultMarker)
+                    + "\n\n" + POST_TOOL_RESULT_INSTRUCTION;
+            String fittedResultText = fitWithinBudget(
+                    conversation.toString(), scaffoldHead, resultText, scaffoldTail,
+                    systemTokens, promptTokenBudget);
 
-            conversation.append("\n\nAssistant: ").append(text);
-            conversation.append("\n\nTool result for ").append(toolName).append(":\n");
-            conversation.append(wrappedResult);
-            conversation.append("\n\n").append(POST_TOOL_RESULT_INSTRUCTION);
+            conversation.append(scaffoldHead).append(fittedResultText).append(scaffoldTail);
         }
 
         // Exceeded iteration cap — final call uses the base system prompt
@@ -988,6 +1013,93 @@ public class ChatAgent {
                 : provider.generate(
                         ModelTask.CHAT_AGENT, baseSystemPrompt, conversation.toString());
         return finalResponse.text();
+    }
+
+    /** Entry-granular fit: JSON arrays admit a byte-exact prefix of whole
+     * entries (uid/url intact); anything else folds WHOLE or not at all. */
+    static String fitWithinBudget(String conversationSoFar, String scaffoldHead,
+                                  String resultText, String scaffoldTail,
+                                  int systemTokens, int promptTokenBudget) {
+        if (foldedRequestTokens(conversationSoFar, scaffoldHead + resultText + scaffoldTail,
+                systemTokens) <= promptTokenBudget) {
+            return resultText;
+        }
+        List<String> entries = topLevelJsonEntries(resultText);
+        if (entries.isEmpty()) {
+            return "";
+        }
+        StringBuilder candidate = new StringBuilder("[");
+        String best = "";
+        for (int i = 0; i < entries.size(); i++) {
+            if (i > 0) {
+                candidate.append(',');
+            }
+            candidate.append(entries.get(i));
+            String withClose = candidate + "]";
+            if (foldedRequestTokens(conversationSoFar, scaffoldHead + withClose + scaffoldTail,
+                    systemTokens) > promptTokenBudget) {
+                return best;
+            }
+            best = withClose;
+        }
+        return best;
+    }
+
+    private static int foldedRequestTokens(String conversationSoFar, String appended,
+                                           int systemTokens) {
+        return systemTokens + ChatSessionRepository.estimateTokens(conversationSoFar + appended);
+    }
+
+    /** Splits a top-level JSON array into byte-exact element slices; other
+     * shapes yield nothing to fold. Our own tools emit this JSON — trusted
+     * producer, not an internal defensive guard. */
+    static List<String> topLevelJsonEntries(String content) {
+        String trimmed = content.trim();
+        if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) {
+            return List.of();
+        }
+        List<String> entries = new ArrayList<>();
+        int depth = 0;
+        int start = -1;
+        boolean inString = false;
+        boolean escaped = false;
+        for (int i = 1; i < trimmed.length() - 1; i++) {
+            char c = trimmed.charAt(i);
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                } else if (c == '\\') {
+                    escaped = true;
+                } else if (c == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+            switch (c) {
+                case '"' -> inString = true;
+                case '{', '[' -> {
+                    if (depth++ == 0) {
+                        start = i;
+                    }
+                }
+                case '}', ']' -> depth--;
+                case ',' -> {
+                    if (depth == 0 && start >= 0) {
+                        entries.add(trimmed.substring(start, i).trim());
+                        start = -1;
+                    }
+                }
+                default -> {
+                    if (depth == 0 && start < 0 && !Character.isWhitespace(c)) {
+                        start = i;
+                    }
+                }
+            }
+        }
+        if (start >= 0) {
+            entries.add(trimmed.substring(start, trimmed.length() - 1).trim());
+        }
+        return entries;
     }
 
     /**

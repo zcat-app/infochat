@@ -370,10 +370,13 @@ class StageProgressNotifierLiveTextTest {
         // so null/empty stand-ins suffice (the ChatAgentReplyModeTest
         // shape, minus its same-package anonymous classes).
         ChatPromptBuilder promptBuilder = new ChatPromptBuilder(
-                null, new ChatSessionRepository(null), 16384, 1024) {
+                null, new ChatSessionRepository(null), 16384, 1024, 6144) {
             @Override
-            public BuiltPrompt build(UUID u, String sk, UUID si, String msg) {
-                return new BuiltPrompt("system", msg, "marker");
+            public BuiltPrompt build(UUID u, String sk, UUID si, String msg,
+                                     String semanticBlock, String turnDirective,
+                                     int systemSuffixTokens) {
+                return new BuiltPrompt("system", msg, "marker",
+                        new CompactionReport(6144, 0, 0, 0, 0, false, false));
             }
         };
 

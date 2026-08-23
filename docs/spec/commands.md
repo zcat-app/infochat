@@ -1841,6 +1841,21 @@ feed-derived text. Degrade and rejection replies (unavailable, in-flight,
 ceiling-gated, refusal, /stop) carry no provenance notice. Exact wording
 lives in design notes (05 §5.4.6).
 
+**The assembled prompt is budget-bounded and compacts
+deterministically.** The chat prompt is assembled under a configured
+token budget measured in the same token estimate as session accounting.
+When the naive assembly exceeds it, a deterministic compaction ladder
+applies in fixed order: oldest history turns first, then the
+deterministic retrieval block whole, then memory pre-fetch hits
+oldest-first, then any remaining memory block. The instruction and
+untrusted-content scaffolding is never dropped. The ladder is a pure
+function of the assembled parts — identical inputs compact to an
+identical prompt (D19). A turn whose retrieval block was dropped takes
+the general-knowledge path: its provenance notice is the not-grounded
+one even when later model-initiated retrieval results were folded into
+the conversation (D58). Budget value, derivation and
+truncation posture live in design notes (05 §5.4.6, §5.7).
+
 **Command-intent retrieval is match-not-assert** (decision D66).
 The `helpLookup` tool resolves a free-text intent to a catalogue command
 name via one pgvector cosine probe against the `doc_embedding` corpus,

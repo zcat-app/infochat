@@ -18,6 +18,10 @@ class ChatPromptBuilderTest {
     // Mirrors the @ConfigProperty defaultValue on the max-tokens constructor
     // parameter, so existing tests observe the default-configured prompt.
     private static final int DEFAULT_MAX_TOKENS = 1024;
+    // Mirrors the @ConfigProperty defaultValue on the prompt-budget
+    // constructor parameter, so existing tests observe the
+    // default-configured compaction behavior.
+    private static final int PROMPT_TOKEN_BUDGET = 6144;
 
     private static ChatMemoryPreFetcher noOpPreFetcher() {
         return new ChatMemoryPreFetcher() {
@@ -42,12 +46,12 @@ class ChatPromptBuilderTest {
     @Test
     void markerIsRandomPerCall() {
         ChatPromptBuilder builder = new ChatPromptBuilder(
-                noOpPreFetcher(), emptyRepository(), TOKEN_BUDGET, DEFAULT_MAX_TOKENS);
+                noOpPreFetcher(), emptyRepository(), TOKEN_BUDGET, DEFAULT_MAX_TOKENS, PROMPT_TOKEN_BUDGET);
 
         ChatPromptBuilder.BuiltPrompt prompt1 =
-                builder.build(USER_ID, "dm", USER_ID, "hello");
+                builder.build(USER_ID, "dm", USER_ID, "hello", "", "", 0);
         ChatPromptBuilder.BuiltPrompt prompt2 =
-                builder.build(USER_ID, "dm", USER_ID, "hello");
+                builder.build(USER_ID, "dm", USER_ID, "hello", "", "", 0);
 
         assertNotEquals(prompt1.marker(), prompt2.marker(),
                 "Each call must produce a distinct per-call random marker");
@@ -58,10 +62,10 @@ class ChatPromptBuilderTest {
     @Test
     void systemPromptContainsRefusalInstruction() {
         ChatPromptBuilder builder = new ChatPromptBuilder(
-                noOpPreFetcher(), emptyRepository(), TOKEN_BUDGET, DEFAULT_MAX_TOKENS);
+                noOpPreFetcher(), emptyRepository(), TOKEN_BUDGET, DEFAULT_MAX_TOKENS, PROMPT_TOKEN_BUDGET);
 
         ChatPromptBuilder.BuiltPrompt prompt =
-                builder.build(USER_ID, "dm", USER_ID, "test");
+                builder.build(USER_ID, "dm", USER_ID, "test", "", "", 0);
 
         assertTrue(prompt.systemPrompt().contains("[REFUSAL: <reason>]"),
                 "System prompt must contain the structured refusal marker");
@@ -75,10 +79,10 @@ class ChatPromptBuilderTest {
     @Test
     void systemPromptCarriesGeneralAssistantGroundingFraming() {
         ChatPromptBuilder builder = new ChatPromptBuilder(
-                noOpPreFetcher(), emptyRepository(), TOKEN_BUDGET, DEFAULT_MAX_TOKENS);
+                noOpPreFetcher(), emptyRepository(), TOKEN_BUDGET, DEFAULT_MAX_TOKENS, PROMPT_TOKEN_BUDGET);
 
         ChatPromptBuilder.BuiltPrompt prompt =
-                builder.build(USER_ID, "dm", USER_ID, "test");
+                builder.build(USER_ID, "dm", USER_ID, "test", "", "", 0);
 
         assertTrue(prompt.systemPrompt().contains("Answer any question"),
                 "the general-assistant framing must invite any question");
@@ -96,10 +100,10 @@ class ChatPromptBuilderTest {
     @Test
     void strengthenedFramingDemandsVerbatimBareUrlCitations() {
         ChatPromptBuilder builder = new ChatPromptBuilder(
-                noOpPreFetcher(), emptyRepository(), TOKEN_BUDGET, DEFAULT_MAX_TOKENS);
+                noOpPreFetcher(), emptyRepository(), TOKEN_BUDGET, DEFAULT_MAX_TOKENS, PROMPT_TOKEN_BUDGET);
 
         ChatPromptBuilder.BuiltPrompt prompt =
-                builder.build(USER_ID, "dm", USER_ID, "test");
+                builder.build(USER_ID, "dm", USER_ID, "test", "", "", 0);
 
         String sp = prompt.systemPrompt();
         assertTrue(sp.contains("cite every post you rely on by its bare source URL"),
@@ -119,10 +123,10 @@ class ChatPromptBuilderTest {
     @Test
     void systemPromptNeverDeclinesOffFeedQuestions() {
         ChatPromptBuilder builder = new ChatPromptBuilder(
-                noOpPreFetcher(), emptyRepository(), TOKEN_BUDGET, DEFAULT_MAX_TOKENS);
+                noOpPreFetcher(), emptyRepository(), TOKEN_BUDGET, DEFAULT_MAX_TOKENS, PROMPT_TOKEN_BUDGET);
 
         ChatPromptBuilder.BuiltPrompt prompt =
-                builder.build(USER_ID, "dm", USER_ID, "what's the weather in Prague");
+                builder.build(USER_ID, "dm", USER_ID, "what's the weather in Prague", "", "", 0);
 
         String sp = prompt.systemPrompt();
         assertFalse(sp.contains("for a news-aggregation chat service"),
@@ -141,10 +145,10 @@ class ChatPromptBuilderTest {
     @Test
     void systemPromptInjectionDefenseHalfIsPreservedVerbatim() {
         ChatPromptBuilder builder = new ChatPromptBuilder(
-                noOpPreFetcher(), emptyRepository(), TOKEN_BUDGET, DEFAULT_MAX_TOKENS);
+                noOpPreFetcher(), emptyRepository(), TOKEN_BUDGET, DEFAULT_MAX_TOKENS, PROMPT_TOKEN_BUDGET);
 
         ChatPromptBuilder.BuiltPrompt prompt =
-                builder.build(USER_ID, "dm", USER_ID, "test");
+                builder.build(USER_ID, "dm", USER_ID, "test", "", "", 0);
 
         String sp = prompt.systemPrompt();
         // The UNTRUSTED_CONTENT wrapper description, verbatim.
@@ -168,10 +172,10 @@ class ChatPromptBuilderTest {
     @Test
     void maxTokens600RendersWordTarget270IntoSystemPrompt() {
         ChatPromptBuilder builder = new ChatPromptBuilder(
-                noOpPreFetcher(), emptyRepository(), TOKEN_BUDGET, 600);
+                noOpPreFetcher(), emptyRepository(), TOKEN_BUDGET, 600, PROMPT_TOKEN_BUDGET);
 
         ChatPromptBuilder.BuiltPrompt prompt =
-                builder.build(USER_ID, "dm", USER_ID, "hello");
+                builder.build(USER_ID, "dm", USER_ID, "hello", "", "", 0);
 
         assertTrue(prompt.systemPrompt().contains("under about 270 words"),
                 "max-tokens 600 must render a 270-word brevity target "
@@ -182,10 +186,10 @@ class ChatPromptBuilderTest {
     void defaultMaxTokensRendersWordTarget461IntoSystemPrompt() {
         ChatPromptBuilder builder = new ChatPromptBuilder(
                 noOpPreFetcher(), emptyRepository(), TOKEN_BUDGET,
-                DEFAULT_MAX_TOKENS);
+                DEFAULT_MAX_TOKENS, PROMPT_TOKEN_BUDGET);
 
         ChatPromptBuilder.BuiltPrompt prompt =
-                builder.build(USER_ID, "dm", USER_ID, "hello");
+                builder.build(USER_ID, "dm", USER_ID, "hello", "", "", 0);
 
         assertTrue(prompt.systemPrompt().contains("under about 461 words"),
                 "the default max-tokens (1024) must render a 461-word brevity "
@@ -206,10 +210,10 @@ class ChatPromptBuilderTest {
             }
         };
         ChatPromptBuilder builder = new ChatPromptBuilder(
-                preFetcherWithResults, emptyRepository(), TOKEN_BUDGET, DEFAULT_MAX_TOKENS);
+                preFetcherWithResults, emptyRepository(), TOKEN_BUDGET, DEFAULT_MAX_TOKENS, PROMPT_TOKEN_BUDGET);
 
         ChatPromptBuilder.BuiltPrompt prompt =
-                builder.build(USER_ID, "dm", USER_ID, "tell me about crypto");
+                builder.build(USER_ID, "dm", USER_ID, "tell me about crypto", "", "", 0);
 
         String up = prompt.userPrompt();
         assertTrue(up.contains("Previously discussed cryptocurrency regulations"),
@@ -237,10 +241,10 @@ class ChatPromptBuilderTest {
                 ownTurn("user", "what is zcash", 4),
                 ownTurn("assistant", "a privacy-focused cryptocurrency", 8)));
         ChatPromptBuilder builder = new ChatPromptBuilder(
-                noOpPreFetcher(), repository, TOKEN_BUDGET, DEFAULT_MAX_TOKENS);
+                noOpPreFetcher(), repository, TOKEN_BUDGET, DEFAULT_MAX_TOKENS, PROMPT_TOKEN_BUDGET);
 
         ChatPromptBuilder.BuiltPrompt prompt =
-                builder.build(USER_ID, "dm", SCOPE_ID, "tell me more");
+                builder.build(USER_ID, "dm", SCOPE_ID, "tell me more", "", "", 0);
 
         String up = prompt.userPrompt();
         int userTurnPos = up.indexOf("user: what is zcash");
@@ -261,10 +265,10 @@ class ChatPromptBuilderTest {
                 ownTurn("user", "newest turn content", 4)));
         // Budget of 10 fits newest (4) + middle (4) but not oldest (6 more)
         ChatPromptBuilder builder = new ChatPromptBuilder(
-                noOpPreFetcher(), repository, 10, DEFAULT_MAX_TOKENS);
+                noOpPreFetcher(), repository, 10, DEFAULT_MAX_TOKENS, PROMPT_TOKEN_BUDGET);
 
         ChatPromptBuilder.BuiltPrompt prompt =
-                builder.build(USER_ID, "dm", SCOPE_ID, "next question");
+                builder.build(USER_ID, "dm", SCOPE_ID, "next question", "", "", 0);
 
         String up = prompt.userPrompt();
         assertFalse(up.contains("oldest turn content"),
@@ -280,10 +284,10 @@ class ChatPromptBuilderTest {
         ChatSessionRepository repository = new StubChatSessionRepository(List.of(
                 ownTurn("user", "remembered history fact", 4)));
         ChatPromptBuilder builder = new ChatPromptBuilder(
-                noOpPreFetcher(), repository, TOKEN_BUDGET, DEFAULT_MAX_TOKENS);
+                noOpPreFetcher(), repository, TOKEN_BUDGET, DEFAULT_MAX_TOKENS, PROMPT_TOKEN_BUDGET);
 
         ChatPromptBuilder.BuiltPrompt prompt =
-                builder.build(USER_ID, "dm", SCOPE_ID, "follow-up");
+                builder.build(USER_ID, "dm", SCOPE_ID, "follow-up", "", "", 0);
 
         String up = prompt.userPrompt();
         // No memory hits, so the first untrusted block is the history block
@@ -315,10 +319,10 @@ class ChatPromptBuilderTest {
                 new StubChatSessionRepository.StoredTurn(USER_ID, "group", SCOPE_ID,
                         new ChatSessionRepository.Turn("user", "group scope secret", 3))));
         ChatPromptBuilder builder = new ChatPromptBuilder(
-                noOpPreFetcher(), repository, TOKEN_BUDGET, DEFAULT_MAX_TOKENS);
+                noOpPreFetcher(), repository, TOKEN_BUDGET, DEFAULT_MAX_TOKENS, PROMPT_TOKEN_BUDGET);
 
         ChatPromptBuilder.BuiltPrompt prompt =
-                builder.build(USER_ID, "dm", SCOPE_ID, "hello");
+                builder.build(USER_ID, "dm", SCOPE_ID, "hello", "", "", 0);
 
         String up = prompt.userPrompt();
         assertFalse(up.contains("other users secret"),

@@ -97,6 +97,9 @@ class ChatAgentTest {
     // so the REAL toolTransportFor resolution probes the stub and answers
     // NATIVE; default false keeps every pre-existing test on TEXT.
     private boolean nativeToolTransport;
+    // M1-918 seam: canned Success payload for every non-semanticSearch tool
+    // dispatch (the counting stub's default was a fixed one-entry array).
+    private String toolResultPayload;
     private TestChatAgent agent;
 
     @BeforeEach
@@ -127,6 +130,7 @@ class ChatAgentTest {
         composeUsageBlockLastCommand = null;
         composeUsageBlockCalls = 0;
         nativeToolTransport = false;
+        toolResultPayload = "[{\"title\": \"test\"}]";
 
         agent = buildAgent("en");
     }
@@ -2144,6 +2148,212 @@ class ChatAgentTest {
                 "after the gate clears, turns persist normally");
     }
 
+    // M1-918: a ladder-dropped semantic block leaves NO partial JSON in the
+    // prompt, takes its clarify/affordance directive with it, and degrades
+    // the provenance notice to the general-knowledge wording.
+    @Test
+    void droppedRetrievalBlockKeepsGeneralKnowledgeProvenance() {
+        String retrievalJson =
+                "[{\"uid\": \"sp-1\", \"url\": \"https://example.test/sp-1\", "
+                + "\"title\": \"a post\", \"similarity\": 0.9}]";
+        int suffixTokens = ChatSessionRepository.estimateTokens(
+                ChatAgent.REPLY_LANGUAGE_DIRECTIVE + ChatAgent.TOOL_INSTRUCTIONS);
+        // Probe build at an effectively unbounded budget measures the fixed
+        // cost, so the test budget lands between "without the block" and
+        // "with the block" regardless of template sizes.
+        ChatPromptBuilder probe = new ChatPromptBuilder(
+                noMemoryPreFetcher(), new StubChatSessionRepository(List.of()),
+                16384, 1024, Integer.MAX_VALUE / 4);
+        int fixedCost = probe.build(USER_ID, SCOPE_KIND, SCOPE_ID, "hello", "", "", suffixTokens)
+                .compaction().estimateBefore();
+        int blockTokens = ChatSessionRepository.estimateTokens(retrievalJson);
+        int budget = fixedCost + blockTokens / 2;
+
+        ChatPromptBuilder realBuilder = new ChatPromptBuilder(
+                noMemoryPreFetcher(), new StubChatSessionRepository(List.of()),
+                16384, 1024, budget);
+        agent = buildAgent("en", countingStubDispatcher(), null, null, realBuilder);
+        semanticSearchResult = retrievalJson;
+        llmProvider.responses.add(new LlmResponse("grounded answer"));
+
+        ChatAgent.ChatTurnResult result = agent.handleTurn(USER_ID, SCOPE_KIND, SCOPE_ID, "hello");
+
+        assertEquals("grounded answer", result.reply());
+        assertEquals(BundleKeys.CHAT_PROVENANCE_GENERAL_KNOWLEDGE, result.provenanceNotice(),
+                "a dropped retrieval block must yield the general-knowledge "
+                        + "notice, never a grounded count");
+        String firstCall = llmProvider.allUserPrompts.get(0);
+        assertFalse(firstCall.contains("https://example.test/sp-1"),
+                "no url fragment of the dropped retrieval result may reach the model");
+        assertFalse(firstCall.contains("sp-1"),
+                "the dropped retrieval result must be gone WHOLE, not mid-JSON");
+        assertFalse(firstCall.contains("Posts from the user's subscribed feed"),
+                "the retrieval block header must be gone with the block");
+        assertFalse(firstCall.contains("You can ground your answer"),
+                "the affordance directive references posts that were not folded "
+                        + "in and must be dropped with them");
+
+        // Marginal pre-drop signal: the clarify selection ran on it, but a
+        // clarifying question about unfolded posts is dishonest — same
+        // general-knowledge degrade, and no clarify directive in the prompt.
+        semanticSearchResult =
+                "[{\"uid\": \"sp-2\", \"url\": \"https://example.test/sp-2\", "
+                + "\"title\": \"weak post\", \"similarity\": 0.55}]";
+        llmProvider = new StubLlmProvider();
+        agent = buildAgent("en", countingStubDispatcher(), null, null, realBuilder);
+        llmProvider.responses.add(new LlmResponse("general answer"));
+
+        ChatAgent.ChatTurnResult marginal =
+                agent.handleTurn(USER_ID, SCOPE_KIND, SCOPE_ID, "hello again");
+
+        assertEquals("general answer", marginal.reply());
+        assertEquals(BundleKeys.CHAT_PROVENANCE_GENERAL_KNOWLEDGE, marginal.provenanceNotice(),
+                "a dropped MARGINAL block is also the general-knowledge path");
+        assertFalse(llmProvider.allUserPrompts.get(0).contains("ask ONE short clarifying question"),
+                "the clarify directive must be dropped with its block");
+
+        // Spec amendment 2026-08-23, the drop is dispositive: a post-drop
+        // model-elected retrieval result IS folded (budget headroom admits
+        // the small entry) yet the notice stays not-grounded.
+        StringBuilder bigEntries = new StringBuilder();
+        for (int i = 0; i < 30; i++) {
+            if (i > 0) {
+                bigEntries.append(',');
+            }
+            bigEntries.append("{\"uid\": \"big-").append(i)
+                    .append("\", \"url\": \"https://example.test/big-").append(i)
+                    .append("\", \"title\": \"").append(paddedTitle(400)).append("\"}");
+        }
+        semanticSearchResult = "[" + bigEntries + "]";
+        toolResultPayload =
+                "[{\"uid\": \"fold-1\", \"url\": \"https://example.test/fold-1\", "
+                + "\"title\": \"folded post\", \"similarity\": 0.9}]";
+        int cornerBudget = fixedCost + 600;
+        ChatPromptBuilder cornerBuilder = new ChatPromptBuilder(
+                noMemoryPreFetcher(), new StubChatSessionRepository(List.of()),
+                16384, 1024, cornerBudget);
+        agent = buildAgent("en", countingStubDispatcher(), null, null, cornerBuilder);
+        llmProvider = new StubLlmProvider();
+        llmProvider.responses.add(
+                new LlmResponse("TOOL_CALL: searchPosts {\"query\": \"hello\"}"));
+        llmProvider.responses.add(new LlmResponse("folded-grounded answer"));
+
+        ChatAgent.ChatTurnResult corner =
+                agent.handleTurn(USER_ID, SCOPE_KIND, SCOPE_ID, "hello");
+
+        assertEquals("folded-grounded answer", corner.reply());
+        assertFalse(llmProvider.allUserPrompts.get(0).contains("big-0"),
+                "the oversized pre-fetch block is dropped by the ladder");
+        assertTrue(llmProvider.allUserPrompts.get(1).contains("fold-1"),
+                "the model-elected searchPosts result IS folded into the "
+                        + "next iteration — the corner is exercised, not vacuous");
+        assertEquals(BundleKeys.CHAT_PROVENANCE_GENERAL_KNOWLEDGE, corner.provenanceNotice(),
+                "the drop is dispositive: a folded post-drop retrieval hit must "
+                        + "NOT resurrect the grounded count");
+    }
+
+    private static ChatMemoryPreFetcher noMemoryPreFetcher() {
+        return new ChatMemoryPreFetcher() {
+            @Override
+            public List<ChatMemoryPreFetcher.MemoryHit> preFetch(
+                    UUID u, String sk, UUID si, String q) {
+                return List.of();
+            }
+        };
+    }
+
+    // M1-918 tool-loop bound: fold-backs admit whole entries only, and an
+    // over-budget next iteration routes to the EXISTING iteration-cap final
+    // call instead of growing.
+    @Test
+    void overBudgetToolLoopTruncatesAtEntriesAndTakesFinalCall() {
+        StringBuilder entries = new StringBuilder();
+        for (int i = 0; i < 30; i++) {
+            if (i > 0) {
+                entries.append(',');
+            }
+            entries.append("{\"uid\": \"entry-").append(i)
+                    .append("\", \"url\": \"https://example.test/entry-").append(i)
+                    .append("\", \"title\": \"").append(paddedTitle(400)).append("\"}");
+        }
+        toolResultPayload = "[" + entries + "]";
+
+        String message = "summarize";
+        int suffixTokens = ChatSessionRepository.estimateTokens(
+                ChatAgent.REPLY_LANGUAGE_DIRECTIVE + ChatAgent.TOOL_INSTRUCTIONS);
+        ChatPromptBuilder probe = new ChatPromptBuilder(
+                noMemoryPreFetcher(), new StubChatSessionRepository(List.of()),
+                16384, 1024, Integer.MAX_VALUE / 4);
+        int firstCallEstimate = probe.build(USER_ID, SCOPE_KIND, SCOPE_ID, message, "", "",
+                suffixTokens).compaction().estimateBefore();
+        // Headroom admits SOME entries of the oversized result but far from
+        // all thirty; each entry is ~110 estimated tokens.
+        int budget = firstCallEstimate + 600;
+
+        ChatPromptBuilder realBuilder = new ChatPromptBuilder(
+                noMemoryPreFetcher(), new StubChatSessionRepository(List.of()),
+                16384, 1024, budget);
+        agent = buildAgent("en", countingStubDispatcher(), null, null, realBuilder);
+
+        llmProvider.responses.add(new LlmResponse(
+                "TOOL_CALL: getPost {\"uid\": \"u-0\"}"));
+        // The second reply adds oversized ASSISTANT prose — it rides into the
+        // conversation before any fitting, so the next iteration starts over
+        // budget and must take the early final call.
+        llmProvider.responses.add(new LlmResponse(
+                "TOOL_CALL: getPost {\"uid\": \"u-1\"} " + paddedTitle(4000)));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, message);
+
+        assertEquals("default response", reply, "the final call answers");
+        assertEquals(3, llmProvider.callCount,
+                "two loop calls + the early final call — never ten iterations");
+        assertFalse(llmProvider.lastSystemPrompt.contains("Available tools:"),
+                "the early route must reuse the iteration-cap final call's base "
+                        + "system prompt");
+
+        String foldedCall = llmProvider.allUserPrompts.get(1);
+        int keptEnd = highestSurvivingEntry(foldedCall);
+        assertTrue(keptEnd >= 0 && keptEnd < 29,
+                "the oversized result must be truncated to a prefix of entries; "
+                        + "highest surviving index was " + keptEnd);
+        for (int i = 0; i <= keptEnd; i++) {
+            assertTrue(foldedCall.contains("https://example.test/entry-" + i),
+                    "surviving entry " + i + " must keep its uid/url lines intact");
+        }
+        assertFalse(foldedCall.contains("https://example.test/entry-" + (keptEnd + 1)),
+                "entries beyond the fit are gone WHOLE — never a mid-entry cut");
+        String wrappedRegion = foldedCall.substring(
+                foldedCall.indexOf("Tool result for getPost"),
+                foldedCall.indexOf(ChatAgent.POST_TOOL_RESULT_INSTRUCTION));
+        assertEquals(countChar(wrappedRegion, '{'), countChar(wrappedRegion, '}'),
+                "every admitted entry stays whole inside the wrapper");
+    }
+
+    private static String paddedTitle(int chars) {
+        return "t" + "x".repeat(Math.max(0, chars - 1));
+    }
+
+    private static int highestSurvivingEntry(String prompt) {
+        int highest = -1;
+        for (int i = 0; i < 30; i++) {
+            if (prompt.contains("https://example.test/entry-" + i)) {
+                highest = i;
+            }
+        }
+        return highest;
+    }
+
+    private static int countChar(String haystack, char needle) {
+        int count = 0;
+        for (int i = 0; i < haystack.length(); i++) {
+            if (haystack.charAt(i) == needle) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     // --- factory + test subclass ---
 
     private TestChatAgent buildAgent(String language) {
@@ -2180,7 +2390,7 @@ class ChatAgentTest {
                     }
                     return new ToolResult.Success(semanticSearchResult);
                 }
-                return new ToolResult.Success("[{\"title\": \"test\"}]");
+                return new ToolResult.Success(toolResultPayload);
             }
         };
     }
@@ -2189,14 +2399,19 @@ class ChatAgentTest {
         return buildAgent(language, dispatcher, null, null);
     }
 
-    // Full-control overload (M1-666): a non-null sanitizer/bundle replaces
-    // the default counting stub / key-echo stub — used by the composition
-    // tests that need the REAL sanitizer's CLOSED_LIST redaction or a
-    // bundle whose topic values carry realistic bytes.
     private TestChatAgent buildAgent(String language, ChatToolDispatcher dispatcher,
                                      @Nullable LlmOutputSanitizer sanitizerOverride,
                                      @Nullable BundleLoader bundleOverride) {
-        ChatPromptBuilder promptBuilder = new ChatPromptBuilder(
+        return buildAgent(language, dispatcher, sanitizerOverride, bundleOverride, null);
+    }
+
+    // M1-918 overload: a non-null builder replaces the canned-prompt
+    // anonymous builder, so the REAL budgeted assembly runs end-to-end.
+    private TestChatAgent buildAgent(String language, ChatToolDispatcher dispatcher,
+                                     @Nullable LlmOutputSanitizer sanitizerOverride,
+                                     @Nullable BundleLoader bundleOverride,
+                                     @Nullable ChatPromptBuilder builderOverride) {
+        ChatPromptBuilder promptBuilder = builderOverride != null ? builderOverride : new ChatPromptBuilder(
                 new ChatMemoryPreFetcher() {
                     @Override
                     public List<ChatMemoryPreFetcher.MemoryHit> preFetch(
@@ -2206,11 +2421,15 @@ class ChatAgentTest {
                 },
                 new ChatSessionRepository(null),
                 16384,
-                1024) {
+                1024,
+                6144) {
             @Override
-            public BuiltPrompt build(UUID u, String sk, UUID si, String msg) {
+            public BuiltPrompt build(UUID u, String sk, UUID si, String msg,
+                                     String semanticBlock, String turnDirective,
+                                     int systemSuffixTokens) {
                 promptBuilderCalls++;
-                return new BuiltPrompt("system", msg, "marker");
+                return new BuiltPrompt("system", msg, "marker",
+                        new CompactionReport(6144, 0, 0, 0, 0, false, false));
             }
         };
 
@@ -2423,6 +2642,9 @@ class ChatAgentTest {
         RuntimeException throwException;
         String lastUserPrompt;
         String lastSystemPrompt;
+        // M1-918: every generate() user prompt, so a multi-call drive can
+        // assert on the FIRST (budgeted) call's assembly, not only the last.
+        final List<String> allUserPrompts = new ArrayList<>();
         // Runs at the top of generate() (before the throw path) so a test can
         // model /stop landing mid-generation — e.g. marking the in-flight
         // handle cancelled. Null by default, so existing tests are unaffected.
@@ -2442,6 +2664,7 @@ class ChatAgentTest {
             callCount++;
             lastUserPrompt = userPrompt;
             lastSystemPrompt = systemPrompt;
+            allUserPrompts.add(userPrompt);
             if (callCount <= responses.size()) {
                 return responses.get(callCount - 1);
             }

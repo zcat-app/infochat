@@ -1,14 +1,16 @@
 ---
 id: M1-918
 title: "Chat prompt token budget + deterministic compaction ladder"
-status: pending
+status: done
 created: 2026-08-23
 last_updated: 2026-08-23
 flow: tick
 reproduction: >-
   ChatPromptBudgetTest.overBudgetTurnCompactsUnderTheConfiguredBudget
-  (to-be-written — converted at /tick start per workflow §0: written first,
-  run RED; child of a 2+ decomposition, analysis
+  (converted from to-be-written at /tick start 2026-08-23: written against
+  the pre-ticket API first and run RED — assembled estimate 8082 tokens vs
+  the 6,144 budget with every per-part cap satisfied — then GREEN after the
+  ladder landed; child of a 2+ decomposition, analysis
   docs/plan/m1/tick-analysis/chat-context-budget-and-serving-defaults.md).
   The wrong behavior it states: nothing bounds the ASSEMBLED chat prompt
   against any serving context — the per-part caps sum past every shipped
@@ -23,6 +25,18 @@ reproduction: >-
   .agents/memory-local/prod-state-post-upgrade-20260823.md).
 analysis_ref: docs/plan/m1/tick-analysis/chat-context-budget-and-serving-defaults.md
 blocked_by: []
+clarity_check: >-
+  start 2026-08-23 pass — tick-lint 0 findings; every file:line citation
+  re-verified in-tree (ChatPromptBuilder build :94 / memory :110-121 /
+  history :128-142 / newestTurnsWithinBudget :157-169, context-window=16384
+  at application.properties:601, ChatAgent collectPostUids :838 /
+  isMarginalGrounding :865-888 / runToolLoop :905+, semantic append :637,
+  MeteredLlmProvider :82-92); no §Census (multi-file diff); analysis
+  P1-P10+P14 all present; blocked_by empty. One mechanical finding: direct
+  ChatPromptBuilder constructor call sites exist in NINE test files, not
+  the two test_plan.modifies names — the same assertion-free call-site
+  update extends to the other seven, authorized via the commit message per
+  engineering-rules §8 ("ticket body OR the commit message").
 files_scope:
   - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatPromptBuilder.java
   - infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java
@@ -72,7 +86,7 @@ acceptance:
   - "KEY + DRIFT PIN (P4): the new infochat.chat.prompt-token-budget is declared in application.properties (base, value 6144) AND mirrored by the @ConfigProperty defaultValue, with a comment recording the derivation: shipped GPU-class slot 11,008 − 600 reply budget = 10,408; 6,144 estimate tolerates ~1.7x chars/4 underestimation (6,144 x 1.7 ≈ 10,400). ChatPromptBudgetTest.budgetDefaultIsDeclaredOnceAndMatchesProperties passes (the M1-917 item-1 reflective pattern) AND probe: grep -n 'prompt-token-budget' infochat-provider/src/main/resources/application.properties returns exactly ONE line, the unprefixed base declaration (no profile override)."
   - "LADDER ORDER + DETERMINISM (P3, P10): the ladder applies in the FIXED order (1) history oldest-first against min(infochat.context-window, budget remainder after fixed parts), re-parameterizing newestTurnsWithinBudget — never a second competing truncation; (2) the WHOLE semantic pre-fetch block (never mid-JSON, P6); (3) memory hits oldest-first, then the block. ChatPromptBudgetTest.ladderDropsHistoryThenRetrievalThenMemory passes (a fixture needing only step 1 keeps retrieval+memory; one needing step 2 drops the whole retrieval block and keeps one history turn; one needing step 3 has neither) AND ChatPromptBudgetTest.sameInputsCompactByteIdentically passes (two builds, byte-identical prompts; no time/GUC/random input beyond the pre-existing per-call markers)."
   - "SCAFFOLDING INTACT (P1, failure-mode): ChatPromptBudgetTest.compactionNeverDropsScaffolding passes — the maximally-compacted prompt still contains CHAT_SYSTEM_PROMPT_TEMPLATE's full injection-defence half verbatim, the complete rendered TOOL_INSTRUCTIONS table, the language directive, and BALANCED UNTRUSTED_CONTENT open/close pairs around every surviving untrusted block; ChatPromptBuilderTest.systemPromptInjectionDefenseHalfIsPreservedVerbatim and historyWrappedInUntrustedContentDelimiters pass UNCHANGED."
-  - "PROVENANCE HONESTY (P6, P7, failure-mode): ChatAgentTest.droppedRetrievalBlockKeepsGeneralKnowledgeProvenance passes — a drive whose pre-fetch returned posts but whose block the ladder dropped asserts the prompt carries NO partial JSON fragment of the retrieval result (no orphan '[{' tail) AND the turn's provenance notice is the general-knowledge bundle string, never a grounded count; the clarify/affordance directive selection sees the pre-drop signal but the folded content is all-or-nothing."
+  - "PROVENANCE HONESTY (P6, P7, failure-mode): ChatAgentTest.droppedRetrievalBlockKeepsGeneralKnowledgeProvenance passes — a drive whose pre-fetch returned posts but whose block the ladder dropped asserts the prompt carries NO partial JSON fragment of the retrieval result (no orphan '[{' tail) AND the turn's provenance notice is the general-knowledge bundle string, never a grounded count; the clarify/affordance directive selection sees the pre-drop signal but the folded content is all-or-nothing. THE DROP IS DISPOSITIVE (spec amendment 2026-08-23): the same drive also exercises the corner where a post-drop model-elected semanticSearch result IS folded into the conversation — the notice STAYS the general-knowledge bundle string (grounding carries a semanticDropped term; folded hits do not resurrect the count)."
   - "OBSERVABILITY (P5): a compacting turn logs at INFO the per-step dropped counts and the before/after estimates (the M1-728 'a truncated LLM input is never silent' posture); ChatPromptBudgetTest.compactionLogsWhatWasDropped passes (log-capture assertion)."
   - "TOOL-LOOP BOUND (P8, failure-mode): ChatAgentTest.overBudgetToolLoopTruncatesAtEntriesAndTakesFinalCall passes — a multi-iteration drive with oversized tool results asserts each fold-back is truncated at ENTRY granularity (every surviving entry keeps its uid/url lines intact; never a mid-entry cut) to a per-result share, AND that a conversation still over budget at the next iteration takes the EXISTING iteration-cap final call (base system prompt, no tool instructions) instead of growing."
   - "TRANSPORT UNIFORMITY (P9): the same budgeted prompt reaches generate / generateStreaming / generateWithTools — ChatAgentReplyModeTest and the pre-existing chat suites (ChatToolCatalogTest, ChatToolDispatcherTest, ChatAgentRefusalIntercept*, ChatAgentProvenanceTest, AutoCompressTriggerTest) pass UNCHANGED; probe: mvn -pl infochat-provider -am test -Dtest='ChatPromptBudgetTest,ChatPromptBuilderTest,ChatAgentTest,ChatAgentReplyModeTest,ChatAgentProvenanceTest,AutoCompressTriggerTest' is green."
@@ -97,6 +111,30 @@ spec_refs:
 decision_refs:
   - D19
   - D58
+reviews:
+  - round: 1
+    date: 2026-08-23
+    verdict: APPROVE-WITH-FIXES
+    checks: "SPEC-TRUTHNESS WARN (low — spec-amendment approval record owed before commit), SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "16 files changed, 1017 insertions(+), 139 deletions(-)"
+    rework_items: 0
+    fix_items: 1
+    verdict_file: .scratch/tick-review-M1-918-r1.txt
+    fixes_applied: >-
+      User amended the wording (evaluation 2026-08-23: bold lead-in,
+      "token estimate" mechanism drop, dispositive-drop final clause);
+      approved text landed via the user's reviewer session, ported to
+      this worktree byte-identical; ticket item 5 extended with the
+      dispositive-drop corner drive + Approach records the approved
+      wording verbatim as do-not-reword. Approval carries to the commit
+      body as the "Spec-amendment approval:" line.
+  - round: 2
+    date: 2026-08-23
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "round-2 fix hunks: 4 files, +106/-29 (spec wording swap, dispositive-drop corner arm in ChatAgentTest, ticket records); round-1 full diff: 16 files, +1017/-139"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-918-r2.txt
 ---
 
 # M1-918: Chat prompt token budget + deterministic compaction ladder
@@ -191,15 +229,23 @@ hardware-profile contract makes the value design-tier.
      granularity to a per-result share of the budget, and routes a
      still-over-budget conversation to the existing final-call path
      (base system prompt) at the next iteration (P8).
-- **Spec amendment rule-text draft (§12 — exact wording approved by the
-  user at implementation; number-free, no dates/IDs):** commands.md
-  §Chat mode gains: the chat prompt is assembled under a deterministic
-  token budget; when the assembly exceeds it, oldest history turns are
-  dropped first, then the deterministic retrieval block, then memory
-  pre-fetch hits, in that fixed order; the instruction and
-  untrusted-content scaffolding is never dropped; the
-  retrieval-provenance notice reflects what was actually folded into the
-  prompt.
+- **Spec amendment rule-text (§12 — wording approved by the user
+  2026-08-23; landed in docs/spec/commands.md §Chat mode between the
+  provenance paragraph and the D66 paragraph; verbatim, do not reword
+  at implementation):** "**The assembled prompt is budget-bounded and
+  compacts deterministically.** The chat prompt is assembled under a
+  configured token budget measured in the same token estimate as session
+  accounting. When the naive assembly exceeds it, a deterministic
+  compaction ladder applies in fixed order: oldest history turns first,
+  then the deterministic retrieval block whole, then memory pre-fetch
+  hits oldest-first, then any remaining memory block. The instruction
+  and untrusted-content scaffolding is never dropped. The ladder is a
+  pure function of the assembled parts — identical inputs compact to an
+  identical prompt (D19). A turn whose retrieval block was dropped takes
+  the general-knowledge path: its provenance notice is the not-grounded
+  one even when later model-initiated retrieval results were folded
+  into the conversation (D58). Budget value, derivation and
+  truncation posture live in design notes (05 §5.4.6, §5.7)."
 - **Steps, in order:**
   1. Write ChatPromptBudgetTest RED (reproduction + ladder/scaffolding/
      determinism/observability pins).
@@ -279,3 +325,44 @@ sequence, never `--parallel`; M1-912 (digest/**) is verified disjoint.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-918-chat-prompt-budget-compaction.md
 ```
+
+## Review observations
+
+- r2 (2026-08-23, APPROVE) RECOMMENDED-NEW-TICKET (user's call,
+  TOUCHED-BY-THIS-DIFF: yes — created by r1's fold code; DECIDE-BEFORE:
+  M1-923): truncated-to-zero fold-backs can over-claim grounding —
+  collectPostUids runs on the FULL tool result before fitWithinBudget
+  (ChatAgent.java:981 vs :999), so a 30-entry result with zero entries
+  admitted still yields "grounded in 30 posts" while the model's next
+  prompt carries an empty wrapper. Fix (count admitted entries / collect
+  after fit) or spec-sanction belongs with M1-923's notice/failure-surface
+  lane. Relayed to the user 2026-08-23. Driver decision (2026-08-23):
+  fix, not spec-sanction — folded into M1-923's ticket (acceptance item
+  10, approach shape 4).
+
+- r1 (2026-08-23, APPROVE-WITH-FIXES) RECOMMENDED-NEW-TICKET (user's call,
+  TOUCHED-BY-THIS-DIFF: yes): post-drop tool-elected grounding under-claims
+  in the provenance notice — when the ladder drops the pre-fetch retrieval
+  block but the model later elects semanticSearch/getPost calls whose
+  results ARE folded in, the notice still reads the general-knowledge
+  wording. Options: a notice reflecting the actually-folded set, or a
+  spec-level confirmation sentence that a dropped-pre-fetch turn always
+  takes the general-knowledge wording regardless of later tool grounding.
+
+## Post-approval repair (§8 authorization, user-mandated)
+
+- 2026-08-23, user mandate ("fix it and finish it"): the merge gate's
+  full `mvn verify` failed twice on
+  SemanticSearchToolDiversityIT.windowAtTheNewDefaultStaysUnderTheByteBudget
+  (M1-917's test, NOT in this ticket's modifies list and untouched by
+  this diff) — an intermittent fixture defect, not a regression: the 18
+  fat posts tie on ts_rank, so the lexical arm's rank tie-breaks on
+  post_id ASC = random UUIDs per run, shuffling the fused head the
+  assertion demands (1 failure in 6 isolated pre-fix runs; two failed
+  full verifies). User authorized repairing the test here (engineering
+  rules §5 escalation resolved by the owner). Fix: identical fat titles
+  (structural ts_rank tie) + byte-ordered explicit post ids via a
+  seedPost overload — both arms rank by angle, the truncation head is
+  fat-1 by construction (D19). No assertion weakened; the
+  head-preservation assertion becomes deterministic. Post-fix: 8/8
+  isolated runs green + full serialized verify on the rebased tree.

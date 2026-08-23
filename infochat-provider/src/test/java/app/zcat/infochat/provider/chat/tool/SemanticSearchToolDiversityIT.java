@@ -264,8 +264,8 @@ class SemanticSearchToolDiversityIT {
         seedSubscription("dm", userId, source);
         String fat = "x".repeat(1200);
         for (int i = 1; i <= 18; i++) {
-            UUID postId = seedPost("fat-" + i, source,
-                    "Quantum router exploit entry " + i + " " + fat, "Body.", "READY");
+            UUID postId = seedPost(fatPostId(i), "fat-" + i, source,
+                    "Quantum router exploit entry " + fat, "Body.", "READY");
             seedEmbedding(postId, vectorAtAngle(0.01 * i));
         }
 
@@ -443,23 +443,37 @@ class SemanticSearchToolDiversityIT {
         }
     }
 
+    // Byte-ordered fat-fixture ids: the identical titles tie ts_rank, so
+    // the lexical arm breaks on post_id ASC — both arms then rank by
+    // angle, making the byte-budget truncation head fat-1 by construction
+    // (D19) instead of by random-UUID luck.
+    private static UUID fatPostId(int i) {
+        return UUID.fromString(String.format("00000000-0000-0000-0000-0000000000%02x", i));
+    }
+
     private UUID seedPost(String slug, UUID sourceId, String title, String body,
+                          String status) throws Exception {
+        return seedPost(UUID.randomUUID(), slug, sourceId, title, body, status);
+    }
+
+    private UUID seedPost(UUID id, String slug, UUID sourceId, String title, String body,
                           String status) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                 "INSERT INTO post (uid, source_id, title, body, url, published_at, "
+                 "INSERT INTO post (id, uid, source_id, title, body, url, published_at, "
                      + "fetched_at, status, ready_at, tags, upstream_identifier) "
-                     + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?) RETURNING id")) {
-            ps.setString(1, PREFIX + slug);
-            ps.setObject(2, sourceId);
-            ps.setString(3, title);
-            ps.setString(4, body);
-            ps.setString(5, "https://example.com/" + slug);
-            ps.setTimestamp(6, Timestamp.from(FETCHED_AT));
+                     + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?) RETURNING id")) {
+            ps.setObject(1, id);
+            ps.setString(2, PREFIX + slug);
+            ps.setObject(3, sourceId);
+            ps.setString(4, title);
+            ps.setString(5, body);
+            ps.setString(6, "https://example.com/" + slug);
             ps.setTimestamp(7, Timestamp.from(FETCHED_AT));
-            ps.setString(8, status);
-            ps.setTimestamp(9, "READY".equals(status) ? Timestamp.from(FETCHED_AT) : null);
-            ps.setString(10, PREFIX + slug);
+            ps.setTimestamp(8, Timestamp.from(FETCHED_AT));
+            ps.setString(9, status);
+            ps.setTimestamp(10, "READY".equals(status) ? Timestamp.from(FETCHED_AT) : null);
+            ps.setString(11, PREFIX + slug);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return (UUID) rs.getObject(1);
