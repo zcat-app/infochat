@@ -1,14 +1,17 @@
 ---
 id: M1-916
 title: "Route temporal/top-news chat intents to searchPosts"
-status: pending
+status: done
 created: 2026-08-23
 last_updated: 2026-08-23
 flow: tick
 reproduction: >-
   ChatToolCatalogTest#searchToolDescriptionsCarryTemporalRoutingGuidance
-  (to-be-written — converted at /tick start per workflow §0: written first,
-  run RED; the catalog type exists, the guidance text does not; child of a
+  (converted at /tick start 2026-08-23: written first, run RED — exactly the
+  two new pins failed
+  (searchToolDescriptionsCarryTemporalRoutingGuidance,
+  wireDeclarationsCarryTheSameRoutingGuidance), all other 1974 provider
+  unit tests green; child of a
   2+ decomposition, analysis
   docs/plan/m1/tick-analysis/tool-routing-temporal-queries.md). Probe of
   today's wrong posture (grep-verified): the two search-tool descriptions in
@@ -93,11 +96,21 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-23
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: PASS; MAINTAINABILITY: PASS; SCOPE: PASS. Reviewer falsified four candidate findings (semanticSearch steer-phrase mutation guarded by the byte pin; wire-pin non-vacuity via wireDeclarations mutation analysis; wire-length hazard defeated by helpLookup precedent; M1-917-already-landed vs P14 advisory ordering, disjointness holds). Owner-run live steering probe (acceptance item 6) remains the post-landing obligation, recorded in the commit message"
+    diff_stats: "round 1: 6 files, +76/−14 (log of record tick-test-M1-916-r1.log, full mvn verify BUILD SUCCESS, 7 modules, 09:57; no source file newer than the log)"
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  commit-time: "item-6 venue ambiguity (post-landing probe vs immutable commit
+    message) resolved by owner 2026-08-23: commit marks the live steering
+    probe PENDING with its grep protocol; the executed outcome + log excerpts
+    are recorded against this ticket record via a docs/plan follow-up after
+    deploy"
 escalation_reason:
 ---
 

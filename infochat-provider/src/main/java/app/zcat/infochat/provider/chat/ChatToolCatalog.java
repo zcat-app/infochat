@@ -30,12 +30,19 @@ final class ChatToolCatalog {
     // the prompt's example hides.
     private static final List<Tool> TOOLS = List.of(
             new Tool("searchPosts",
-                    "search posts by tags within a time window",
+                    "search posts by tags within a time window, newest first. "
+                            + "Use this for questions about recent, latest, today's or "
+                            + "top news posts — anything with a time dimension. 'Top' means "
+                            + "most recent, not most important: present the results with "
+                            + "their dates and say so.",
                     List.of(new ToolArg("tags", "array", false, "[\"tag1\"]"),
                             new ToolArg("window", "string", false, "\"P7D\""),
                             new ToolArg("limit", "integer", false, "10"))),
             new Tool("semanticSearch",
-                    "find posts semantically or by keyword related to a free-text query",
+                    "find posts semantically or by keyword related to a free-text "
+                            + "query, for topical or theme questions with no time dimension. "
+                            + "It has no time window and no recency ordering — for recent, "
+                            + "latest, today's or top news questions use searchPosts instead.",
                     List.of(new ToolArg("query", "string", true, "\"free-text topic\""),
                             new ToolArg("limit", "integer", false, "10"))),
             new Tool("getPost",

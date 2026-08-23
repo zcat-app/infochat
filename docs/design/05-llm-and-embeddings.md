@@ -539,7 +539,16 @@ Rules:
 Active language: {{scope_lang}}                                                                                                                                                                                                                       
 Active scope: {{scope_kind}} {{scope_id_redacted}}                                                                                                                                                                                                    
                                                                                                                                                                                                                                                       
-The system prompt is stable. Provider-cache-friendly: never include user-volatile content here.                                                                                                                                                       
+The system prompt is stable. Provider-cache-friendly: never include user-volatile content here.
+
+**Search-tool routing guidance.** The `searchPosts` catalog description
+steers temporal/top-news intents — "recent", "latest", "today", "top" — to
+it, binding "top" to most recent (never most important) and requiring dated,
+honest presentation of results; the `semanticSearch` catalog description
+scopes it to topical/theme questions with no time dimension and steers
+temporal questions back to `searchPosts`. The guidance lives only in the
+two catalog strings (`ChatToolCatalog`), single-sourced into both the
+instruction table and the wire declarations.                                                                                                                                                       
 
 **Digest-first semantic retrieval.** On every chat turn the agent
 dispatches `semanticSearch` **deterministically** with the user's message as

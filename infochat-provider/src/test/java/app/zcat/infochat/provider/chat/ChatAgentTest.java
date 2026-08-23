@@ -1334,9 +1334,15 @@ class ChatAgentTest {
     @Test
     void renderedInstructionTableIsByteIdentical() {
         String expected = "- searchPosts {\"tags\": [\"tag1\"], \"window\": \"P7D\", \"limit\": 10}"
-                + " — search posts by tags within a time window\n"
+                + " — search posts by tags within a time window, newest first. Use this"
+                + " for questions about recent, latest, today's or top news posts —"
+                + " anything with a time dimension. 'Top' means most recent, not most"
+                + " important: present the results with their dates and say so.\n"
                 + "- semanticSearch {\"query\": \"free-text topic\", \"limit\": 10}"
-                + " — find posts semantically or by keyword related to a free-text query\n"
+                + " — find posts semantically or by keyword related to a free-text query,"
+                + " for topical or theme questions with no time dimension. It has no time"
+                + " window and no recency ordering — for recent, latest, today's or top"
+                + " news questions use searchPosts instead.\n"
                 + "- getPost {\"uid\": \"post-uid\"} — retrieve a single post by UID\n"
                 + "- getReferences {\"uid\": \"post-uid\"} — get references for a post\n"
                 + "- recallMemory {\"keywords\": [\"keyword1\", \"keyword2\"]}"

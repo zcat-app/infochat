@@ -2,10 +2,13 @@ package app.zcat.infochat.provider.chat;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import app.zcat.infochat.llm.LlmProvider;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -61,6 +64,42 @@ class ChatToolCatalogTest {
                     name + " schema must declare object type");
             assertTrue(node.get("properties").isObject(),
                     name + " schema must carry per-param properties");
+        }
+    }
+
+    @Test
+    void searchToolDescriptionsCarryTemporalRoutingGuidance() {
+        String searchPosts = ChatToolCatalog.tool("searchPosts").description();
+        assertTrue(searchPosts.contains("recent")
+                        && searchPosts.contains("latest")
+                        && searchPosts.contains("today's or top news"),
+                "searchPosts must name the temporal intents it serves");
+        assertTrue(searchPosts.contains("'Top' means most recent, not most important"),
+                "searchPosts must bind 'top' to recency, promising no importance "
+                        + "ranking it does not have");
+        String semanticSearch = ChatToolCatalog.tool("semanticSearch").description();
+        assertTrue(semanticSearch.contains("no time window and no recency ordering"),
+                "semanticSearch must disclaim its missing time dimension");
+        assertTrue(semanticSearch.contains("use searchPosts instead"),
+                "semanticSearch must steer temporal intents to searchPosts");
+    }
+
+    @Test
+    void wireDeclarationsCarryTheSameRoutingGuidance() {
+        Map<String, String> wireDescriptions =
+                ChatToolCatalog.wireDeclarations().stream()
+                        .collect(Collectors.toMap(
+                                LlmProvider.ToolDeclaration::name,
+                                LlmProvider.ToolDeclaration::description,
+                                (a, b) -> a));
+        for (String name : List.of("searchPosts", "semanticSearch")) {
+            assertEquals(ChatToolCatalog.tool(name).description(),
+                    wireDescriptions.get(name),
+                    name + "'s wire description must be the single-sourced "
+                            + "catalog string");
+            assertTrue(wireDescriptions.get(name).contains("time dimension"),
+                    name + "'s wire declaration must carry the routing "
+                            + "guidance, not only the instruction table");
         }
     }
 
