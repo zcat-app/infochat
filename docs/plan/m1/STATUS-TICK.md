@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 7 |
-| in-progress | 0 |
+| pending | 9 |
+| in-progress | 1 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 122 |
-| deferred | 0 |
-| abandoned | 3 |
-| **total** | **132** |
+| deferred | 1 |
+| abandoned | 4 |
+| **total** | **137** |
 
 ---
 
@@ -26,12 +26,11 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-909 — Wizard GPU-class spec-decode head delivery + clone recovery (complexity: medium, risk: medium)
-- M1-910 — Rootless IPv6 compose enablement, capability-derived (complexity: medium, risk: medium)
-- M1-911 — No-IPv6-host fallback: image getaddrinfo IPv4 preference (complexity: low, risk: medium)
-- M1-914 — Persist post.comments and rank reddit replies in the digest (complexity: high, risk: medium)
 - M1-915 — Migrate reddit feeds from kind=rss to kind=reddit in place (complexity: medium, risk: medium)
 - M1-916 — Route temporal/top-news chat intents to searchPosts (complexity: low, risk: medium)
 - M1-917 — Widen and diversity-cap the semanticSearch window (complexity: medium, risk: medium)
+- M1-918 — Chat prompt token budget + deterministic compaction ladder (complexity: medium, risk: medium)
+- M1-922 — Reconcile D-8 live wedge evidence with the controlled no-IPv6 rerun (complexity: medium, risk: low)
 
 ---
 
@@ -39,8 +38,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 | ID | Title | Status | Last review |
 |---|---|---|---|
-
-_(none)_
+| M1-914 | Persist post.comments and rank reddit replies in the digest | in-progress | (none) |
 
 ---
 
@@ -48,7 +46,9 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-920 — blocked_by: M1-909 (pending)
+- M1-921 — blocked_by: M1-918 (pending), M1-920 (pending)
+- M1-923 — blocked_by: M1-918 (pending)
 
 ---
 
@@ -82,7 +82,8 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 ## Deferred
 
-_(none)_
+### blocked-on-new-ticket (1)
+- M1-911 → M1-922
 
 ---
 
@@ -96,6 +97,9 @@ Tickets decided against — not implemented as this ticket. Terminal: not reopen
 ### superseded (2)
 - M1-860 — Measure news-category tagger coverage on the local model
 - M1-861 — Seed validated news categories into the tag vocabulary
+
+### wont-do-infeasible (1)
+- M1-910 — Rootless IPv6 compose enablement, capability-derived
 
 ---
 
@@ -251,12 +255,18 @@ M1-906 (done)
 M1-907 (done)
 M1-908 (done)
   └── M1-909 (pending) ← runnable
-M1-910 (pending) ← runnable
-M1-911 (pending) ← runnable
+        └── M1-920 (pending)
+              └── M1-921 (pending)
+M1-910 (abandoned)
 M1-912 (done)
   └── M1-913 (done)
-M1-914 (pending) ← runnable
+M1-914 (in-progress)
 M1-915 (pending) ← runnable
 M1-916 (pending) ← runnable
 M1-917 (pending) ← runnable
+M1-918 (pending) ← runnable
+  ├── M1-921 (pending) [see above]
+  └── M1-923 (pending)
+M1-922 (pending) ← runnable
+  └── M1-911 (deferred)
 ```
