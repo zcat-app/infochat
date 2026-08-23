@@ -1,7 +1,7 @@
 ---
 id: M1-910
 title: "Rootless IPv6 compose enablement, capability-derived"
-status: pending
+status: abandoned
 created: 2026-08-23
 last_updated: 2026-08-23
 flow: tick
@@ -28,7 +28,6 @@ files_scope:
   - prod/scripts/apps.sh
   - prod/scripts/upgrade.sh
   - prod/scripts/restore.sh
-  - prod/scripts/stack.sh
   - infochat-provider/src/test/java/app/zcat/infochat/provider/wiring/Ipv6OverlayWiringTest.java
   - docs/design/07-deployment.md
 complexity: medium
@@ -45,6 +44,13 @@ out_of_scope:
     they never recreate the provider (census, analysis Ground truth), so they
     never apply the overlay; 8-verify.sh additionally keeps its WARN-only
     posture and exit contract with zero diff (P8).
+  - >-
+    stack.sh — never recreates the provider (census correction): its dispatch
+    (prod/scripts/stack.sh:68-76) allows only start|stop|restart|status, and
+    start is `compose start`, never `up` (:37-48) — it resumes the existing
+    container set around host reboots by design, so it has no bring-up point
+    at which the overlay could apply; the file contains no `up -d` site at
+    all. Zero diff; StackScriptWiringTest stays byte-untouched.
   - >-
     Any messaging-adapter source or test — the M1-889/890/901 detector is the
     untouched safety net (P7); this ticket changes the environment, never the
@@ -64,14 +70,14 @@ out_of_scope:
     repo.
 acceptance:
   - "STEP-0 GATE (P2, ASSUMPTION A1) — live probe, run before any file edit, recorded in the commit message (the M1-908 acceptance-2 pattern): on the real rootless host, record the RootlessKit version and its v6-relevant flags, create a throwaway `enable_ipv6` network in the landed shape, run a throwaway container on it, and capture outbound v6 connectivity (e.g. curl -6 to a dual-stack host). This decides the branch: BRANCH 1 — no daemon-level change needed (expected on RootlessKit 3.0.2-class per the 2026-08-23 session probe); BRANCH 2 — a per-user daemon config / rootlesskit flag is needed: the wizard-side write must land before any bring-up (P9), disclose the daemon restart and the daemon-wide blast radius (every container of that user's daemon) in docs, and keep the off-override. If NO fail-safe shape exists, STOP and escalate — ship nothing."
-  - "REPRODUCTION, now passing: Ipv6OverlayWiringTest.v6CapableRootlessHostAppliesIpv6Overlay (test_plan.adds) — fake docker reporting rootless + fake host v6 route present, driving each of the five provider-recreating scripts (7-apps.sh, apps.sh, upgrade.sh, restore.sh, stack.sh) on the DoctorWiringTest restricted-PATH/fake-docker pattern, asserts the compose argv carries `-f docker-compose.ipv6.yml`; plus a static layer asserting the overlay's landed shape: a v6-enabled network (enable_ipv6, fixed generic ULA /64 literal from the step-0 probe) attached to infochat-provider alongside the default network, and nothing else (FAILURE-MODE mutation: dropping the -f addition from any ONE of the five scripts fails its drive — P1)."
+  - "REPRODUCTION, now passing: Ipv6OverlayWiringTest.v6CapableRootlessHostAppliesIpv6Overlay (test_plan.adds) — fake docker reporting rootless + fake host v6 route present, driving each of the four provider-recreating scripts (7-apps.sh, apps.sh, upgrade.sh, restore.sh) on the DoctorWiringTest restricted-PATH/fake-docker pattern, asserts the compose argv carries `-f docker-compose.ipv6.yml`; plus a static layer asserting the overlay's landed shape: a v6-enabled network (enable_ipv6, fixed generic ULA /64 literal from the step-0 probe) attached to infochat-provider alongside the default network, and nothing else (FAILURE-MODE mutation: dropping the -f addition from any ONE of the four scripts fails its drive — P1)."
   - "FAILURE-MODE (P3, negative): Ipv6OverlayWiringTest.noV6OrUncertainCapabilityRendersByteIdenticalArgv — host v6 route absent, AND separately the capability predicate undetermined (probe tools absent / branch-2 config missing), each yield compose argv byte-identical to today's, a printed note, and unchanged exit codes: a v6-less or uncertain host is never broken by the enhancement (the M1-890 detector remains the wedge surface there)."
   - "FAILURE-MODE (P3) predicate pin: the applied branch requires BOTH host v6 and daemon capability — a drive with host v6 present but capability negative asserts NO overlay (a mutation that weakens the predicate to host-v6-only fails the build; applying on an incapable daemon fails the whole stack `up`, which this pin exists to prevent)."
-  - "BASE-FILE INVARIANT (P4): the test asserts docker-compose.yml contains no `networks:` key and docker-compose.gpu.yml / docker-compose.comfyui.yml gain none — the base render stays byte-identical and startable on every host class (07-deployment.md:1011)."
-  - "GENERIC SURFACE (P5, binding steer): the test scans docker-compose.ipv6.yml and the five scripts for `simplex.im`, any IPv4 literal, and any host-derived value — zero hits; the only address literal anywhere is the fixed generic ULA prefix (identical for every deployment, not derived from the probe host)."
-  - "OVERRIDE + REVERSIBILITY (P2): an INFOCHAT_IPV6=off drive on a v6-capable host asserts byte-identical argv (operator-exported env, the INFOCHAT_LLAMACPP_GPU=on|off precedent — never a secrets.env key, 07-deployment.md:823); docs record that off + the next provider recreate detaches the v6 network."
+  - "BASE-FILE INVARIANT (P4): the test asserts docker-compose.yml contains no `networks:` key and docker-compose.gpu.yml / docker-compose.comfyui.yml gain none — the base render stays byte-identical and startable on every host class (07-deployment.md:1032)."
+  - "GENERIC SURFACE (P5, binding steer): the test scans docker-compose.ipv6.yml and the four scripts for `simplex.im`, any IPv4 literal, and any host-derived value — zero hits; the only address literal anywhere is the fixed generic ULA prefix (identical for every deployment, not derived from the probe host)."
+  - "OVERRIDE + REVERSIBILITY (P2): an INFOCHAT_IPV6=off drive on a v6-capable host asserts byte-identical argv (operator-exported env, the INFOCHAT_LLAMACPP_GPU=on|off precedent — never a secrets.env key, 07-deployment.md:841); docs record that off + the next provider recreate detaches the v6 network."
   - "DOCS (07-deployment.md): a runbook paragraph records the mechanism (capability-derived overlay application at every provider-recreating bring-up, printed in the echoed compose command), the override, the reversal, the branch-2 daemon-restart + daemon-wide disclosure if the step-0 probe landed branch 2, and a §7.7.2-step-table note where the shape fits; if branch 2 landed, ADMIN_GUIDE.md gains the matching operator disclosure. Verification: `git diff --stat docs/ ADMIN_GUIDE.md` shows exactly those files (M1-911 edits DISJOINT sections of 07-deployment.md — run serially)."
-  - "Controls preserved (§10): every pre-existing wiring test (DoctorWiringTest, RestoreWiringTest, UpgradeWiringTest, VerifyWiringTest, LlamacppWiringTest, StackScriptWiringTest) is byte-untouched — `git diff` shows the new test class as the only test-file addition; the M1-905 GPU-overlay threading in 4-llm.sh is untouched (4-llm.sh is not in files_scope); `git diff --name-only` shows no 8-verify.sh hunk (P8) and no messaging-adapter path (P7)."
+  - "Controls preserved (§10): every pre-existing wiring test (DoctorWiringTest, RestoreWiringTest, UpgradeWiringTest, VerifyWiringTest, LlamacppWiringTest — that one in infochat-llm-adapter, not provider —, StackScriptWiringTest) is byte-untouched — `git diff` shows the new test class as the only test-file addition; the M1-905 GPU-overlay threading in 4-llm.sh is untouched (4-llm.sh is not in files_scope); `git diff --name-only` shows no 8-verify.sh hunk (P8) and no messaging-adapter path (P7)."
   - "./mvnw -B -pl infochat-provider test -Dtest='Ipv6OverlayWiringTest' is green AND mvn verify from the repo root is green (engineering-rules §5)."
   - "ROLLOUT EVIDENCE (P10, recorded in the commit message or rollout notes, not a build test): on the test checkout the extra_hosts pins are removed, the stack is fresh-started, and the wedge stays gone (provider holds SMP sessions) with the M1-890 detector green; on a no-v6 host (or simulated negative probe) the scripts render byte-identical argv."
 test_plan:
@@ -79,7 +85,7 @@ test_plan:
     - >-
       infochat-provider/src/test/java/app/zcat/infochat/provider/wiring/Ipv6OverlayWiringTest.java
       — v6CapableRootlessHostAppliesIpv6Overlay (reproduction; per-site drives
-      for 7-apps.sh, apps.sh, upgrade.sh, restore.sh, stack.sh),
+      for 7-apps.sh, apps.sh, upgrade.sh, restore.sh),
       noV6OrUncertainCapabilityRendersByteIdenticalArgv,
       capabilityNegativeWithHostV6AppliesNothing, ipv6OffOverrideRendersBaseArgv,
       plus the static layer (overlay landed shape, base-file networks:
@@ -95,10 +101,50 @@ reviews: []
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  start-self-check: >-
+    PASS after one pre-start blocking fix (user-applied): the census row
+    "stack.sh:34 arbitrary-verb passthrough" was a false provider-recreating
+    claim (dispatch allows only start|stop|restart|status; no `up -d` site);
+    ticket + analysis corrected to FOUR threaded sites. Citations
+    re-spot-checked clean: GPU precedent 07-deployment.md:1032 + :815,
+    secrets-env never-sourced :841, echo-shape contract §7.7.1 (:824),
+    Dockerfile.jvm v7.0.0 pin, DoctorWiringTest fake-docker harness,
+    LlamacppWiringTest located in infochat-llm-adapter. Lint 0 findings;
+    absence probe re-run zero hits; census grep re-run matches; no in-flight
+    tick tickets (--parallel module boundary clear).
+abandoned_reason: wont-do-infeasible
 ---
 
 # M1-910: Rootless IPv6 compose enablement, capability-derived
+
+> **ABANDONED 2026-08-23 — wont-do-infeasible (premise-fail at the step-0
+> gate, acceptance 1).** The live probe on the real rootless host
+> (RootlessKit 3.0.2, Docker 29.7.2 rootless) falsified the ticket's premise
+> at the root: the daemon's net driver is gvisor-tap-vsock (fall-through
+> default — no slirp4netns/pasta/vpnkit binary on the box), and rootlesskit
+> `--ipv6` defaults FALSE and is "only supported for pasta and slirp4netns"
+> (--help), so BRANCH 1 cannot yield outbound v6 on ANY stock rootless host
+> and cannot on this one at all. Confirmed empirically: a throwaway
+> `--ipv6` network in the exact landed shape (fd00:db8::/64) gave the
+> container its address plus a working gateway ping while outbound v6 was
+> BLACKHOLED (curl -6 connect fail; the v4 control worked). BRANCH 2 here =
+> root apt-install of pasta/slirp4netns plus a whole-daemon net-driver
+> switch and restart — re-networking every container of the user's daemon;
+> not fail-safe — while the write-less predicate-gated variant stays inert
+> forever on this host class and ships nothing toward the D-8 wedge.
+> Acceptance-1 terminal clause fired: NO fail-safe shape exists, STOP and
+> escalate — ship nothing (zero deployment-surface edits landed; the branch
+> carried bookkeeping only, preserved above: the pre-start census correction
+> that stack.sh is not provider-recreating — four threaded sites, not five).
+> Reinforced by M1-911's corrected step-0 rerun (same day): pinned
+> simplex-chat v7.0.0.11 connects over IPv4 in a controlled no-v6 +
+> AAAA-first environment WITHOUT gai.conf, so no confirmed wedge remains for
+> this ticket to serve — the live-vs-controlled evidence contradiction is
+> M1-919's to reconcile. Resurrection condition: a host class with
+> pasta/slirp4netns present (or a genuinely fail-safe per-network driver
+> switch) makes a capability-derived overlay viable again — raise a FRESH
+> ticket; `reopen` refuses this one.
 
 ## Context
 
@@ -127,7 +173,7 @@ file edit and the fail-safe direction (P3) is byte-identical to today.
 
 Numbered consistently with the analysis document.
 
-- P1: partial threading flaps the network shape — all five provider-recreating
+- P1: partial threading flaps the network shape — all four provider-recreating
   scripts must apply the overlay under the same predicate or a later
   upgrade/restore silently strips v6 and reintroduces the wedge.
 - P2: ASSUMPTION A1 — rootless v6 mechanics unverified; step-0 live probe
@@ -148,12 +194,12 @@ Numbered consistently with the analysis document.
 
 Derived from spec_refs: spec/deployment.md §Deployment scenarios commits to
 the wizard-driven single-host containerized shapes; design/07-deployment.md
-§7.7.2 is the script contract the change rides, and :1011 is the merged
-precedent for capability-derived overlay application (GPU: probe `/dev/dri`,
-apply at bring-up, `INFOCHAT_LLAMACPP_GPU=on|off` override, printed never
-prompted).
+§7.7.2 is the script contract the change rides, and :1032 (with the
+step-table row at :815) is the merged precedent for capability-derived overlay
+application (GPU: probe `/dev/dri`, apply at bring-up,
+`INFOCHAT_LLAMACPP_GPU=on|off` override, printed never prompted).
 
-- **Files to touch:** `files_scope:` (one new overlay, five scripts, one new
+- **Files to touch:** `files_scope:` (one new overlay, four scripts, one new
   test class, one docs file).
 - **Steps, in order:**
   1. STEP-0 GATE (P2): run the acceptance-1 probe on the real host; record
@@ -164,7 +210,7 @@ prompted).
      §0; the ticket's reproduction).
   3. `docker-compose.ipv6.yml`: the v6-enabled network (enable_ipv6 + fixed
      generic ULA /64) attached to infochat-provider alongside default.
-  4. The five scripts: one small probe block each (host default v6 route +
+  4. The four scripts: one small probe block each (host default v6 route +
      capability predicate; `INFOCHAT_IPV6` override), appending
      `-f docker-compose.ipv6.yml` to the compose argv only when positive —
      matching each script's existing boilerplate style (no sourced helper
@@ -174,7 +220,8 @@ prompted).
      any bring-up (P9) and ADMIN_GUIDE.md gains the disclosure.
   6. Module test run + `mvn verify`; rollout evidence (acceptance 11).
 - **Controls to preserve (§10):** the echoed-before-run script shape
-  (07-deployment.md:703-708); secrets.env never sourced (the override is an
+  (§7.7.1 script shape, restated for wizard subscripts at
+  07-deployment.md:824); secrets.env never sourced (the override is an
   operator-exported env var); base compose invariants (loopback-only binds,
   M1-512 caps, image pins, no `networks:`); the M1-905 GPU threading in
   4-llm.sh (untouched — not in scope); pre-existing wiring tests
@@ -188,7 +235,7 @@ prompted).
 
 Every acceptance item verified by its named test/probe: the step-0 probe
 recorded with its branch decision; the overlay landed in the verified shape;
-all five provider-recreating scripts apply it iff the probe predicate is
+all four provider-recreating scripts apply it iff the probe predicate is
 positive, byte-identical argv otherwise, override honored; the base file
 carries no `networks:`; nothing box-specific on any shipped surface; docs
 record mechanism/override/reversal (+ branch-2 disclosures if applicable);
@@ -232,7 +279,7 @@ analysis Ground truth).
 | prod/scripts/apps.sh:65 | THREADED (this ticket) |
 | prod/scripts/upgrade.sh:115/117 | THREADED (this ticket) |
 | prod/scripts/restore.sh:978/1042 | THREADED (this ticket) |
-| prod/scripts/stack.sh:34 (arbitrary-verb passthrough) | THREADED (this ticket) |
+| prod/scripts/stack.sh:30-35 compose() | out-of-scope: no `up -d` site — dispatch (:68-76) allows only start|stop|restart|status; `start` is `compose start`, never `up` (:37-48), so it never recreates the provider (census correction: the earlier "arbitrary-verb passthrough" row was false) |
 | prod/scripts/3-postgres.sh:47 | out-of-scope: postgres only, never the provider |
 | prod/scripts/4-llm.sh:471/664/681/690/859 | out-of-scope: ollama/llamacpp only (M1-905 GPU threading untouched) |
 | prod/scripts/4b-image.sh:868 | out-of-scope: comfyui only |

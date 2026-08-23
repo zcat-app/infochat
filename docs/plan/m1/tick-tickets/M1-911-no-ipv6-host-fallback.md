@@ -1,7 +1,7 @@
 ---
 id: M1-911
 title: "No-IPv6-host fallback: image getaddrinfo IPv4 preference"
-status: pending
+status: deferred
 created: 2026-08-23
 last_updated: 2026-08-23
 flow: tick
@@ -79,9 +79,27 @@ overrides: []
 aborted_attempts: []
 reopens: []
 clarity_check: {}
+deferred_on: M1-919
+deferred_reason: blocked-on-new-ticket
 ---
 
 # M1-911: No-IPv6-host fallback: image getaddrinfo IPv4 preference
+
+> **DEFERRED 2026-08-23 — blocked-on-new-ticket (M1-919).** The corrected
+> step-0 rerun (valid artifacts on both legs: an EnableIpv6:false network,
+> a DNS fixture logging both A and AAAA queries, and the pinned simplex-chat
+> v7.0.0.11 logging `Agent connected` / SMP host `smp5.simplex.im` / 2
+> subscribed queues) showed the no-gai.conf control leg connects over IPv4
+> just as well as the with-gai.conf leg — the wedge this ticket exists to
+> clear did NOT reproduce under control, contradicting the recorded D-8 live
+> outage evidence. Shipping the gai.conf stanza now would be a fix with no
+> confirmed failure; dropping the ticket would leave the live D-8 evidence
+> unexplained. Paused until M1-919 reconciles the live-vs-controlled delta
+> (image version at outage time, resolver environment, host state). If D-8
+> re-confirms as client-side AAAA wedging, this ticket's image-level shape —
+> cheap, host-class-agnostic, and after M1-910's abandonment the only
+> remaining candidate — is the remedy; reopen via the driver once M1-919 is
+> done.
 
 ## Context
 

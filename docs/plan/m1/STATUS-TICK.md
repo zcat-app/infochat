@@ -30,7 +30,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-916 — Route temporal/top-news chat intents to searchPosts (complexity: low, risk: medium)
 - M1-917 — Widen and diversity-cap the semanticSearch window (complexity: medium, risk: medium)
 - M1-918 — Chat prompt token budget + deterministic compaction ladder (complexity: medium, risk: medium)
-- M1-922 — Reconcile D-8 live wedge evidence with the controlled no-IPv6 rerun (complexity: medium, risk: low)
+- M1-919 — Reconcile D-8 live wedge evidence with the controlled no-IPv6 rerun (complexity: medium, risk: low)
 
 ---
 
@@ -83,7 +83,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 ## Deferred
 
 ### blocked-on-new-ticket (1)
-- M1-911 → M1-922
+- M1-911 → M1-919
 
 ---
 
@@ -267,6 +267,6 @@ M1-917 (pending) ← runnable
 M1-918 (pending) ← runnable
   ├── M1-921 (pending) [see above]
   └── M1-923 (pending)
-M1-922 (pending) ← runnable
+M1-919 (pending) ← runnable
   └── M1-911 (deferred)
 ```
