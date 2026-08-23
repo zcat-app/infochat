@@ -107,6 +107,55 @@ class RssFeedParserTest {
     }
 
     @Test
+    void atomAuthorAndCategoryLandInRawMetadata() {
+        // Reddit's listing Atom is the motivating shape: t3_ id, /u/name
+        // author, subreddit category term (M1-915).
+        String xml = """
+            <?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">
+            <entry>
+              <author><name>/u/desrtfx</name><uri>https://www.reddit.com/user/desrtfx</uri></author>
+              <category term="java" label="r/java"/>
+              <id>t3_j7h9er</id>
+              <title>Some title</title>
+              <content type="html">body</content>
+            </entry>
+            <entry><id>t3_noauthor</id><title>Bare</title><content>b</content></entry>
+            </feed>""";
+
+        List<NormalizedPost> posts = RssFeedParser.parse(SOURCE_ID, xml.getBytes(StandardCharsets.UTF_8), FETCHED_AT);
+
+        assertEquals(2, posts.size());
+        assertEquals("/u/desrtfx", posts.get(0).rawMetadata().get("author"),
+            "first <author><name> lands in rawMetadata under 'author'");
+        assertEquals("java", posts.get(0).rawMetadata().get("category"),
+            "first <category term> lands in rawMetadata under 'category'");
+        assertTrue(posts.get(1).rawMetadata().isEmpty(),
+            "an entry without author/category keeps empty rawMetadata");
+    }
+
+    @Test
+    void atomMultipleAuthorsAreFirstWins() {
+        // RFC 4287 allows 1..n atom:author per entry; the FIRST name wins
+        // (the javadoc's contract, mirrored from the category guard).
+        String xml = """
+            <?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">
+            <entry>
+              <author><name>Alice</name></author>
+              <author><name>Bob</name></author>
+              <id>t3_multi</id><title>Co-authored</title><content>body</content>
+            </entry>
+            </feed>""";
+
+        List<NormalizedPost> posts = RssFeedParser.parse(
+            SOURCE_ID, xml.getBytes(StandardCharsets.UTF_8), FETCHED_AT);
+
+        assertEquals(1, posts.size());
+        assertEquals("Alice", posts.get(0).rawMetadata().get("author"),
+            "a second <author> must not overwrite the first — first-wins, "
+                + "same as the category capture");
+    }
+
+    @Test
     void rssTitleAbsentYieldsNullTitle() throws IOException {
         List<NormalizedPost> posts = parseRss();
         // Third item in the fixture has no <title>.

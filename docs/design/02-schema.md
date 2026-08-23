@@ -629,6 +629,15 @@ Rationale:
   `(kind, identifier)` uniqueness key; the URL verdict leaves it, the
   fixture, and the deployment example unchanged.
 
+**Reddit identifier shape.** A `kind='reddit'` row's `identifier` is the
+listing URL without an `.rss` suffix — exactly the string the reddit
+fetcher appends `/.rss` to when requesting the listing's Atom feed
+(e.g. `https://www.reddit.com/r/<sub>/hot`). Feeds
+historically registered as `kind='rss'` with `.rss`-suffixed URLs were
+flipped in place by V86, which strips the suffix and skips any row whose
+normalized key would collide with an existing `kind='reddit'` row on
+`(kind, identifier)`.
+
 ### 2.2.2 `tag` (Tier-1 controlled vocabulary, D5)
 
 ```sql

@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 7 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 125 |
+| done | 126 |
 | deferred | 1 |
 | abandoned | 4 |
 | **total** | **137** |
@@ -26,7 +26,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-909 — Wizard GPU-class spec-decode head delivery + clone recovery (complexity: medium, risk: medium)
-- M1-915 — Migrate reddit feeds from kind=rss to kind=reddit in place (complexity: medium, risk: medium)
 - M1-918 — Chat prompt token budget + deterministic compaction ladder (complexity: medium, risk: medium)
 - M1-919 — Reconcile D-8 live wedge evidence with the controlled no-IPv6 rerun (complexity: medium, risk: low)
 
@@ -68,6 +67,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 |---|---|---|---|
 | M1-917 | Widen and diversity-cap the semanticSearch window | 2026-08-23 | round 1 APPROVE |
 | M1-916 | Route temporal/top-news chat intents to searchPosts | 2026-08-23 | round 1 APPROVE |
+| M1-915 | Migrate reddit feeds from kind=rss to kind=reddit in place, onto the /.rss transport | 2026-08-23 | round 4 APPROVE |
 | M1-914 | Persist post.comments and rank reddit replies in the digest | 2026-08-23 | round 2 APPROVE |
 | M1-913 | Digest v1 shape: count header, 10 headlines, drill-down close | 2026-08-23 | round 1 APPROVE-WITH-FIXES |
 | M1-912 | Bound digest render volume in FULL and degraded modes | 2026-08-23 | round 1 APPROVE |
@@ -75,7 +75,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-907 | 8-verify.sh config-freshness leg + boot-verify rule | 2026-08-23 | round 1 APPROVE |
 | M1-906 | Restore-time derivative retention floor + old-bundle WARN | 2026-08-22 | round 2 APPROVE |
 | M1-905 | Compose+wizard llamacpp serving keys and GPU timing class | 2026-08-22 | round 1 APPROVE |
-| M1-904 | Chat help blocks: privileged DM-only, echo-probe suppression | 2026-08-22 | round 2 APPROVE |
 
 ---
 
@@ -260,7 +259,7 @@ M1-910 (abandoned)
 M1-912 (done)
   └── M1-913 (done)
 M1-914 (done)
-M1-915 (pending) ← runnable
+M1-915 (done)
 M1-916 (done)
 M1-917 (done)
 M1-918 (pending) ← runnable

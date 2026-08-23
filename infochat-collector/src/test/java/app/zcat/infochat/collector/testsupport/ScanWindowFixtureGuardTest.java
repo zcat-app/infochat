@@ -107,11 +107,10 @@ class ScanWindowFixtureGuardTest {
             "app.zcat.infochat.collector.fetch.FetchSchedulerPersistFailureIT",
             "app.zcat.infochat.collector.fetcher.bluesky.BlueskyFetcherTest",
             "app.zcat.infochat.collector.fetcher.bluesky.BlueskyResponseParserTest",
-            "app.zcat.infochat.collector.fetcher.reddit.RedditResponseParserCommentsTest",
-            "app.zcat.infochat.collector.fetcher.reddit.RedditResponseParserItemCapTest",
-            "app.zcat.infochat.collector.fetcher.reddit.RedditResponseParserNameValidationTest",
-            "app.zcat.infochat.collector.fetcher.reddit.RedditResponseParserPermalinkTest",
-            "app.zcat.infochat.collector.fetcher.reddit.RedditResponseParserSocialSignalTest",
+            // Expected value only: the instant is pinned output of the
+            // atom-listing.rss fixture's <published>, asserted against the
+            // parser result — it never seeds a pickup gate.
+            "app.zcat.infochat.collector.fetcher.reddit.RedditFetcherRssTransportTest",
             "app.zcat.infochat.collector.fetcher.rss.RssFeedParserTest",
             "app.zcat.infochat.collector.linking.LinkingJobBehaviorIT",
             "app.zcat.infochat.collector.linking.LinkingJobIT",

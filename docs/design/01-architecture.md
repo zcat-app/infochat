@@ -618,9 +618,14 @@ quarantine-review commands.
 
   | Source kind | laptop | vps | pi | remote-llm |
   |-------------|-------:|----:|---:|-----------:|
-  | Bluesky / Reddit / Nitter | 5 | 5 | 2 | 5 |
+  | Bluesky / Nitter         | 5 | 5 | 2 | 5 |
   | YouTube / Odysee          | 3 | 3 | 1 | 3 |
-  | RSS                       | 1 (no pagination) | 1 | 1 | 1 |
+  | RSS / Reddit              | 1 (no pagination) | 1 | 1 | 1 |
+
+  Reddit rides the same no-pagination row as RSS (M1-915): the listing
+  `/.rss` Atom feed it fetches carries no after-cursor and no
+  `rel="next"` link — one request per tick. (The former `.json`
+  transport is edge-blocked from prod's network entirely.)
 
   The existence of a per-source cap is spec
   ([`spec/architecture.md`](../spec/architecture.md) §Ingest SPIs); the

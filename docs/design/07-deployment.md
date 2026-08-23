@@ -1770,6 +1770,50 @@ exec docker compose exec -T postgres sh -c 'PGPASSWORD="$INFOCHAT_DB_PASSWORD" p
 
 **Sweep note.** The vocabulary change bumps the sweep fingerprint: previously `tags='{}'` posts are re-tagged within the existing caps (batch 4/tick, max 3 attempts) — bounded, one-time, expected. Mapped non-empty historical tags are NOT re-tagged.
 
+**Flip the reddit feed kind (one-time, V86).** Deployments whose reddit feeds were registered `kind='rss'` with `.rss`-suffixed identifiers fetch them over the RSS path, which has no engagement fields; V86 re-matches those rows by host and flips them onto the dedicated reddit path in place (`kind`, `identifier` only — `source_id`, `source_origin`, subscriptions, exclusions and posts are untouched). After the flip the reddit path fetches `identifier + "/.rss"` (the listing's Atom feed, parsed by the shared RSS/Atom parser — reddit's `.json` endpoint is edge-blocked from prod's network; engagement fields stay null until an OAuth path lands). The migration is quiet by design and needs no stop-first sequence, but it is paired with ONE runtime-file edit that MUST land before the next pack/restore re-introduces `kind='rss'` rows beside the flipped ones (the loader upserts on `(kind, identifier)` — a file declaring the old strings INSERTs duplicates).
+
+1. **Pre-check.** Review exactly what the migration will touch — this IS the migration's census predicate, so what you see is what it flips, plus any `(kind, identifier)` collision against an existing `kind='reddit'` row:
+   ```sql
+   SELECT s.id, s.kind, s.identifier,
+          regexp_replace(s.identifier, '/?\.rss/?$', '', 'i') AS normalized_identifier,
+          EXISTS (SELECT 1 FROM source t
+                  WHERE t.kind = 'reddit'
+                    AND t.identifier = regexp_replace(s.identifier, '/?\.rss/?$', '', 'i')) AS collides
+   FROM source s
+   WHERE s.kind = 'rss'
+     AND s.deleted_at IS NULL
+     AND s.identifier ~* '^https?://([a-z0-9-]+\.)*(reddit\.com|redd\.it)(:[0-9]+)?(/|$)'
+     AND s.identifier ~* '\.rss/?$';
+   ```
+   Resolve every `collides = true` row NOW via `/remove-source` on the redundant rss row (or accept the skip: the migration leaves it untouched, reports it by `RAISE NOTICE`, and never fails the boot).
+
+   Reddit-host rss rows WITHOUT an `.rss` suffix are deliberately outside the census (the migration leaves them untouched) — list them too, so the class is named rather than silent:
+   ```sql
+   SELECT id, identifier FROM source
+   WHERE kind = 'rss' AND deleted_at IS NULL
+     AND identifier ~* '^https?://([a-z0-9-]+\.)*(reddit\.com|redd\.it)(:[0-9]+)?(/|$)'
+     AND NOT identifier ~* '\.rss/?$';
+   ```
+   Each row listed here is an operator decision: `/remove-source` it and re-add the feed (a fresh registration resolves `kind='reddit'` from the host), or deliberately keep it on the RSS path — knowing that path carries no engagement fields, so the feed never feeds the social ranking terms.
+2. **Edit the runtime bootstrap file.** `$RUNTIME_DIR/bootstrap-sources.json`: every reddit entry declares `kind: "reddit"` and the identifier WITHOUT the `.rss` suffix (`https://www.reddit.com/r/<sub>/hot`) — byte-identical to the `normalized_identifier` the pre-check prints for its row. A pack/restore bundles this runtime file ([§7.11](#7-11-backup-and-restore)); fixing only the DB re-imports the old rows on the next restore.
+3. **Migrate = start the Collector.** Only the Collector runs Flyway in production; it applies V86 at boot. Never hand-run V86's statements via psql — same rule as V84.
+4. **Post-check.**
+   ```sql
+   SELECT id, identifier FROM source
+   WHERE kind = 'rss' AND deleted_at IS NULL
+     AND identifier ~* '^https?://([a-z0-9-]+\.)*(reddit\.com|redd\.it)(:[0-9]+)?(/|$)'
+     AND identifier ~* '\.rss/?$';
+   ```
+   Expected: zero rows. Any row listed here is a NOTICE-reported collision the migration skipped — resolve it per step 1.
+   Then list EVERY remaining reddit-host rss row, suffixed or not, so nothing stays invisible:
+   ```sql
+   SELECT id, identifier FROM source
+   WHERE kind = 'rss' AND deleted_at IS NULL
+     AND identifier ~* '^https?://([a-z0-9-]+\.)*(reddit\.com|redd\.it)(:[0-9]+)?(/|$)';
+   ```
+   Expected: only rows you can name — a step-1 collision, or a deliberate keep from the pre-check's no-suffix listing. A row you cannot name was hand-added during the deploy window: decide per row as in step 1.
+5. **Timing.** Flip right after a digest slot: the JSON path derives post uids differently from the RSS guid did, so currently-listing items re-ingest once under new uids; near-duplicate clustering folds each into its story cluster (no user-visible double), and the old rows age out via the TTL partition drops. The digest boundary absorbs the re-ingest burst.
+
 ---
 
 ## 7.15 Disaster scenarios

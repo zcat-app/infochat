@@ -38,7 +38,10 @@ import java.util.Map;
  *       body ← {@code <content>} (raw); url ← {@code href} of
  *       {@code <link rel="alternate">} or first {@code <link>} without
  *       {@code rel}; publishedAt ← {@code <published>} parsed per
- *       RFC 3339 / ISO 8601, nullable on parse failure.</li>
+ *       RFC 3339 / ISO 8601, nullable on parse failure; rawMetadata ←
+ *       first {@code <author><name>} as {@code author} and first
+ *       {@code <category term>} as {@code category} when present
+ *       (reddit's listing Atom is the motivating source).</li>
  * </ul>
  *
  * <p>HTML stripping, NFKC normalization, and redaction live at Stage 1
@@ -258,6 +261,8 @@ public final class RssFeedParser {
         String published = null;
         String alternateHref = null;
         String firstUnrelHref = null;
+        String authorName = null;
+        String categoryTerm = null;
 
         while (reader.hasNext()) {
             int event = reader.next();
@@ -271,6 +276,24 @@ public final class RssFeedParser {
                     case "title"     -> title = readTextContent(reader);
                     case "content"   -> content = readTextContent(reader);
                     case "published" -> published = readTextContent(reader).trim();
+                    // First author wins (RFC 4287 allows 1..n), mirroring
+                    // the category guard; every <author> is still drained
+                    // so the stream advances.
+                    case "author" -> {
+                        if (authorName == null) {
+                            authorName = readAuthorName(reader);
+                        } else {
+                            readAuthorName(reader);
+                        }
+                    }
+                    case "category" -> {
+                        // First category wins; reddit's listing Atom carries
+                        // the subreddit here (term="java" label="r/java").
+                        if (categoryTerm == null) {
+                            categoryTerm = reader.getAttributeValue(null, "term");
+                        }
+                        readTextContent(reader);
+                    }
                     case "link" -> {
                         // Atom <link> is empty-element with attributes;
                         // capture href + rel on START, then drain.
@@ -305,6 +328,15 @@ public final class RssFeedParser {
 
         String url = alternateHref != null ? alternateHref : firstUnrelHref;
 
+        Map<String, String> metadata = Map.of();
+        if (authorName != null && categoryTerm != null) {
+            metadata = Map.of("author", authorName, "category", categoryTerm);
+        } else if (authorName != null) {
+            metadata = Map.of("author", authorName);
+        } else if (categoryTerm != null) {
+            metadata = Map.of("category", categoryTerm);
+        }
+
         return new NormalizedPost(
             dispatchKey,
             id,
@@ -313,8 +345,36 @@ public final class RssFeedParser {
             url,
             publishedAt,
             fetchedAt,
-            Map.of()
+            metadata
         );
+    }
+
+    /**
+     * Reads an {@code <author>} element's nested {@code <name>} text
+     * (RFC 4287 atom:author/atom:name). Returns null when the author
+     * carries no name. The reader is positioned on the author
+     * START_ELEMENT and leaves it on the matching END_ELEMENT.
+     */
+    private static @Nullable String readAuthorName(XMLStreamReader reader) throws XMLStreamException {
+        String name = null;
+        int depth = 1;
+        while (reader.hasNext() && depth > 0) {
+            int event = reader.next();
+            switch (event) {
+                case XMLStreamConstants.START_ELEMENT -> {
+                    depth++;
+                    if (depth == 2 && "name".equals(reader.getLocalName())) {
+                        name = readTextContent(reader);
+                        depth--;
+                    }
+                }
+                case XMLStreamConstants.END_ELEMENT -> depth--;
+                default -> {
+                    // uri, email, text — ignored
+                }
+            }
+        }
+        return name == null || name.isBlank() ? null : name.strip();
     }
 
     /**
