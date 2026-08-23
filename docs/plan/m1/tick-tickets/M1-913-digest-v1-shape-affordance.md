@@ -1,13 +1,16 @@
 ---
 id: M1-913
 title: "Digest v1 shape: count header, 10 headlines, drill-down close"
-status: pending
+status: done
 created: 2026-08-23
 last_updated: 2026-08-23
+clarity_check: pass - citations verified (en.properties line drift from M1-912 additions only), census clean, M1-912 seam tests traced (explicit field pins survive the default change), no blocking ambiguity
 flow: tick
 reproduction: >-
   DigestRendererV1ShapeTest.normalDigestOpensWithWindowStoryCountAndClosesWithSummaryDrilldown
-  (to-be-written) — converted at start: written first, run RED. Verified on
+  — written first, run RED on 2026-08-23 (all 3 tests of the new class red
+  for exactly the missing header/copy; log .scratch/tick-red-M1-913.log),
+  then green against the implementation. Verified on
   this checkout (2026-08-23): a NORMAL digest opens directly with the lead
   or first category section (DigestRenderer.java:427-505 — no window-size
   header exists anywhere in renderSections), renders at most
@@ -116,6 +119,18 @@ decision_refs:
   - D43
   - D62
   - D63
+reviews:
+  - round: 1
+    date: 2026-08-23
+    verdict: APPROVE-WITH-FIXES
+    checks: SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE WARN
+    diff_stats: 17 files, +350/-45
+    fixes_applied: >-
+      Finding 1 (low/SCOPE): final-bytes verification artifact re-captured —
+      single-class re-run with stdout captured (.scratch/tick-v1shape-final.log,
+      grep "Tests run: 3, Failures: 0" = 2, log newer than the trimmed test
+      file) + mvn -pl infochat-provider -am test-compile BUILD SUCCESS; zero
+      repo files changed; fixed-tree snapshot .scratch/tick-fixes-M1-913.tree.
 ---
 
 # M1-913: Digest v1 shape — count header, 10 headlines, drill-down close
@@ -231,6 +246,16 @@ default changes). The FULL/brief treatment of the window header beyond
 NORMAL is decided against the approved spec wording at implementation, not
 guessed here. Test modifications are exactly the three files in
 test_plan.modifies, each §8-authorized in acceptance item 4.
+
+## Review observations
+
+- Round 1 (APPROVE-WITH-FIXES) recommended new ticket: the spec's
+  Periodic-group-digests paragraph says "Every digest ends with one
+  localized closing affordance line" while the degraded (D17) digest
+  renders none — the sentence over-promises by one word ("non-degraded"
+  is the fix; the design doc already says it). Pre-existing tension, not
+  introduced by this diff; spec edit, so wording goes through user
+  approval. Filing is the owner's call.
 
 ## Census
 

@@ -66,7 +66,7 @@ class DigestRendererTest {
         renderer.digestCategorizer = newCategorizer(3);
         renderer.bundleLoader = bundleLoader;
         renderer.categoryItemCap = 12;
-        renderer.categoryHeadlineCount = 5;
+        renderer.categoryHeadlineCount = 10;
         renderer.translationMaxPerRender = 5;
     }
 
@@ -196,7 +196,8 @@ class DigestRendererTest {
         String result = renderJoined(posts, DigestMode.FULL);
 
         String affordance =
-                "@mention me to go deeper on any story, or ask about a topic you don't see here.";
+                "/summary <tag> to drill into a topic, or @mention me to go deeper "
+                        + "on any story or ask about one you don't see here.";
         int first = result.indexOf(affordance);
         assertTrue(first >= 0, "closing affordance present: " + result);
         assertEquals(first, result.lastIndexOf(affordance), "affordance appears exactly once");

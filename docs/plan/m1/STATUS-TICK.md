@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 13 |
+| pending | 12 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 120 |
+| done | 121 |
 | deferred | 0 |
 | abandoned | 3 |
 | **total** | **136** |
@@ -28,7 +28,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-908 — Tracked llamacpp speculative-decoding compose keys, off by default (complexity: low, risk: low)
 - M1-910 — Rootless IPv6 compose enablement, capability-derived (complexity: medium, risk: medium)
 - M1-911 — No-IPv6-host fallback: image getaddrinfo IPv4 preference (complexity: low, risk: medium)
-- M1-913 — Digest v1 shape: count header, 10 headlines, drill-down close (complexity: medium, risk: medium)
 - M1-914 — Persist post.comments and rank reddit replies in the digest (complexity: high, risk: medium)
 - M1-915 — Migrate reddit feeds from kind=rss to kind=reddit in place (complexity: medium, risk: medium)
 - M1-916 — Route temporal/top-news chat intents to searchPosts (complexity: low, risk: medium)
@@ -72,6 +71,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-913 | Digest v1 shape: count header, 10 headlines, drill-down close | 2026-08-23 | round 1 APPROVE-WITH-FIXES |
 | M1-912 | Bound digest render volume in FULL and degraded modes | 2026-08-23 | round 1 APPROVE |
 | M1-907 | 8-verify.sh config-freshness leg + boot-verify rule | 2026-08-23 | round 1 APPROVE |
 | M1-906 | Restore-time derivative retention floor + old-bundle WARN | 2026-08-22 | round 2 APPROVE |
@@ -81,7 +81,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-902 | Make postflight's runtime-file check leaf-only | 2026-08-21 | round 2 APPROVE |
 | M1-901 | Liveness IT: subs responder survives reconnect swap | 2026-08-21 | round 1 APPROVE |
 | M1-900 | Fix the span-parser FAIL remedy; drop dead jq advice | 2026-08-21 | round 1 APPROVE |
-| M1-899 | Spell out the shared cutover rulings-file lifecycle | 2026-08-21 | round 1 APPROVE |
 
 ---
 
@@ -261,7 +260,7 @@ M1-908 (pending) ← runnable
 M1-910 (pending) ← runnable
 M1-911 (pending) ← runnable
 M1-912 (done)
-  └── M1-913 (pending) ← runnable
+  └── M1-913 (done)
 M1-914 (pending) ← runnable
 M1-915 (pending) ← runnable
 M1-916 (pending) ← runnable

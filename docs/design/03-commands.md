@@ -1714,7 +1714,7 @@ during the cache TTL is served from cache (no second LLM call).
 selects how each category body renders: `brief` — a header carrying the
 section's TRUE cluster count plus one `CategoryRollupGenerator` roll-up;
 `normal` (the default) — the same plus up to
-`infochat.digest.category-headline-count` (default 5) bare headlines
+`infochat.digest.category-headline-count` (default 10) bare headlines
 (sanitized `DisplayHeadline` title + URL, no prose); `full` — per-cluster
 prose bounded at `infochat.digest.category-item-cap` per section (the
 prominence head; a render-local effective cap, not a re-tune of the key),
@@ -1726,6 +1726,15 @@ value resolves to `normal` with one WARN at the SQL-deserialization
 boundary (`DigestWorker.readGroupMetadata`). The user-facing
 `/digest brief|normal|full` command is M1-733; delivery batching is
 M1-734.
+
+**v1 shape (window line and closing affordance).** A `normal` digest
+opens with one localized window-size line — the window's true pre-cap
+story count and followed-topic section count, prepended to the FIRST
+section's text (lead when one renders, first category otherwise), so no
+extra message is spent. Every non-degraded digest closes with one
+localized affordance naming the `/summary <tag>` drill-down for topic
+depth and the `@mention` chat path for an individual story, folded into
+the LAST section's text exactly once.
 
 **Render volume bounds (M1-912).** Three bounds keep a digest's size
 tied to configuration rather than window size: the `full` item cap

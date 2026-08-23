@@ -336,7 +336,8 @@ class DigestDeliveryTest {
         // only the final category message carries the affordance at the
         // wire — never once per message.
         String affordance =
-                "@mention me to go deeper on any story, or ask about a topic you don't see here.";
+                "/summary <tag> to drill into a topic, or @mention me to go deeper "
+                        + "on any story or ask about one you don't see here.";
         ScriptedAdapter adapter = new ScriptedAdapter(ADAPTER_NAME);
         DigestDelivery digestDelivery = wiredDelivery(new RecordingRepo());
         UUID groupId = UUID.randomUUID();
@@ -482,7 +483,8 @@ class DigestDeliveryTest {
         // into the last CATEGORY section's text, stays on the trailing
         // message; the lead never carries it.
         String affordance =
-                "@mention me to go deeper on any story, or ask about a topic you don't see here.";
+                "/summary <tag> to drill into a topic, or @mention me to go deeper "
+                        + "on any story or ask about one you don't see here.";
         RecordingDeliveryRepo deliveryRepo = new RecordingDeliveryRepo();
         ScriptedAdapter adapter = new ScriptedAdapter(ADAPTER_NAME);
         DigestDelivery digestDelivery = wiredDelivery(new RecordingRepo(), deliveryRepo);

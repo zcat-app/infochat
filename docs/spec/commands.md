@@ -2137,9 +2137,16 @@ token is the category's raw controlled-vocabulary tag, such as
 `ai` — or, for the Other bucket whose tag is not in the
 controlled vocabulary, to bare `/summary --full`. Per-cluster LLM
 prose is generated only for the clusters actually shown. The
-`brief` and `normal` bodies carry no item cap and no demotion
-line: the roll-up names what the capped headline list hides. The
-**number of sections** is
+  `brief` and `normal` bodies carry no item cap and no demotion
+  line: the roll-up names what the capped headline list hides. In
+  `normal` mode the body is the roll-up plus up to a configured number
+  of bare headlines (default 10, `infochat.digest.category-headline-count`),
+  and the digest opens with one localized **window-size line** — the
+  whole window's story count and topic-section count, the true pre-cap
+  totals rather than the rendered subset — prepended to the first
+  message's text, so delivery structure is unchanged (no extra
+  message). The
+  **number of sections** is
 bounded too, by a separate operator-configurable **section cap**
 (default 8): a digest's section count tracks the tag vocabulary,
 which grows with every source an operator adds, so without this
@@ -2159,9 +2166,10 @@ overflow line, on its last section, naming how many categories
 are not shown and steering readers to `/summary`, which caps no
 sections; a digest under the cap appends no such line. Every
 digest ends with **one**
-localized closing affordance line steering readers to `@mention`
-the bot for exploratory chat-mode questions (a distinct purpose
-from the overflow line's capped-category promise). Given the same
+localized closing affordance line steering readers to `/summary <tag>`
+to drill into a topic and to `@mention` the bot for chat about an
+individual story (the affordance drills into what is shown; the
+overflow line accounts for what the cap hid). Given the same
 clusters and tags,
 the assignment and section order are byte-identical — the LLM
 touches only the per-cluster prose, extending the D19

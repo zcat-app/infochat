@@ -77,7 +77,7 @@ class DigestRendererSectionsTest {
         renderer.digestCategorizer = newCategorizer(3);
         renderer.bundleLoader = bundleLoader;
         renderer.categoryItemCap = 12;
-        renderer.categoryHeadlineCount = 5;
+        renderer.categoryHeadlineCount = 10;
     }
 
     @Test
@@ -123,7 +123,8 @@ class DigestRendererSectionsTest {
         List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.FULL, GROUP_ID).sections();
 
         String affordance =
-                "@mention me to go deeper on any story, or ask about a topic you don't see here.";
+                "/summary <tag> to drill into a topic, or @mention me to go deeper "
+                        + "on any story or ask about one you don't see here.";
         // Every section except the last must NOT contain the affordance.
         for (int i = 0; i < sections.size() - 1; i++) {
             assertFalse(sections.get(i).text().contains(affordance),
@@ -215,9 +216,9 @@ class DigestRendererSectionsTest {
     void normalModeRendersTrueCountHeaderRollupHeadlinesAndFooter() {
         noLead(); // the hybrid body shape is the subject (the "without a lead" half); the with-lead half is below
         // The hybrid body: UPPERCASE header with the section's TRUE cluster
-        // count, the roll-up synthesis, up to category-headline-count (5)
+        // count, the roll-up synthesis, up to category-headline-count (10)
         // bare headlines (title + URL, NO prose), and the category footer.
-        // 13 clusters pin the count against the 5 headlines shown.
+        // 13 clusters pin the count against the 10 headlines shown.
         rollupGenerator.setResponse("thirteen-story synthesis");
         List<Post> posts = new ArrayList<>();
         for (int i = 0; i < 13; i++) {
@@ -229,16 +230,17 @@ class DigestRendererSectionsTest {
 
         assertEquals(1, sections.size());
         String text = sections.getFirst().text();
-        assertTrue(text.startsWith("SECURITY NEWS — 13 STORIES"),
-                "header carries the TRUE cluster count, not the 5 headlines shown: " + text);
+        assertTrue(text.startsWith("Digest window: 13 stories across 1 topic\n\nSECURITY NEWS — 13 STORIES"),
+                "the v1-shape window line (window totals) precedes the header, which carries "
+                        + "the TRUE cluster count, not the 10 headlines shown: " + text);
         assertTrue(text.contains("thirteen-story synthesis"),
                 "the roll-up synthesis renders: " + text);
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < 10; i++) {
             assertTrue(text.contains("· Story sec " + i + "\nhttps://example.com/sec-" + i),
                     "headline " + i + " renders as bare title then URL on its own line: " + text);
         }
-        assertFalse(text.contains("Story sec 5"),
-                "the 6th headline is capped off by category-headline-count: " + text);
+        assertFalse(text.contains("Story sec 10"),
+                "the 11th headline is capped off by category-headline-count: " + text);
         assertTrue(text.contains("/summary security to expand this category"),
                 "the category footer closes the section: " + text);
         assertEquals(0, proseGenerator.callCount(),
@@ -340,8 +342,9 @@ class DigestRendererSectionsTest {
 
         String normal = sectionByTag(
                 renderer.renderSections(posts, "tr", DigestMode.NORMAL, GROUP_ID).sections(), "ai").text();
-        assertTrue(normal.startsWith("AI HABERLERİ — 3 HABER"),
-                "the count header keeps the same tag/prose split: " + normal);
+        assertTrue(normal.startsWith("Özet penceresi: 1 konuda 4 haber\n\nAI HABERLERİ — 3 HABER"),
+                "the window line (choice-less tr shape) precedes the count header, which "
+                        + "keeps the same tag/prose split: " + normal);
         assertFalse(normal.contains("Aİ"),
                 "Turkish casing must not reach the tag in the count header: " + normal);
     }
@@ -485,8 +488,9 @@ class DigestRendererSectionsTest {
         RenderedSection lead = sections.getFirst();
         assertEquals(DigestRenderer.LEAD_TAG, lead.tag(),
                 "the lead is the FIRST section, marked by LEAD_TAG");
-        assertTrue(lead.text().startsWith("TOP STORIES"),
-                "the lead opens with the localized UPPERCASE header: " + lead.text());
+        assertTrue(lead.text().startsWith("Digest window: 7 stories across 2 topics\n\nTOP STORIES"),
+                "the window line (window totals, pre-fold topic count) precedes the "
+                        + "localized UPPERCASE lead header: " + lead.text());
         int sec3 = lead.text().indexOf("Sec 3");
         int ai3 = lead.text().indexOf("AI 3");
         int sec1 = lead.text().indexOf("Sec 1");
@@ -680,7 +684,8 @@ class DigestRendererSectionsTest {
         List<RenderedSection> sections = renderer.renderSections(posts, "en", DigestMode.NORMAL, GROUP_ID).sections();
 
         String affordance =
-                "@mention me to go deeper on any story, or ask about a topic you don't see here.";
+                "/summary <tag> to drill into a topic, or @mention me to go deeper "
+                        + "on any story or ask about one you don't see here.";
         assertEquals(DigestRenderer.LEAD_TAG, sections.getFirst().tag(),
                 "the lead is the first section — its own first message");
         assertFalse(sections.getFirst().text().contains(affordance),

@@ -2138,6 +2138,9 @@ public final class BundleKeys {
     /** Lead-section header (M1-725): the digest's top {@code infochat.digest.lead-size} clusters by prominence, rendered with full prose ahead of every category. No tokens; resolved via the 2-arg accessor. Uppercased in code. */
     public static final String REPLY_DIGEST_LEAD_HEADER = "reply.digest.lead.header";
 
+    /** Window-size line (v1 shape): a NORMAL digest's opening line, prepended to the FIRST section's text (lead when one renders, first category otherwise) so delivery structure is unchanged. Tokens {0} = the window's total story count, {1} = its followed-topic section count — pre-cap true totals, not the rendered subset; both carry per-language {@code {n,choice,...}} plural shapes. */
+    public static final String REPLY_DIGEST_WINDOW_HEADER = "reply.digest.window_header";
+
     /** Section-cap overflow line, appended ONCE to the last section of a digest whose category count exceeded {@code infochat.digest.max-categories} (M1-721). Token {@code {0}} = the number of categories not shown; both values carry a {@code {0,choice,...}} plural shape. Names no tags — it steers to {@code /summary}, which caps no sections. */
     public static final String REPLY_DIGEST_CATEGORIES_MORE = "reply.digest.categories.more";
 
@@ -2155,7 +2158,7 @@ public final class BundleKeys {
     public static final String REPLY_DIGEST_DEGRADED_ENTRIES_MORE =
             "reply.digest.degraded.entries_more";
 
-    /** One closing affordance line ending every non-degraded digest (group scope, so it steers to @mention). No tokens; resolved via the 2-arg accessor. */
+    /** One closing affordance line ending every non-degraded digest: steers to {@code /summary <tag>} for topic depth and {@code @mention} chat for an individual story. No tokens; resolved via the 2-arg accessor. */
     public static final String REPLY_DIGEST_CLOSING_AFFORDANCE = "reply.digest.closing_affordance";
 
     // ----- Conceptual topic corpus (M1-649, D68) -----------------------------

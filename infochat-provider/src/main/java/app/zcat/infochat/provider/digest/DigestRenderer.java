@@ -136,18 +136,20 @@ public class DigestRenderer {
      * it renders the documented default rather than zero headlines — the
      * {@link #categoryRollupGenerator} field-initialization pattern above.
      */
-    @ConfigProperty(name = "infochat.digest.category-headline-count", defaultValue = "5")
-    int categoryHeadlineCount = 5;
+    @ConfigProperty(name = "infochat.digest.category-headline-count", defaultValue = "10")
+    int categoryHeadlineCount = 10;
 
     /**
      * Generative display-hit translator calls allowed per {@link
      * #renderSections} invocation (M1-756). Without this bound one render
      * would translate up to {@code max-categories} ×
-     * {@link #categoryHeadlineCount} = 8 × 5 = 40 headlines. Bounded, a
+     * {@link #categoryHeadlineCount} = 8 × 10 = 80 headlines. Bounded, a
      * group's HEADLINE worst case is 5 per render and 10 per day (two
      * slots) — the same per-invocation budget {@code /saved} spends
      * ({@code infochat.save.translation-max-per-page}) at a strictly lower
-     * invocation rate. It bounds THIS leg only: {@link
+     * invocation rate. The budget is deliberately NOT re-tuned to the 10
+     * default: on non-en scopes the headlines past the 5-call budget
+     * render untranslated (the accepted honesty trade). It bounds THIS leg only: {@link
      * #appendClusterProse} and {@link CategoryRollupGenerator} reach the
      * same {@code ModelTask.TRANSLATOR} on the same render with no
      * per-render budget of their own, so this key is not a bound on the
@@ -326,6 +328,11 @@ public class DigestRenderer {
         List<Cluster> clusters = clusterTraversal.cluster(posts);
         Map<String, String> sectionKeys = tagTreeExpansion.sectionKeyByLeaf("group", groupId);
         List<CategorySection> allSections = digestCategorizer.categorize(clusters, Set.of(), sectionKeys);
+        // v1 shape window line: name the WINDOW's totals — pre-cap stories,
+        // pre-removal topic sections (Other is not a followed topic) —
+        // captured here because lead promotion below can fold a section.
+        int windowSectionCount = (int) allSections.stream()
+                .filter(section -> section.tag() != null).count();
         // M1-724 prominence ranking: score every cluster (urgent gate →
         // weighted percentile score → input-order tiebreak) and re-sort
         // WITHIN each section. Section membership stays D62 tag arithmetic —
@@ -533,6 +540,17 @@ public class DigestRenderer {
                         bundleLoader.get(BundleKeys.REPLY_DIGEST_CLOSING_AFFORDANCE, langCode));
             }
             rendered.add(new RenderedSection(section.tag(), sb.toString()));
+        }
+        if (mode == DigestMode.NORMAL && !rendered.isEmpty()) {
+            // The window line rides the FIRST section's text (lead when one
+            // renders, first category otherwise): no new message, so D63
+            // delivery structure and the LEAD_TAG split are untouched.
+            RenderedSection first = rendered.getFirst();
+            rendered.set(0, new RenderedSection(first.tag(),
+                    MessageFormat.format(
+                            bundleLoader.get(BundleKeys.REPLY_DIGEST_WINDOW_HEADER, langCode),
+                            clusters.size(), windowSectionCount)
+                            + "\n\n" + first.text()));
         }
         return new RenderResult(rendered, synthesisTotal, synthesisDegraded);
     }

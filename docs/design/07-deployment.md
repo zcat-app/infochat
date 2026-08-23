@@ -308,6 +308,13 @@ infochat.digest.max-categories=8
 # escape). The @ConfigProperty defaults carry the same values.
 infochat.digest.degraded-member-cap=3
 infochat.digest.degraded-max-entries=50
+# Normal-mode bare headlines per category section (v1 shape): each
+# followed-topic section renders its roll-up plus up to this many bare
+# headlines (title + URL, no prose). Headlines past the display-hit
+# translation budget (translation-max-per-render below) render
+# untranslated on non-en scopes. The @ConfigProperty default carries
+# the same value.
+infochat.digest.category-headline-count=10
 # Prominence weights (M1-724, D71): the within-section cluster order is a
 # weighted sum of four integer-percentile terms — corroboration, reposts,
 # likes, source scarcity — gated by the urgent classification, tie-broken by
