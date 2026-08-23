@@ -45,7 +45,7 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
      * prompt (LLM tool-call outputs are a trust boundary), so a large
      * result set would otherwise consume the context window. Mirrors
      * {@link SearchPostsTool#MAX_RESULT_BYTES}: entries past the budget
-     * are dropped, nearest-first (the ORDER BY) ordering kept.
+     * are dropped, the diversity-selected window order kept.
      */
     static final int MAX_RESULT_BYTES = 16 * 1024;
 
@@ -60,6 +60,13 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
      * calibrated threshold/limit properties.
      */
     static final int RRF_K = 60;
+
+    /** Per-source share cap on the fused window: K = min(limit,
+     *  max(2, (limit+1)/2)) — half the window rounded up, floor 2; a fixed
+     *  code expression of the effective limit ({@link #RRF_K} precedent). */
+    static int perSourceCap(int limit) {
+        return Math.min(limit, Math.max(2, (limit + 1) / 2));
+    }
 
     // The scope's declared language (D58 (c)): identical SQL to
     // InboundRouter's lookup — a missing row means 'en' (D43).
@@ -85,7 +92,7 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
                               @ConfigProperty(name = "infochat.chat.semantic-threshold",
                                       defaultValue = "0.40") double distanceThreshold,
                               @ConfigProperty(name = "infochat.chat.semantic-limit",
-                                      defaultValue = "8") int defaultLimit) {
+                                      defaultValue = "16") int defaultLimit) {
         this.dataSource = dataSource;
         this.cancellationService = cancellationService;
         this.embeddingProvider = embeddingProvider;
@@ -212,23 +219,30 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
         // Fusion is Reciprocal Rank Fusion computed in SQL: each arm's
         // rank comes from ROW_NUMBER() over an explicit total order
         // (distance/ts_rank, tie-broken by post_id — never input row
-        // order), and the outer ORDER BY (fused_score, post_id) is total
-        // too, so same DB state -> same set, same order (D19).
+        // order), and the window selection below is cap-then-fill over
+        // those same ranks only, so same DB state -> same set/order (D19).
         final String sql =
             "SELECT uid, title, url, distance "
                 + "  FROM ( "
+                + "    SELECT fused.*, "
+                + "           ROW_NUMBER() OVER "
+                + "             (ORDER BY fused_score DESC, post_id ASC) AS pool_rank, "
+                + "           ROW_NUMBER() OVER (PARTITION BY source_id "
+                + "             ORDER BY fused_score DESC, post_id ASC) AS source_rank "
+                + "      FROM ( "
                 + "    SELECT COALESCE(s.post_id, l.post_id) AS post_id, "
                 + "           COALESCE(s.uid, l.uid) AS uid, "
                 + "           COALESCE(s.title, l.title) AS title, "
                 + "           COALESCE(s.url, l.url) AS url, "
                 + "           s.distance AS distance, "
                 + "           COALESCE(1.0 / (" + RRF_K + " + s.arm_rank), 0) "
-                + "             + COALESCE(1.0 / (" + RRF_K + " + l.arm_rank), 0) AS fused_score "
+                + "             + COALESCE(1.0 / (" + RRF_K + " + l.arm_rank), 0) AS fused_score, "
+                + "           COALESCE(s.source_id, l.source_id) AS source_id "
                 + "      FROM ( "
                 + "        SELECT hits.*, ROW_NUMBER() OVER "
                 + "               (ORDER BY distance ASC, post_id ASC) AS arm_rank "
                 + "          FROM ( "
-                + "            SELECT p.uid, p.title, p.url, pe.post_id AS post_id, "
+                + "            SELECT p.uid, p.title, p.url, p.source_id, pe.post_id AS post_id, "
                 + "                   (pe.embedding <=> ?::vector) AS distance "
                 + "              FROM post_embedding pe "
                 + "              JOIN post p ON p.id = pe.post_id "
@@ -243,7 +257,7 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
                 + "        SELECT lhits.*, ROW_NUMBER() OVER "
                 + "               (ORDER BY lex_score DESC, post_id ASC) AS arm_rank "
                 + "          FROM ( "
-                + "            SELECT p.uid, p.title, p.url, p.id AS post_id, "
+                + "            SELECT p.uid, p.title, p.url, p.source_id, p.id AS post_id, "
                 + "                   ts_rank(p.search_tsv, "
                 + "                           plainto_tsquery('english', ?)) AS lex_score "
                 + "              FROM post p "
@@ -255,7 +269,8 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
                 + "          ) lhits "
                 + "      ) l ON s.post_id = l.post_id "
                 + "  ) fused "
-                + " ORDER BY fused_score DESC, post_id ASC "
+                + "    ) capped "
+                + " ORDER BY CASE WHEN source_rank <= ? THEN 0 ELSE 1 END, pool_rank "
                 + " LIMIT ?";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             // Each arm's world predicate binds two (scope_kind, scope_id)
@@ -277,7 +292,8 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
             ps.setObject(14, scopeId);
             ps.setString(15, query);
             ps.setInt(16, limit);
-            ps.setInt(17, limit);
+            ps.setInt(17, perSourceCap(limit));
+            ps.setInt(18, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 // '[' + ']' — every appended entry adds its own bytes (plus
                 // a joining comma) against MAX_RESULT_BYTES, exactly as

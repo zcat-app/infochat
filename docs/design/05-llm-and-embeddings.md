@@ -574,7 +574,7 @@ calibrated against the live corpus; deliberately a separate key from
 post-to-post-linking decision over a smaller distance distribution) gates
 grounding-vs-general-knowledge: nothing under the threshold → empty result →
 the model answers from general knowledge. `infochat.chat.semantic-limit`
-(default 8) sizes the grounded set. The retrieved set and its order are
+(default 16) sizes the grounded set. The retrieved set and its order are
 SQL-decided (D19, strict_order + a distance/post_id re-sort keep it exactly
 deterministic); the result carries `uid/title/url/similarity`, never a raw
 vector (D5). The tool is also model-callable mid-loop for refined queries
@@ -612,9 +612,22 @@ The arms are FULL OUTER JOINed on `post_id` and fused by **Reciprocal
 Rank Fusion**: `fused_score = Σ 1/(k + rank_arm)` with **k = 60** (the
 Cormack et al. 2009 standard), a fixed code constant
 (`SemanticSearchTool.RRF_K`) rather than a config key — varying it would
-silently change the retrieved set across deployments. The outer order is
-`fused_score DESC, post_id ASC LIMIT limit` — total, so same DB state →
-same set, same order (D19). Emission shape is unchanged
+silently change the retrieved set across deployments. The fused pool is
+bounded at 2·`limit` rows by the arm LIMITs, and the window is then
+**cap-then-fill diversity-selected**, still entirely in SQL: every row
+carries its pool rank (`ROW_NUMBER()` over `fused_score DESC, post_id
+ASC`) and its per-source rank (the same order partitioned by
+`source_id`); rows with per-source rank ≤ K are admitted first in pool
+order, the remaining slots fill from the rest of the pool in pool order,
+and the window truncates at `limit`. K =
+`min(limit, max(2, (limit+1)/2))` — half the window rounded up, floor 2
+— a fixed code expression of the effective limit
+(`SemanticSearchTool.perSourceCap`, the same no-config-knob rationale as
+`RRF_K`). The selection orders by those two ranks only — total orders
+with total tie-breaks — so same DB state → same set, same order (D19);
+when no source exceeds K among the surviving rows the pass is provably
+inert and renders the plain `fused_score DESC, post_id ASC LIMIT limit`
+order byte-for-byte. Emission shape is unchanged
 (`uid/title/url/similarity`); a **lexical-only row emits
 `"similarity":null`** — such a post may have NO `post_embedding` row at
 all (embedding-failure posts are released without a vector), so a number
@@ -625,6 +638,16 @@ alternatives (query rewriting, HyDE, LLM/cross-encoder re-ranking) are
 considered-and-deferred in D58 — each makes the retrieved set a function
 of non-deterministic model output (D19), and cross-encoder re-rank is
 additionally blocked by the CPU-only posture.
+
+**Byte ledger for the widened default (16).** Entries run ~200–400 bytes
+(title + URL dominate), so doubling the default adds ≤ 8 entries ≈
++1.6–3.2 KB ≈ +400–800 tokens per retrieval injection (~4 chars/token);
+the worst case, 16 × 400 B ≈ 6.4 KB, stays well under the aggregate
+16 KiB `MAX_RESULT_BYTES` budget (that cap binds only near ~40 entries)
+with order-preserving tail truncation unchanged. Against the shipped
+wizard serving slot this narrows the context fit margin until the
+chat-context-budget work lands — recorded here as an inherited cost,
+weighed and accepted by the owner at ticket time.
 
 **Query anchoring to the corpus language (D58, M1-746).** The query text
 reaching both arms is anchored to the corpus anchor language (English,

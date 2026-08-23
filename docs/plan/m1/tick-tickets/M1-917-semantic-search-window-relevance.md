@@ -1,15 +1,18 @@
 ---
 id: M1-917
 title: "Widen and diversity-cap the semanticSearch window"
-status: pending
+status: done
 created: 2026-08-23
 last_updated: 2026-08-23
 flow: tick
 reproduction: >-
   SemanticSearchToolDiversityIT#fusedWindowCapsSingleSourceDominance and
   SemanticSearchToolDefaultLimitWiringTest#semanticLimitDefaultIsSixteenAndMatchesProperties
-  (both to-be-written — converted at /tick start per workflow §0: written
-  first, run RED; child of a 2+ decomposition, analysis
+  (both WRITTEN AND RUN RED at start 2026-08-23, converting the to-be-written
+  markers per workflow §0: the wiring pin failed expected <16> but was <8>;
+  the cap test returned a 13-A / 2-B window against the asserted ≤8-A cap
+  while 8 B candidates sat in the arm pool — dominance reproduced
+  deterministically; child of a 2+ decomposition, analysis
   docs/plan/m1/tick-analysis/tool-routing-temporal-queries.md). The wrong
   behaviors they state: (1) seed limit+2 READY posts from ONE source
   nearest the query vector plus in-world candidates from a second source
@@ -115,11 +118,26 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-23
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY WARN (informational — comment lengths in the two new test files carry fixture-arithmetic/rig-trap content; production code clean), SCOPE PASS"
+    diff_stats: "9 files changed, 642 insertions(+), 26 deletions(-)"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-917-r1.txt
+
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  p14-sequencing-at-parallel-start: >-
+    Started --parallel 2026-08-23 with ZERO in-flight tick tickets
+    (mechanical check: no tick ticket in-progress/in-review; M1-908's stale
+    worktree is clean and infochat-llm-adapter/compose-scoped — no module
+    overlap). P14 stands: M1-916 must NOT start until this ticket merges,
+    and this ticket must not merge before M1-916 lands (shared design 05,
+    same module).
 escalation_reason:
 ---
 

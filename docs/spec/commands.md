@@ -1822,7 +1822,10 @@ in SQL, so the retrieved set and its order stay reproducible on unchanged
 DB state (D19: the LLM never picks the set). Both arms enforce
 `status='READY'` and per-(user, scope) subscription isolation inside the
 query. The lexical arm recovers keyword-exact queries (CVE ids, product
-names) whose embeddings fall outside the semantic threshold.
+names) whose embeddings fall outside the semantic threshold. The fused
+window is diversity-selected per source in SQL, so one prolific source
+cannot fill the result window while other in-world candidates exist; the
+selection is deterministic (D19).
 
 **Retrieval provenance is explicit in every reply** (decision D58). Every
 successful chat reply carries a deterministic, bundle-localized notice
