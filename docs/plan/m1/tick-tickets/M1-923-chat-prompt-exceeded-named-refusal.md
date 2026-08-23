@@ -83,10 +83,11 @@ acceptance:
   - "BUNDLE KEY SETS (D43): error.chat.prompt_exceeded lands in ALL FIVE bundles (en/cs/es/ru/tr) with owner-reviewed wording that NAMES the cause (the conversation grew past the model's context; suggest /clear or /compress) — BundleLoaderTest's key-set check passes unchanged."
   - "SPEC AMENDMENT rides the diff (analysis P16; engineering-rules §12 — exact wording to the user at implementation; rule-text drafts in Approach): docs/spec/security.md §Failure handling's chat-mode bullet gains the prompt-exceeds-context degrade as a distinct named localized notice (separate from the generic unavailable) with a throttled operator notification; docs/spec/commands.md §Chat mode's degrade enumeration (the no-provenance-notice list at :1837-1838) gains the new degrade kind — number-free, no dates/IDs. Probe: grep -n 'prompt' docs/spec/security.md returns the §Failure handling mention."
   - "DOCS: docs/design/05-llm-and-embeddings.md §5.4.6 records the named-notice posture, the under-budget gate, and the error class. Probe: git diff --stat docs/ shows exactly docs/spec/security.md, docs/spec/commands.md, docs/design/05-llm-and-embeddings.md."
+  - "DECIDE-BEFORE FOLD-IN (M1-918 r2 review, relayed 2026-08-23; user decision 2026-08-23: fix here, not spec-sanction): grounding accounting matches what the prompt actually carries — collectPostUids runs on the FULL tool result while fitWithinBudget admits whole entries only (M1-918's r1 fold code, ChatAgent.java:981 vs :999 in its worktree), so a result truncated to zero entries still yields 'grounded in N posts' for posts the model never saw. ChatAgentPromptExceededTest.truncatedToZeroFoldBackClaimsNoGrounding (test_plan.adds) passes — zero admitted entries yields the ungrounded wording, never a grounding claim; partial admission names only the admitted count (collect after the fit or count admitted entries — implementer's choice, the assertion is the observed claim)."
   - "mvn verify from repo root is green (engineering-rules §5)."
 test_plan:
   adds:
-    - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentPromptExceededTest.java — promptExceededTurnGetsTheNamedNotice, underBudgetEstimateKeepsTheGenericNotice, promptExceededNotifiesOperatorOnce, streamingHeaders400FinalizesWithTheNamedString
+    - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentPromptExceededTest.java — promptExceededTurnGetsTheNamedNotice, underBudgetEstimateKeepsTheGenericNotice, promptExceededNotifiesOperatorOnce, streamingHeaders400FinalizesWithTheNamedString, truncatedToZeroFoldBackClaimsNoGrounding
     - infochat-llm-adapter/src/test/java/app/zcat/infochat/llm/impl/LlmHttpSupportTest.java — non2xxCarriesTypedStatusAndRedactedMessage
   preserves:
     - all tests currently green on main — explicitly the breaker
@@ -113,6 +114,11 @@ server log and no notification (prod incident 2026-08-23,
 the honesty surface for the residual (estimator error band, a backend
 re-configured below the floor): a NAMED, localized notice plus an
 operator signal that names the numbers. Analysis: `analysis_ref:`.
+
+Folded in by user decision 2026-08-23 (M1-918 r2 review DECIDE-BEFORE,
+relayed 2026-08-23): the fold-back grounding over-claim — the tool-loop
+provenance counts entries the budget then truncates away — is fixed
+HERE (acceptance item 10, approach shape 4), not spec-sanctioned.
 
 ## Root cause
 
@@ -171,9 +177,17 @@ bundles; D37 keeps user prose out of every log/notification.
      vs budget; fire the throttled admin notification
      (`chat-prompt-exceeded`, naming the numbers, no user prose).
      Everything else falls through to the existing arms unchanged.
-  3. `BundleKeys.ERROR_CHAT_PROMPT_EXCEEDED` + the five bundle entries
-     (wording owner-reviewed at implementation; it names the cause and
-     points at /clear or /compress).
+   3. `BundleKeys.ERROR_CHAT_PROMPT_EXCEEDED` + the five bundle entries
+      (wording owner-reviewed at implementation; it names the cause and
+      points at /clear or /compress).
+   4. DECIDE-BEFORE fold-in (user, 2026-08-23 — fix, not spec-sanction):
+      in the tool-result fold-back loop, the grounding account
+      (`retrievedPostUids` via `collectPostUids`) is taken from the
+      entries that SURVIVE `fitWithinBudget` — move the collection after
+      the fit (or count admitted entries) so the provenance notice never
+      names posts whose entries were truncated away. M1-918's r1 fold
+      code created the surface; blocked_by M1-918 guarantees the code is
+      on main when this runs.
 - **Spec amendment rule-text drafts (§12 — exact wording approved by the
   user at implementation):**
   - security.md §Failure handling, chat-mode bullet, append: when the
@@ -200,7 +214,8 @@ bundles; D37 keeps user prose out of every log/notification.
   tests pass unchanged).
 - **Pitfall→mitigation:** P15→shapes 1-2 + acceptance items 2-3; P16→
   item 8's approval gate; P17→item 6's streaming drive; P18→step 3
-  reuses the existing arm's return shape verbatim + item 5's assertions.
+  reuses the existing arm's return shape verbatim + item 5's assertions;
+  fold-in→shape 4 + item 10's truncated-to-zero drive.
 
 ## Definition of done
 
@@ -222,10 +237,13 @@ design note land; `mvn verify` green from the repo root.
 - P17 → ChatAgentPromptExceededTest.streamingHeaders400FinalizesWithTheNamedString.
 - P18 → the reproduction drive asserts null commit + null notice; the
   pre-existing unavailable-path drives pass unchanged.
+- Fold-in → ChatAgentPromptExceededTest.truncatedToZeroFoldBackClaimsNoGrounding
+  (30-entry result, budget admits zero → ungrounded wording; partial
+  admission → admitted count only).
 - FAILURE-MODE coverage (beyond the reproduction) → items 3 and 6
   (under-budget 400 keeps the generic notice; headers-phase streaming
   400 finalizes cleanly).
-- acceptance items 4, 5, 7, 9, 10 → the named stub-notifier assertions,
+- acceptance items 4, 5, 7, 9, 11 → the named stub-notifier assertions,
   the discard assertions, the BundleLoaderTest key-set check, the
   diff-stat probe, `mvn verify`.
 
