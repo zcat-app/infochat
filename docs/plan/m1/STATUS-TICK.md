@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
-| in-progress | 0 |
+| pending | 9 |
+| in-progress | 1 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 119 |
 | deferred | 0 |
 | abandoned | 3 |
-| **total** | **122** |
+| **total** | **132** |
 
 ---
 
@@ -25,7 +25,13 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-908 — Tracked llamacpp speculative-decoding compose keys, off by default (complexity: low, risk: low)
+- M1-910 — Rootless IPv6 compose enablement, capability-derived (complexity: medium, risk: medium)
+- M1-911 — No-IPv6-host fallback: image getaddrinfo IPv4 preference (complexity: low, risk: medium)
+- M1-914 — Persist post.comments and rank reddit replies in the digest (complexity: high, risk: medium)
+- M1-915 — Migrate reddit feeds from kind=rss to kind=reddit in place (complexity: medium, risk: medium)
+- M1-916 — Route temporal/top-news chat intents to searchPosts (complexity: low, risk: medium)
+- M1-917 — Widen and diversity-cap the semanticSearch window (complexity: medium, risk: medium)
 
 ---
 
@@ -33,8 +39,7 @@ _(none — all pending tickets are blocked)_
 
 | ID | Title | Status | Last review |
 |---|---|---|---|
-
-_(none)_
+| M1-912 | Bound digest render volume in FULL and degraded modes | in-progress | (none) |
 
 ---
 
@@ -42,7 +47,8 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-909 — blocked_by: M1-908 (pending)
+- M1-913 — blocked_by: M1-912 (in-progress)
 
 ---
 
@@ -243,4 +249,14 @@ M1-904 (done)
 M1-905 (done)
 M1-906 (done)
 M1-907 (done)
+M1-908 (pending) ← runnable
+  └── M1-909 (pending)
+M1-910 (pending) ← runnable
+M1-911 (pending) ← runnable
+M1-912 (in-progress)
+  └── M1-913 (pending)
+M1-914 (pending) ← runnable
+M1-915 (pending) ← runnable
+M1-916 (pending) ← runnable
+M1-917 (pending) ← runnable
 ```
