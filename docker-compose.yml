@@ -329,6 +329,10 @@ services:
       # 0 is llama-server b9776's own documented --ctx-size default (loaded
       # from the model), verified on the pinned image's --help.
       LLAMA_ARG_CTX_SIZE: "${INFOCHAT_LLAMACPP_CTX:-0}"
+      # Prompt-cache MiB limit: FIXED, does not scale with ctx (the token
+      # limit does). 8192 is the image's own --help-verified default, so a
+      # set-nothing render stays byte-stable; the GPU class raises it (§7.8.3).
+      LLAMA_ARG_CACHE_RAM: "${INFOCHAT_LLAMACPP_CACHE_MB:-8192}"
       # Speculative decoding is opt-in: `none` plus an empty draft path leaves
       # existing deployments inert; an operator filename maps into the volume.
       LLAMA_ARG_SPEC_TYPE: "${INFOCHAT_LLAMACPP_SPEC_TYPE:-none}"

@@ -310,6 +310,41 @@ class LlamacppWiringTest {
         }
     }
 
+    @Test
+    void composeExposesCacheRamKeyWithClassWrites() throws IOException {
+        // M1-920: the prompt-cache MiB limit is FIXED (does not scale with ctx);
+        // 8192 is the --help-verified image default (LLAMA_ARG_CACHE_RAM on
+        // server-vulkan-b9776), so the base render stays byte-stable (§7.8.3).
+        String gen = composeServiceBlock("llamacpp");
+        assertTrue(gen.contains("LLAMA_ARG_CACHE_RAM: \"${INFOCHAT_LLAMACPP_CACHE_MB:-8192}\""),
+                "generative llamacpp must expose the operator-settable prompt-cache MiB limit"
+                        + " (default 8192 = the image default, byte-stable render):\n" + gen);
+        String emb = composeServiceBlock("llamacpp-embeddings");
+        assertFalse(emb.contains("LLAMA_ARG_CACHE_RAM"),
+                "the cache key belongs only on the generative service (embedding prompts are tiny):\n" + emb);
+        // P11: a misspelled LLAMA_ARG_* name is silently ignored — pin the exact
+        // name by scanning the compose + wizard surface for wrong names, then
+        // admit no LLAMA_ARG_CACHE_* variant outside the verified one.
+        List<String> surfaces = new ArrayList<>(List.of("docker-compose.yml", "docker-compose.gpu.yml"));
+        try (Stream<Path> scripts = Files.list(repoRoot().resolve("prod/scripts"))) {
+            scripts.forEach(p -> surfaces.add("prod/scripts/" + p.getFileName()));
+        }
+        for (String surface : surfaces) {
+            String content = Files.readString(repoRoot().resolve(surface));
+            assertFalse(content.contains("LLAMA_ARG_CACHE_SIZE"),
+                    "the plausible wrong cache env name must appear nowhere: " + surface);
+            assertFalse(content.contains("LLAMA_ARG_CACHE_MB"),
+                    "the plausible wrong cache env name must appear nowhere: " + surface);
+            assertFalse(content.contains("LLAMA_ARG_PROMPT_CACHE"),
+                    "the plausible wrong cache env name must appear nowhere: " + surface);
+            Matcher m = Pattern.compile("LLAMA_ARG_CACHE_[A-Z_]+").matcher(content);
+            while (m.find()) {
+                assertEquals("LLAMA_ARG_CACHE_RAM", m.group(),
+                        "no LLAMA_ARG_CACHE_* variant outside the verified name may appear on " + surface);
+            }
+        }
+    }
+
     // --- Generated config (drive the real wizard) -------------------------------
 
     @Test
@@ -1034,6 +1069,8 @@ class LlamacppWiringTest {
                 "GPU class must write the 40g memory cap through the M1-744 key:\n" + secrets);
         assertTrue(secrets.contains("INFOCHAT_LLAMACPP_CPUS=\"12\""),
                 "GPU class must write the 12-cpu cap through the M1-744 key:\n" + secrets);
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_CACHE_MB=\"16384\""),
+                "GPU class must write the 16 GiB prompt-cache secret (P12 arithmetic):\n" + secrets);
 
         for (String task : List.of("security", "tagger", "entity", "classifier", "translator")) {
             assertFalse(props.containsKey("infochat.llm." + task + ".timeout-ms"),
@@ -1066,11 +1103,33 @@ class LlamacppWiringTest {
                 "CPU-forced host must get NO GPU memory-cap write (P15):\n" + secrets);
         assertFalse(secrets.lines().anyMatch(l -> l.startsWith("INFOCHAT_LLAMACPP_CPUS=")),
                 "CPU-forced host must get NO GPU cpus-cap write (P15):\n" + secrets);
+        assertFalse(secrets.lines().anyMatch(l -> l.startsWith("INFOCHAT_LLAMACPP_CACHE_MB=")),
+                "CPU-forced host must get NO GPU-class cache write (P12):\n" + secrets);
 
         for (String task : List.of("security", "tagger", "entity", "classifier", "translator")) {
             assertEquals("240000", props.get("infochat.llm." + task + ".timeout-ms"),
                     "CPU class scales the ingest roles to the answered chat timeout (D-15): " + task);
         }
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void gpuToCpuRerunClearsStaleCacheSecret(@TempDir Path tmp) throws Exception {
+        // P12 lifecycle twin: the GPU class writes a 16 GiB allocation target, so
+        // a CPU-class re-run must clear it — left under the 7g cap it is an OOM
+        // invitation. Mirrors the SPEC decline-clear's seeded re-run shape.
+        Path runtime = Files.createDirectories(runtimeDir(tmp));
+        Files.writeString(runtime.resolve("secrets.env"),
+                "INFOCHAT_LLAMACPP_CACHE_MB=\"16384\"\n");
+
+        WizardRun run = runWizardCapture(tmp,
+                "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "off"));
+
+        assertEquals(0, run.rc, "the GPU->CPU re-run drive must succeed:\n" + run.output);
+        String secrets = Files.readString(runtime.resolve("secrets.env"));
+        assertFalse(secrets.lines().anyMatch(l -> l.startsWith("INFOCHAT_LLAMACPP_CACHE_MB=")),
+                "a GPU->CPU re-run must clear the stale GPU-class cache secret (P12):\n" + secrets);
     }
 
     @Test

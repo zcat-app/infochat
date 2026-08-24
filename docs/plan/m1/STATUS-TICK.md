@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
-| in-progress | 0 |
+| pending | 3 |
+| in-progress | 1 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 130 |
+| done | 131 |
 | deferred | 1 |
 | abandoned | 4 |
 | **total** | **140** |
@@ -25,9 +25,8 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-920 — Tracked llamacpp prompt-cache RAM key, sized per class (complexity: low, risk: low)
+- M1-921 — Re-derive GPU-class default ctx from the prompt floor (complexity: low, risk: medium)
 - M1-924 — Isolate the embedded-DNS response field that wedges simplex-chat (complexity: medium, risk: low)
-- M1-925 — Confirm the D-8 wedge on the real supervised simplex shape (complexity: medium, risk: low)
 
 ---
 
@@ -35,8 +34,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 | ID | Title | Status | Last review |
 |---|---|---|---|
-
-_(none)_
+| M1-925 | Confirm the D-8 wedge on the real supervised simplex shape | in-progress | round 1 REWORK on 2026-08-24 |
 
 ---
 
@@ -44,8 +42,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-921 — blocked_by: M1-918 (done), M1-920 (pending)
-- M1-926 — blocked_by: M1-924 (pending), M1-925 (pending)
+- M1-926 — blocked_by: M1-924 (pending), M1-925 (in-progress)
 
 ---
 
@@ -65,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-923 | Named chat notice + operator signal on prompt-exceeds-context | 2026-08-24 | round 2 APPROVE |
+| M1-920 | Tracked llamacpp prompt-cache RAM key, sized per class | 2026-08-24 | round 2 APPROVE |
 | M1-919 | Reconcile D-8 live wedge evidence with the controlled no-IPv6 rerun | 2026-08-24 | round 1 APPROVE |
 | M1-909 | Wizard GPU-class spec-decode head delivery + clone recovery | 2026-08-24 | round 2 APPROVE-WITH-FIXES |
 | M1-918 | Chat prompt token budget + deterministic compaction ladder | 2026-08-23 | round 2 APPROVE |
@@ -73,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-915 | Migrate reddit feeds from kind=rss to kind=reddit in place, onto the /.rss transport | 2026-08-23 | round 4 APPROVE |
 | M1-914 | Persist post.comments and rank reddit replies in the digest | 2026-08-23 | round 2 APPROVE |
 | M1-913 | Digest v1 shape: count header, 10 headlines, drill-down close | 2026-08-23 | round 1 APPROVE-WITH-FIXES |
-| M1-912 | Bound digest render volume in FULL and degraded modes | 2026-08-23 | round 1 APPROVE |
 
 ---
 
@@ -252,8 +249,8 @@ M1-906 (done)
 M1-907 (done)
 M1-908 (done)
   └── M1-909 (done)
-        └── M1-920 (pending) ← runnable
-              └── M1-921 (pending)
+        └── M1-920 (done)
+              └── M1-921 (pending) ← runnable
 M1-910 (abandoned)
 M1-912 (done)
   └── M1-913 (done)
@@ -268,6 +265,6 @@ M1-919 (done)
   └── M1-911 (deferred)
 M1-924 (pending) ← runnable
   └── M1-926 (pending)
-M1-925 (pending) ← runnable
+M1-925 (in-progress)
   └── M1-926 (pending) [see above]
 ```

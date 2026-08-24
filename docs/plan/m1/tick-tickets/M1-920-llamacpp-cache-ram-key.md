@@ -1,14 +1,29 @@
 ---
 id: M1-920
 title: "Tracked llamacpp prompt-cache RAM key, sized per class"
-status: pending
+status: done
 created: 2026-08-23
-last_updated: 2026-08-23
+last_updated: 2026-08-24
 flow: tick
+clarity_check: >-
+  2026-08-24 driver self-check: absence probe re-run clean (zero matches);
+  analysis P11/P12/P14 all landed (P13 correctly stays M1-921's); the six
+  M1-909 seam drives assert secrets only via contains/prefix checks, so a
+  GPU-branch-scoped cache write preserves every one; the un-forced full-flow
+  drives all carry an explicit INFOCHAT_LLAMACPP_GPU pin since M1-909, so no
+  auto-probe ambiguity; no drive asserts the serving-class echo lines.
+  --help probe on server-vulkan-b9776 verifies LLAMA_ARG_CACHE_RAM with
+  default 8192 MiB (.scratch/M1-920-llama-server-help.txt, acceptance 2).
+  Stale narrative noted, no approach impact: Root cause's "nothing else"
+  enumeration predates M1-908's three SPEC keys (docker-compose.yml:332-336),
+  which the ticket's controls list already preserves. One addition inside the
+  ticket's behavior envelope: the CPU branch clears a stale
+  INFOCHAT_LLAMACPP_CACHE_MB (the M1-909 SPEC-clear precedent) so a GPU->CPU
+  re-run cannot keep a 16 GiB allocation target under the 7g cap (P12).
 reproduction: >-
   LlamacppWiringTest.composeExposesCacheRamKeyWithClassWrites
-  (to-be-written — converted at /tick start per workflow §0: written
-  first, run RED; child of a 2+ decomposition, analysis
+  (written and run RED at /tick start 2026-08-24; child of a 2+
+  decomposition, analysis
   docs/plan/m1/tick-analysis/chat-context-budget-and-serving-defaults.md).
   Verified absence probe on this checkout (2026-08-23): grep -rn
   'LLAMA_ARG_CACHE' docker-compose.yml docker-compose.gpu.yml
@@ -81,6 +96,17 @@ spec_refs:
   - docs/design/07-deployment.md §7.7.2
 decision_refs:
   - D49
+reviews:
+  - round: 1
+    date: 2026-08-24
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: FAIL; MAINTAINABILITY: PASS; SCOPE: PASS. One low finding: the CPU-branch stale-key cleanup (4-llm.sh sed) is promised by the updated docs but no test seeds INFOCHAT_LLAMACPP_CACHE_MB before a CPU-class re-run, so deleting the cleanup line keeps the suite green while the P12 OOM scenario becomes reachable again; fix = one seeded GPU->CPU re-run drive mirroring specDecodeDeclineOnRerunClearsStaleSpecKeys. Reviewer falsified five candidate findings (memory-file unplanned touch — disclosed working-tree repair; --help probe on Vulkan image vs base pin — same b9776 release pair, acceptance 2 names it; switch-llm.sh absence — standing posture for serving keys; leftover MEMORY/CPUS caps — ceilings not allocation targets; test-comment ticket prefix — carries business rationale in file style)"
+    diff_stats: "round 1: 7 files, +99/−24 (log of record tick-test-M1-920-r1-rerun3.log, full mvn verify BUILD SUCCESS 0 failures / 0 errors, zero port-race collisions; three earlier same-round attempts red solely on the documented rootless-docker port race, environmental, disclosed in the mechanical report; no staged code/doc file newer than the log except the regenerated board)"
+  - round: 2
+    date: 2026-08-24
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: PASS; MAINTAINABILITY: PASS; SCOPE: PASS. Round-1 item 1 SATISFIED: gpuToCpuRerunClearsStaleCacheSecret (LlamacppWiringTest.java:1115-1133) in exactly the SOLUTION shape; all three EVALUATED-AS legs recorded (module 59/59 green, RED mutant with 4-llm.sh:717 commented out, green after byte-identical restore). Reviewer falsified four candidates (drive could pass without the cleanup line — defeated by harness seeding semantics + recorded RED mutant; stdin sequence mismatch — defeated by rc==0 + byte-identical stdin to the long-green CPU-forced drive; startsWith could miss the quoted write — defeated by the seed mirroring set_secret's exact shape; +49-line growth — accounted as the named fix +20 and flow bookkeeping +29). No RECOMMENDED-NEW-TICKET entries."
+    diff_stats: "round 2 fix delta vs round 1: 75-line fix diff, 2 files (+20 new drive / +29 ticket bookkeeping); cumulative 7 files +148/−24. Log of record tick-test-M1-920-r2.log: full mvn verify BUILD SUCCESS, 384 provider tests / 0 failures / 0 errors, zero 'address already in use' (quiet window, draw walker probed at 40595 outside the host band); no staged file newer than the log"
 ---
 
 # M1-920: Tracked llamacpp prompt-cache RAM key, sized per class
@@ -201,3 +227,26 @@ start-hurdle escalation, not a silent edit.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-920-llamacpp-cache-ram-key.md
 ```
+
+## Round 1 rework
+
+REWORK ITEMS (verbatim from .scratch/tick-review-M1-920-r1.txt):
+
+1. Finding 1: add the seeded GPU→CPU re-run drive to LlamacppWiringTest.java
+   (SOLUTION above), evaluated via the EVALUATED-AS probe: module run green
+   with the drive present, RED when prod/scripts/4-llm.sh:717 is commented
+   out, green again on restore, then a full mvn verify.
+
+Finding 1 SOLUTION (verbatim): Add one new drive to
+infochat-llm-adapter/src/test/java/app/zcat/infochat/llm/wiring/LlamacppWiringTest.java
+mirroring specDecodeDeclineOnRerunClearsStaleSpecKeys
+(LlamacppWiringTest.java:1520-1544): create runtime/, seed
+secrets.env with INFOCHAT_LLAMACPP_CACHE_MB="16384", run the
+wizard with INFOCHAT_LLAMACPP_GPU=off, and assert no line
+starting INFOCHAT_LLAMACPP_CACHE_MB= survives in secrets.env.
+
+Finding 1 EVALUATED-AS (verbatim): ./mvnw -B -pl infochat-llm-adapter test
+-Dtest='LlamacppWiringTest' is green with the new drive present,
+AND the new drive fails (RED probe) when
+prod/scripts/4-llm.sh:717 is commented out, then passes again
+when it is restored.

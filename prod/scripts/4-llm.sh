@@ -652,7 +652,11 @@ case "$backend" in
       # GPU model class — the cap writes ride the same gpu_on condition (P14).
       set_secret INFOCHAT_LLAMACPP_MEMORY "40g"
       set_secret INFOCHAT_LLAMACPP_CPUS "12"
-      echo "GPU serving class: parallel=3, ctx=32768, memory=40g, cpus=12 (measured prod candidate)"
+      # 40g cap minus ~21 GB Q6_K_XL weights, minus KV for the serving shape,
+      # minus ~2 GB spec-decode head (M1-909), leaves room for a 16 GiB prompt
+      # cache; the CPU-class 7g cap does not (P12).
+      set_secret INFOCHAT_LLAMACPP_CACHE_MB "16384"
+      echo "GPU serving class: parallel=3, ctx=32768, memory=40g, cpus=12, cache-ram=16384 MiB (measured prod candidate)"
       # Speculative decoding: GPU-class opt-in head delivery — the wizard
       # offers, never pins (no default URL/SHA, binding user steer); the fetch
       # and its secrets land before the generative up (the M1-907 census order).
@@ -707,6 +711,10 @@ case "$backend" in
       gpu_build="CPU build (base file only)"
       set_secret INFOCHAT_LLAMACPP_PARALLEL "1"
       set_secret INFOCHAT_LLAMACPP_CTX "4096"
+      # A GPU->CPU re-run must not keep the GPU-class cache write: it is an
+      # allocation target inside the container's address space, and 16 GiB under
+      # the 7g cap is an OOM invitation (P12; the SPEC-key decline clear's shape).
+      sed -i '/^INFOCHAT_LLAMACPP_CACHE_MB=/d' "$SECRETS_FILE"
       echo "CPU serving class: parallel=1, ctx=4096"
     fi
     echo "GPU probe: /dev/dri render nodes ${render_nodes}; INFOCHAT_LLAMACPP_GPU=${llamacpp_gpu} -> llama.cpp ${gpu_build}"
