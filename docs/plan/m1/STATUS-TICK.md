@@ -14,10 +14,10 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 133 |
+| done | 134 |
 | deferred | 1 |
 | abandoned | 4 |
-| **total** | **138** |
+| **total** | **139** |
 
 ---
 
@@ -62,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-925 | Confirm the D-8 wedge on the real supervised simplex shape | 2026-08-24 | round 2 APPROVE-WITH-FIXES |
+| M1-924 | Isolate the embedded-DNS response field that wedges simplex-chat | 2026-08-24 | round 2 APPROVE |
 | M1-923 | Named chat notice + operator signal on prompt-exceeds-context | 2026-08-24 | round 2 APPROVE |
 | M1-921 | Make GPU context and memory configurable | 2026-08-24 | round 1 APPROVE-WITH-FIXES |
 | M1-920 | Tracked llamacpp prompt-cache RAM key, sized per class | 2026-08-24 | round 2 APPROVE |
@@ -70,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-918 | Chat prompt token budget + deterministic compaction ladder | 2026-08-23 | round 2 APPROVE |
 | M1-917 | Widen and diversity-cap the semanticSearch window | 2026-08-23 | round 1 APPROVE |
 | M1-916 | Route temporal/top-news chat intents to searchPosts | 2026-08-23 | round 1 APPROVE |
-| M1-915 | Migrate reddit feeds from kind=rss to kind=reddit in place, onto the /.rss transport | 2026-08-23 | round 4 APPROVE |
 
 ---
 
@@ -263,5 +263,6 @@ M1-918 (done)
   └── M1-923 (done)
 M1-919 (done)
   └── M1-911 (deferred)
+M1-924 (done)
 M1-925 (done)
 ```
