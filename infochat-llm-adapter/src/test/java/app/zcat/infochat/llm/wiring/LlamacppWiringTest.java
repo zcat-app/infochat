@@ -300,8 +300,13 @@ class LlamacppWiringTest {
                     "the legacy wrong draft-model env name must appear nowhere: " + surface);
             assertFalse(content.contains("mtp-gemma"),
                     "the shipped surface must not pin a Gemma-specific draft head: " + surface);
-            assertFalse(content.contains("draft-mtp"),
-                    "the shipped surface must not pin a speculative type: " + surface);
+        }
+        // The draft-mtp pin covers COMPOSE only (M1-909 clarity_check): compose
+        // must never pin an active spec type, but the wizard's GPU-branch offer
+        // carries an overtypable [draft-mtp] prompt default, not a constant.
+        for (String compose : new String[] {"docker-compose.yml", "docker-compose.gpu.yml"}) {
+            assertFalse(Files.readString(repoRoot().resolve(compose)).contains("draft-mtp"),
+                    "the shipped compose surface must not pin a speculative type: " + compose);
         }
     }
 
@@ -372,7 +377,8 @@ class LlamacppWiringTest {
         String customSha = "0000000000000000000000000000000000000000000000000000000000000000";
         // stdin: backend=llamacpp, generative=<custom url>, gen SHA=<customSha>,
         // embeddings=llamacpp (Enter), embeddings GGUF=pinned (Enter), timing (4× Enter).
-        runWizard(tmp, "llamacpp\n" + customUrl + "\n" + customSha + "\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT);
+        runWizard(tmp, "llamacpp\n" + customUrl + "\n" + customSha + "\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "off"));
 
         String secrets = Files.readString(tmp.resolve("runtime/secrets.env"));
         assertTrue(secrets.contains("INFOCHAT_LLAMACPP_GGUF=\"my-custom-gen.gguf\""),
@@ -393,7 +399,7 @@ class LlamacppWiringTest {
         Files.writeString(local, "fake gguf bytes");
         String localPath = local.toAbsolutePath().toString();
         runWizard(tmp, "llamacpp\n" + localPath + "\n" + "\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
-                Map.of("FAKE_DOCKER_PROBE_ABSENT", "1"));
+                Map.of("INFOCHAT_LLAMACPP_GPU", "off", "FAKE_DOCKER_PROBE_ABSENT", "1"));
 
         String curlLog = Files.readString(tmp.resolve("curl-argv.log"));
         assertFalse(curlLog.contains(localPath),
@@ -444,7 +450,7 @@ class LlamacppWiringTest {
         String localPath = local.toAbsolutePath().toString();
         WizardRun run = runWizardCapture(tmp,
                 "llamacpp\n" + localPath + "\n" + "\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
-                Map.of("FAKE_DOCKER_PROBE_ABSENT", "1"));
+                Map.of("INFOCHAT_LLAMACPP_GPU", "off", "FAKE_DOCKER_PROBE_ABSENT", "1"));
 
         assertEquals(0, run.rc, "the staged flow must succeed:\n" + run.output);
         String disclosure = run.output.lines()
@@ -480,7 +486,7 @@ class LlamacppWiringTest {
         String embPath = emb.toAbsolutePath().toString();
         WizardRun run = runWizardCapture(tmp,
                 "llamacpp\n\n\n" + embPath + "\nyes\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
-                Map.of("FAKE_DOCKER_PROBE_ABSENT", "1"));
+                Map.of("INFOCHAT_LLAMACPP_GPU", "off", "FAKE_DOCKER_PROBE_ABSENT", "1"));
 
         assertEquals(0, run.rc, "a confirmed staged embeddings override must stage:\n" + run.output);
         String disclosure = run.output.lines()
@@ -503,7 +509,8 @@ class LlamacppWiringTest {
         // Item-3 negative: the pinned-default path IS re-fetchable (restore.sh
         // re-fetches from its known URL) — a disclosure here would cry wolf on
         // the default path.
-        WizardRun run = runWizardCapture(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT, Map.of());
+        WizardRun run = runWizardCapture(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "off"));
 
         assertEquals(0, run.rc, "the pinned-default drive must succeed:\n" + run.output);
         assertFalse(run.output.contains("not re-fetchable"),
@@ -519,7 +526,8 @@ class LlamacppWiringTest {
         Path local = tmp.resolve("operator-local-model.gguf");
         Files.writeString(local, "fake gguf bytes");
         WizardRun run = runWizardCapture(tmp,
-                "llamacpp\n" + local.toAbsolutePath() + "\n" + "\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT, Map.of());
+                "llamacpp\n" + local.toAbsolutePath() + "\n" + "\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "off"));
 
         assertEquals(0, run.rc, "a staged source already in the volume must succeed:\n" + run.output);
         assertTrue(run.output.contains("skip GGUF staging"),
@@ -595,7 +603,7 @@ class LlamacppWiringTest {
 
         WizardRun accepted = runWizardCapture(tmp,
                 "llamacpp\n\n\n" + embPath + "\nyes\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
-                Map.of("FAKE_DOCKER_PROBE_ABSENT", "1"));
+                Map.of("INFOCHAT_LLAMACPP_GPU", "off", "FAKE_DOCKER_PROBE_ABSENT", "1"));
         assertEquals(0, accepted.rc, "a confirmed staged embeddings override must stage:\n" + accepted.output);
         String dockerLog = Files.readString(tmp.resolve("docker-argv.log"));
         assertTrue(dockerLog.lines()
@@ -616,7 +624,7 @@ class LlamacppWiringTest {
         Path local = tmp.resolve("model#2.gguf");
         Files.writeString(local, "fake gguf bytes");
         runWizard(tmp, "llamacpp\n" + local.toAbsolutePath() + "\n" + "\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
-                Map.of("FAKE_DOCKER_PROBE_ABSENT", "1"));
+                Map.of("INFOCHAT_LLAMACPP_GPU", "off", "FAKE_DOCKER_PROBE_ABSENT", "1"));
 
         String dockerLog = Files.readString(tmp.resolve("docker-argv.log"));
         String cp = dockerLog.lines()
@@ -638,7 +646,8 @@ class LlamacppWiringTest {
     void ollamaEmbeddingsShapePointsAtOllamaNomicEndpoint(@TempDir Path tmp) throws Exception {
         // stdin: backend=llamacpp, generative=pinned (Enter), embeddings=ollama,
         // timing defaults (4× Enter).
-        Map<String, String> props = runWizard(tmp, "llamacpp\n\nollama\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT);
+        Map<String, String> props = runWizard(tmp, "llamacpp\n\nollama\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "off"));
 
         assertEquals(GEN_GGUF, props.get("infochat.llm.chat.model"));
         assertEquals(LLAMACPP_URL, props.get("infochat.llm.default.base-url"),
@@ -756,7 +765,8 @@ class LlamacppWiringTest {
         // real name the compose services mount. This is the assertion that would have
         // caught the M1-442 volume-name mismatch (the GGUFs landing in a volume the
         // servers never mount).
-        runWizard(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT);
+        runWizard(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "off"));
 
         String scriptVolume = modelVolumeFromDockerArgv(Files.readString(tmp.resolve("docker-argv.log")));
         assertEquals(MODEL_VOLUME, scriptVolume,
@@ -772,7 +782,7 @@ class LlamacppWiringTest {
         // preflight proves) with the host's proxy env forwarded name-only; the
         // probe-absent switch makes the shim issue the download, so the argv is real.
         runWizard(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
-                Map.of("FAKE_DOCKER_PROBE_ABSENT", "1"));
+                Map.of("INFOCHAT_LLAMACPP_GPU", "off", "FAKE_DOCKER_PROBE_ABSENT", "1"));
 
         String download = downloadInvocationFromDockerArgv(Files.readString(tmp.resolve("docker-argv.log")));
         assertTrue(containsToken(download, "--network host"),
@@ -814,7 +824,7 @@ class LlamacppWiringTest {
         // generative always, the embeddings when llama.cpp-backed — before the
         // first fetch; a HEAD-refusal exit (22) must not block (P10).
         WizardRun run = runWizardCapture(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
-                Map.of("FAKE_DOCKER_PROBE_ABSENT", "1", "FAKE_CURL_EXIT", "22"));
+                Map.of("INFOCHAT_LLAMACPP_GPU", "off", "FAKE_DOCKER_PROBE_ABSENT", "1", "FAKE_CURL_EXIT", "22"));
 
         assertEquals(0, run.rc, "a HEAD refusal must not abort the download:\n" + run.output);
         assertTrue(run.output.contains("WARN"), "a HEAD refusal must print a warning:\n" + run.output);
@@ -838,7 +848,7 @@ class LlamacppWiringTest {
         // the host path — a host-curl preflight of it would be the P1 false-pass
         // shape. The ollama-embeddings drive must HEAD ONLY the generative URL.
         WizardRun run = runWizardCapture(tmp, "llamacpp\n\nollama\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
-                Map.of("FAKE_DOCKER_PROBE_ABSENT", "1"));
+                Map.of("INFOCHAT_LLAMACPP_GPU", "off", "FAKE_DOCKER_PROBE_ABSENT", "1"));
 
         assertEquals(0, run.rc, "the ollama-embeddings shape must still succeed:\n" + run.output);
         List<String> heads = Files.readString(tmp.resolve("curl-argv.log")).lines().toList();
@@ -855,7 +865,7 @@ class LlamacppWiringTest {
         // HTTP-level refusal (exit 22 — the server answered) proves reachability
         // and must warn + continue; only exits 6/7/28 abort.
         WizardRun refusal = runWizardCapture(tmp, "llamacpp\n" + CUSTOM_GEN_URL + "\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
-                Map.of("FAKE_DOCKER_PROBE_ABSENT", "1", "FAKE_CURL_EXIT", "22"));
+                Map.of("INFOCHAT_LLAMACPP_GPU", "off", "FAKE_DOCKER_PROBE_ABSENT", "1", "FAKE_CURL_EXIT", "22"));
         assertEquals(0, refusal.rc, "a HEAD refusal must not abort a reachable custom URL:\n" + refusal.output);
         assertTrue(refusal.output.contains("WARN"), "a HEAD refusal must print a warning:\n" + refusal.output);
         String dockerAfterRefusal = Files.readString(tmp.resolve("docker-argv.log"));
@@ -935,7 +945,8 @@ class LlamacppWiringTest {
 
         // backend=llamacpp, generative=pinned (Enter), embeddings=llamacpp (Enter),
         // embeddings GGUF=pinned (Enter), timing defaults (4× Enter).
-        Map<String, String> props = runWizard(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT);
+        Map<String, String> props = runWizard(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "off"));
 
         for (String key : props.keySet()) {
             assertFalse(key.matches("infochat\\.llm\\..*\\.api-key"),
@@ -958,7 +969,7 @@ class LlamacppWiringTest {
         // Reproduction (P10 made structural): the SAME positional stdin as the
         // pinned-default drive — no new prompt — with the probe seam forcing
         // GPU-present regardless of the host's /dev state (P3).
-        Map<String, String> props = runWizard(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+        Map<String, String> props = runWizard(tmp, "llamacpp\n\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
                 Map.of("INFOCHAT_LLAMACPP_GPU", "on"));
         assertEquals(GEN_GGUF, props.get("infochat.llm.chat.model"),
                 "the generative GGUF must still drive every LLM task under the merged overlay");
@@ -1002,7 +1013,7 @@ class LlamacppWiringTest {
         // M1-905: the GPU class is the campaign-measured prod candidate —
         // parallel=3 / ctx 32768 with memory 40g / cpus 12 (the caps ride the
         // same gpu_on condition: GTT pages pin to the cgroup — P14).
-        Map<String, String> props = runWizard(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+        Map<String, String> props = runWizard(tmp, "llamacpp\n\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
                 Map.of("INFOCHAT_LLAMACPP_GPU", "on"));
 
         assertEquals("60000", props.get("infochat.llm.chat.timeout-ms"),
@@ -1067,7 +1078,7 @@ class LlamacppWiringTest {
     void ollamaEmbeddingsUpNeverMergesTheGpuOverlay(@TempDir Path tmp) throws Exception {
         // P9 negative: the overlay defines no ollama keys — with GPU forced on,
         // the llamacpp up merges it and the ollama-embeddings up stays base-only.
-        runWizard(tmp, "llamacpp\n\nollama\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+        runWizard(tmp, "llamacpp\n\nollama\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
                 Map.of("INFOCHAT_LLAMACPP_GPU", "on"));
 
         String argv = Files.readString(tmp.resolve("docker-argv.log"));
@@ -1143,7 +1154,7 @@ class LlamacppWiringTest {
         Path blockedNode = tmp.resolve("renderD128");
         Files.writeString(blockedNode, "node");
         Files.setPosixFilePermissions(blockedNode, PosixFilePermissions.fromString("---------"));
-        runWizard(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+        runWizard(tmp, "llamacpp\n\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
                 Map.of("INFOCHAT_LLAMACPP_GPU", "on",
                        "INFOCHAT_LLAMACPP_GPU_NODES", blockedNode.toString()));
         String rootfulArgv = Files.readString(tmp.resolve("docker-argv.log"));
@@ -1154,7 +1165,7 @@ class LlamacppWiringTest {
         Path rwNode = aclHost.resolve("renderD128");
         Files.writeString(rwNode, "node");
         Files.setPosixFilePermissions(rwNode, PosixFilePermissions.fromString("rw-rw-rw-"));
-        runWizard(aclHost, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+        runWizard(aclHost, "llamacpp\n\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
                 Map.of("INFOCHAT_LLAMACPP_GPU", "on",
                        "FAKE_DOCKER_ROOTLESS", "1",
                        "INFOCHAT_LLAMACPP_GPU_NODES", rwNode.toString()));
@@ -1169,7 +1180,7 @@ class LlamacppWiringTest {
         // P11 end-of-path assertion: the -f flags prove the overlay, not the
         // device — after EACH GPU up the wizard execs llama-server
         // --list-devices; empty list or failed exec fails loud (both services).
-        WizardRun genEmpty = runWizardCapture(tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+        WizardRun genEmpty = runWizardCapture(tmp, "llamacpp\n\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
                 Map.of("INFOCHAT_LLAMACPP_GPU", "on", "FAKE_DOCKER_NO_DEVICES", "1"));
         assertNotEquals(0, genEmpty.rc, "a generative container listing zero devices must fail loud:\n" + genEmpty.output);
         assertTrue(genEmpty.output.contains("§7.8.7"),
@@ -1179,7 +1190,7 @@ class LlamacppWiringTest {
                 "the wizard must exec /app/llama-server --list-devices after the GPU up (the live image shape):\n" + genArgv);
 
         Path embHost = Files.createDirectories(tmp.resolve("emb-host"));
-        WizardRun embEmpty = runWizardCapture(embHost, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+        WizardRun embEmpty = runWizardCapture(embHost, "llamacpp\n\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
                 Map.of("INFOCHAT_LLAMACPP_GPU", "on", "FAKE_DOCKER_NO_EMBED_DEVICES", "1"));
         assertNotEquals(0, embEmpty.rc,
                 "an embeddings container listing zero devices must fail loud:\n" + embEmpty.output);
@@ -1188,7 +1199,7 @@ class LlamacppWiringTest {
                 "the embeddings GPU up must also be device-verified:\n" + embArgv);
 
         Path deadHost = Files.createDirectories(tmp.resolve("dead-host"));
-        WizardRun dead = runWizardCapture(deadHost, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+        WizardRun dead = runWizardCapture(deadHost, "llamacpp\n\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
                 Map.of("INFOCHAT_LLAMACPP_GPU", "on", "FAKE_DOCKER_EXEC_EXIT", "1"));
         assertNotEquals(0, dead.rc,
                 "a failed verification exec (container down) is not-verified, never passed:\n" + dead.output);
@@ -1203,7 +1214,8 @@ class LlamacppWiringTest {
         // drive answers the reply-mode ask with bare Enter — the unmeasured
         // gemma-4-E4B GGUF gets the conservative translate recommended/written.
         WizardRun run = runWizardCapture(
-                tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT, Map.of());
+                tmp, "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "off"));
 
         assertEquals(0, run.rc, "the drive must succeed:\n" + run.output);
         assertTrue(run.output.contains("recommendation for " + GEN_GGUF),
@@ -1225,7 +1237,8 @@ class LlamacppWiringTest {
         // M1-895 (D79 operator ownership): the recommendation is advice — an
         // explicit `native` answer writes the operator's value verbatim.
         Map<String, String> props = runWizard(tmp,
-                "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + "native\n");
+                "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + "native\n",
+                Map.of("INFOCHAT_LLAMACPP_GPU", "off"));
 
         assertEquals("native", props.get("infochat.chat.reply-mode"),
                 "the operator's explicit native must be written, not the recommendation");
@@ -1238,7 +1251,8 @@ class LlamacppWiringTest {
         // shape) — an invalid answer exits non-zero naming the valid answers
         // and writes NO reply-mode line (never silently coerced to a default).
         WizardRun run = runWizardCapture(tmp,
-                "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + "maybe\n", Map.of());
+                "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + "maybe\n",
+                Map.of("INFOCHAT_LLAMACPP_GPU", "off"));
 
         assertNotEquals(0, run.rc, "an invalid reply-mode answer must fail:\n" + run.output);
         assertTrue(run.output.contains("FAIL"),
@@ -1261,7 +1275,8 @@ class LlamacppWiringTest {
                 "quarkus.profile=vps\ninfochat.chat.reply-mode=native\n");
 
         WizardRun run = runWizardCapture(tmp,
-                "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT, Map.of());
+                "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "off"));
 
         assertEquals(0, run.rc, "the re-run drive must succeed:\n" + run.output);
         assertTrue(run.output.contains("currently set: native"),
@@ -1273,6 +1288,220 @@ class LlamacppWiringTest {
                 Files.readAllLines(runtime.resolve("application.properties")).stream()
                         .filter(l -> l.startsWith("infochat.chat.reply-mode=")).count(),
                 "set_prop idempotency must keep exactly one reply-mode line");
+    }
+
+    // --- M1-909: GPU-class spec-decode head offer --------------------------------
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void gpuClassSpecDecodeOfferFetchesHeadAndMintsSecrets(@TempDir Path tmp) throws Exception {
+        // M1-909 reproduction (wizard half): a GPU-class drive answering the offer
+        // with an operator URL + SHA takes draft-mtp/4 defaults, HEAD-preflights,
+        // fetch_ggufs before the up, mints five secrets (P3: no shipped default).
+        String headUrl = "https://models.example.test/my-draft-head.gguf";
+        String headSha = "0000000000000000000000000000000000000000000000000000000000000000";
+        // stdin: backend, gen=Enter, emb=Enter, embgguf=Enter, offer=headUrl,
+        // SHA, type=Enter (draft-mtp), n-max=Enter (4), timing (4× Enter), reply.
+        WizardRun run = runWizardCapture(tmp,
+                "llamacpp\n\n\n\n" + headUrl + "\n" + headSha + "\n\n\n"
+                        + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "on", "FAKE_DOCKER_PROBE_ABSENT", "1"));
+
+        assertEquals(0, run.rc, "the spec-decode offer drive must succeed:\n" + run.output);
+        String curlLog = Files.readString(tmp.resolve("curl-argv.log"));
+        assertTrue(curlLog.contains("-fsSLI") && curlLog.contains(headUrl),
+                "the head URL must be HEAD-preflighted before the download:\n" + curlLog);
+
+        String argv = Files.readString(tmp.resolve("docker-argv.log"));
+        String headDownload = argv.lines()
+                .filter(l -> l.contains("-fL") && l.contains(headUrl))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("the head must download via fetch_gguf:\n" + argv));
+        assertTrue(containsToken(headDownload, "-u 0:0") && containsToken(headDownload, "--network host")
+                        && containsToken(headDownload, "-v infochat-llamacpp-models:/models"),
+                "the head download must reuse fetch_gguf's argv-only posture (no second download helper):\n"
+                        + headDownload);
+        assertTrue(argv.indexOf(headDownload) < argv.indexOf("up -d llamacpp"),
+                "the head download must precede `up -d llamacpp` (write-before-boot, P8):\n" + argv);
+
+        String secrets = Files.readString(tmp.resolve("runtime/secrets.env"));
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF=\"my-draft-head.gguf\""),
+                "the head filename must be minted:\n" + secrets);
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF_URL=\"" + headUrl + "\""),
+                "the head URL must be persisted for restore recovery:\n" + secrets);
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF_SHA=\"" + headSha + "\""),
+                "the head SHA must be persisted:\n" + secrets);
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_SPEC_TYPE=\"draft-mtp\""),
+                "the Enter-default spec type must be minted:\n" + secrets);
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_SPEC_N_MAX=\"4\""),
+                "the Enter-default n-max must be minted:\n" + secrets);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void gpuClassSpecDecodeDeclinedWritesNoSecrets(@TempDir Path tmp) throws Exception {
+        // P3 off-default: a GPU-class drive answering the offer with bare Enter
+        // writes NO spec secret and no head download; the printed offer names
+        // "off" as the default. The shipped repo picks no head.
+        WizardRun run = runWizardCapture(tmp,
+                "llamacpp\n\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "on"));
+
+        assertEquals(0, run.rc, "the declined offer drive must succeed:\n" + run.output);
+        assertTrue(run.output.contains("default off"),
+                "the printed offer must name 'off' as the default:\n" + run.output);
+        String secrets = Files.readString(tmp.resolve("runtime/secrets.env"));
+        assertFalse(secrets.lines().anyMatch(l -> l.startsWith("INFOCHAT_LLAMACPP_SPEC_")),
+                "a declined offer must write NO spec secret:\n" + secrets);
+        String argv = Files.readString(tmp.resolve("docker-argv.log"));
+        assertFalse(argv.lines().anyMatch(l -> l.contains("-fL")),
+                "no head download may run when the offer is declined:\n" + argv);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void forcedGpuOffWritesNoSpecDecodeSecrets(@TempDir Path tmp) throws Exception {
+        // P5 CPU-side absence twin: the offer must fire ONLY on the GPU branch
+        // — its stdin sits among all-Enter answers, so a CPU leak shifts reads
+        // without tripping any drive; only this absence assertion catches it.
+        Map<String, String> props = runWizard(tmp,
+                "llamacpp\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "off"));
+        assertEquals(GEN_GGUF, props.get("infochat.llm.chat.model"),
+                "sanity: the CPU-class drive must complete the ordinary flow");
+        String secrets = Files.readString(tmp.resolve("runtime/secrets.env"));
+        assertFalse(secrets.lines().anyMatch(l -> l.startsWith("INFOCHAT_LLAMACPP_SPEC_")),
+                "a CPU-class drive must never see the offer or a spec secret:\n" + secrets);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void specDecodeHeadStagedFromLocalPathPersistsEmptyUrl(@TempDir Path tmp) throws Exception {
+        // P7 staged-head twin: an absolute-path answer stages via stage_gguf,
+        // persists an EMPTY head URL (a host path is not re-fetchable), never
+        // persists the host path, and prints the staged-source disclosure.
+        Path head = tmp.resolve("operator-draft-head.gguf");
+        Files.writeString(head, "fake head bytes");
+        // stdin: ..., offer=head path, SHA=Enter (blank), type=Enter, n-max=Enter.
+        WizardRun run = runWizardCapture(tmp,
+                "llamacpp\n\n\n\n" + head.toAbsolutePath() + "\n\n\n\n"
+                        + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "on", "FAKE_DOCKER_PROBE_ABSENT", "1"));
+
+        assertEquals(0, run.rc, "the staged-head drive must succeed:\n" + run.output);
+        String argv = Files.readString(tmp.resolve("docker-argv.log"));
+        String cp = argv.lines()
+                .filter(l -> l.contains("--entrypoint cp"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("the head must stage via stage_gguf's cp:\n" + argv));
+        assertTrue(containsToken(cp, "-u 0:0")
+                        && cp.contains("-v " + MODEL_VOLUME + ":/models")
+                        && cp.contains("-v " + head.getParent().toAbsolutePath() + ":/stage:ro")
+                        && cp.contains(CURL_IMAGE)
+                        && cp.endsWith("/models/" + head.getFileName()),
+                "the head staging must reuse stage_gguf's argv-only read-only-mount posture:\n" + cp);
+        assertFalse(cp.contains("bash") || cp.contains("--entrypoint sh"),
+                "the cp must stay argv-only — no shell:\n" + cp);
+
+        String secrets = Files.readString(tmp.resolve("runtime/secrets.env"));
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF=\"" + head.getFileName() + "\""),
+                "the staged head filename must be minted:\n" + secrets);
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF_URL=\"\""),
+                "a staged head must persist an EMPTY URL:\n" + secrets);
+        assertFalse(secrets.contains(head.toAbsolutePath().toString()),
+                "the host path must NEVER be persisted into secrets.env:\n" + secrets);
+        String disclosure = run.output.lines()
+                .filter(l -> l.contains("not re-fetchable"))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("the staged head must print the disclosure:\n" + run.output));
+        assertTrue(disclosure.contains(head.getFileName().toString()),
+                "the disclosure must name the staged head's basename:\n" + disclosure);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void specDecodeHeadShaMismatchFailsAndRemoves(@TempDir Path tmp) throws Exception {
+        // P12 FAILURE-MODE: a non-empty SHA mismatch fails the wizard and
+        // removes the head — through fetch_gguf's own mismatch path (the fake
+        // docker's wildcard digest cannot match 'f'*64), never a second helper.
+        String headUrl = "https://models.example.test/bad-sha-head.gguf";
+        WizardRun run = runWizardCapture(tmp,
+                "llamacpp\n\n\n\n" + headUrl + "\n" + "f".repeat(64) + "\n\n\n"
+                        + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "on", "FAKE_DOCKER_PROBE_ABSENT", "1"));
+
+        assertNotEquals(0, run.rc, "a head SHA mismatch must fail the wizard:\n" + run.output);
+        assertTrue(run.output.contains("checksum mismatch"),
+                "the failure must name the checksum mismatch:\n" + run.output);
+        String argv = Files.readString(tmp.resolve("docker-argv.log"));
+        String headDownload = argv.lines()
+                .filter(l -> l.contains("-fL") && l.contains(headUrl))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("the mismatch drive must download via fetch_gguf first:\n" + argv));
+        assertTrue(containsToken(headDownload, "-u 0:0") && containsToken(headDownload, "--network host"),
+                "the head fetch must run through fetch_gguf's exact argv shape:\n" + headDownload);
+        assertTrue(argv.contains("--entrypoint rm"),
+                "the mismatched head must be removed from the volume:\n" + argv);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void specDecodeNMaxRejectsNonInteger(@TempDir Path tmp) throws Exception {
+        // P11 FAILURE-MODE: a non-integer n-max fails loud (prompt_timing
+        // shape) BEFORE any head fetch; a junk head answer fails AT THE PROMPT
+        // with no curl/docker invocation recorded for it.
+        WizardRun nmax = runWizardCapture(tmp,
+                "llamacpp\n\n\n\nhttps://models.example.test/head.gguf\n\n\nabc\n"
+                        + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "on"));
+        assertNotEquals(0, nmax.rc, "a non-integer n-max must fail the wizard:\n" + nmax.output);
+        assertTrue(nmax.output.contains("must be a positive integer (got 'abc')"),
+                "the failure must use the prompt_timing shape:\n" + nmax.output);
+        String argv = Files.readString(tmp.resolve("docker-argv.log"));
+        assertFalse(argv.lines().anyMatch(l -> l.contains("-fL")),
+                "the head must not be fetched before the n-max validation passes:\n" + argv);
+
+        Files.deleteIfExists(tmp.resolve("docker-argv.log"));
+        Files.deleteIfExists(tmp.resolve("curl-argv.log"));
+        WizardRun junk = runWizardCapture(tmp,
+                "llamacpp\n\n\n\nnot-a-head-answer\n\n\n\n"
+                        + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "on"));
+        assertNotEquals(0, junk.rc, "a junk head answer must abort the wizard at the prompt:\n" + junk.output);
+        assertTrue(junk.output.contains("not-a-head-answer")
+                        && junk.output.contains("download URL")
+                        && junk.output.contains("absolute path"),
+                "the failure must name the answer and the accepted forms (the nonUrlNonFile shape):\n" + junk.output);
+        String junkArgv = Files.readString(tmp.resolve("docker-argv.log"));
+        String junkCurl = Files.readString(tmp.resolve("curl-argv.log"));
+        assertFalse(junkArgv.contains("not-a-head-answer") || junkCurl.contains("not-a-head-answer"),
+                "no docker or curl invocation may carry the rejected answer:\n" + junkArgv + junkCurl);
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void specDecodeDeclineOnRerunClearsStaleSpecKeys(@TempDir Path tmp) throws Exception {
+        // bare Enter means OFF, so a re-run against a runtime whose
+        // secrets.env still carries a prior accepted offer's five keys
+        // must clear them — else "press Enter for off" keeps the old head on.
+        Path runtime = Files.createDirectories(runtimeDir(tmp));
+        Files.writeString(runtime.resolve("secrets.env"),
+                "INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF=\"stale-head.gguf\"\n"
+                        + "INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF_URL=\"https://models.example.test/stale-head.gguf\"\n"
+                        + "INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF_SHA=\"\"\n"
+                        + "INFOCHAT_LLAMACPP_SPEC_TYPE=\"draft-mtp\"\n"
+                        + "INFOCHAT_LLAMACPP_SPEC_N_MAX=\"4\"\n");
+
+        WizardRun run = runWizardCapture(tmp,
+                "llamacpp\n\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "on"));
+
+        assertEquals(0, run.rc, "the declined re-run drive must succeed:\n" + run.output);
+        assertTrue(run.output.contains("speculative decoding off"),
+                "the decline must print its confirmation:\n" + run.output);
+        String secrets = Files.readString(tmp.resolve("runtime/secrets.env"));
+        assertFalse(secrets.lines().anyMatch(l -> l.startsWith("INFOCHAT_LLAMACPP_SPEC_")),
+                "a declined re-run must clear the stale spec keys:\n" + secrets);
     }
 
     // --- helpers ----------------------------------------------------------------

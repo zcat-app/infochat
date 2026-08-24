@@ -497,6 +497,33 @@ class RestoreWiringTest {
     }
 
     @Test
+    void restoreRecoversSpecDraftHeadFromPersistedUrl() throws Exception {
+        // M1-909 reproduction (restore half): the generative leg must recover
+        // a draft head from the persisted URL+SHA — ensure_gguf with ALL THREE
+        // args (M1-585 pin shape) BEFORE `up -d llamacpp`; absent key = skip.
+        String script = Files.readString(repoRoot().resolve("prod/scripts/restore.sh"));
+
+        int guardIdx = script.indexOf("read_dotenv_value INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF ");
+        assertTrue(guardIdx >= 0,
+                "rehydrate_models must read the persisted spec-decode draft head key:\n" + script);
+        assertTrue(script.contains("[[ -n \"$spec_draft\" ]]"),
+                "the recovery must be guarded on a non-empty persisted key (absent key = skip)");
+        assertTrue(script.contains("read_dotenv_value INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF_URL"),
+                "the head recovery must read the persisted head URL");
+        assertTrue(script.contains("read_dotenv_value INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF_SHA"),
+                "the head recovery must read the persisted head SHA");
+        assertTrue(script.contains("ensure_gguf \"$spec_draft\""),
+                "the head must recover through ensure_gguf (no second restore-side download helper)");
+
+        int genIdx = script.indexOf("read_dotenv_value INFOCHAT_LLAMACPP_GGUF ");
+        int upIdx = script.indexOf("compose --profile llamacpp up -d llamacpp");
+        assertTrue(genIdx >= 0 && upIdx >= 0, "rehydrate_models' generative leg must exist:\n" + script);
+        assertTrue(genIdx < guardIdx && guardIdx < upIdx,
+                "the head recovery must sit in the generative leg, after the generative ensure_gguf"
+                        + " and BEFORE `up -d llamacpp` (write-before-boot, P8)");
+    }
+
+    @Test
     @EnabledOnOs(OS.LINUX)
     void nonIgnorablePgRestoreErrorAbortsBeforeImageBuildAndBringUp(@TempDir Path tmp) throws Exception {
         // M1-580: pg_restore exiting 1 with a REAL error beyond the two ignorable notices

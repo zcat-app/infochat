@@ -909,6 +909,16 @@ rehydrate_models() {
     ensure_gguf "$(read_dotenv_value INFOCHAT_LLAMACPP_GGUF "$SECRETS_FILE")" \
       "$(read_dotenv_value INFOCHAT_LLAMACPP_GGUF_URL "$SECRETS_FILE")" \
       "$(read_dotenv_value INFOCHAT_LLAMACPP_GGUF_SHA "$SECRETS_FILE")"
+    # Speculative-decoding draft head (M1-909): recover from the persisted
+    # URL+SHA like a custom GGUF, BEFORE the generative up; a staged head
+    # (empty URL) fails loud; absent key = spec off / pre-M1-909 bundle.
+    local spec_draft
+    spec_draft="$(read_dotenv_value INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF "$SECRETS_FILE")"
+    if [[ -n "$spec_draft" ]]; then
+      ensure_gguf "$spec_draft" \
+        "$(read_dotenv_value INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF_URL "$SECRETS_FILE")" \
+        "$(read_dotenv_value INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF_SHA "$SECRETS_FILE")"
+    fi
     echo "  + start llama.cpp generative server"
     compose --profile llamacpp up -d llamacpp
   fi

@@ -653,6 +653,56 @@ case "$backend" in
       set_secret INFOCHAT_LLAMACPP_MEMORY "40g"
       set_secret INFOCHAT_LLAMACPP_CPUS "12"
       echo "GPU serving class: parallel=3, ctx=32768, memory=40g, cpus=12 (measured prod candidate)"
+      # Speculative decoding: GPU-class opt-in head delivery — the wizard
+      # offers, never pins (no default URL/SHA, binding user steer); the fetch
+      # and its secrets land before the generative up (the M1-907 census order).
+      echo "Speculative-decoding draft head (default off) — optional draft model for faster decoding:"
+      read -rp "Draft head GGUF — paste a full download URL or an absolute local path, or press Enter for off: " spec_override
+      if [[ -n "$spec_override" ]]; then
+        if [[ "$spec_override" == http://* || "$spec_override" == https://* ]]; then
+          spec_url="$spec_override"
+          spec_file="$(gguf_basename "$spec_override")"
+          read -rp "Draft head SHA-256 (blank to skip integrity check): " spec_sha
+        elif [[ "$spec_override" == /* && -f "$spec_override" && -r "$spec_override" ]]; then
+          spec_url=""   # staged source — the empty-URL marker restore.sh fails loud on
+          spec_file="$(basename "$spec_override")"
+          staged_source_disclosure "$spec_file"
+          read -rp "Draft head SHA-256 (blank to skip integrity check): " spec_sha
+        else
+          echo "FAIL: '$spec_override' is neither a full download URL nor an absolute path to an existing file." >&2
+          echo "      Use a full http(s):// URL, or an ABSOLUTE path to a local draft-head file (relative paths are not accepted)." >&2
+          exit 1
+        fi
+        read -rp "Speculative-decoding type [draft-mtp]: " spec_type
+        spec_type="${spec_type:-draft-mtp}"
+        if ! [[ "$spec_type" =~ ^[A-Za-z0-9._-]+$ ]]; then
+          echo "FAIL: spec type must be a single non-empty token (got '$spec_type')." >&2
+          exit 1
+        fi
+        read -rp "Draft head n-max (draft tokens per step) [4]: " spec_n_max
+        spec_n_max="${spec_n_max:-4}"
+        if ! [[ "$spec_n_max" =~ ^[1-9][0-9]*$ ]]; then
+          echo "FAIL: draft head n-max must be a positive integer (got '$spec_n_max')." >&2
+          exit 1
+        fi
+        if [[ -n "$spec_url" ]]; then
+          preflight_gguf_url "$spec_url"
+          fetch_gguf "$spec_url" "$spec_file" "$spec_sha"
+        else
+          stage_gguf "$spec_override" "$spec_file" "$spec_sha"
+        fi
+        set_secret INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF "$spec_file"
+        set_secret INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF_URL "$spec_url"
+        set_secret INFOCHAT_LLAMACPP_SPEC_DRAFT_GGUF_SHA "$spec_sha"
+        set_secret INFOCHAT_LLAMACPP_SPEC_TYPE "$spec_type"
+        set_secret INFOCHAT_LLAMACPP_SPEC_N_MAX "$spec_n_max"
+      else
+        # Bare Enter = OFF, so a re-run that declines must also clear keys an
+        # earlier accepted offer minted — else the printed "Enter for off"
+        # would silently keep the old head enabled.
+        sed -i '/^INFOCHAT_LLAMACPP_SPEC_/d' "$SECRETS_FILE"
+        echo "speculative decoding off"
+      fi
     else
       gpu_build="CPU build (base file only)"
       set_secret INFOCHAT_LLAMACPP_PARALLEL "1"
