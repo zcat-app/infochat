@@ -16,8 +16,8 @@
 | escalated | 0 |
 | done | 134 |
 | deferred | 1 |
-| abandoned | 4 |
-| **total** | **139** |
+| abandoned | 5 |
+| **total** | **140** |
 
 ---
 
@@ -92,8 +92,9 @@ Tickets decided against — not implemented as this ticket. Terminal: not reopen
 - M1-860 — Measure news-category tagger coverage on the local model
 - M1-861 — Seed validated news categories into the tag vocabulary
 
-### wont-do-infeasible (1)
+### wont-do-infeasible (2)
 - M1-910 — Rootless IPv6 compose enablement, capability-derived
+- M1-926 — Provider DNS remedy: client-compatible resolver on rootless embedded DNS
 
 ---
 
