@@ -305,6 +305,23 @@ custom embeddings model must produce 768-dimensional vectors, so the wizard asks
 you to confirm); if you pick `ollama`, there is no model prompt. Either way,
 embeddings always run separately from the chat model.
 
+On a GPU host, the wizard's safe llama.cpp serving defaults are **3 parallel
+slots**, a **24,576-token total context** (8,192 tokens per slot), and a **40 GB
+memory cap**. The context default is sized from the product's 6,144-token
+prompt floor, the 600-token chat reply cap, and template headroom; it is not a
+throughput-only number. If you need a larger context, provide the context and
+memory choices together before running the wizard, for example:
+
+```bash
+INFOCHAT_LLAMACPP_CTX=32768 INFOCHAT_LLAMACPP_MEMORY=48g ./prod/setup.sh
+```
+
+The wizard writes those values to `prod/runtime/secrets.env` and honors them;
+the larger context must have a memory cap sized for the model, KV cache, prompt
+cache, speculative-decoding head, and the other containers sharing the host.
+CPU-class llama.cpp keeps its existing 4,096-token shape and does not receive
+the GPU memory-cap write.
+
 If you pick **remote**, the wizard first asks which **provider dialect** your
 endpoint speaks — **openai-compatible** (the default: any generic OpenAI-style
 API, e.g. NanoGPT, OpenAI, OpenRouter) or **deepseek** (DeepSeek's own

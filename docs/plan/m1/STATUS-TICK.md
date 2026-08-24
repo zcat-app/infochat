@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 0 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 132 |
+| done | 133 |
 | deferred | 1 |
 | abandoned | 4 |
-| **total** | **140** |
+| **total** | **138** |
 
 ---
 
@@ -25,8 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-921 — Re-derive GPU-class default ctx from the prompt floor (complexity: low, risk: medium)
-- M1-924 — Isolate the embedded-DNS response field that wedges simplex-chat (complexity: medium, risk: low)
+_(none — all pending tickets are blocked)_
 
 ---
 
@@ -43,7 +42,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-926 — blocked_by: M1-924 (pending), M1-925 (done)
+_(none)_
 
 ---
 
@@ -64,6 +63,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 |---|---|---|---|
 | M1-925 | Confirm the D-8 wedge on the real supervised simplex shape | 2026-08-24 | round 2 APPROVE-WITH-FIXES |
 | M1-923 | Named chat notice + operator signal on prompt-exceeds-context | 2026-08-24 | round 2 APPROVE |
+| M1-921 | Make GPU context and memory configurable | 2026-08-24 | round 1 APPROVE-WITH-FIXES |
 | M1-920 | Tracked llamacpp prompt-cache RAM key, sized per class | 2026-08-24 | round 2 APPROVE |
 | M1-919 | Reconcile D-8 live wedge evidence with the controlled no-IPv6 rerun | 2026-08-24 | round 1 APPROVE |
 | M1-909 | Wizard GPU-class spec-decode head delivery + clone recovery | 2026-08-24 | round 2 APPROVE-WITH-FIXES |
@@ -71,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-917 | Widen and diversity-cap the semanticSearch window | 2026-08-23 | round 1 APPROVE |
 | M1-916 | Route temporal/top-news chat intents to searchPosts | 2026-08-23 | round 1 APPROVE |
 | M1-915 | Migrate reddit feeds from kind=rss to kind=reddit in place, onto the /.rss transport | 2026-08-23 | round 4 APPROVE |
-| M1-914 | Persist post.comments and rank reddit replies in the digest | 2026-08-23 | round 2 APPROVE |
 
 ---
 
@@ -251,7 +250,7 @@ M1-907 (done)
 M1-908 (done)
   └── M1-909 (done)
         └── M1-920 (done)
-              └── M1-921 (pending) ← runnable
+              └── M1-921 (done)
 M1-910 (abandoned)
 M1-912 (done)
   └── M1-913 (done)
@@ -260,12 +259,9 @@ M1-915 (done)
 M1-916 (done)
 M1-917 (done)
 M1-918 (done)
-  ├── M1-921 (pending) [see above]
+  ├── M1-921 (done) [see above]
   └── M1-923 (done)
 M1-919 (done)
   └── M1-911 (deferred)
-M1-924 (pending) ← runnable
-  └── M1-926 (pending)
 M1-925 (done)
-  └── M1-926 (pending) [see above]
 ```

@@ -647,16 +647,21 @@ case "$backend" in
       gpu_build="Vulkan build (docker-compose.gpu.yml merged)"
       gpu_rootless_acl_gate
       set_secret INFOCHAT_LLAMACPP_PARALLEL "3"
-      set_secret INFOCHAT_LLAMACPP_CTX "32768"
+      gpu_ctx="${INFOCHAT_LLAMACPP_CTX:-24576}"
+      set_secret INFOCHAT_LLAMACPP_CTX "$gpu_ctx"
+      # Default 24576 = 3 × 8192: 6144 infochat.chat.prompt-token-budget floor + 600 reply
+      # budget + ~1.4k chars/4 headroom, rounded up; larger contexts remain an
+      # operator choice, with the 2.7× real-turn lesson as the sizing reference.
       # GTT pages pin to the container cgroup, so the base 7g/3.0 caps OOM the
       # GPU model class — the cap writes ride the same gpu_on condition (P14).
-      set_secret INFOCHAT_LLAMACPP_MEMORY "40g"
+      gpu_memory="${INFOCHAT_LLAMACPP_MEMORY:-40g}"
+      set_secret INFOCHAT_LLAMACPP_MEMORY "$gpu_memory"
       set_secret INFOCHAT_LLAMACPP_CPUS "12"
-      # 40g cap minus ~21 GB Q6_K_XL weights, minus KV for the serving shape,
-      # minus ~2 GB spec-decode head (M1-909), leaves room for a 16 GiB prompt
-      # cache; the CPU-class 7g cap does not (P12).
+      # The default 40g cap minus ~21 GB Q6_K_XL weights, minus KV for the
+      # default serving shape, minus ~2 GB spec-decode head (M1-909), leaves
+      # room for a 16 GiB prompt cache; larger CTX needs a larger chosen cap.
       set_secret INFOCHAT_LLAMACPP_CACHE_MB "16384"
-      echo "GPU serving class: parallel=3, ctx=32768, memory=40g, cpus=12, cache-ram=16384 MiB (measured prod candidate)"
+      echo "GPU serving class: parallel=3, ctx=$gpu_ctx, memory=$gpu_memory, cpus=12, cache-ram=16384 MiB (fit-derived defaults; overrideable)"
       # Speculative decoding: GPU-class opt-in head delivery — the wizard
       # offers, never pins (no default URL/SHA, binding user steer); the fetch
       # and its secrets land before the generative up (the M1-907 census order).

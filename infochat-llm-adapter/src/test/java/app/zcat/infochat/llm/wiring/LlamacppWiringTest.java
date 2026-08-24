@@ -1046,7 +1046,7 @@ class LlamacppWiringTest {
     @EnabledOnOs(OS.LINUX)
     void gpuHostGetsBenchmarkServingClassAndTiming(@TempDir Path tmp) throws Exception {
         // M1-905: the GPU class is the campaign-measured prod candidate —
-        // parallel=3 / ctx 32768 with memory 40g / cpus 12 (the caps ride the
+        // parallel=3 / default ctx 24576 with memory 40g / cpus 12 (the caps ride the
         // same gpu_on condition: GTT pages pin to the cgroup — P14).
         Map<String, String> props = runWizard(tmp, "llamacpp\n\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
                 Map.of("INFOCHAT_LLAMACPP_GPU", "on"));
@@ -1063,8 +1063,8 @@ class LlamacppWiringTest {
         String secrets = Files.readString(tmp.resolve("runtime/secrets.env"));
         assertTrue(secrets.contains("INFOCHAT_LLAMACPP_PARALLEL=\"3\""),
                 "GPU class must write the measured 3-slot serving secret:\n" + secrets);
-        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_CTX=\"32768\""),
-                "GPU class must write the measured 32768 ctx secret:\n" + secrets);
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_CTX=\"24576\""),
+                "GPU class must write the fit-derived default ctx secret:\n" + secrets);
         assertTrue(secrets.contains("INFOCHAT_LLAMACPP_MEMORY=\"40g\""),
                 "GPU class must write the 40g memory cap through the M1-744 key:\n" + secrets);
         assertTrue(secrets.contains("INFOCHAT_LLAMACPP_CPUS=\"12\""),
@@ -1076,6 +1076,46 @@ class LlamacppWiringTest {
             assertFalse(props.containsKey("infochat.llm." + task + ".timeout-ms"),
                     "GPU class writes NO ingest-role override (30s default measured adequate ~8x — D-15): " + task);
         }
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void gpuClassServingShapeFitsTheDocumentedPromptFloor(@TempDir Path tmp) throws Exception {
+        runWizard(tmp,
+                "llamacpp\n\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "on"));
+
+        String secrets = Files.readString(tmp.resolve("runtime/secrets.env"));
+        int promptFloor = 6144;
+        int chatReplyBudget = 600;
+        int templateHeadroom = 1400;
+        int minimumPerSlot = promptFloor + chatReplyBudget + templateHeadroom;
+        int expectedPerSlot = 1;
+        while (expectedPerSlot < minimumPerSlot) {
+            expectedPerSlot *= 2;
+        }
+
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_PARALLEL=\"3\""));
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_CTX=\"24576\""));
+        assertTrue(secrets.contains("INFOCHAT_LLAMACPP_MEMORY=\"40g\""));
+        assertEquals(8192, expectedPerSlot);
+        assertTrue(24576 / 3 >= minimumPerSlot,
+                "GPU serving slot must cover prompt floor, reply budget, and headroom");
+        assertTrue(Files.readString(repoRoot().resolve("prod/scripts/4-llm.sh"))
+                        .contains("infochat.chat.prompt-token-budget"),
+                "GPU serving derivation must name the prompt-budget floor");
+
+        Path overrideTmp = Files.createDirectory(tmp.resolve("override"));
+        runWizard(overrideTmp,
+                "llamacpp\n\n\n\n\n" + ACCEPT_TIMING_DEFAULTS + ACCEPT_REPLYMODE_DEFAULT,
+                Map.of("INFOCHAT_LLAMACPP_GPU", "on",
+                        "INFOCHAT_LLAMACPP_CTX", "32768",
+                        "INFOCHAT_LLAMACPP_MEMORY", "48g"));
+        String overriddenSecrets = Files.readString(overrideTmp.resolve("runtime/secrets.env"));
+        assertTrue(overriddenSecrets.contains("INFOCHAT_LLAMACPP_CTX=\"32768\""),
+                "an explicit INFOCHAT_LLAMACPP_CTX must override the default");
+        assertTrue(overriddenSecrets.contains("INFOCHAT_LLAMACPP_MEMORY=\"48g\""),
+                "an explicit INFOCHAT_LLAMACPP_MEMORY must override the default");
     }
 
     @Test
