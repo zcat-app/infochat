@@ -11,10 +11,10 @@
 | Status | Count |
 |---|---|
 | pending | 3 |
-| in-progress | 1 |
+| in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 131 |
+| done | 132 |
 | deferred | 1 |
 | abandoned | 4 |
 | **total** | **140** |
@@ -34,7 +34,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 | ID | Title | Status | Last review |
 |---|---|---|---|
-| M1-925 | Confirm the D-8 wedge on the real supervised simplex shape | in-progress | round 1 REWORK on 2026-08-24 |
+
+_(none)_
 
 ---
 
@@ -42,7 +43,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-926 — blocked_by: M1-924 (pending), M1-925 (in-progress)
+- M1-926 — blocked_by: M1-924 (pending), M1-925 (done)
 
 ---
 
@@ -61,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-925 | Confirm the D-8 wedge on the real supervised simplex shape | 2026-08-24 | round 2 APPROVE-WITH-FIXES |
 | M1-923 | Named chat notice + operator signal on prompt-exceeds-context | 2026-08-24 | round 2 APPROVE |
 | M1-920 | Tracked llamacpp prompt-cache RAM key, sized per class | 2026-08-24 | round 2 APPROVE |
 | M1-919 | Reconcile D-8 live wedge evidence with the controlled no-IPv6 rerun | 2026-08-24 | round 1 APPROVE |
@@ -70,7 +72,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-916 | Route temporal/top-news chat intents to searchPosts | 2026-08-23 | round 1 APPROVE |
 | M1-915 | Migrate reddit feeds from kind=rss to kind=reddit in place, onto the /.rss transport | 2026-08-23 | round 4 APPROVE |
 | M1-914 | Persist post.comments and rank reddit replies in the digest | 2026-08-23 | round 2 APPROVE |
-| M1-913 | Digest v1 shape: count header, 10 headlines, drill-down close | 2026-08-23 | round 1 APPROVE-WITH-FIXES |
 
 ---
 
@@ -265,6 +266,6 @@ M1-919 (done)
   └── M1-911 (deferred)
 M1-924 (pending) ← runnable
   └── M1-926 (pending)
-M1-925 (in-progress)
+M1-925 (done)
   └── M1-926 (pending) [see above]
 ```
