@@ -3,7 +3,7 @@ id: M1-911
 title: "No-IPv6-host fallback: image getaddrinfo IPv4 preference"
 status: deferred
 created: 2026-08-23
-last_updated: 2026-08-23
+last_updated: 2026-08-24
 flow: tick
 reproduction: >-
   Ipv4PreferenceWiringTest.providerImageCarriesGetaddrinfoIpv4Preference
@@ -85,21 +85,24 @@ deferred_reason: blocked-on-new-ticket
 
 # M1-911: No-IPv6-host fallback: image getaddrinfo IPv4 preference
 
-> **DEFERRED 2026-08-23 — blocked-on-new-ticket (M1-919).** The corrected
-> step-0 rerun (valid artifacts on both legs: an EnableIpv6:false network,
-> a DNS fixture logging both A and AAAA queries, and the pinned simplex-chat
-> v7.0.0.11 logging `Agent connected` / SMP host `smp5.simplex.im` / 2
-> subscribed queues) showed the no-gai.conf control leg connects over IPv4
-> just as well as the with-gai.conf leg — the wedge this ticket exists to
-> clear did NOT reproduce under control, contradicting the recorded D-8 live
-> outage evidence. Shipping the gai.conf stanza now would be a fix with no
-> confirmed failure; dropping the ticket would leave the live D-8 evidence
-> unexplained. Paused until M1-919 reconciles the live-vs-controlled delta
-> (image version at outage time, resolver environment, host state). If D-8
-> re-confirms as client-side AAAA wedging, this ticket's image-level shape —
-> cheap, host-class-agnostic, and after M1-910's abandonment the only
-> remaining candidate — is the remedy; reopen via the driver once M1-919 is
-> done.
+> **DEFERRED 2026-08-23 — blocked-on-new-ticket (M1-919); defer DISCHARGED
+> 2026-08-24 by M1-919's record
+> (`docs/measurement/d8-wedge-reconciliation.md`).** The corrected step-0
+> rerun (valid artifacts on both legs) showed the no-gai.conf control leg
+> connecting over IPv4, contradicting the recorded D-8 live outage.
+> M1-919 reconciled the two evidence sets and the conclusion is in: the
+> recorded AAAA-first/no-fallback mechanism is DISPROVEN on the pinned
+> client (v7.0.0.11 connects over IPv4 with the real global AAAA present
+> in the same answer set), and the actual live-path failure layer is the
+> client's DNS-response handling against the rootless daemon's
+> embedded-DNS forwarder — a layer gai.conf never reaches (and the
+> client's resolution is not plain getaddrinfo). NOT reopened on this
+> evidence. Named reopen condition: the follow-up analysis brief
+> (`simplex-client-embedded-dns-response-compatibility`, named in the
+> record §4) re-implicates getaddrinfo address-family selection — i.e.
+> the wedge reproduces through a client-compatible resolver on the
+> current pin. Until then this ticket's gai.conf shape is a mechanism
+> with no confirmed failure to clear.
 
 ## Context
 

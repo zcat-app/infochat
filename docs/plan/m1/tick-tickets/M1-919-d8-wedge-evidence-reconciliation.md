@@ -1,9 +1,9 @@
 ---
 id: M1-919
 title: "Reconcile D-8 live wedge evidence with the controlled no-IPv6 rerun"
-status: pending
+status: done
 created: 2026-08-23
-last_updated: 2026-08-23
+last_updated: 2026-08-24
 flow: tick
 reproduction: >-
   The contradiction itself, observed by the corrected M1-911 step-0 probe
@@ -73,11 +73,33 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-24
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY NOT-APPLICABLE (evidence-only, doc-only diff; verify skipped per doc-only-edits-skip-verify, disclosed), MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "4 files, +272/-25 (new docs/measurement/d8-wedge-reconciliation.md 229; M1-911 defer pointer; own frontmatter; STATUS-TICK regen)"
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  start-self-check: >-
+    PASS, no blocking ambiguity. Lint 0 findings. Citations spot-checked
+    clean: plan §10 :787-831 (read; the 2026-08-19 re-drive at 4ce8aea0,
+    which already pins SIMPLEX_CHAT_VERSION=v7.0.0), all 15 rerun
+    artifacts under /tmp/codex-m1-911-step0-* (read in full), M1-910
+    abandoned + M1-911 deferred records, docs/measurement/ M1-860 shape
+    present, M1-890 done (the arm-c surveillance). Census rows re-run
+    clean; blocked_by empty (no test-tracing duty); no in-flight tick
+    tickets (--parallel module boundary trivially clear — docs-only
+    scope). Two non-blocking notes: (a) the record filename differs
+    between files_scope (d8-wedge-reconciliation.md) and Definition of
+    done (d8-wedge-evidence-reconciliation.md) — resolved to the
+    files_scope name; (b) rerun-artifact read finds BOTH legs' getent
+    ahostsv6 EMPTY and no getent-originated queries in dns.log — the
+    controlled AAAA may never have reached the client's getaddrinfo
+    result set, making both "connects fine" legs uninformative; this is
+    the ticket's central discriminator, not a premise break.
 escalation_reason:
 ---
 
