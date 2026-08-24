@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 127 |
+| done | 128 |
 | deferred | 1 |
 | abandoned | 4 |
 | **total** | **137** |
@@ -27,7 +27,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-909 — Wizard GPU-class spec-decode head delivery + clone recovery (complexity: medium, risk: medium)
 - M1-919 — Reconcile D-8 live wedge evidence with the controlled no-IPv6 rerun (complexity: medium, risk: low)
-- M1-923 — Named chat notice + operator signal on prompt-exceeds-context (complexity: medium, risk: medium)
 
 ---
 
@@ -64,6 +63,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-923 | Named chat notice + operator signal on prompt-exceeds-context | 2026-08-24 | round 2 APPROVE |
 | M1-918 | Chat prompt token budget + deterministic compaction ladder | 2026-08-23 | round 2 APPROVE |
 | M1-917 | Widen and diversity-cap the semanticSearch window | 2026-08-23 | round 1 APPROVE |
 | M1-916 | Route temporal/top-news chat intents to searchPosts | 2026-08-23 | round 1 APPROVE |
@@ -73,7 +73,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-912 | Bound digest render volume in FULL and degraded modes | 2026-08-23 | round 1 APPROVE |
 | M1-908 | Tracked llamacpp speculative-decoding compose keys, off by default | 2026-08-23 | round 1 APPROVE |
 | M1-907 | 8-verify.sh config-freshness leg + boot-verify rule | 2026-08-23 | round 1 APPROVE |
-| M1-906 | Restore-time derivative retention floor + old-bundle WARN | 2026-08-22 | round 2 APPROVE |
 
 ---
 
@@ -263,7 +262,7 @@ M1-916 (done)
 M1-917 (done)
 M1-918 (done)
   ├── M1-921 (pending) [see above]
-  └── M1-923 (pending) ← runnable
+  └── M1-923 (done)
 M1-919 (pending) ← runnable
   └── M1-911 (deferred)
 ```

@@ -750,8 +750,30 @@ The notice is deterministic bot prose: it takes the bundle path in the
 scope language and is NEVER routed through TranslationPipeline (the D43
 two-path rule — the translator path would also bypass the sanitizer
 ordering). Degrade/rejection turns (unavailable, in-flight,
-ceiling-gated, refusal intercept, /stop-cancelled) carry a `null` notice:
-those replies are deterministic notices, not answers.
+ceiling-gated, refusal intercept, prompt-exceeded, /stop-cancelled)
+carry a `null` notice: those replies are deterministic notices, not
+answers.
+
+**Named prompt-exceeded degrade (M1-923).** A backend 400 rejection
+gated on the turn's own assembled-prompt estimate exceeding the
+configured `infochat.chat.prompt-token-budget` surfaces a DISTINCT
+localized notice (`error.chat.prompt_exceeded`, all five bundles) that
+names the cause and points at `/clear` or `/compress`; the turn is
+discarded under the same no-advance contract as the unavailable degrade,
+and a throttled admin notification under the error class
+`chat-prompt-exceeded` (ThrottledAdminNotifier DB-row throttle) records
+the estimate against the budget. The gate is evidence-bearing in both
+directions: the status arrives as the typed
+`LlmCallFailedException.ProviderRequestRejectedException` (both the
+unary and streaming non-2xx paths carry it; the message keeps the
+provider-label + status + host redaction shape, never the provider body),
+and an UNDER-budget 400 — the dialect-mismatch class — keeps the generic
+unavailable notice, as does any non-400 rejection: the notice never
+claims "too large" on evidence the turn does not carry. The fold-back
+grounding account matches this honesty posture: `collectPostUids` runs
+on the FITTED tool result (whole-entry admission), so a result truncated
+to zero entries claims no grounding and partial admission names only the
+admitted count.
 
 **Conversational-refinement recovery.** Two affordances sit on
 top of the retrieval + provenance surface for the case where the first

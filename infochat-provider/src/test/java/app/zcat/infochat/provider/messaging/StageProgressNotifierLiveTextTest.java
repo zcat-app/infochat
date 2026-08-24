@@ -430,7 +430,7 @@ class StageProgressNotifierLiveTextTest {
                 router, sanitizer, pipeline, bundle, noopTrigger,
                 auditWriter,
                 SanitizerTestDoubles.noOpDataSource(),
-                context, breakerRegistry, embeddingProvider, null, null, streamer);
+                context, breakerRegistry, embeddingProvider, null, null, streamer, null);
         return new LiveTextRig(adapter, notifier, agent, provider);
     }
 

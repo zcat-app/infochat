@@ -6,6 +6,7 @@ import app.zcat.infochat.core.audit.TargetKind;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.core.llm.LlmOutputSanitizerCore;
+import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import app.zcat.infochat.core.util.JsonEscaper;
 import app.zcat.infochat.llm.EmbeddingProvider;
 import app.zcat.infochat.llm.EmbeddingResult;
@@ -94,6 +95,11 @@ public class ChatAgent {
 
     // Shared D21 refusal marker for final interception and live hold-back.
     static final String REFUSAL_MARKER_PREFIX = "[REFUSAL:";
+
+    // Throttled-admin-notification error class for the named
+    // prompt-exceeds-context degrade (ThrottledAdminNotifier key and
+    // error_class; the DB-row throttle coalesces repeats).
+    static final String ERROR_CLASS_CHAT_PROMPT_EXCEEDED = "chat-prompt-exceeded";
 
     /** Finds the earliest raw tool opener for fail-closed live display. */
     static int earliestToolOpenerIndex(String text) {
@@ -274,6 +280,7 @@ public class ChatAgent {
     private final HelpCommandHandler helpHandler;
     private final CancellationService cancellationService;
     private final ChatLiveTextStreamer liveTextStreamer;
+    private final ThrottledAdminNotifier throttledAdminNotifier;
 
     @Inject
     public ChatAgent(InFlightTracker inFlightTracker,
@@ -292,7 +299,8 @@ public class ChatAgent {
                      EmbeddingProvider embeddingProvider,
                      HelpCommandHandler helpHandler,
                      CancellationService cancellationService,
-                     ChatLiveTextStreamer liveTextStreamer) {
+                     ChatLiveTextStreamer liveTextStreamer,
+                     ThrottledAdminNotifier throttledAdminNotifier) {
         this.inFlightTracker = inFlightTracker;
         this.promptBuilder = promptBuilder;
         this.toolDispatcher = toolDispatcher;
@@ -310,6 +318,7 @@ public class ChatAgent {
         this.helpHandler = helpHandler;
         this.cancellationService = cancellationService;
         this.liveTextStreamer = liveTextStreamer;
+        this.throttledAdminNotifier = throttledAdminNotifier;
     }
 
     /**
@@ -375,6 +384,11 @@ public class ChatAgent {
             return new ChatTurnResult(
                     bundleLoader.get(BundleKeys.ERROR_CHAT_IN_FLIGHT, scopeLanguage), null, null);
         }
+        // Per-turn carrier for the FIRST build's compaction report: doHandle
+        // owns it; the LLM-failure catch below needs the turn's own
+        // estimate-vs-budget evidence to gate the named notice.
+        ChatPromptBuilder.CompactionReport[] firstCompaction =
+                new ChatPromptBuilder.CompactionReport[1];
         try {
             // Adopted a turn /stop had already cancelled — marked while
             // QUEUED, between the stage preamble and this acquire (M1-638):
@@ -385,7 +399,7 @@ public class ChatAgent {
                 return new ChatTurnResult(null, null, null);
             }
             ChatTurnResult result = doHandle(userId, scopeKind, scopeId, userMessage,
-                    scopeLanguage, scope);
+                    scopeLanguage, scope, firstCompaction);
             // Delivery boundary: /stop may have marked this request cancelled
             // even though the work completed — the interrupt landed after the
             // last interruptible point, or it never landed at all (a "missed
@@ -414,6 +428,29 @@ public class ChatAgent {
             // LLM failures").
             if (slot.isCancelled()) {
                 return new ChatTurnResult(null, null, null);
+            }
+            // Named degrade (M1-923): a 400 gated on the turn's OWN estimate
+            // exceeding the budget names the cause; an under-budget or
+            // non-400 rejection keeps the generic notice (D37: no user prose).
+            ChatPromptBuilder.CompactionReport firstReport = firstCompaction[0];
+            if (e instanceof LlmCallFailedException.ProviderRequestRejectedException rejection
+                    && rejection.httpStatus() == 400
+                    && firstReport != null
+                    && firstReport.estimateBefore() > firstReport.tokenBudget()) {
+                log.warn("chat prompt exceeded context: estimated {} prompt tokens against "
+                        + "the {}-token budget for userId={}; degrading with the named notice",
+                        firstReport.estimateBefore(), firstReport.tokenBudget(), userId);
+                throttledAdminNotifier.notifyOnce(
+                        ERROR_CLASS_CHAT_PROMPT_EXCEEDED,
+                        ERROR_CLASS_CHAT_PROMPT_EXCEEDED,
+                        "chat prompt exceeded context: estimated "
+                                + firstReport.estimateBefore() + " prompt tokens against the "
+                                + firstReport.tokenBudget()
+                                + "-token budget (infochat.chat.prompt-token-budget); "
+                                + "turn degraded with error.chat.prompt_exceeded");
+                return new ChatTurnResult(
+                        bundleLoader.get(BundleKeys.ERROR_CHAT_PROMPT_EXCEEDED, scopeLanguage),
+                        null, null);
             }
             boolean unreachable = e instanceof LlmCallFailedException.ProviderUnreachableException;
             SafeLog.error(log, "ChatAgent.handle: LLM call failed for userId=" + userId
@@ -463,7 +500,8 @@ public class ChatAgent {
 
     private ChatTurnResult doHandle(UUID userId, String scopeKind, UUID scopeId,
                                     String userMessage, String scopeLanguage,
-                                    @Nullable ScopeRef scope) {
+                                    @Nullable ScopeRef scope,
+                                    ChatPromptBuilder.CompactionReport[] firstCompactionCarrier) {
         // Ceiling gate: a failed auto-compress left this session at its
         // token ceiling — reject the turn outright (no LLM call, no
         // persist) instead of silently growing past the ceiling. Clears
@@ -618,6 +656,9 @@ public class ChatAgent {
         ChatPromptBuilder.BuiltPrompt prompt = promptBuilder.build(
                 userId, scopeKind, scopeId, userMessage,
                 semanticBlock, turnDirective, systemSuffixTokens);
+        // First-call report per the M1-923 gate: the turn's own
+        // estimate-vs-budget evidence for the named-degrade catch arm.
+        firstCompactionCarrier[0] = prompt.compaction();
         String baseSystemPrompt = prompt.systemPrompt() + languageDirective;
         String augmentedSystemPrompt = baseSystemPrompt + TOOL_INSTRUCTIONS;
 
@@ -977,10 +1018,7 @@ public class ChatAgent {
                     toolDispatcher.dispatch(toolName, args, userId, scopeKind, scopeId, turnContext);
 
             String resultText = switch (result) {
-                case ChatToolDispatcher.ToolResult.Success s -> {
-                    collectPostUids(toolName, s.content(), retrievedPostUids);
-                    yield s.content();
-                }
+                case ChatToolDispatcher.ToolResult.Success s -> s.content();
                 case ChatToolDispatcher.ToolResult.ValidationError v -> "Error: " + v.reason();
             };
 
@@ -1000,6 +1038,12 @@ public class ChatAgent {
                     conversation.toString(), scaffoldHead, resultText, scaffoldTail,
                     systemTokens, promptTokenBudget);
 
+            // Grounding counts only ADMITTED entries: the provenance account
+            // is taken from the fitted text, so a truncated result never
+            // claims posts the model did not see.
+            if (result instanceof ChatToolDispatcher.ToolResult.Success) {
+                collectPostUids(toolName, fittedResultText, retrievedPostUids);
+            }
             conversation.append(scaffoldHead).append(fittedResultText).append(scaffoldTail);
         }
 

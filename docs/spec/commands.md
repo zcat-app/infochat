@@ -1838,7 +1838,8 @@ always tell a "found nothing" answer from a "didn't look" answer (the
 wording also covers the breaker-open pre-fetch skip truthfully). The
 notice interpolates the count only — never post UIDs, titles, or other
 feed-derived text. Degrade and rejection replies (unavailable, in-flight,
-ceiling-gated, refusal, /stop) carry no provenance notice. Exact wording
+ceiling-gated, refusal, prompt-exceeded, /stop) carry no provenance
+notice. Exact wording
 lives in design notes (05 §5.4.6).
 
 **The assembled prompt is budget-bounded and compacts

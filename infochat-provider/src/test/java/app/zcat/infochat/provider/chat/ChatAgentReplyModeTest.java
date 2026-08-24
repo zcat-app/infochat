@@ -353,7 +353,7 @@ class ChatAgentReplyModeTest {
             super(tracker, builder, dispatcher, repo, router,
                     sanitizer, pipeline, bundle, autoCompressTrigger, null, null,
                     inboundContextWith(language, replyMode), breakerRegistry,
-                    embeddingProvider, helpHandler, null, null);
+                    embeddingProvider, helpHandler, null, null, null);
         }
 
         @Override

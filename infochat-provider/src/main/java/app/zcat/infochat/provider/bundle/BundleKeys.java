@@ -1579,6 +1579,9 @@ public final class BundleKeys {
     /** Chat LLM emitted the D21 structured refusal marker; this deterministic notice replaces it — the marker is protocol surface and is never delivered (security.md §Prompt-injection defenses). */
     public static final String ERROR_CHAT_REFUSED = "error.chat.refused";
 
+    /** Context-exceeded rejection (gated 400: typed rejection plus the turn's own estimate over budget); names the cause, points at /clear or /compress, same no-advance discard. */
+    public static final String ERROR_CHAT_PROMPT_EXCEEDED = "error.chat.prompt_exceeded";
+
     // ----- Chat retrieval provenance (M1-617) --------------------------------
     // Per docs/spec/commands.md §Chat mode + D58: every successful chat
     // reply carries a deterministic, bundle-localized signal saying whether

@@ -1733,7 +1733,12 @@ rules:
    so an outage window pays that bounded cost at most once per
     breaker cycle: only the failures that precede the trip (and the
     cooldown-expiry probe turn, which legitimately needs its
-    grounding) run it.
+    grounding) run it. When the chat backend rejects a turn because
+    the assembled prompt exceeds its context, the user receives a
+    distinct localized notice naming the cause (separate from the
+    generic unavailable error); the turn is discarded under the same
+    no-advance contract, and a throttled admin notification records
+    the estimated size against the configured budget.
 - **Fail-fast on a known-unreachable provider (circuit breaker).** An in-memory circuit breaker keyed by resolved provider
    endpoint (base-url; all tasks routed to one endpoint share its
   state, matching the D56 one-LLM-service topology — the embedding

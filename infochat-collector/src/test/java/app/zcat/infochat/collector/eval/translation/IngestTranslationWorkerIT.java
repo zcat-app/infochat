@@ -126,7 +126,7 @@ class IngestTranslationWorkerIT {
         // boundary is deterministic (M1-444 seam).
         QuarkusMock.installMockForType(Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
         stub().reset();
-        clearItData();
+        clearAllPosts();
         // The notifier's state is DB-persistent across the whole Quarkus
         // test instance — a must-NOT-fire assertion is only meaningful
         // from a known-empty slate.
@@ -739,11 +739,12 @@ class IngestTranslationWorkerIT {
         }
     }
 
-    private void clearItData() throws Exception {
+    // Whole-table wipe, not this class's prefix: the pickup is batch-limited
+    // (LIMIT 64, oldest fetched_at first), and other classes' leftover posts
+    // visible under the pinned Clock would starve the seeded rows out of it.
+    private void clearAllPosts() throws Exception {
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                 "DELETE FROM post WHERE uid LIKE ?")) {
-            ps.setString(1, UID_PREFIX + "%");
+             PreparedStatement ps = conn.prepareStatement("DELETE FROM post")) {
             ps.executeUpdate();
         }
     }

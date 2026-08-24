@@ -56,4 +56,20 @@ public class LlmCallFailedException extends RuntimeException {
             super(message, cause);
         }
     }
+
+    /** Non-2xx answer: carries the status as typed data so callers can distinguish rejections without parsing the body (security.md §Failure handling); never transport-unreachable. */
+    public static final class ProviderRequestRejectedException extends LlmCallFailedException {
+
+        private final int httpStatus;
+
+        public ProviderRequestRejectedException(String message, int httpStatus) {
+            super(message);
+            this.httpStatus = httpStatus;
+        }
+
+        /** The non-2xx status the endpoint returned. */
+        public int httpStatus() {
+            return httpStatus;
+        }
+    }
 }

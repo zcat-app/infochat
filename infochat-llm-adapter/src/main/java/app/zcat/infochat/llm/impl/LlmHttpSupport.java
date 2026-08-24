@@ -166,6 +166,11 @@ public final class LlmHttpSupport {
     @FunctionalInterface
     interface CallFailureFactory {
         RuntimeException create(String message, @Nullable Throwable cause, boolean providerUnreachable);
+
+        /** Non-2xx arm: the endpoint ANSWERED, so application-class, never unreachable; the chat family overrides to the status-carrying subtype. */
+        default RuntimeException rejected(String message, int httpStatus) {
+            return create(message, null, false);
+        }
     }
 
     /**
@@ -241,12 +246,36 @@ public final class LlmHttpSupport {
             LOG.warnf("%s: non-2xx %d from %s",
                 providerLabel, response.statusCode(), host);
             // Not unreachable: a status line means the endpoint answered.
-            throw failure.create(providerLabel + ": non-2xx status " + response.statusCode()
-                + " from " + host, null, false);
+            throw failure.rejected(providerLabel + ": non-2xx status "
+                + response.statusCode() + " from " + host, response.statusCode());
         }
 
         return response.body();
     }
+
+    /** The chat family's factory: unreachable and non-2xx each map to their typed subtype, everything else the plain failure; an anonymous class because it overrides {@code rejected}. */
+    private static final CallFailureFactory CHAT_CALL_FAILURES = new CallFailureFactory() {
+        @Override
+        public RuntimeException create(String message, @Nullable Throwable cause,
+                                       boolean providerUnreachable) {
+            if (providerUnreachable) {
+                // cause is always non-null on the unreachable path (only
+                // the IOException arm classifies unreachable); the
+                // null-split form is what the nullness analysis verifies.
+                return cause == null
+                    ? new LlmCallFailedException.ProviderUnreachableException(message)
+                    : new LlmCallFailedException.ProviderUnreachableException(message, cause);
+            }
+            return cause == null
+                ? new LlmCallFailedException(message)
+                : new LlmCallFailedException(message, cause);
+        }
+
+        @Override
+        public RuntimeException rejected(String message, int httpStatus) {
+            return new LlmCallFailedException.ProviderRequestRejectedException(message, httpStatus);
+        }
+    };
 
     /**
      * The shared HTTP call pipeline for the two chat-completion HTTP
@@ -259,26 +288,14 @@ public final class LlmHttpSupport {
      *
      * <p>{@code providerLabel} prefixes every log line and exception
      * message so the failing provider stays identifiable now that the
-     * call site is shared.
+     * call site is shared.</p>
      */
     static LlmResponse executeJsonCall(HttpClient http, Config config, HttpRequest request,
                                        String providerLabel, LlmResponseParser parser) {
         long cap = clampBodyCapBytes(
             config.getOptionalValue("infochat.llm.max-response-bytes", Long.class)
                 .orElse(DEFAULT_BODY_CAP_BYTES));
-        String body = sendForBody(http, request, cap, providerLabel, (message, cause, unreachable) -> {
-            if (unreachable) {
-                // cause is always non-null here (only the IOException path
-                // classifies unreachable); the null-split form is what the
-                // nullness analysis can verify.
-                return cause == null
-                    ? new LlmCallFailedException.ProviderUnreachableException(message)
-                    : new LlmCallFailedException.ProviderUnreachableException(message, cause);
-            }
-            return cause == null
-                ? new LlmCallFailedException(message)
-                : new LlmCallFailedException(message, cause);
-        });
+        String body = sendForBody(http, request, cap, providerLabel, CHAT_CALL_FAILURES);
         return parser.parse(body, request.uri());
     }
 
@@ -332,8 +349,9 @@ public final class LlmHttpSupport {
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             String host = request.uri().getHost();
             LOG.warnf("%s: non-2xx %d from %s", providerLabel, response.statusCode(), host);
-            throw new LlmCallFailedException(providerLabel + ": non-2xx status "
-                + response.statusCode() + " from " + host);
+            throw new LlmCallFailedException.ProviderRequestRejectedException(
+                providerLabel + ": non-2xx status " + response.statusCode() + " from " + host,
+                response.statusCode());
         }
         try (StreamLineReader reader = response.body()) {
             SseFramer framer = new SseFramer();

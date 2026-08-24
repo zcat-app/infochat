@@ -1,14 +1,16 @@
 ---
 id: M1-923
 title: "Named chat notice + operator signal on prompt-exceeds-context"
-status: pending
+status: done
 created: 2026-08-23
-last_updated: 2026-08-23
+last_updated: 2026-08-24
 flow: tick
 reproduction: >-
   ChatAgentPromptExceededTest.promptExceededTurnGetsTheNamedNotice
-  (to-be-written — converted at /tick start per workflow §0: written
-  first, run RED; child of a 2+ decomposition, analysis
+  (run RED 2026-08-24, r1: the named-notice and streaming legs fail with
+  error.chat.unavailable, the notification leg sees zero notifier calls,
+  and truncatedToZeroFoldBackClaimsNoGrounding fails with grounded(30)
+  on zero admitted entries; child of a 2+ decomposition, analysis
   docs/plan/m1/tick-analysis/chat-context-budget-and-serving-defaults.md).
   The wrong behavior it states: a context-exceeded backend rejection is
   indistinguishable from every other LLM failure. Verified on this
@@ -24,6 +26,21 @@ reproduction: >-
   saw "unavailable right now"; the only trace was a WARN in the
   llama-server log (.agents/memory-local/prod-state-post-upgrade-20260823.md).
 analysis_ref: docs/plan/m1/tick-analysis/chat-context-budget-and-serving-defaults.md
+clarity_check: >-
+  start 2026-08-24 pass — tick-lint 0 findings; every file:line citation
+  re-verified in-tree (LlmHttpSupport non-2xx :235-246 + redaction comment
+  :236-239 + streaming twin :332-337; ChatAgent catch :399-422, /stop guard
+  :415-417, collectPostUids :981 vs fitWithinBudget :999, collectPostUids
+  impl :1242; en.properties:612; BundleKeys :1542); blocked_by M1-918 done
+  (HEAD 80797c15) and its added tests traced — ChatPromptBudgetTest is
+  builder-seam only; the ChatAgentTest fold-back drive asserts prompt shape,
+  not provenance, so the collect-after-fit move leaves it green; the
+  unavailable-path drives gate on unreachable/generic failures the new arm
+  does not intercept. No §Census (multi-file diff). Analysis P15/P16/P17 all
+  present in the ticket. One implementer's-choice note (no user input
+  needed): the catch arm learns the turn estimate via a per-turn carrier from
+  doHandle (the compaction report is doHandle-local), first-call report per
+  acceptance wording.
 blocked_by:
   - M1-918
 files_scope:
@@ -41,6 +58,8 @@ files_scope:
   - docs/spec/security.md
   - docs/spec/commands.md
   - docs/design/05-llm-and-embeddings.md
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/translation/IngestTranslationWorkerIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval/ReEvalVerdictNotifyIT.java
 complexity: medium
 risk: medium
 round_cap: 2
@@ -83,6 +102,7 @@ acceptance:
   - "BUNDLE KEY SETS (D43): error.chat.prompt_exceeded lands in ALL FIVE bundles (en/cs/es/ru/tr) with owner-reviewed wording that NAMES the cause (the conversation grew past the model's context; suggest /clear or /compress) — BundleLoaderTest's key-set check passes unchanged."
   - "SPEC AMENDMENT rides the diff (analysis P16; engineering-rules §12 — exact wording to the user at implementation; rule-text drafts in Approach): docs/spec/security.md §Failure handling's chat-mode bullet gains the prompt-exceeds-context degrade as a distinct named localized notice (separate from the generic unavailable) with a throttled operator notification; docs/spec/commands.md §Chat mode's degrade enumeration (the no-provenance-notice list at :1837-1838) gains the new degrade kind — number-free, no dates/IDs. Probe: grep -n 'prompt' docs/spec/security.md returns the §Failure handling mention."
   - "DOCS: docs/design/05-llm-and-embeddings.md §5.4.6 records the named-notice posture, the under-budget gate, and the error class. Probe: git diff --stat docs/ shows exactly docs/spec/security.md, docs/spec/commands.md, docs/design/05-llm-and-embeddings.md."
+  - "SUITE DETERMINISM (r1 verify hurdle, user decision 2026-08-24: fix in this ticket — escalate-refine): ReEvalVerdictNotifyIT and IngestTranslationWorkerIT begin each test from an empty post table, so their batch-limited pickups (eval-stage max-concurrency 4; translation enumeratePending LIMIT 64) cannot be starved by other classes' leftover posts that a class-pinned Clock makes visible — the order-dependent starvation that failed the 2026-08-24 r1 verify (entity-stage starvation left the pipeline post RAW; 64+ pending leftovers pushed the seeded posts out of the translation pickup) regardless of surefire class order. Probe: grep -E 'Tests run: (15|4), Failures: 0' target/tick-test-M1-923-r1.log shows IngestTranslationWorkerIT and ReEvalVerdictNotifyIT green in the full-suite run that previously failed them."
   - "DECIDE-BEFORE FOLD-IN (M1-918 r2 review, relayed 2026-08-23; user decision 2026-08-23: fix here, not spec-sanction): grounding accounting matches what the prompt actually carries — collectPostUids runs on the FULL tool result while fitWithinBudget admits whole entries only (M1-918's r1 fold code, ChatAgent.java:981 vs :999 in its worktree), so a result truncated to zero entries still yields 'grounded in N posts' for posts the model never saw. ChatAgentPromptExceededTest.truncatedToZeroFoldBackClaimsNoGrounding (test_plan.adds) passes — zero admitted entries yields the ungrounded wording, never a grounding claim; partial admission names only the admitted count (collect after the fit or count admitted entries — implementer's choice, the assertion is the observed claim)."
   - "mvn verify from repo root is green (engineering-rules §5)."
 test_plan:
@@ -99,6 +119,29 @@ spec_refs:
 decision_refs:
   - D37
   - D43
+reviews:
+  - round: 1
+    date: 2026-08-24
+    verdict: REWORK
+    checks:
+      SPEC-TRUTHNESS-CHECK: FAIL
+      SECURITY-CHECK: PASS
+      TEST-ADEQUACY-CHECK: WARN
+      MAINTAINABILITY-CHECK: PASS
+      SCOPE-CHECK: PASS
+    diff_stats: "27 files, +785/-54"
+    verdict_file: .scratch/tick-review-M1-923-r1.txt
+  - round: 2
+    date: 2026-08-24
+    verdict: APPROVE
+    checks:
+      SPEC-TRUTHNESS-CHECK: PASS
+      SECURITY-CHECK: PASS
+      TEST-ADEQUACY-CHECK: NOT-APPLICABLE
+      MAINTAINABILITY-CHECK: PASS
+      SCOPE-CHECK: PASS
+    diff_stats: "fix hunks: 2 files, +47/-9"
+    verdict_file: .scratch/tick-review-M1-923-r2.txt
 ---
 
 # M1-923: Named chat notice + operator signal on prompt-exceeds-context
@@ -119,6 +162,25 @@ Folded in by user decision 2026-08-23 (M1-918 r2 review DECIDE-BEFORE,
 relayed 2026-08-23): the fold-back grounding over-claim — the tool-loop
 provenance counts entries the budget then truncates away — is fixed
 HERE (acceptance item 10, approach shape 4), not spec-sanctioned.
+
+Folded in by user decision 2026-08-24 (r1 verify hurdle, escalate-refine):
+the r1 `mvn verify` failed on TWO collector ITs outside this ticket's
+original scope — ReEvalVerdictNotifyIT and IngestTranslationWorkerIT —
+with the diff exonerated (both classes pass in isolation on the identical
+tree; the diff touches no collector code). Root cause: an order-dependent
+cross-class flake. Every IT seeds posts at fixed past fetched_at values
+and cleans only its OWN uid prefix, so leftover posts accumulate in the
+shared Dev Services DB; a class-pinned Clock (QuarkusMock) makes them
+visible to later classes' scan-window pickups, and the batch-limited
+pickup (stage max-concurrency 4 / translation LIMIT 64, ORDER BY
+fetched_at) sorts the older leftovers ahead of the class's own seeded
+rows, starving them (entity stage starved → pipeline post stuck RAW;
+64+ pending leftovers → seeded posts outside the translation pickup).
+The class order flipped when M1-915 changed the test-class set
+(surefire filesystem order): green at the M1-918 merge verify (worktree
+order), red here (main-repo order). Fix: both victim classes wipe the
+entire post table in per-test setup — safe (no FK or trigger references
+post; each class seeds everything it reads; single-threaded suite).
 
 ## Root cause
 
@@ -252,12 +314,52 @@ design note land; `mvn verify` green from the repo root.
 Named in `out_of_scope`: the ladder (M1-918), any retry surface, body
 propagation, a new AuditAction/migration (the throttled notifier covers
 the operator signal), breaker reclassification, and non-chat endpoints'
-non-2xx handling. No pre-existing test is modified (§8): the unavailable
-arm's drives must pass unchanged — if one genuinely conflicts, escalate
-rather than edit.
+non-2xx handling. The unavailable arm's drives must pass unchanged — if
+one genuinely conflicts, escalate rather than edit. §8 authorization for
+the mechanical seam this ticket's operator signal requires: the ChatAgent
+constructor gains a ThrottledAdminNotifier parameter, so each of nine
+pre-existing test classes gains exactly ONE `null` constructor argument
+and zero assertion changes — ChatAgentAuditActorTest,
+ChatAgentProvenanceTest, ChatAgentRefusalInterceptTest,
+ChatAgentRefusalInterceptionTest, ChatAgentReplyLanguageTest,
+ChatAgentReplyModeTest, ChatAgentTest,
+InboundRouterChatProvenanceTest, StageProgressNotifierLiveTextTest
+(r1 review REWORK item 2 recorded this authorization; all nine pass in
+the green r1 log).
 
 ## Pre-flight self-check (author-side)
 
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-923-chat-prompt-exceeded-named-refusal.md
 ```
+
+## Round 1 rework
+
+Items from .scratch/tick-review-M1-923-r1.txt (recorded condensed per the
+M1-914 precedent; the verdict file holds the full text):
+
+1. Finding 1 (SPEC-TRUTHNESS): restore the recorded user-approved wording
+   verbatim in docs/spec/security.md §Failure handling — delete the inserted
+   "instead", delete the inserted error-class clause, restore "the estimated
+   size" in place of "the estimated prompt size". Evaluated via
+   `sed -n '/When the chat backend rejects a turn because/,/configured budget\./p' docs/spec/security.md | tr -s ' \n' ' ' | grep -c '<approved sentence>'`
+   → 1 (and `grep -c 'instead receives'` through the same pipeline → 0).
+2. Finding 2 (TEST-ADEQUACY): add the §8 authorization to the ticket body
+   naming the nine seam-modified test classes (one null ThrottledAdminNotifier
+   argument each, assertions unchanged) and correct the falsified §8 claim
+   that pre-existing tests stay unmodified. Evaluated via
+   `grep -c '<that falsified claim>' <ticket>` → 0 and
+   `grep -ci 'ThrottledAdminNotifier' <ticket>` → ≥ 2.
+
+## Review observations
+
+From the r1 verdict's RECOMMENDED-NEW-TICKET (TOUCHED-BY-THIS-DIFF: no; no
+DECIDE-BEFORE — recorded per review.md step 5, no decision requested; filing
+is the user's call): the cross-test starvation pattern this ticket's
+escalate-refine fixed in two victim classes is systemic — other collector ITs
+still seed posts at fixed past fetched_at values and clean only their OWN uid
+prefix in the shared Dev Services DB, while batch-limited pickups sort older
+leftovers ahead of a class's own seeded rows; any future change to the
+test-class set can flip surefire ordering and starve another class the same
+way. Durable shape: every IT that seeds posts starts each test from an empty
+post table (or the shared DB resets per class).

@@ -105,7 +105,10 @@ class ReEvalVerdictNotifyIT {
         stub().reset();
         try (Connection conn = dataSource.getConnection()) {
             exec(conn, "DELETE FROM quarantine WHERE post_uid LIKE ?", UID_PREFIX + "%");
-            exec(conn, "DELETE FROM post WHERE uid LIKE ?", UID_PREFIX + "%");
+            // Whole-post-table wipe, not this class's prefix: the driven
+            // stage ticks are batch-limited (oldest fetched_at first), and
+            // other classes' leftovers would steal the batch slots.
+            exec(conn, "DELETE FROM post");
         }
     }
 
