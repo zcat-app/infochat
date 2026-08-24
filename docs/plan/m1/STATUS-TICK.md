@@ -14,10 +14,10 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 134 |
+| done | 135 |
 | deferred | 1 |
 | abandoned | 5 |
-| **total** | **140** |
+| **total** | **141** |
 
 ---
 
@@ -61,6 +61,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-927 | Date and honestly frame the chat semantic grounding set | 2026-08-24 | round 1 APPROVE-WITH-FIXES |
 | M1-925 | Confirm the D-8 wedge on the real supervised simplex shape | 2026-08-24 | round 2 APPROVE-WITH-FIXES |
 | M1-924 | Isolate the embedded-DNS response field that wedges simplex-chat | 2026-08-24 | round 2 APPROVE |
 | M1-923 | Named chat notice + operator signal on prompt-exceeds-context | 2026-08-24 | round 2 APPROVE |
@@ -70,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-909 | Wizard GPU-class spec-decode head delivery + clone recovery | 2026-08-24 | round 2 APPROVE-WITH-FIXES |
 | M1-918 | Chat prompt token budget + deterministic compaction ladder | 2026-08-23 | round 2 APPROVE |
 | M1-917 | Widen and diversity-cap the semanticSearch window | 2026-08-23 | round 1 APPROVE |
-| M1-916 | Route temporal/top-news chat intents to searchPosts | 2026-08-23 | round 1 APPROVE |
 
 ---
 
@@ -265,5 +265,8 @@ M1-918 (done)
 M1-919 (done)
   └── M1-911 (deferred)
 M1-924 (done)
+  └── M1-926 (abandoned)
 M1-925 (done)
+  └── M1-926 (abandoned) [see above]
+M1-927 (done)
 ```

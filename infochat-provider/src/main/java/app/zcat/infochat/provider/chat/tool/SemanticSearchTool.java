@@ -222,7 +222,7 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
         // order), and the window selection below is cap-then-fill over
         // those same ranks only, so same DB state -> same set/order (D19).
         final String sql =
-            "SELECT uid, title, url, distance "
+            "SELECT uid, title, url, ready_at, distance "
                 + "  FROM ( "
                 + "    SELECT fused.*, "
                 + "           ROW_NUMBER() OVER "
@@ -234,6 +234,7 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
                 + "           COALESCE(s.uid, l.uid) AS uid, "
                 + "           COALESCE(s.title, l.title) AS title, "
                 + "           COALESCE(s.url, l.url) AS url, "
+                + "           COALESCE(s.ready_at, l.ready_at) AS ready_at, "
                 + "           s.distance AS distance, "
                 + "           COALESCE(1.0 / (" + RRF_K + " + s.arm_rank), 0) "
                 + "             + COALESCE(1.0 / (" + RRF_K + " + l.arm_rank), 0) AS fused_score, "
@@ -242,7 +243,7 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
                 + "        SELECT hits.*, ROW_NUMBER() OVER "
                 + "               (ORDER BY distance ASC, post_id ASC) AS arm_rank "
                 + "          FROM ( "
-                + "            SELECT p.uid, p.title, p.url, p.source_id, pe.post_id AS post_id, "
+                + "            SELECT p.uid, p.title, p.url, p.ready_at, p.source_id, pe.post_id AS post_id, "
                 + "                   (pe.embedding <=> ?::vector) AS distance "
                 + "              FROM post_embedding pe "
                 + "              JOIN post p ON p.id = pe.post_id "
@@ -257,7 +258,7 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
                 + "        SELECT lhits.*, ROW_NUMBER() OVER "
                 + "               (ORDER BY lex_score DESC, post_id ASC) AS arm_rank "
                 + "          FROM ( "
-                + "            SELECT p.uid, p.title, p.url, p.source_id, p.id AS post_id, "
+                + "            SELECT p.uid, p.title, p.url, p.ready_at, p.source_id, p.id AS post_id, "
                 + "                   ts_rank(p.search_tsv, "
                 + "                           plainto_tsquery('english', ?)) AS lex_score "
                 + "              FROM post p "
@@ -314,6 +315,9 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
                     entry.append("{\"uid\":").append(SearchPostsTool.jsonStr(rs.getString("uid")))
                          .append(",\"title\":").append(SearchPostsTool.jsonStr(rs.getString("title")))
                          .append(",\"url\":").append(SearchPostsTool.jsonStr(rs.getString("url")))
+                         .append(",\"ready_at\":")
+                         .append(SearchPostsTool.jsonStr(
+                                 SearchPostsTool.instantStr(rs.getTimestamp("ready_at"))))
                          .append(",\"similarity\":").append(similarity)
                          .append('}');
                     int entryBytes = entry.toString()

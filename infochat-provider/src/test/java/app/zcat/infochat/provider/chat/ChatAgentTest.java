@@ -810,6 +810,41 @@ class ChatAgentTest {
                         + "the UNTRUSTED_CONTENT wrapper");
     }
 
+    // Reproduction (M1-927): an unwindowed grounding set must disclose its
+    // framing and carry dates, or week-old posts get labeled "recent" (the
+    // observed failure). Boundary: the first-call user prompt.
+    @Test
+    void preFetchBlockDisclosesItIsNotTimeFiltered() {
+        String datedEntries =
+                "[{\"uid\":\"sp-1\",\"title\":\"Chip fab story\","
+                        + "\"url\":\"https://example.test/sp-1\","
+                        + "\"ready_at\":\"2026-08-17T19:39:00Z\",\"similarity\":0.91}]";
+        semanticSearchResult = datedEntries;
+        llmProvider.responses.add(new LlmResponse("Grounded answer."));
+
+        agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "what happened in tech news "
+                + "in the last 2 hours?");
+
+        String firstCall = llmProvider.lastUserPrompt;
+        assertTrue(firstCall.contains("matched by topic similarity only, not filtered by time"),
+                "the pre-fetch header must disclose that the set is not time-filtered; "
+                        + "prompt: " + firstCall);
+        assertTrue(firstCall.contains("they may be of any age"),
+                "the pre-fetch header must say the posts may be of any age; "
+                        + "prompt: " + firstCall);
+        assertTrue(firstCall.contains("ready_at says when it became readable"),
+                "the pre-fetch header must define ready_at as became-readable, "
+                        + "never published; prompt: " + firstCall);
+        int open = firstCall.indexOf("<<<UNTRUSTED_CONTENT id=\"");
+        int json = firstCall.indexOf(datedEntries);
+        int close = firstCall.indexOf("<<<END id=\"");
+        assertTrue(json >= 0,
+                "the tool's JSON bytes must be folded verbatim, dated entries "
+                        + "included; prompt: " + firstCall);
+        assertTrue(open >= 0 && open < json && json < close,
+                "the dated JSON must sit inside the UNTRUSTED_CONTENT wrapper");
+    }
+
     @Test
     void emptySemanticResultFoldsNoRetrievalBlock() {
         // Default stub result "[]" = nothing under the distance threshold.

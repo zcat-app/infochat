@@ -894,7 +894,9 @@ public class ChatAgent {
         boolean marginal = isMarginalGrounding(success.content(), CONFIDENT_SIMILARITY_CUTOFF);
         String marker = UUID.randomUUID().toString();
         String block = "\n\nPosts from the user's subscribed feed semantically related "
-                + "to their message:\n"
+                + "to their message — matched by topic similarity only, not "
+                + "filtered by time: they may be of any age, and each post's "
+                + "ready_at says when it became readable:\n"
                 + String.format(ChatPromptBuilder.UNTRUSTED_CONTENT_OPEN_FORMAT, marker)
                 + "\n" + success.content() + "\n"
                 + String.format(ChatPromptBuilder.UNTRUSTED_CONTENT_CLOSE_FORMAT, marker);

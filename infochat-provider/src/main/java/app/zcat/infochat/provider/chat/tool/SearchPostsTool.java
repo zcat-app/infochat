@@ -255,7 +255,7 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
         sb.append(']');
     }
 
-    private static @Nullable String instantStr(@Nullable Timestamp ts) {
+    static @Nullable String instantStr(@Nullable Timestamp ts) {
         return ts == null ? null : ts.toInstant().toString();
     }
 }

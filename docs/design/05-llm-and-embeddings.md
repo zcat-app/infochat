@@ -599,7 +599,10 @@ post ever surfaces (isolation holds), but the density-signal freedom is an
 HNSW property; an `ivfflat` profile would need to re-establish it (or accept
 the coarse density side channel) when that design is un-deferred. A non-empty
 result is folded into the
-prompt inside the same `UNTRUSTED_CONTENT` wrapper as in-loop tool results.
+prompt inside the same `UNTRUSTED_CONTENT` wrapper as in-loop tool results;
+the fold's deterministic header discloses what the set is — posts matched by
+topic similarity only, never filtered or ordered by time, possibly of any
+age, with each entry's `ready_at` saying when the post became readable.
 `infochat.chat.semantic-threshold` (cosine distance, default 0.40 —
 calibrated against the live corpus; deliberately a separate key from
 `infochat.linking.semantic-threshold`, whose 0.18 gates the different
@@ -608,8 +611,9 @@ grounding-vs-general-knowledge: nothing under the threshold → empty result →
 the model answers from general knowledge. `infochat.chat.semantic-limit`
 (default 16) sizes the grounded set. The retrieved set and its order are
 SQL-decided (D19, strict_order + a distance/post_id re-sort keep it exactly
-deterministic); the result carries `uid/title/url/similarity`, never a raw
-vector (D5). The tool is also model-callable mid-loop for refined queries
+deterministic); the result carries `uid/title/url/ready_at/similarity`, never a raw
+vector (D5) — the `ready_at` is the same READY-transition timestamp
+`searchPosts` emits, so the model can date what it serves. The tool is also model-callable mid-loop for refined queries
 (registry row in security.md §Prompt-injection defenses); the deterministic
 pre-fetch and the loop share ONE per-turn dispatch context, so the fixed
 call cap and identical-call cache hold across the whole turn.
@@ -659,11 +663,14 @@ and the window truncates at `limit`. K =
 with total tie-breaks — so same DB state → same set, same order (D19);
 when no source exceeds K among the surviving rows the pass is provably
 inert and renders the plain `fused_score DESC, post_id ASC LIMIT limit`
-order byte-for-byte. Emission shape is unchanged
-(`uid/title/url/similarity`); a **lexical-only row emits
-`"similarity":null`** — such a post may have NO `post_embedding` row at
+order byte-for-byte. Emission shape carries each entry's
+`ready_at` between `url` and `similarity`
+(`uid/title/url/ready_at/similarity`); a **lexical-only row emits
+`"similarity":null` and still carries its `ready_at`** — such a post may
+have NO `post_embedding` row at
 all (embedding-failure posts are released without a vector), so a number
-would be fabricated. A single-arm result degrades to that arm's own order
+would be fabricated, but its date never depends on one. A single-arm
+result degrades to that arm's own order
 (RRF over one list is order-preserving), which is why the semantic-only
 behaviour and its tests are unchanged. LLM-in-the-retrieval-loop
 alternatives (query rewriting, HyDE, LLM/cross-encoder re-ranking) are
@@ -676,7 +683,11 @@ additionally blocked by the CPU-only posture.
 +1.6–3.2 KB ≈ +400–800 tokens per retrieval injection (~4 chars/token);
 the worst case, 16 × 400 B ≈ 6.4 KB, stays well under the aggregate
 16 KiB `MAX_RESULT_BYTES` budget (that cap binds only near ~40 entries)
-with order-preserving tail truncation unchanged. Against the shipped
+with order-preserving tail truncation unchanged. The dated emission adds
+an ISO-8601 `ready_at` per entry (~26 bytes), moving the worst case to
+≈ 6.8 KB — still far under the cap; truncation stays order-preserving at
+the tail, so an entry dropped by budget drops with its date. Against the
+shipped
 wizard serving slot this narrows the context fit margin until the
 chat-context-budget work lands — recorded here as an inherited cost,
 weighed and accepted by the owner at ticket time.

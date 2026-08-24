@@ -259,10 +259,49 @@ class SemanticSearchToolIT {
 
         assertTrue(json.matches(
                 "\\[\\{\"uid\":\"[^\"]*\",\"title\":\"[^\"]*\",\"url\":\"[^\"]*\","
-                        + "\"similarity\":[0-9.]+\\}\\]"),
-                "each entry must carry exactly uid/title/url/similarity; got: " + json);
+                        + "\"ready_at\":\"[^\"]*\",\"similarity\":[0-9.]+\\}\\]"),
+                "each entry must carry exactly uid/title/url/ready_at/similarity; got: " + json);
         assertFalse(json.contains("embedding"),
                 "the raw embedding vector must never be emitted (D5); got: " + json);
+    }
+
+    // Reproduction (M1-927): every emitted entry must carry its post's
+    // ready_at between url and similarity — per-entry equality against
+    // DISTINCT seeded instants catches a dropped or misdated field.
+    @Test
+    void entriesCarryReadyAtSoTheModelCanDateWhatItServes() throws Exception {
+        UUID userId = seedUser("dated");
+        UUID sourceId = seedSource("dated-src", "Dated source");
+        seedSubscription("dm", userId, sourceId);
+        Instant olderReady = Instant.parse("2026-05-01T09:15:00Z");
+        Instant newerReady = Instant.parse("2026-05-20T18:45:30Z");
+        seedEmbeddedPostReadyAt("dated-old", sourceId, vectorAtAngle(0.2), olderReady);
+        seedEmbeddedPostReadyAt("dated-new", sourceId, vectorAtAngle(0.9), newerReady);
+
+        String json = tool.execute(userId, "dm", userId, Map.of("query", "anything"));
+
+        String oldEntry = entryContaining(json, PREFIX + "dated-old");
+        assertTrue(oldEntry.matches(
+                        "\\{\"uid\":\"[^\"]*\",\"title\":\"[^\"]*\",\"url\":\"[^\"]*\","
+                                + "\"ready_at\":\"" + olderReady + "\","
+                                + "\"similarity\":[0-9.]+\\}"),
+                "the dated-old entry must carry exactly its seeded ready_at "
+                        + "between url and similarity; got: " + oldEntry);
+        String newEntry = entryContaining(json, PREFIX + "dated-new");
+        assertTrue(newEntry.matches(
+                        "\\{\"uid\":\"[^\"]*\",\"title\":\"[^\"]*\",\"url\":\"[^\"]*\","
+                                + "\"ready_at\":\"" + newerReady + "\","
+                                + "\"similarity\":[0-9.]+\\}"),
+                "the dated-new entry must carry exactly its seeded ready_at "
+                        + "between url and similarity; got: " + newEntry);
+    }
+
+    // The '{'-to-'}' span around a uid occurrence — entries are flat JSON
+    // objects, so the nearest braces bound the whole entry.
+    private static String entryContaining(String json, String uid) {
+        int at = json.indexOf(uid);
+        assertTrue(at >= 0, "no entry for " + uid + " in: " + json);
+        return json.substring(json.lastIndexOf('{', at), json.indexOf('}', at) + 1);
     }
 
     // Boundary validation: a missing/blank query rejects before any embed
@@ -320,6 +359,12 @@ class SemanticSearchToolIT {
 
     /** READY post + its embedding row, sharing FETCHED_AT so both land in the May 2026 partitions. */
     private void seedEmbeddedPost(String slug, UUID sourceId, float[] embedding) throws Exception {
+        seedEmbeddedPostReadyAt(slug, sourceId, embedding, FETCHED_AT);
+    }
+
+    /** Same, with the post's own READY-transition instant (M1-927 dating fixture). */
+    private void seedEmbeddedPostReadyAt(String slug, UUID sourceId, float[] embedding,
+                                         Instant readyAt) throws Exception {
         UUID postId;
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
@@ -333,7 +378,7 @@ class SemanticSearchToolIT {
             ps.setString(5, "https://example.com/" + slug);
             ps.setTimestamp(6, Timestamp.from(FETCHED_AT));
             ps.setTimestamp(7, Timestamp.from(FETCHED_AT));
-            ps.setTimestamp(8, Timestamp.from(FETCHED_AT));
+            ps.setTimestamp(8, Timestamp.from(readyAt));
             ps.setString(9, PREFIX + slug);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();

@@ -335,39 +335,44 @@ class SemanticSearchToolDiversityIT {
         };
     }
 
+    // Every fitting-window post seeds READY at FETCHED_AT, so each golden
+    // entry carries that instant between url and similarity — derived from
+    // the seeding constant, never free-typed.
+    private static final String GOLDEN_READY_AT = ",\"ready_at\":\"" + FETCHED_AT + "\"";
+
     private static final String GOLDEN_FITTING_JSON =
             "[{\"uid\":\"diversity-search-test/g-fit-0\",\"title\":\"Alpha beta gamma digest 0\","
-            + "\"url\":\"https://example.com/g-fit-0\",\"similarity\":0.99875027},"
+            + "\"url\":\"https://example.com/g-fit-0\"" + GOLDEN_READY_AT + ",\"similarity\":0.99875027},"
             + "{\"uid\":\"diversity-search-test/g-fit-3\",\"title\":\"Alpha beta gamma digest 3\","
-            + "\"url\":\"https://example.com/g-fit-3\",\"similarity\":0.99820054},"
+            + "\"url\":\"https://example.com/g-fit-3\"" + GOLDEN_READY_AT + ",\"similarity\":0.99820054},"
             + "{\"uid\":\"diversity-search-test/g-fit-6\",\"title\":\"Alpha beta gamma digest 6\","
-            + "\"url\":\"https://example.com/g-fit-6\",\"similarity\":0.99755096},"
+            + "\"url\":\"https://example.com/g-fit-6\"" + GOLDEN_READY_AT + ",\"similarity\":0.99755096},"
             + "{\"uid\":\"diversity-search-test/g-fit-9\",\"title\":\"Alpha beta gamma digest 9\","
-            + "\"url\":\"https://example.com/g-fit-9\",\"similarity\":0.9968017},"
+            + "\"url\":\"https://example.com/g-fit-9\"" + GOLDEN_READY_AT + ",\"similarity\":0.9968017},"
             + "{\"uid\":\"diversity-search-test/g-fit-12\",\"title\":\"Alpha beta gamma digest 12\","
-            + "\"url\":\"https://example.com/g-fit-12\",\"similarity\":0.9959527},"
+            + "\"url\":\"https://example.com/g-fit-12\"" + GOLDEN_READY_AT + ",\"similarity\":0.9959527},"
             + "{\"uid\":\"diversity-search-test/h-fit-1\",\"title\":\"Alpha beta gamma digest 1\","
-            + "\"url\":\"https://example.com/h-fit-1\",\"similarity\":0.9950042},"
+            + "\"url\":\"https://example.com/h-fit-1\"" + GOLDEN_READY_AT + ",\"similarity\":0.9950042},"
             + "{\"uid\":\"diversity-search-test/h-fit-4\",\"title\":\"Alpha beta gamma digest 4\","
-            + "\"url\":\"https://example.com/h-fit-4\",\"similarity\":0.9939561},"
+            + "\"url\":\"https://example.com/h-fit-4\"" + GOLDEN_READY_AT + ",\"similarity\":0.9939561},"
             + "{\"uid\":\"diversity-search-test/h-fit-7\",\"title\":\"Alpha beta gamma digest 7\","
-            + "\"url\":\"https://example.com/h-fit-7\",\"similarity\":0.99280864},"
+            + "\"url\":\"https://example.com/h-fit-7\"" + GOLDEN_READY_AT + ",\"similarity\":0.99280864},"
             + "{\"uid\":\"diversity-search-test/h-fit-10\",\"title\":\"Alpha beta gamma digest 10\","
-            + "\"url\":\"https://example.com/h-fit-10\",\"similarity\":0.9915619},"
+            + "\"url\":\"https://example.com/h-fit-10\"" + GOLDEN_READY_AT + ",\"similarity\":0.9915619},"
             + "{\"uid\":\"diversity-search-test/h-fit-13\",\"title\":\"Alpha beta gamma digest 13\","
-            + "\"url\":\"https://example.com/h-fit-13\",\"similarity\":0.990216},"
+            + "\"url\":\"https://example.com/h-fit-13\"" + GOLDEN_READY_AT + ",\"similarity\":0.990216},"
             + "{\"uid\":\"diversity-search-test/j-fit-2\",\"title\":\"Alpha beta gamma digest 2\","
-            + "\"url\":\"https://example.com/j-fit-2\",\"similarity\":0.9887711},"
+            + "\"url\":\"https://example.com/j-fit-2\"" + GOLDEN_READY_AT + ",\"similarity\":0.9887711},"
             + "{\"uid\":\"diversity-search-test/j-fit-5\",\"title\":\"Alpha beta gamma digest 5\","
-            + "\"url\":\"https://example.com/j-fit-5\",\"similarity\":0.98722726},"
+            + "\"url\":\"https://example.com/j-fit-5\"" + GOLDEN_READY_AT + ",\"similarity\":0.98722726},"
             + "{\"uid\":\"diversity-search-test/j-fit-8\",\"title\":\"Alpha beta gamma digest 8\","
-            + "\"url\":\"https://example.com/j-fit-8\",\"similarity\":0.9855848},"
+            + "\"url\":\"https://example.com/j-fit-8\"" + GOLDEN_READY_AT + ",\"similarity\":0.9855848},"
             + "{\"uid\":\"diversity-search-test/j-fit-11\",\"title\":\"Alpha beta gamma digest 11\","
-            + "\"url\":\"https://example.com/j-fit-11\",\"similarity\":0.9838437},"
+            + "\"url\":\"https://example.com/j-fit-11\"" + GOLDEN_READY_AT + ",\"similarity\":0.9838437},"
             + "{\"uid\":\"diversity-search-test/j-fit-14\",\"title\":\"Alpha beta gamma digest 14\","
-            + "\"url\":\"https://example.com/j-fit-14\",\"similarity\":0.9820042},"
+            + "\"url\":\"https://example.com/j-fit-14\"" + GOLDEN_READY_AT + ",\"similarity\":0.9820042},"
             + "{\"uid\":\"diversity-search-test/g-fit-15\",\"title\":\"Alpha beta gamma digest 15\","
-            + "\"url\":\"https://example.com/g-fit-15\",\"similarity\":0.9800666}]";
+            + "\"url\":\"https://example.com/g-fit-15\"" + GOLDEN_READY_AT + ",\"similarity\":0.9800666}]";
 
     private List<String> extractUids(String json) {
         List<String> uids = new ArrayList<>();

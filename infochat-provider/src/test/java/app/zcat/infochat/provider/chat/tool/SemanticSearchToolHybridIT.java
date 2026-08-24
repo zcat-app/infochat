@@ -209,6 +209,12 @@ class SemanticSearchToolHybridIT {
         assertTrue(json.contains("\"similarity\":null"),
                 "a row the semantic arm did not return carries similarity null, "
                         + "never a fabricated number; got: " + json);
+        // The single returned entry IS the lexical-only row: its seeded
+        // READY-transition instant must still render — a null similarity
+        // never costs the post its date.
+        assertTrue(json.contains("\"ready_at\":\"" + FETCHED_AT + "\""),
+                "the lexical-only entry must carry its post's ready_at even with "
+                        + "similarity null; got: " + json);
     }
 
     // Acceptance (D19 determinism): same DB state -> byte-identical fused

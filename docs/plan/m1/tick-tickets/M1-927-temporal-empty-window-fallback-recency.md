@@ -1,16 +1,16 @@
 ---
 id: M1-927
 title: "Date and honestly frame the chat semantic grounding set"
-status: pending
+status: done
 created: 2026-08-24
 last_updated: 2026-08-24
 flow: tick
 reproduction: >-
   SemanticSearchToolIT.entriesCarryReadyAtSoTheModelCanDateWhatItServes
-  (to-be-written — the marker converts at /tick start per workflow §0:
-  written first, run RED) and
-  ChatAgentTest.preFetchBlockDisclosesItIsNotTimeFiltered (to-be-written,
-  same conversion) — both state today's wrong behavior: (1) a seeded
+  and
+  ChatAgentTest.preFetchBlockDisclosesItIsNotTimeFiltered (both written
+  at start and run RED against the unmodified code before any fix code) —
+  both state today's wrong behavior: (1) a seeded
   semanticSearch result emits entries of exactly {uid, title, url,
   similarity} with NO date field (verified in-tree: the fused SELECT is
   `SELECT uid, title, url, distance` at SemanticSearchTool.java:225 and
@@ -149,7 +149,14 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-24
+    verdict: APPROVE-WITH-FIXES
+    checks: {SPEC-TRUTHNESS: WARN, SECURITY: PASS, TEST-ADEQUACY: PASS, MAINTAINABILITY: PASS, SCOPE: PASS}
+    diff_stats: "11 files, 152 insertions(+), 42 deletions(-) vs merge-base d8a0f3da"
+    fix_probes: "approval-record grep 'Each entry carries the post's' = 2 (>=1) in .scratch/tick-mech-M1-927-r1.txt addendum; git diff vs reviewed tree 21373f42 = empty (identity held); ./mvnw -B -pl infochat-provider -am test-compile = BUILD SUCCESS (.scratch/tick-fixes-compile-M1-927.log)"
+    fix_applied: "Finding 1 (low, SPEC-TRUTHNESS): user approved the exact landed security.md:329 wording via driver prompt ('Approve as landed', 2026-08-24); recorded in .scratch/tick-mech-M1-927-r1.txt addendum; zero file edits"
 overrides: []
 aborted_attempts: []
 reopens: []
@@ -479,6 +486,22 @@ date but that carries no date". Enumerated over the closed tool surface
 | `getReferences` emission (spec row security.md:331) | NONE | defer — model-initiated-only (never pre-fetch), unobserved in the V4 evidence; its own ticket if live evidence shows the same mislabel |
 | `listSaves` (security.md:333) | `saved_at` | unchanged |
 | `recallMemory` (security.md:332) | `compressed_at` | unchanged (not feed grounding) |
+
+## Review observations
+
+Recorded from the round-1 gate verdict (2026-08-24) — observations only, no
+tickets filed (filing is the owner's call in every case):
+
+- `getReferences` still emits `{uid, title, url, link_type, score}` with no
+  date — the same defect class this ticket fixes for semanticSearch, on a
+  model-initiated-only surface. The §Census already disposes this as
+  defer-with-trigger ("its own ticket if live evidence shows the same
+  mislabel").
+- The pre-existing design-05 §5.4.6 quoted-prompt drift
+  (docs/design/05-llm-and-embeddings.md:524-541 quotes rules the shipped
+  ChatPromptBuilder template lacks, e.g. "fall back to summarizing what you
+  have") remains unreconciled — already NOTED in this ticket's out_of_scope;
+  wholesale reconciliation is its own doc change.
 
 ## Pre-flight self-check (author-side)
 
