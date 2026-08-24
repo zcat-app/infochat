@@ -5,12 +5,21 @@ metadata:
   type: project
 ---
 
-Rootless docker publishes container ports from an internal allocator whose
-band is effectively fixed at the 40000-60999 half of the default
-32768-60999 ephemeral range. When the HOST kernel hands outbound sockets
-(test JVMs, prod stacks' connections, agent sessions, TIME-WAIT residue)
-from the same band, container publishes race those sockets and random
-integration tests die at container startup with:
+Rootless docker publishes container ports from an internal allocator that
+walks the default 32768-60999 ephemeral range upward, one step per
+publish. **2026-08-24 falsification of the earlier premise:** the draw
+band is NOT fixed at 40000-60999 — after a daemon restart the walk
+resets near 32768 and climbs with churn (measured 33078 → 33387 across
+one day of verifies on RootlessKit 3.0.2), so it re-enters ANY static
+host band in time; the 40000-band draws observed 2026-08-15 were the
+walker's position then, not a pinned band. The host-side split below
+still holds as the only live lever, but it only protects while the
+walker happens to be outside the host band — a quiet-window verify (the
+walker sparse, low host occupancy) is the practical pass condition; see
+the memory-local 2026-08-24 observation. When the HOST kernel hands
+outbound sockets (test JVMs, prod stacks' connections, agent sessions,
+TIME-WAIT residue) from the same band, container publishes race those
+sockets and random integration tests die at container startup with:
 
     RootlessKit PortManager.AddPort(): listen tcp4 0.0.0.0:<port>:
     bind: address already in use
@@ -67,6 +76,7 @@ docker port "$id" | head -1     # a 40000-band draw = publish band unchanged
 docker rm -f "$id" >/dev/null
 ```
 
-Healthy state: host `32768-39999`, docker draws 40000-band. Verify-start
+Healthy state: host `32768-39999` AND the probe's draw OUTSIDE that band
+(the draw position is transient — probe it, never assume it). Verify-start
 guard: `scripts/verify-serialized.sh` warns when the host band overlaps
 40000-60999 and prints the fix. Related: [[clean-verify-monitoring]].
