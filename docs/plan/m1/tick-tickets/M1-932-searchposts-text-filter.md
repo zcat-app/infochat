@@ -97,7 +97,7 @@ acceptance:
   - "Dispatcher boundary already bounds the new param (security.md §Prompt-injection defenses: every free-form string input length-capped before any SQL runs): ChatToolDispatcherTest.rejectsOversizedInput gains a searchPosts arm — an over-cap text (501 chars at the default infochat.chat.tool.input-max-length=500) returns a typed ValidationError naming the input, BEFORE any SQL executes; no new validation code is written in the tool (ChatToolDispatcher.validateValue recurses over every String arg, :221-255 — the arm pins that the param rides the existing cap)."
   - "Spec amendment rides the diff (engineering-rules §12 — the exact wording goes to the user for approval at implementation; rule-text drafts in the Approach; rides-the-diff shape, NOT a SPEC-GAP: the amendment records behavior the closed-tool-table discipline requires recording, and every existing promise of the row is preserved): docs/spec/security.md searchPosts row — Inputs column gains `text: string` (optional free text, length-capped), Notes gains the mechanism sentence (composes AND with tag/window/world; matches post.search_tsv via a parameter-bound to_tsquery('english', …) whose bound value carries ONLY sanitized terms as AND-joined prefix lexemes (term:* — qwen matches qwen/qwen2/qwen3; raw text never interpolated); temporal expressions route to window and text carries entity/topic terms only; never reorders — the COALESCE ordering and its bound unchanged; blank text is no filter) and the anchoring clause (a non-English declared /lang anchors the text to the corpus language under the same bounded exception as the semanticSearch query; en is a strict no-op; failure falls back to the raw text); §Rate limiting's query-anchoring bullet extends its leg enumeration to the searchPosts text filter; §Secrets handling's query-anchoring bullet names the searchPosts text leg — probes: `grep -n 'to_tsquery' docs/spec/security.md` returns the searchPosts row (the semanticSearch row keeps its own plainto_tsquery wording, untouched); `grep -n 'searchPosts text' docs/spec/security.md` returns the §Rate limiting mention."
   - "docs/design/05-llm-and-embeddings.md §5.4.6 synced: the searchPosts catalog-description paragraph records the text param, its keyword-narrowing role, and its temporal-to-window routing sentence, and the query-anchoring paragraph records that the searchPosts text leg anchors identically to the semanticSearch query leg — probe: `grep -n 'text filter' docs/design/05-llm-and-embeddings.md` returns the §5.4.6 mention."
-  - "OWNER-RUN live probe (verification ceiling, the M1-916/M1-927 posture — no unit test can prove the model uses the param; phrased owner-run with a recorded outcome, never claimed as a unit result): after landing, the owner re-asks the motivating question (\"What happened with qwen AI in the last day?\") on the test stack and captures the provider-log slice — the slice shows a searchPosts dispatch whose args carry a non-empty text field (a slice whose only searchPosts call carries no text FAILS); the reply's cited posts all match the text. The quantitative acceptance reference is the eval delta — M1-930's baseline (if already recorded) vs an owner-run post-landing harness re-run on the golden set's entity/topic classes (M1-928); the delta record goes to the measurement lane, not CI."
+  - "OWNER-RUN live probe (verification ceiling, the M1-916/M1-927 posture — no unit test can prove the model uses the param; phrased owner-run with a recorded outcome, never claimed as a unit result): after landing, the owner re-asks the motivating question (\"What happened with qwen AI in the last day?\") on the test stack and captures the provider-log slice — the slice shows a searchPosts dispatch whose args carry a non-empty text field (a slice whose only searchPosts call carries no text FAILS); the reply's cited posts all match the text. The quantitative acceptance reference is the owner-run log-slice probe above; a quantitative class-delta would need the eval lane's own searchPosts-side extension — M1-929's runner executes the semanticSearch fused path only and never dispatches searchPosts, so this filter cannot move a harness number as specced (the M1-938 posture; any harness extension is the eval lane's separately-decided follow-up)."
   - "mvn verify from the repo root is green (engineering-rules §5)."
   - "PREFIX-LEXEME match (P12, tokenizer conjoining — the stress-test miss): SearchPostsToolTest.textFilterMatchesPrefixLexemes passes — a post titled \"Qwen3-32B released\" (indexed lexemes qwen3, 32b — no bare qwen lexeme exists) IS returned by text=\"qwen\" (the bound value is `qwen:*`); seeded titles \"Qwen\", \"Qwen2\", \"Qwen2.5\" are returned by the same call; a bare-lexeme mutation (plainto_tsquery, no :*) returns ONLY the standalone-\"Qwen\" post and fails the arm."
   - "Version-discriminating AND composition (P12): SearchPostsToolTest.textFilterPrefixLexemesDiscriminateVersions passes — one fixture with a \"Qwen3-35B\" post and a \"Qwen 27B\" post; text=\"qwen 27B\" (bound `qwen:* & 27b:*`) returns EXACTLY the \"Qwen 27B\" uid and NOT the \"Qwen3-35B\" uid (`27b:*` does not prefix-match lexeme `35b`); an OR-widened assembly — the sanitization failure mode — returns both and fails."
@@ -191,10 +191,11 @@ searchPosts parameter. Revision round (user stress test, 2026-08-26, on
 so the match must be PREFIX-based (P12), and temporal words must route to
 `window`, never `text` (P13). This is topic 3 of the RAG campaign's (2,3,7) parallel
 batch; the eval's entity/topic classes (M1-928, whose entity-project examples
-are literally "qwen, monero/zcash") gain expected hits once this lands, and
-the baseline-vs-post-landing delta (M1-930) is this ticket's acceptance
-reference. Single-ticket analysis: `analysis_ref: self` — this body is the
-analysis.
+are literally "qwen, monero/zcash") gain expected hits once this lands (a
+quantitative delta needs the eval lane's own searchPosts-side extension —
+M1-929's runner never dispatches searchPosts; the owner-run probe is the
+live acceptance reference). Single-ticket analysis: `analysis_ref: self` —
+this body is the analysis.
 
 ## Root cause
 
@@ -203,9 +204,9 @@ Verified in-tree, end to end:
 1. **The tool reads three args.** `SearchPostsTool.execute()` consults
    exactly `tags`, `window`, `limit` (SearchPostsTool.java:66-71); the file
    read in full contains no other arg key and no reference to `search_tsv`.
-   `queryPosts` builds `WHERE status='READY' AND ready_at >= ? AND
-   <D59 world predicate> [AND tag expansion] ORDER BY COALESCE(published_at,
-   fetched_at) DESC, id DESC LIMIT ?` via a StringBuilder + ordered params
+   `queryPosts` builds    `WHERE p.status = 'READY' AND p.ready_at >= ? AND
+   <D59 world predicate> [AND tag expansion] ORDER BY COALESCE(p.published_at,
+   p.fetched_at) DESC, p.id DESC LIMIT ?` via a StringBuilder + ordered params
    list (:147-166) — the composition point a fourth predicate joins.
 2. **The spec contract matches the code.** The security.md:328 Inputs column
    is `tags: list<Tier-1 tag>`, `window: duration`, `limit: int ≤

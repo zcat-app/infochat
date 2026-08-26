@@ -81,7 +81,10 @@ out_of_scope:
   - >-
     Golden-set re-labeling and the eval re-run — M1-928/930 contracts;
     the entity/topic-class delta this ticket enables is owner-run
-    reference, never edited here.
+    reference, never edited here (note: M1-929's runner executes the
+    semanticSearch fused path only and never dispatches searchPosts — a
+    topics-filter delta requires the eval lane's own extension, the
+    M1-938 posture).
 acceptance:
   - "REPRODUCTION closed: SearchPostsToolTest.topicsFilterNarrowsWithinWindowToPostsMentioningTheTopic — the reproduction fixture above; topics=[\"czech\"] returns EXACTLY the two search_tags-carrying uids, and the companion arm with no topics arg returns all four (the compose discriminator: a mutation dropping the predicate fails the first arm, a mutation filtering unconditionally fails the second)."
   - "Tolerant matching semantics (analysis P10/P13): match = a canonical PREFIX relation — post qualifies iff ANY element of p.search_tags EQUALS the normalized value OR STARTS WITH it, implemented as EXISTS (SELECT 1 FROM unnest(p.search_tags) AS t WHERE t LIKE ? ESCAPE '\\') per value, OR-joined across the (≤ list cap) requested values; each bound parameter is the normalized value with %, _ and the escape character escaped, plus the code-appended trailing % — pinned by SearchPostsToolTest.prefixAndContainmentSemantics (seeds czechia, czech-republic, qwen3 posts; topics=[\"czech\"] returns both czech* posts and NOT qwen3)."

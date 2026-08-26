@@ -337,7 +337,7 @@ from the repo root.
   language authorization; item 2 pins the moved-in windowed header).
 - P2 → item 3 (args key set, header bytes, no-hint, unmodified identity
   arms, conditional-SQL diff check).
-- P4 → item 13 (no catalog diff; the four M1-916 markers green; grep
+- P4 → item 12 (no catalog diff; the four M1-916 markers green; grep
   probes).
 - P5 → item 8 (Prague/UTC discrimination; DM default; failure degrade).
 - P6 → item 4 (hostile unsubscribed + non-READY feeds; reviewer diff
@@ -347,7 +347,7 @@ from the repo root.
   generation; breaker-open zero/zero).
 - P10 → item 5 (no block, one windowed dispatch, hint present).
 - P11 → item 11b's enumeration + the fence probe.
-- P12 → item 3's no-hint arm + item 12's single-constant probe and
+- P12 → item 3's no-hint arm + item 13's single-constant probe and
   survival check.
 - P13 → disclosed (analysis P13); the unmodified cache pin is the evidence
   the parse-miss sharing still holds.

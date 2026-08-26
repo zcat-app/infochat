@@ -143,8 +143,11 @@ construction.
 
 ## Pitfalls
 
-Numbered per the analysis document; this ticket carries P1, P2, P3, P8, P9,
-P11, plus the fingerprint half of P7 and the world half of P10.
+Numbered per the analysis document; this ticket carries P1, P2, P3, P5
+(the scorer half: capped+raw recall and the |E|>k failure mode), P8, P9,
+P11, P12 (the scoring half: none_expected rows scored by over-return,
+never recall), P15 (prod isolation — no prod URL in any harness path),
+plus the fingerprint half of P7 and the world half of P10.
 
 - P1: approximation drift — run the production bean; disclose every residual
   divergence in the .bench README; never fork the SQL.

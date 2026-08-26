@@ -503,6 +503,13 @@ modifies EXACTLY four pre-existing tests, each §8-authorized in acceptance
 item 7 with its new expected behavior stated in plain language;
 every other pre-existing suite must pass unmodified.
 
+## Census
+
+Not class-scoped: one new tool joins an existing closed surface whose
+parity guards (ChatToolAllowlistSpecParityTest, ChatToolRegistryTest,
+ChatToolCatalogTest, the byte pin) enumerate the surface themselves; each
+is either preserved or §8-authorized in acceptance item 7.
+
 ## Pre-flight self-check (author-side)
 
 ```bash
