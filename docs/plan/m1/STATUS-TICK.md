@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 12 |
+| pending | 11 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 137 |
+| done | 138 |
 | deferred | 1 |
 | abandoned | 5 |
 | **total** | **155** |
@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-930 — Baseline retrieval-eval measurement record (complexity: low, risk: low)
 - M1-931 — Add deterministic getPrice chat tool for price_snapshot (complexity: medium, risk: medium)
 - M1-932 — Add a text filter parameter to searchPosts (complexity: medium, risk: medium)
 - M1-933 — Align derivative retention with post (30d base, 14d pi) (complexity: low, risk: low)
@@ -71,6 +70,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-930 | Baseline retrieval-eval measurement record | 2026-08-27 | round 1 APPROVE |
 | M1-929 | Harness: score golden set over production fused SQL | 2026-08-27 | round 2 APPROVE |
 | M1-928 | Golden-set fixtures for the fused-retrieval eval | 2026-08-27 | round 2 APPROVE |
 | M1-927 | Date and honestly frame the chat semantic grounding set | 2026-08-24 | round 1 APPROVE-WITH-FIXES |
@@ -80,7 +80,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-921 | Make GPU context and memory configurable | 2026-08-24 | round 1 APPROVE-WITH-FIXES |
 | M1-920 | Tracked llamacpp prompt-cache RAM key, sized per class | 2026-08-24 | round 2 APPROVE |
 | M1-919 | Reconcile D-8 live wedge evidence with the controlled no-IPv6 rerun | 2026-08-24 | round 1 APPROVE |
-| M1-909 | Wizard GPU-class spec-decode head delivery + clone recovery | 2026-08-24 | round 2 APPROVE-WITH-FIXES |
 
 ---
 
@@ -281,8 +280,8 @@ M1-925 (done)
 M1-927 (done)
 M1-928 (done)
   ├── M1-929 (done)
-  │     └── M1-930 (pending) ← runnable
-  └── M1-930 (pending) [see above]
+  │     └── M1-930 (done)
+  └── M1-930 (done) [see above]
 M1-931 (pending) ← runnable
 M1-932 (pending) ← runnable
   └── M1-935 (pending)

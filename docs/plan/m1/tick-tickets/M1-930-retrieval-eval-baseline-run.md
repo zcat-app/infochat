@@ -1,9 +1,9 @@
 ---
 id: M1-930
 title: "Baseline retrieval-eval measurement record"
-status: pending
+status: done
 created: 2026-08-26
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 flow: tick
 reproduction: >-
   Probe (measurement ticket): `ls docs/measurement/ | grep retriev` returns
@@ -84,11 +84,32 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-27
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: NOT-APPLICABLE (doc-only); MAINTAINABILITY: PASS; SCOPE: PASS"
+    diff_stats: "3 files, +266/-10 — record +243 across two commits (rules e0edd3d4 → results e7fc64fc), board regen 12, own frontmatter 21"
+    notes: "reviewer re-derived all 9 table rows from both runs' scores.json, verified rules-before-results via reflog+manifest timestamps, re-ran content probes; 6 falsification candidates dropped with citations (pre-registration timing, number provenance, determinism claim, translator model-key mismatch, smoke marks, none_expected carve-out); 1 RECOMMENDED-NEW-TICKET (measurement-README index gap) recorded under Review observations"
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check: >-
+  start 2026-08-27: citations re-verified (docs/measurement holds
+  retrieval-separability.md only; security.md allowlist has no price-reading
+  tool; fused SQL :224-275 carries no time predicate; golden set = 51 records
+  — temporal-today 5 / temporal-2h 5 / temporal-24h 4 / entity-location 6 /
+  entity-project 6 / price 5 / topical 8 / cross-lingual 12, none_expected 6,
+  no supersedes rows). Harness plumbing proven green today (three 0-fallback
+  smoke runs at 08:54/08:57/09:00, label_fingerprint_match true,
+  ready=5214/06ed0de1…); test stack currently torn down — bring-up is
+  postgres(15432) + llamacpp(18081) + llamacpp-embeddings(18080) ONLY (frozen
+  corpus: no provider/collector, or ingest drifts the fingerprint and the run
+  refuses to score), 18080/18081 republished via an untracked override
+  (docker-compose.ports.yml precedent). M1-929's round-2 review observation
+  (P9 no-op-translation share derivable from queries.jsonl) folds into this
+  record work — derived at authoring, no scorer change, no files_scope change.
+  Doc-only diff; mvn verify N/A (inert-diff rule).
 escalation_reason:
 ---
 
@@ -188,3 +209,11 @@ by a harness whose self-checks failed.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-930-retrieval-eval-baseline-run.md
 ```
+
+## Review observations
+
+- Round 1 (RECOMMENDED-NEW-TICKET, recorded, no decision requested):
+  `docs/measurement/README.md`'s record index table does not list
+  `retrieval-eval-baseline.md` (nor `retrieval-separability.md` — the
+  incompleteness pattern predates this ticket). Indexing follow-up only;
+  this ticket's diff fence correctly forbade touching README.md.
