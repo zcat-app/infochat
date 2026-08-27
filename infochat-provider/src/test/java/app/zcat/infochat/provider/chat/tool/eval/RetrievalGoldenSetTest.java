@@ -20,6 +20,7 @@ import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -39,12 +40,27 @@ class RetrievalGoldenSetTest {
     private static final Map<String, Integer> CLASS_FLOORS = Map.of(
             "temporal-today", 5, "temporal-2h", 5, "temporal-24h", 4,
             "entity-location", 5, "entity-project", 5, "price", 5,
-            "topical", 8, "cross-lingual", 12);
+            "topical", 16, "cross-lingual", 12);
 
     private static final Set<String> LANGS = Set.of("en", "cs", "es", "ru", "tr");
     private static final Set<String> NON_EN = Set.of("cs", "es", "ru", "tr");
     private static final Set<String> KNOWN_CHECK_BLOCKS = Set.of("retrieval");
-    private static final int MAX_EXPECTED_UIDS = 8;
+    private static final int MAX_EXPECTED_UIDS = 16;
+
+    // Adjudicated row identities (2026-08-27, .bench/retrieval-eval/ +
+    // .scratch/adjudication-report-20260827.md) pinned by the corrections leg.
+    private static final String ZCASH_NEWSLETTER =
+            "d0b2d19d5926cf338f73b64d0ef3b0ac887ccc5b2cc3f4f9e0f8a2d9c036bb38";
+    private static final String BENCZECHMARK =
+            "a795dcd7b8fa27e722312feafdfb347d8653ac3dc53f4472b517c3d19c1dc526";
+    private static final String MUSTANG_PANDA =
+            "d7c3ba941a444b955cd49a8b453eca3336f91164a58bd3e882780d905801c9fb";
+    private static final String CAVERN_C2 =
+            "4a4c022f7840340c05425b3bce10c02c08bdd925588be0d3de2b4a22ba8c2de9";
+    private static final String GLM_5_3 =
+            "08106a093512cd0ad4ec3a0c6712dccf69f59a26c3d1b7630e8df2ca9f2573e6";
+    private static final String HELGOLAND_BITE =
+            "8503304d3eae2b16b8c74c791e9734529ea92a3cd188a05a19d4610edb9c4674";
 
     // ---- loading ----
 
@@ -159,8 +175,9 @@ class RetrievalGoldenSetTest {
                 "class-below-floor: " + cls + " has " + n
                 + ", floor is " + CLASS_FLOORS.get(cls)));
         long total = records.size();
-        assertTrue(total >= 49 && total <= 56,
-                "set size " + total + " outside 49-56 (floors sum to 49; P5 cap)");
+        assertTrue(total >= 57 && total <= 66,
+                "set size " + total + " outside 57-66 over ACTIVE records"
+                + " (floors sum to 57; M1-942 re-derived cap)");
     }
 
     private static void validateRationales(List<JsonNode> records) {
@@ -267,9 +284,13 @@ class RetrievalGoldenSetTest {
     @Test
     void classCoverageMeetsFloors() throws Exception {
         List<JsonNode> records = load();
-        validateFloors(records);
+        // Retired records carry the audit trail, not coverage: floors and
+        // the total cap count ACTIVE records only (M1-942).
+        List<JsonNode> active = records.stream()
+                .filter(r -> !r.path("replaced_by").isTextual()).toList();
+        validateFloors(active);
         Map<String, List<Integer>> sizesPerClass = new TreeMap<>();
-        for (JsonNode r : records) {
+        for (JsonNode r : active) {
             int size = r.path("expected").path("retrieval").path("relevant_uids").size();
             sizesPerClass.computeIfAbsent(text(r, "class"), k -> new ArrayList<>()).add(size);
         }
@@ -304,6 +325,177 @@ class RetrievalGoldenSetTest {
                     + "uid_sha256=06ed0de15eefad172062b4b6e3dfb11713e02017b103cc8ab8e064ffbe489727",
                     fp, "record " + text(r, "id") + " carries a different fingerprint"
                     + " — mixed-fingerprint sets are drift, not a set (P7)");
+        }
+    }
+
+    @Test
+    void adjudicatedCorrectionsPresent() throws Exception {
+        List<JsonNode> records = load();
+        Map<String, JsonNode> byId = records.stream().collect(
+                HashMap::new, (m, r) -> m.put(text(r, "id"), r), HashMap::putAll);
+        long successors = records.stream().filter(r -> r.path("supersedes").isTextual()).count();
+        long retired = records.stream().filter(r -> r.path("replaced_by").isTextual()).count();
+        assertEquals(18, successors, "the 2026-08-27 adjudication lands 18 supersedes pairs");
+        assertEquals(18, retired, "18 retired targets (4 entity-location + 6 topical relabels"
+                + " + 8 xling cascade)");
+        assertEquals(77, records.size(), "file grows 51 -> 77 lines (18 successors + 8 extensions)");
+        assertEquals(59, records.stream()
+                .filter(r -> !r.path("replaced_by").isTextual()).count(),
+                "59 active records after corrections + extension");
+
+        // el-2: the Zcash newsletter (body keyword "prague" = a summit venue)
+        // is dropped; the Czech benchmark story is the whole set.
+        assertEquals(Set.of(BENCZECHMARK), uidSet(byId.get("el-2b")),
+                "el-2 successor keeps only the Czech-story row");
+        assertEquals("el-2", byId.get("el-2b").path("supersedes").asText());
+
+        // el-4: both Kaspersky-as-source accidents out; Dahua/Manic stay.
+        Set<String> el4 = uidSet(byId.get("el-4b"));
+        assertEquals(Set.of(
+                "9ee2f18f9c7034e7872cc314952724b1d6c9e36f82bb44adc899646cb55920e7",
+                "d1d3fa2509b538aec4274a6d5ccaeb103f2e03dcedb9f2ae2c1960fc95aa51c1",
+                "f8e7ea663d61b2de27679cf12c56037e66200a1777058dc6e5fa2f54ca8de3a9"),
+                el4, "el-4 successor = Russian-OAuth + Dahua + Manic");
+        assertFalse(el4.contains(MUSTANG_PANDA) || el4.contains(CAVERN_C2),
+                "the Kaspersky-attribution rows are dropped");
+
+        // el-5: the GLM-5.3 story joins the four keeps.
+        Set<String> el5 = uidSet(byId.get("el-5b"));
+        assertTrue(el5.contains(GLM_5_3), "the on-topic GLM-5.3 row is added");
+        assertEquals(5, el5.size(), "el-5 successor = 4 keeps + GLM-5.3");
+
+        // el-3: the weakest Ukraine row (Helgoland Bite) is dropped.
+        Set<String> el3 = uidSet(byId.get("el-3b"));
+        assertFalse(el3.contains(HELGOLAND_BITE), "Helgoland Bite is dropped");
+        assertEquals(6, el3.size(), "el-3 successor keeps the other six rows");
+
+        // Six topical relabels to the full adjudicated sets (two-direction
+        // pooling, 16-cap selection; sizes are the derived end state).
+        Map<String, Integer> topicalSizes = Map.of(
+                "top-ai-b", 16, "top-cyber-b", 16, "top-ml-b", 16,
+                "top-med-b", 12, "top-bio-b", 10, "top-robot-b", 10);
+        topicalSizes.forEach((id, size) -> {
+            JsonNode succ = byId.get(id);
+            assertTrue(succ != null, id + " successor record exists");
+            assertEquals("topical", text(succ, "class"));
+            assertEquals(id.substring(0, id.length() - 2), succ.path("supersedes").asText(),
+                    id + " supersedes its snapshot predecessor");
+            assertEquals(size, uidSet(succ).size(), id + " full adjudicated set size");
+        });
+        Set<String> aiSet = uidSet(byId.get("top-ai-b"));
+        assertFalse(aiSet.contains("2e4aa59c5eeb477e5daf160b993615db2545ce3901df1e148b9914dc9a7101cc"),
+                "top-ai drops the adjudicated Fragments digest");
+        assertTrue(aiSet.contains("015b1714fccc0d458b99ac0d7c063b0084d1098bbb044e24bb7ead348c1111a9"),
+                "top-ai keeps its in-window labeled row");
+        assertTrue(aiSet.contains(
+                "c57e5eb3ff3bf36184a78a564e6db479d847e9e82bfaf50d20d3cad792d51466"),
+                "an adjudicated returned-window row joins top-ai");
+        assertFalse(aiSet.contains("bdc57d37ea0f2863476e72682089870cd21f2b4c64f56658c10104b8eb1e5632")
+                && aiSet.contains("043e2c0cd5e945a676e92408da23ac8337ede4be0468af9d1c13121b032d59ef"),
+                "the 16-cap cut drops the two oldest out-of-window keeps");
+        Set<String> cyberSet = uidSet(byId.get("top-cyber-b"));
+        assertFalse(cyberSet.contains("192c67089412577eb6d05639c5160f5c89250c64ca099f07b6509241e011ef37"),
+                "top-cyber drops the adjudicated Baeldung howto");
+        assertTrue(cyberSet.contains(
+                "b65113d27f1228f87a0d2b86569b73633580d9e3f5f8eb25ebe9e17d64e0594a"),
+                "an adjudicated returned-window row joins top-cyber");
+        assertFalse(cyberSet.contains("91d043173e054a0996afd73f89133660828f9d935d4283d9e4ab416bbb69fd84"),
+                "the 16-cap cut drops the oldest out-of-window keep");
+
+        // Carried keeps pinned verbatim against the retired in-file records
+        // (r1 rework): a prefix-variant fabrication in any successor's keep
+        // must flip this leg red, not just resize a set.
+        assertTrue(uidSet(byId.get("top-med-b")).containsAll(uidSet(byId.get("top-med"))),
+                "top-med-b carries every retired top-med keep verbatim");
+        assertTrue(uidSet(byId.get("top-bio-b")).containsAll(uidSet(byId.get("top-bio"))),
+                "top-bio-b carries every retired top-bio keep verbatim");
+        assertTrue(uidSet(byId.get("top-robot-b")).containsAll(uidSet(byId.get("top-robot"))),
+                "top-robot-b carries every retired top-robot keep verbatim");
+        Set<String> mlKeeps = uidSet(byId.get("top-ml"));
+        mlKeeps.remove("f836627485d40d1775c1aaa60b61b7d198029071e40d62cd99f3192afa3a2d9c");
+        mlKeeps.remove("cc109b5aa3efe3bec9ef093633693b7b4ef4eab7ff53f93f35a52ef93abe270f");
+        assertTrue(uidSet(byId.get("top-ml-b")).containsAll(mlKeeps),
+                "top-ml-b carries every non-cut retired top-ml keep verbatim");
+        assertFalse(uidSet(byId.get("top-ml-b")).contains("f836627485d40d1775c1aaa60b61b7d198029071e40d62cd99f3192afa3a2d9c")
+                || uidSet(byId.get("top-ml-b")).contains("cc109b5aa3efe3bec9ef093633693b7b4ef4eab7ff53f93f35a52ef93abe270f"),
+                "the two 16-cap-cut top-ml keeps stay dropped");
+
+        // The xling cascade: 8 successors inherit the corrected active
+        // sibling sets verbatim and name the corrected sibling in notes.
+        for (String base : List.of("xl-ai-cs", "xl-ai-es", "xl-ai-ru", "xl-ai-tr",
+                "xl-cyber-cs", "xl-cyber-es", "xl-cyber-ru", "xl-cyber-tr")) {
+            JsonNode succ = byId.get(base + "-b");
+            assertTrue(succ != null, base + " cascade successor exists");
+            assertEquals(base, succ.path("supersedes").asText());
+            String sibling = "xl-ai".equals(base.substring(0, 5)) ? "top-ai-b" : "top-cyber-b";
+            assertEquals(uidSet(byId.get(sibling)), uidSet(succ),
+                    base + "-b inherits the corrected sibling set verbatim");
+            assertTrue(succ.path("notes").asText("").contains(sibling),
+                    base + "-b notes name the corrected active sibling");
+        }
+
+        // The extension: eight NEW topical needs, active topical n = 16.
+        List<String> extension = List.of("top-quantum", "top-space", "top-climate",
+                "top-chips", "top-physics", "top-drones", "top-misinfo", "top-gaming");
+        for (String id : extension) {
+            JsonNode r = byId.get(id);
+            assertTrue(r != null, id + " extension record exists");
+            assertEquals("topical", text(r, "class"));
+            assertTrue(r.path("supersedes").isNull() && !r.path("replaced_by").isTextual(),
+                    id + " is an original record, not a correction");
+            int size = uidSet(r).size();
+            assertTrue(size >= 1 && size <= 16, id + " set within 1..16");
+        }
+        long activeTopical = records.stream()
+                .filter(r -> "topical".equals(text(r, "class")))
+                .filter(r -> !r.path("replaced_by").isTextual()).count();
+        assertEquals(16, activeTopical, "topical class extended 8 -> 16 active needs");
+    }
+
+    @Test
+    void validatorAcceptsHonestShapes() throws Exception {
+        // The adjudicated topical populations exceed the old authoring cap:
+        // a 16-uid set must pass schema validation; 17 must still fail.
+        List<JsonNode> sixteen = corrupted(rs -> padExpectedTo(rs.get(0), 16));
+        validateSchema(sixteen);
+        List<JsonNode> seventeen = corrupted(rs -> padExpectedTo(rs.get(0), 17));
+        AssertionError e = assertThrows(AssertionError.class,
+                () -> validateSchema(seventeen));
+        assertTrue(e.getMessage().contains("label cap"), e.getMessage());
+
+        // The corrected end state — 59 active records (18 supersedes pairs
+        // are net-zero, 8 extensions add) — must pass the re-derived cap.
+        List<JsonNode> padded = corrupted(rs -> {
+            try {
+                ObjectMapper mapper = new ObjectMapper();
+                long active = rs.stream()
+                        .filter(r -> !r.path("replaced_by").isTextual()).count();
+                JsonNode seed = rs.stream()
+                        .filter(r -> "topical".equals(r.get("class").asText())
+                                && !r.path("replaced_by").isTextual()).findFirst().orElseThrow();
+                for (int i = 0; active + i < 59; i++) {
+                    ObjectNode clone = (ObjectNode) mapper.readTree(
+                            mapper.writeValueAsString(seed));
+                    clone.remove("replaced_by");
+                    clone.remove("supersedes");
+                    clone.remove("notes");
+                    clone.put("id", "honest-shape-" + i);
+                    rs.add(clone);
+                }
+            } catch (Exception ex) {
+                throw new IllegalStateException(ex);
+            }
+        });
+        assertEquals(59, padded.stream()
+                .filter(r -> !r.path("replaced_by").isTextual()).count());
+        validateAll(padded);
+    }
+
+    private static void padExpectedTo(ObjectNode record, int target) {
+        ArrayNode uids = (ArrayNode) record.get("expected").get("retrieval")
+                .get("relevant_uids");
+        while (uids.size() < target) {
+            uids.add("0".repeat(64));
         }
     }
 
@@ -452,16 +644,41 @@ class RetrievalGoldenSetTest {
 
     @Test
     void failureModeOversizedExpectedSet() throws Exception {
-        List<JsonNode> records = corrupted(rs -> {
-            ObjectNode r = rs.get(0);
-            ArrayNode uids = (ArrayNode) r.get("expected").get("retrieval")
-                    .get("relevant_uids");
-            while (uids.size() < 9) {
-                uids.add("0".repeat(64));
-            }
-        });
+        List<JsonNode> records = corrupted(rs -> padExpectedTo(rs.get(0), 17));
         AssertionError e = assertThrows(AssertionError.class,
                 () -> validateSchema(records));
         assertTrue(e.getMessage().contains("label cap"), e.getMessage());
+    }
+
+    @Test
+    void failureModeRetiredRecordDoubleCounts() throws Exception {
+        // The active-only filter is load-bearing (M1-928 r2 observation):
+        // retiring a temporal-today record whose successor is of a DIFFERENT
+        // class must drop the class below its floor.
+        List<JsonNode> records = corrupted(rs -> {
+            try {
+                ObjectMapper mapper = new ObjectMapper();
+                JsonNode tt1 = rs.stream()
+                        .filter(r -> "tt-1".equals(r.get("id").asText())).findFirst().orElseThrow();
+                ObjectNode successor = (ObjectNode) mapper.readTree(
+                        mapper.writeValueAsString(tt1));
+                successor.put("id", "tt-1b");
+                successor.put("supersedes", "tt-1");
+                successor.put("class", "price");
+                ((ObjectNode) successor.get("expected").get("retrieval")).remove("relevant_uids");
+                ((ObjectNode) successor.get("expected").get("retrieval")).put("none_expected", true);
+                ((ObjectNode) successor.get("expected").get("retrieval")).put("rationale",
+                        "pooled placeholder rationale long enough for none-expected shape");
+                ((ObjectNode) rs.stream()
+                        .filter(r -> "tt-1".equals(r.get("id").asText())).findFirst().orElseThrow())
+                        .put("replaced_by", "tt-1b");
+                rs.add(successor);
+            } catch (Exception ex) {
+                throw new IllegalStateException(ex);
+            }
+        });
+        AssertionError e = assertThrows(AssertionError.class,
+                () -> validateAll(records));
+        assertTrue(e.getMessage().contains("class-below-floor"), e.getMessage());
     }
 }

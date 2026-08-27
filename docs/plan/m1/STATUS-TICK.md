@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 13 |
+| pending | 12 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 139 |
+| done | 140 |
 | deferred | 1 |
 | abandoned | 5 |
 | **total** | **158** |
@@ -32,7 +32,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-937 — Deterministic temporal-expression parser (complexity: low, risk: low)
 - M1-939 — Pin the native reply language per-turn and after fold-backs (complexity: medium, risk: medium)
 - M1-940 — Surface bounded post content in search tool emissions (complexity: medium, risk: medium)
-- M1-942 — Golden-set label corrections, relabel, and extension (complexity: medium, risk: medium)
+- M1-944 — Re-baseline the retrieval eval on the corrected set (complexity: low, risk: low)
 
 ---
 
@@ -53,7 +53,6 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-936 — blocked_by: M1-934 (pending)
 - M1-938 — blocked_by: M1-937 (pending)
 - M1-941 — blocked_by: M1-940 (pending)
-- M1-944 — blocked_by: M1-942 (pending), M1-943 (done)
 
 ---
 
@@ -73,6 +72,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-943 | Eval harness: skip retired records, pin golden-set id | 2026-08-27 | round 1 APPROVE |
+| M1-942 | Golden-set label corrections, relabel, and extension | 2026-08-27 | round 2 APPROVE |
 | M1-930 | Baseline retrieval-eval measurement record | 2026-08-27 | round 1 APPROVE |
 | M1-929 | Harness: score golden set over production fused SQL | 2026-08-27 | round 2 APPROVE |
 | M1-928 | Golden-set fixtures for the fused-retrieval eval | 2026-08-27 | round 2 APPROVE |
@@ -81,7 +81,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-924 | Isolate the embedded-DNS response field that wedges simplex-chat | 2026-08-24 | round 2 APPROVE |
 | M1-923 | Named chat notice + operator signal on prompt-exceeds-context | 2026-08-24 | round 2 APPROVE |
 | M1-921 | Make GPU context and memory configurable | 2026-08-24 | round 1 APPROVE-WITH-FIXES |
-| M1-920 | Tracked llamacpp prompt-cache RAM key, sized per class | 2026-08-24 | round 2 APPROVE |
 
 ---
 
@@ -296,8 +295,8 @@ M1-937 (pending) ← runnable
 M1-939 (pending) ← runnable
 M1-940 (pending) ← runnable
   └── M1-941 (pending)
-M1-942 (pending) ← runnable
-  └── M1-944 (pending)
+M1-942 (done)
+  └── M1-944 (pending) ← runnable
 M1-943 (done)
   └── M1-944 (pending) [see above]
 ```

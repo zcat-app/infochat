@@ -1,26 +1,23 @@
 ---
 id: M1-942
 title: "Golden-set label corrections, relabel, and extension"
-status: pending
+status: done
 created: 2026-08-27
 last_updated: 2026-08-27
 flow: tick
 reproduction: >-
-  RetrievalGoldenSetTest.adjudicatedCorrectionsPresent (to-be-written, run
-  RED before any fixture edit — workflow §0): asserts the committed golden
-  set carries the 2026-08-27 adjudicated corrections as supersedes pairs
-  (18 pairs: el-2/el-4/el-5/el-3 + six topical relabels + the eight
-  xl-ai-*/xl-cyber-* cascade successors) and active topical n = 16. Run
-  against today's file it FAILS on every clause — observed: 0 supersedes
-  rows (every record has "supersedes": null), topical active n = 8, el-2's
-  expected set still contains the Zcash-newsletter uid (body keyword
-  "prague" = a summit venue), el-4's still contains the two
-  Kaspersky-attribution uids, el-5's still omits the GLM-5.3 row
-  (.scratch/adjudication-report-20260827.md, the reproduction evidence).
-  A second RED leg, RetrievalGoldenSetTest.validatorAcceptsHonestShapes
-  (to-be-written): a 16-uid expected set is REJECTED today with "label
-  cap" (RetrievalGoldenSetTest.java:47,:142-144) and the 59-active-record
-  end state is rejected with "outside 49-56" (:161-163).
+  RetrievalGoldenSetTest.adjudicatedCorrectionsPresent (written and run RED
+  2026-08-27 before any fixture edit — observed: "expected: <18> but was:
+  <0>" supersedes pairs; 0 retired targets; file 51 lines vs 77 expected):
+  asserts the committed golden set carries the 2026-08-27 adjudicated
+  corrections as supersedes pairs (18 pairs: el-2/el-4/el-5/el-3 + six
+  topical relabels + the eight xl-ai-*/xl-cyber-* cascade successors) and
+  active topical n = 16. A second RED leg,
+  RetrievalGoldenSetTest.validatorAcceptsHonestShapes (observed RED:
+  16-uid set rejected "label cap"; the 59-active end state rejected
+  "outside 49-56"): a 16-uid expected set passes schema validation while
+  a 17-uid set fails with "label cap", and the 59-active end state passes
+  the re-derived floors/cap.
 analysis_ref: docs/plan/m1/tick-analysis/golden-set-corrections.md
 blocked_by: []
 files_scope:
@@ -107,11 +104,36 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-27
+    verdict: REWORK
+    checks: {SPEC-TRUTHNESS: FAIL, SECURITY: PASS, TEST-ADEQUACY: FAIL,
+      MAINTAINABILITY: PASS, SCOPE: PASS}
+    rework_items: 2
+    critical_high: 0
+    diff_stats: "4 files, +303/-55 (r1)"
+  - round: 2
+    date: 2026-08-27
+    verdict: APPROVE
+    checks: {SPEC-TRUTHNESS: PASS, SECURITY: PASS, TEST-ADEQUACY: PASS,
+      MAINTAINABILITY: PASS, SCOPE: PASS}
+    rework_items: 0
+    critical_high: 0
+    diff_stats: "fix hunks 120 lines over r1; full diff 4 files, +361/-56"
+    dispositions: "r1 items 1,2 SATISFIED (see .scratch/tick-review-M1-942-r2.txt)" 
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  2026-08-27: start pre-flight passed — lint 0 findings; file:line citations
+  spot-checked against RetrievalGoldenSetTest.java (MAX_EXPECTED_UIDS :47,
+  label cap :142-144, 49-56 :161-163, pairing :95-121, unfiltered floors
+  :267-277, fingerprint :300-308, xling :217-229, oversized pad :454-466);
+  all seven analysis pitfalls present; no blocked_by; M1-943 landed first
+  (ecc44d9a) per the approved wave order; operator surfaces (frozen DB
+  volume, .bench pipeline, adjudication run artifacts) verified present on
+  this host. No blocking ambiguity.
 escalation_reason:
 ---
 
@@ -240,6 +262,26 @@ nothing outside `files_scope`.
 
 ## Verification
 
+- Operator pre-flight (P7, run 2026-08-27 before any labeling read): the
+  frozen eval DB was brought up postgres-only from the test checkout and
+  the fingerprint read EXACT — `ready=5214;max_ready_at=2026-08-24
+  16:00:57.001472+00;uid_sha256=06ed0de15eefad172062b4b6e3dfb11713e02017b
+  103cc8ab8e064ffbe489727` (runner-equivalent SQL over the D59 world,
+  uid-sha256 over uid-ordered concatenation). All adjudicated uid
+  identities re-derived from that DB + run 20260827-115606 pass-1 windows;
+  extension pools and row-by-row adjudication recorded operator-local in
+  `.bench/retrieval-eval/{pools-extension-20260827.txt,
+  adjudication-extension-20260827.txt}` (8 pools, sizes
+  22/10/12/45/25/10/7/9; adjudicated sets 12/4/9/8/8/5/7/4 — every set is
+  the FULL adjudicated population, no cap cut anywhere in the extension).
+  Extension distinctness (P9): the eight needs — quantum computing,
+  space industry, climate, semiconductors, physics research, drones,
+  influence operations, video-game industry — are distinct from the
+  existing eight topical queries (ai/crypto/cyber/ml/oss/med/robot/bio
+  news-and-research needs) and from each other; row overlap across
+  needs (e.g. the vCenter row in both el-5 and top-cyber-b) is legitimate
+  cross-need relevance, not paraphrase.
+
 - P1 → adjudicatedCorrectionsPresent (set shapes) +
   rationaleAndPoolingFieldsPresent (derivation named) + review of the six
   topical successor rationales against the adjudication report — each
@@ -285,3 +327,34 @@ constants (caps/floors per the binding decisions).
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-942-golden-set-corrections-relabel.md
 ```
+
+## Round 1 rework
+
+REWORK ITEMS (verbatim from .scratch/tick-review-M1-942-r1.txt):
+
+1. FINDING 1: replace the four fabricated uid strings in
+   infochat-provider/src/test/resources/retrieval-eval/golden-set.jsonl:58
+   with the four true identities from the retired top-ml record (:35),
+   after re-deriving the full 16-member set against the frozen DB and
+   run-20260827-115606 windows per ticket step 2 — evaluated via
+   `grep -c e87965d1b51f16be golden-set.jsonl` → 0 (and the same for the
+   other three fabricated prefixes), `grep -c e87965d1b51f03b96
+   golden-set.jsonl` → 3, plus the green corrected-file run of
+   RetrievalGoldenSetTest.adjudicatedCorrectionsPresent.
+2. FINDING 2: extend
+   RetrievalGoldenSetTest.adjudicatedCorrectionsPresent
+   (RetrievalGoldenSetTest.java:374-384) to assert carried-keep uid
+   identities verbatim for top-ml-b, top-med-b, top-bio-b and
+   top-robot-b — evaluated via the mutation probe (any single
+   carried-keep prefix-variant swap must turn the test red) and `mvn
+   verify` green from the repo root.
+
+## Review observations
+
+- Mechanical phantom-uid detection in the golden-set validator
+  (RECOMMENDED-NEW-TICKET, r1): the validator checks uid SHAPE only, so
+  a well-formed but nonexistent row id passes every gate; committing the
+  frozen corpus's uid-set identity (e.g. sha256 over the sorted uid list
+  or the list itself as a pinned resource) plus a validator leg asserting
+  every expected uid exists in that universe would make phantom detection
+  a CI fact. TOUCHED-BY-THIS-DIFF: no. (User's call whether to file.)
