@@ -1,9 +1,9 @@
 ---
 id: M1-929
 title: "Harness: score golden set over production fused SQL"
-status: pending
+status: done
 created: 2026-08-26
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 flow: tick
 reproduction: >-
   Probe (harness ticket; the runner cannot exist before it is written — the
@@ -103,11 +103,24 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-27
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS: WARN; SECURITY: PASS; TEST-ADEQUACY: PASS; MAINTAINABILITY: WARN; SCOPE: PASS"
+    diff_stats: "7 files, +900/-10 (runner 534, scorer 168, scorer test 164, POM 21, test props 5, board+ticket 18)"
+    rework: 2
+    notes: "smoke-run + dead-translator probes accepted as evidence; 2 low findings (fallback dedup, dead accumulators); 4 attempted falsifications dropped"
+  - round: 2
+    date: 2026-08-27
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: PASS; MAINTAINABILITY: PASS; SCOPE: PASS"
+    diff_stats: "fix diff: 3 files, +37/-10 (code: runner +5/-3, scorer +0/-6; rest = round-1 ticket record); build green 09:03, scorer 5/5, runner absent from failsafe list"
+    notes: "both r1 items SATISFIED (dispositions in .scratch/tick-review-M1-929-r2.txt); 3 attempted falsifications dropped; 1 informational note (fully-qualified java.util.Set at 3 sites)"
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check: "start 2026-08-27: citations re-verified (queryFusedPosts sole in-tree construction, worktree hits are gitignored stale trees; config keys at :501-502; worldPredicateSql :216-227; QueryTranslationCache get/put; MeteredLlmProvider emits llm.calls.total{task,provider,model,outcome} — the P8 counters come from an injected MeterRegistry, no main-source change). Test-classpath stubs TestLlmProvider/StubEmbeddingProvider are globally-enabled @Priority alternatives (M1-644) — the runner's TestProfile must quarkus.arc.unselected-alternatives them or it measures a stub (README-disclosed control, not a divergence). Fallback detection = cache-row absence after a non-en execute (all four fallback legs skip the cache write; the retention-belt skip is unreachable at default input-max-length 500 — belt boundary recorded in the manifest via the effective input-max-length). Fingerprint uid_sha256 concatenation to be reproduced against the frozen test DB at smoke time (labels pin ready=5214/06ed0de1…). No @Tag exists anywhere in the test tree today — the excludedGroups entry can match only the runner."
 escalation_reason:
 ---
 
@@ -245,3 +258,27 @@ finding to record and escalate — never a harness tweak to mask.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-929-retrieval-eval-harness.md
 ```
+
+## Round 1 rework
+
+1. Finding 1: make fallbackRecords a deduplicated collection
+   (LinkedHashSet) at RetrievalEvalRunnerIT.java:191 so the abort message
+   and manifest count/list the 12 affected records once, evaluated via
+   the dead-translator probe re-run ("translator fallback on 12
+   cross-lingual record(s)", each xl-* id once, manifest list length 12)
+   plus green repo-root `mvn verify` with the runner still absent from
+   the failsafe run list.
+2. Finding 2: delete the dead accumulators matched/expectedTotal/
+   cappedTotal at RetrievalEvalScorer.java:99-101 and :142-144, evaluated
+   via the grep probe returning nothing plus RetrievalEvalScorerTest 5/5
+   green in the default suite.
+
+## Review observations
+
+- Round 1 RECOMMENDED-NEW-TICKET (recorded, no decision requested): the
+  derived no-op-translation signal (per-language share of xling rows whose
+  anchored text equals the source query, analysis P9's "no-op flag") is
+  not computed anywhere; the raw anchored_text per xling row IS recorded
+  in queries.jsonl, so the signal is derivable when the baseline record
+  is authored — fold into M1-930's record work or grow a scorer slice
+  field there.
