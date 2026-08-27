@@ -42,10 +42,20 @@ ecosystem — re-check the PR states before relying on them.
 
 - DFlash2 sidecar GGUFs exist for **dense Qwen3.8-27B only**: incoai
   (Apache-2.0), z-lab (Q8_0), agentionai (FP4).
-- **No draft head (MTP or DFlash2) published for Qwen3.8-Flash-Next** as of
-  2026-08-27. Unverified lead: Nathanw1014's README says the Flash-Next
-  "draft head ships as a separate sidecar" needing GTT headroom — the first
-  claim anywhere that one exists; no HF repo named. Verify before re-trying.
+- **Flash-Next MTP sidecar EXISTS since late 2026-08-27** —
+  `quimmedes/Qwen3.8-Flash-Next-MTP-GGUF` (4B MTP head standalone, Q4_K_M
+  ~2.65 GB / Q6_K / Q8_0 / BF16) — but it is **fork-locked**: it requires
+  `quimmedes/cafe-llama.cpp` (experimental, 0-star fork implementing the
+  qwen4exp MTP graph: hyper-connection hidden states, QSA Hadamard KV
+  rotation). Mainline + PR-27742 builds cannot load it. Claimed acceptance
+  50-70% at `--spec-draft-n-max 2` (1-layer head) → expect only ~1.3-1.5x
+  decode, not a step change. Vontra/Jundot MTP builds are MLX (Apple-only).
+- **PR #27742 (qwen4exp arch) merged to ggml-org master 2026-08-27** —
+  Flash-Next GGUFs now load in mainline; PR-branch builds are superseded
+  and deserve a re-measure (kernels may mature post-merge).
+- Strix-targeted Flash-Next ROCmFP4 quants appearing same day:
+  `agentionai/Qwen3.8-Flash-Next-ROCmFP4-FAST-GGUF`,
+  `kingjones777/...-ROCmFP4-STRIX(_LEAN)-GGUF` (Laurent-fork ecosystem).
 - Speculation is the only decode lever on bandwidth-bound APUs: both Strix
   Halo forks measure bare single-stream decode at ~80% of theoretical
   bandwidth (memory wall); their kernel work moves prefill, not decode.
@@ -72,5 +82,7 @@ ecosystem — re-check the PR states before relying on them.
 
 - #27812 merged AND `xsn/dflash2` reached master → upstream DFlash2 becomes
   viable on Vulkan; re-bench before believing any prior Vulkan spec figure.
-- A Flash-Next MTP or DFlash2 sidecar GGUF appears on HF → Flash-Next decode
-  re-try (memory-local flash entry holds the recipe and rollback context).
+- cafe-llama.cpp's qwen4exp MTP support landing in mainline (or the fork
+  gaining a Vulkan-verified build) → Flash-Next decode re-try with the
+  quimmedes sidecar (memory-local flash entry holds the recipe and rollback
+  context).
