@@ -28,9 +28,30 @@ property, not a result): temporal-today 5, temporal-2h 5, temporal-24h 4,
 entity-location 6, entity-project 6, price 5 (all `none_expected`),
 topical 8, cross-lingual 12 (3 information needs × cs/es/ru/tr); one further
 `none_expected` row lives outside price. Residual divergences from a
-production chat turn are enumerated in `.bench/retrieval-eval/README.md`
-(cancellation arming, the eval scopes' all-bootstrap world, the per-boot
-anchor cache) — none result-affecting.
+production chat turn, restated here as the durable copy: (1) cancellation
+arming is a no-op registration for the fixed eval user (the statement
+timeout itself is still applied); (2) the eval scopes' world is all live
+non-excluded bootstrap sources (a production user's may be narrower — labels
+are valid for THIS world, pinned by the fingerprint); (3) the in-memory
+query-anchor cache is per-boot, so pass 1 takes real translator calls and
+pass 2 is all hits — both states recorded per record. None result-affecting.
+
+## Artifacts — committed vs operator-local
+
+Only versioned surfaces carry audit weight; this record cites the
+operator-local ones as provenance, never as a requirement for reading it.
+Committed: this record (the durable copy of every number quoted — final or
+absent per the folder convention), the golden set, the harness
+(`RetrievalEvalRunnerIT` / `RetrievalEvalScorer` + its CI unit test, whose
+javadoc documents the operator invocation), and the idempotent
+`scripts/eval-scopes-seed.sql`. Operator-local and gitignored
+(`.bench/retrieval-eval/`, present only on the measuring host): the runs'
+raw outputs — per-run `manifest.json`, per-query `queries.jsonl`,
+`scores.json` under `results/<ts>/` — plus the harness README with the
+bring-up notes. A reader of the committed repo can re-derive equivalents by
+re-running the documented operator invocation against a DB matching the
+pinned fingerprint (comparability is fingerprint-gated, rule D1); every
+value this record states is restated here in full.
 
 Metrics (computed by `RetrievalEvalScorer`, CI-covered by its unit test):
 capped Recall@16 `|top16 ∩ E| / min(|E|,16)` AND raw recall `|top16 ∩ E| / |E|`
@@ -115,8 +136,9 @@ incomplete)
   on pass 2); en scope issues zero translator calls (asserted)
 - run timestamps: both invocations
 - cross-lingual no-op share: per language, the share of xling rows whose
-  anchored text equals the source query (derived from `queries.jsonl` at
-  authoring — the Rosetta no-op lesson, analysis P9)
+  anchored text equals the source query (the Rosetta no-op lesson, analysis
+  P9; derived at authoring from the runs' operator-local `queries.jsonl` —
+  the derived shares are restated below, see Artifacts)
 
 ## What these numbers do not settle
 
@@ -154,9 +176,10 @@ rationale; corrections stay visible.
 | anchor cache | fresh boot per invocation (in-memory Caffeine; no DB writes): pass 1 = miss-then-cached on all 12 xling rows, pass 2 = hit on all 12 |
 | run timestamps | run 1 `2026-08-27T11:56:15Z` (all numbers below quote run 1); run 2 `2026-08-27T11:58:00Z` (determinism leg) |
 
-Note: the fingerprint string above is mechanically identical to the one
-stamped in both runs' manifests under
-`.bench/retrieval-eval/results/{20260827-115606,20260827-115752}/`.
+Note: the fingerprint string above is the durable copy; it is mechanically
+identical to the one stamped in both runs' manifests (operator-local,
+gitignored, under `.bench/retrieval-eval/results/{20260827-115606,20260827-
+115752}/` — see Artifacts above).
 
 ### Determinism leg (rule D1 / acceptance)
 
@@ -188,7 +211,8 @@ expected set is 8, so the |E| > 16 ceiling never binds (mean label size 6.27).
 
 The overall row's over-return pair is computed over the 6 `none_expected`
 rows (5 price + el-1). Cross-lingual no-op share (P9, derived from
-`queries.jsonl`): **0/3 per language** — every anchored text is a real
+`queries.jsonl`, operator-local — see Artifacts): **0/3 per language** —
+every anchored text is a real
 translation (xl-ai-cs `nejnovější zprávy o umělé inteligenci` → "latest news
 about artificial intelligence"; xl-crypto-ru `новости о криптовалютах` →
 "cryptocurrency news"; xl-cyber-tr `siber güvenlik haberleri` → "cyber
