@@ -7,7 +7,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-// Holds the closed seven-tool allowlist for the chat agent. Additions or
+// Holds the closed eight-tool allowlist for the chat agent. Additions or
 // removals are spec amendments (security.md §Prompt-injection defenses);
 // M1-654's ChatToolAllowlistSpecParityTest asserts this set equals the
 // marker-delimited table in security.md byte-for-byte. M1-664 added
@@ -22,7 +22,8 @@ public class ChatToolRegistry {
             "getReferences",
             "recallMemory",
             "listSaves",
-            "helpLookup"
+            "helpLookup",
+            "getPrice"
     );
 
     // Contract for a chat-agent tool. Receives caller identity, scope,

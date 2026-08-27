@@ -12,7 +12,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-// Single source for the seven chat tools' descriptions: the instruction
+// Single source for the eight chat tools' descriptions: the instruction
 // table ChatAgent renders into TOOL_INSTRUCTIONS and the JSON-Schema
 // parameters a tools-bearing wire renders from (M1-872).
 final class ChatToolCatalog {
@@ -68,7 +68,16 @@ final class ChatToolCatalog {
                             + "usage and examples. If the tool returns no command, say you "
                             + "do not know and point at /help — do not invent commands.",
                     List.of(new ToolArg("query", "string", true,
-                            "\"free-text intent in the user's language\""))));
+                            "\"free-text intent in the user's language\""))),
+            new Tool("getPrice",
+                    "get the latest stored price of an operator-configured crypto "
+                            + "asset (e.g. zcash, monero) with its source, capture time "
+                            + "and age. Use this for any question about current prices, "
+                            + "costs or market values of these assets, and never state a price from memory. "
+                            + "If the result is marked stale, say the data is old and give its "
+                            + "capture time instead of presenting it as current.",
+                    List.of(new ToolArg("asset", "string", true, "\"monero\""),
+                            new ToolArg("vs_currency", "string", false, "\"usd\""))));
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 

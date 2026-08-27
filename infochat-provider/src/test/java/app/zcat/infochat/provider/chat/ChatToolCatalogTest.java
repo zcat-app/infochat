@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 // Parity guards for ChatToolCatalog: the catalog DESCRIBES the same
-// seven tools the registry allows — it adds, renames, and re-scopes
+// eight tools the registry allows — it adds, renames, and re-scopes
 // nothing — and its arg shapes match the tools' actual parsing.
 class ChatToolCatalogTest {
 
@@ -52,6 +52,7 @@ class ChatToolCatalogTest {
         assertArgs("recallMemory", List.of("keywords:array"));
         assertArgs("listSaves", List.of("tags:array", "window:string"));
         assertArgs("helpLookup", List.of("query:string"));
+        assertArgs("getPrice", List.of("asset:string", "vs_currency:string"));
     }
 
     @Test

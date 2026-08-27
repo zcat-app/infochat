@@ -559,7 +559,10 @@ GPU-class slot 11,008 tokens − ~600-token reply budget = 10,408 fit ceiling;
 6,144 tolerates ~1.7× estimator underestimation (6,144 × 1.7 ≈ 10,444). The
 ledger absorbs sibling growth by kind: M1-916's +~90 tokens/turn rides inside
 the TOOL_INSTRUCTIONS table — never-drop scaffolding — so it is absorbed by
-the headroom; M1-917's 16-entry semantic injection (~800 tokens ≈ 13% of
+the headroom; M1-931's getPrice catalog line (~60 words, the eighth tool —
+anti-parametric price lookup over price_snapshot) rides the same
+never-droppable TOOL_INSTRUCTIONS scaffolding and is absorbed by the same
+headroom; M1-917's 16-entry semantic injection (~800 tokens ≈ 13% of
 budget) drops whole at ladder step 2 before history does — no separate window
 bound is added. Over budget, the ladder compacts in fixed order: (1) history
 oldest-first against min(`infochat.context-window`, budget remainder after
@@ -891,7 +894,7 @@ into a fresh token; a strip output holding nothing outside whitespace
 and elision separators counts as empty.
 
 **Single-source tool catalog (M1-871).** `ChatToolCatalog` is the single
-source for the seven tools' descriptions: `TOOL_INSTRUCTIONS`' per-tool
+source for the eight tools' descriptions: `TOOL_INSTRUCTIONS`' per-tool
 table renders from it (pinned byte-identical to the pre-catalog lines by
 `ChatAgentTest`), and each tool carries a JSON-Schema-shaped parameters
 declaration — name, ordered arg types, requiredness — the data a

@@ -1,9 +1,9 @@
 ---
 id: M1-931
 title: "Add deterministic getPrice chat tool for price_snapshot"
-status: pending
+status: done
 created: 2026-08-26
-last_updated: 2026-08-26
+last_updated: 2026-08-28
 flow: tick
 reproduction: >-
   GetPriceToolIT#dispatchReturnsLatestSnapshotForFixtureAsset (to-be-written;
@@ -135,11 +135,46 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-28
+    verdict: APPROVE-WITH-FIXES
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: PASS; MAINTAINABILITY: FAIL (2 low comment-only findings, fixed per the verdict); SCOPE: PASS. Reviewer falsified three candidate findings (commands.md read-only/scope-filtered summary — defeated by its own delegation to security.md + the helpLookup tier-filter precedent; clock-split age/stale drift — defeated, both read the one injected Clock bean; unknown-asset error reflection — defeated, rides the UNTRUSTED_CONTENT fold + 500-char cap). FIX ITEMS applied: (1) ChatToolRegistry.java ticket-chronicle sentence deleted — probe grep -c 'M1-931' → 0; (2) 'seven tools'/'seven-tool list' comments in ChatToolCatalogTest/ChatToolRegistryTest → eight — probe grep -rn 'seven' over both files → no matches. Both fixes comment-only (no docs/spec, docs/design or root-level *.md touched); ./mvnw -B -pl infochat-provider -am test-compile exit 0. Fixed tree snapshot .scratch/tick-fixes-M1-931.tree @ fc294a7e. Round-1 log of record target/tick-test-M1-931-r1.log (full mvn verify BUILD SUCCESS). Owner-run live price probe (acceptance item 11) remains the post-landing obligation, recorded in the commit message"
+    diff_stats: "round 1: 14 files, +540/−23 + 3 comment-only fix lines (8 insertions/5 deletions across 3 files, all comment lines)"
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check: >-
+  start 2026-08-28 pass (--parallel, worktree .opencode/worktrees/M1-931):
+  tick-lint 0 findings; analysis_ref self (no cross-read). Citations
+  verified — ChatToolRegistry.java:18-26 exactly seven names;
+  security.md tool-allowlist markers + closed-at-spec-level text + the
+  DB-roles price_snapshot SELECT sentence (amendment target quoted
+  verbatim in tree); AssetSnapshotReader readLatest ORDER BY
+  captured_at DESC LIMIT 1 (:158-167), injected Clock (:64-71);
+  AssetRegistry.getAsset exact-key (:125) with AssetEntry/
+  SubVerbEntry shapes; ChatToolDispatcher closed-name check +
+  clamp/length/cache/cap + IllegalArgumentException->ValidationError
+  (:143-204); ChatAgent fold + TOOL_INSTRUCTIONS-from-catalog +
+  POST_TOOL_RESULT_INSTRUCTION + POST_CORPUS_TOOLS (4 names, no
+  price tool); AssetHandler default-pair/currency/attribution
+  semantics incl. attributionUrl from asset_config not the snapshot
+  column; application.properties:159/:171; commands.md :722/:749-751/
+  :755-767/:768-771; the four §8 pins located (byte pin :1374-1399,
+  wire count :1029-1030). Main moved only by M1-945 (test-side eval)
+  since drafting — zero src/main drift. Seams confirmed: AssetRegistry
+  map test-constructor is package-private to command.asset, so the
+  plain-JUnit tests use the HelpCommandHandlerTest anonymous-subclass
+  seam (public getAsset override) and the IT refreshes via a test
+  helper in command.asset (Approach step 2's first option). Module
+  boundary: no tick ticket in-progress/in-review, no in-flight
+  migration_touch; coexistence noted — finished session's eval
+  worktree .opencode/worktrees/M1-945-eval (branch
+  m1/M1-945-retrieval-eval-probe, test-only eval files, disjoint
+  from this diff). Acceptance item 6's probe command uses -Dtest
+  cross-module — blocked by the M1-446 surefire tripwire (memory
+  mvn-dtest-filter-blocked-by-tripwire); the parity green is proven
+  by the module-scoped unfiltered run instead. No blocking ambiguity.
 escalation_reason:
 ---
 

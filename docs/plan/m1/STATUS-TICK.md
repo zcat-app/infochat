@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 13 |
+| pending | 12 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 142 |
+| done | 143 |
 | deferred | 1 |
 | abandoned | 5 |
 | **total** | **161** |
@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-931 — Add deterministic getPrice chat tool for price_snapshot (complexity: medium, risk: medium)
 - M1-932 — Add a text filter parameter to searchPosts (complexity: medium, risk: medium)
 - M1-933 — Align derivative retention with post (30d base, 14d pi) (complexity: low, risk: low)
 - M1-934 — search_tags column, tagger free-tags emission, sweep backfill (complexity: medium, risk: medium)
@@ -73,6 +72,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-945 | Characterize the anchor-leg gap: probes + counterfactuals | 2026-08-28 | round 1 APPROVE |
+| M1-931 | Add deterministic getPrice chat tool for price_snapshot | 2026-08-28 | round 1 APPROVE-WITH-FIXES |
 | M1-944 | Re-baseline the retrieval eval on the corrected set | 2026-08-27 | round 1 APPROVE |
 | M1-943 | Eval harness: skip retired records, pin golden-set id | 2026-08-27 | round 1 APPROVE |
 | M1-942 | Golden-set label corrections, relabel, and extension | 2026-08-27 | round 2 APPROVE |
@@ -81,7 +81,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-928 | Golden-set fixtures for the fused-retrieval eval | 2026-08-27 | round 2 APPROVE |
 | M1-927 | Date and honestly frame the chat semantic grounding set | 2026-08-24 | round 1 APPROVE-WITH-FIXES |
 | M1-925 | Confirm the D-8 wedge on the real supervised simplex shape | 2026-08-24 | round 2 APPROVE-WITH-FIXES |
-| M1-924 | Isolate the embedded-DNS response field that wedges simplex-chat | 2026-08-24 | round 2 APPROVE |
 
 ---
 
@@ -284,7 +283,7 @@ M1-928 (done)
   ├── M1-929 (done)
   │     └── M1-930 (done)
   └── M1-930 (done) [see above]
-M1-931 (pending) ← runnable
+M1-931 (done)
 M1-932 (pending) ← runnable
   └── M1-935 (pending)
 M1-933 (pending) ← runnable

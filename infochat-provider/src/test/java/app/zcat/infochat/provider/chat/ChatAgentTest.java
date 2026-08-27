@@ -323,6 +323,44 @@ class ChatAgentTest {
     }
 
     @Test
+    void getPriceResultRidesBackWrappedWithPostToolInstruction() {
+        // Boundary siting: the fold-back is the last surface our code
+        // controls before the model — asserting the tool's return value
+        // alone would prove the producer, not the fold.
+        int[] executions = {0};
+        Map<String, ChatToolRegistry.ChatTool> tools = new HashMap<>();
+        for (String name : new ChatToolRegistry().toolNames()) {
+            tools.put(name, (u, sk, si, a) -> "[]");
+        }
+        tools.put("getPrice", (u, sk, si, a) -> {
+            executions[0]++;
+            return "{\"asset\":\"monero\",\"price\":180.25}";
+        });
+        agent = buildAgent("en", new ChatToolDispatcher(
+                new ChatToolRegistry(), tools, 500, 200, 20));
+
+        llmProvider.responses.add(
+                new LlmResponse("TOOL_CALL: getPrice {\"asset\": \"monero\"}"));
+        llmProvider.responses.add(
+                new LlmResponse("Monero is at 180.25 USD (coingecko)."));
+
+        String reply = agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID,
+                "what is the price of monero?");
+
+        assertEquals(1, executions[0], "the stubbed getPrice executed once");
+        String fedBack = llmProvider.lastUserPrompt;
+        assertTrue(fedBack.contains("Tool result for getPrice"), fedBack);
+        assertTrue(fedBack.contains("180.25"),
+                "the price result reached the model's prompt: " + fedBack);
+        assertTrue(fedBack.contains("<<<UNTRUSTED_CONTENT id=\""),
+                "the price result rides the untrusted-content fold: " + fedBack);
+        assertTrue(fedBack.contains(ChatAgent.POST_TOOL_RESULT_INSTRUCTION.trim()));
+        assertFalse(reply.contains("UNTRUSTED_CONTENT"),
+                "the delivered text carries no protocol fragment");
+        assertEquals("Monero is at 180.25 USD (coingecko).", reply);
+    }
+
+    @Test
     void aClarifyTurnCarriesNoCitationDemand() {
         // A marginal-grounding CLARIFY turn (0.62 < 0.65) asks a narrowing
         // question that cites nothing; its per-turn prompt must not carry
@@ -1026,8 +1064,8 @@ class ChatAgentTest {
         assertFalse(reply.contains("UNTRUSTED_CONTENT"),
                 "the delivered text carries no protocol fragment");
         assertNotNull(llmProvider.lastDeclarations);
-        assertEquals(7, llmProvider.lastDeclarations.size(),
-                "the wire declarations render from the catalog's seven tools");
+        assertEquals(8, llmProvider.lastDeclarations.size(),
+                "the wire declarations render from the catalog's eight tools");
     }
 
     @Test
@@ -1393,7 +1431,14 @@ class ChatAgentTest {
                 + " description. Use this when the user asks how to do something the commands"
                 + " cover. NEVER restate command syntax from memory; always direct the user to"
                 + " /help <name> for usage and examples. If the tool returns no command, say"
-                + " you do not know and point at /help — do not invent commands.\n\n";
+                + " you do not know and point at /help — do not invent commands.\n"
+                + "- getPrice {\"asset\": \"monero\", \"vs_currency\": \"usd\"}"
+                + " — get the latest stored price of an operator-configured crypto asset"
+                + " (e.g. zcash, monero) with its source, capture time and age. Use this for"
+                + " any question about current prices, costs or market values of these"
+                + " assets, and never state a price from memory. If the result is marked"
+                + " stale, say the data is old and give its capture time instead of"
+                + " presenting it as current.\n\n";
         assertEquals(expected, ChatToolCatalog.renderInstructionTable(),
                 "the rendered tool table must match the pinned instruction lines byte-for-byte");
     }

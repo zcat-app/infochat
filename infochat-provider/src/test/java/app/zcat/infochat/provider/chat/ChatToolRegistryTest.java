@@ -11,7 +11,7 @@ class ChatToolRegistryTest {
     private final ChatToolRegistry registry = new ChatToolRegistry();
 
     // CI assertion: the registry's name set must equal the spec's
-    // seven-tool list byte-for-byte (security.md §Prompt-injection defenses).
+    // eight-tool list byte-for-byte (security.md §Prompt-injection defenses).
     // A name added or removed here without a matching spec amendment
     // breaks the build. M1-664 added helpLookup, the chat-side
     // command-intent lookup against the doc_embedding corpus.
@@ -24,7 +24,8 @@ class ChatToolRegistryTest {
                 "getReferences",
                 "recallMemory",
                 "listSaves",
-                "helpLookup"
+                "helpLookup",
+                "getPrice"
         );
         assertEquals(expected, registry.toolNames());
     }
