@@ -265,3 +265,239 @@ None. No golden-set `supersedes` record was created; the set is byte-identical
 to M1-928's committed file. (The pre-registered corrections policy above
 stands for future runs.)
 
+## Results — 2026-08-27, re-baseline on the corrected golden set (appended by the M1-944 results commit)
+
+Second reading of the same instrument, walking rule D1's explicit
+`supersedes` relabel path: the answer key was corrected and extended
+(M1-942 — 18 supersedes pairs, topical 8→16) and the harness taught to skip
+retired records and pin the set's identity (M1-943), then the corrected set
+was executed against the SAME frozen fingerprint. The rules T1/G1/N1/D1
+above are unchanged and were NOT re-registered — nothing below was known
+when they were fixed. The 2026-08-27 section above stands as the
+defective-key reading; THIS section is the gating reference for the RAG
+campaign's owner-run deltas. The production retrieval path is byte-identical
+between the two readings (zero diffs under `infochat-provider/src/main` /
+`infochat-llm/src/main` from `e0edd3d4` to `90ef5bdd`; the family's diffs are
+test-scope only), so every class-level movement below measures the label
+set, not retrieval.
+
+**Pre-run fence (P7).** The frozen DB was verified intact BEFORE the run by
+reading the world fingerprint directly off the quiesced stack:
+`ready=5214;max_ready_at=2026-08-24 16:00:57.001472+00;uid_sha256=06ed0de15eefad172062b4b6e3dfb11713a02017b103cc8ab8e064ffbe489727`
+— exactly the labels' `labeled_against` fingerprint. The harness then
+asserted `label_fingerprint_match` true inside both invocations. A drifted
+DB aborts scoring with the runner's named refusal; scoring across drift is
+impossible by construction (the M1-933/M1-934 corpus-mutation caution — no
+provider/collector boot, no backfill, no retention deploy against this DB
+while the campaign runs).
+
+### Pins
+
+| pin | value |
+|---|---|
+| repo / harness commit | `90ef5bdd516df31701c6f311a74c2c56eca23241` |
+| DB fingerprint | `ready=5214;max_ready_at=2026-08-24 16:00:57.001472+00;uid_sha256=06ed0de15eefad172062b4b6e3dfb11713a02017b103cc8ab8e064ffbe489727` (unchanged from the first reading) |
+| label fingerprint match | yes — harness-asserted in both invocations |
+| **label-set pin** | `golden_set_sha256 = 4dfed2d3df02f48b6b0369c8f0323d871d874c25d97769bbc8d445e6ba8e1154` (equals `sha256sum` of the committed `golden-set.jsonl`; asserted equal in both runs' manifests); **18 supersedes pairs; 59 active / 18 retired records** (manifest counts; retired records are skipped before execution) |
+| semantic threshold / limit | 0.40 / 16 (effective, read from the booted config — unchanged) |
+| tool input-max-length | 500 |
+| embedder | `http://127.0.0.1:18080/v1`, model key `nomic-embed-text` — the test stack's `llamacpp-embeddings` serving `nomic-embed-text-v1.5.f16.gguf` (unchanged) |
+| translator | endpoint `http://127.0.0.1:18081/v1` — the test stack's `llamacpp` serving `gemma-4-26B-A4B-it-UD-Q6_K_XL.gguf`; booted config's translator model KEY `llama3.1:8b` (name-only key, as in the first reading — the served model is the gemma GGUF) |
+| translator fallbacks | 0 (harness-asserted; a non-zero count aborts scoring) |
+| en-scope translator calls | 0 (harness-asserted, D58 no-op leg) |
+| anchor cache | fresh boot per invocation: pass 1 = miss-then-cached on all 12 xling rows, pass 2 = hit on all 12 |
+| run timestamps | run 1 `2026-08-27T18:27:29Z` (all numbers below quote run 1); run 2 `2026-08-27T18:28:53Z` (determinism leg); artifacts under `.bench/retrieval-eval/results/{20260827-182719,20260827-182844}/` (operator-local) |
+
+### Determinism leg (rule D1 / acceptance)
+
+Two separate invocations on the shared fingerprint: per-query uid lists
+byte-identical across the two runs on both passes — 0 of 118 (pass, record)
+rows differ — and the 12 anchored texts are byte-identical across the two
+boots (greedy translation of the same 12 queries). The runner's internal
+pass-1/pass-2 fingerprint and uid-identity self-checks passed inside each
+run.
+
+### Per-class results
+
+`none_expected` rows scored by over-return only; `—` = not applicable.
+Smoke marks per rule G1 at the NEW sizes: **topical (n = 16) clears the G1
+floor and is marked decision-grade — the first class row to do so**; every
+other class row is smoke-only; the overall row (n = 59) is above the floor.
+Capped and raw recall are equal everywhere: the largest expected set is
+exactly 16 (mean label size 8.25), so the |E| > 16 ceiling still never
+binds.
+
+| class | n | signal | capped R@16 | raw R | MRR | over-ret mean count | over-ret median age (h) | lexical-only share |
+|---|---|---|---|---|---|---|---|---|
+| overall | 59 | — | 0.358 | 0.358 | 0.607 | 2.000 | 83.8 | 0.091 |
+| temporal-today | 5 | smoke | 0.100 | 0.100 | 0.250 | — | — | 0.083 |
+| temporal-2h | 5 | smoke | 0.100 | 0.100 | 0.233 | — | — | 0.000 |
+| temporal-24h | 4 | smoke | 0.3125 | 0.3125 | 0.625 | — | — | 0.000 |
+| entity-location | 6 | smoke | 0.313 | 0.313 | 0.600 | 1.0 | 214.7 | 0.125 |
+| entity-project | 6 | smoke | 0.4375 | 0.4375 | 0.667 | — | — | 0.320 |
+| price | 5 | smoke | — | — | — | 2.2 | 71.4 | 0.091 |
+| topical | 16 | **decision-grade** | 0.399 | 0.399 | 0.688 | — | — | 0.094 |
+| cross-lingual | 12 | smoke | 0.513 | 0.513 | 0.771 | — | — | 0.052 |
+
+The overall row's over-return pair is computed over the 6 `none_expected`
+rows (5 price + el-1, unchanged). Cross-lingual no-op share (derived from
+run 1's `queries.jsonl`): **0/3 per language** — every anchored text is a
+real translation, including the 8 cascade successors (e.g. xl-cyber-tr-b
+`siber güvenlik haberleri` → "cyber security news"; xl-ai-ru-b `последние
+новости об искусственном интеллекте` → "latest news about artificial
+intelligence").
+
+### Movement vs the 2026-08-27 reading is DESCRIPTIVE, never a T1 result
+
+The label set changed between the two readings (18 supersedes pairs + 8
+extension rows; n 51 → 59). **Rule T1 gates a retrieval change only against
+the SAME golden set — cross-set deltas are descriptive statements about the
+size of the label artifact, never gated comparisons, and no retrieval
+change is credited or debited by anything in this section.** The
+consistency proof is in the rows that did not move: every class whose
+labels are unchanged posts byte-identical numbers (temporal-today/2h/24h,
+entity-project, price), and per-record the untouched top-crypto (0.4),
+top-oss (0.0) and xl-crypto-* (0.4/0.8/0.8/0.4) are byte-identical to the
+first reading — retrieval is deterministic across the two runs; all
+movement lives exactly where the labels moved.
+
+Decomposition of the movement (P13 — artifact vs weakness, not
+regression/improvement):
+
+- **topical 0.153 → 0.399 (n 8 → 16): mostly label artifact.** The six
+  relabeled snapshots (top-ai 0.75, top-cyber 0.75, top-ml 0.75, top-med
+  0.333, top-bio 0.5, top-robot 0.5 per-record raw recall) rose because
+  their relevant populations were 2–3× the originally-labeled newest-8
+  slice — the first reading measured "did retrieval return the same
+  newest-8 sample", not relevance. **Real retrieval weakness remains,
+  unchanged:** top-crypto 0.4 (precision noise) and top-oss 0.0 (the
+  "open"→"OpenAI" lexical collision — recorded as an observation, NOT
+  fixed here) are byte-identical rows, and several extension rows sit at
+  or near zero (top-gaming 0.0, top-chips 0.0, top-physics 0.0,
+  top-climate 0.111 — smoke rows, new observations with no old reading;
+  top-drones 0.8 and top-misinfo 0.571 show the served end).
+- **entity-location 0.179 → 0.313: denominator change, noted, not
+  interpreted as movement.** The adjudicated corrections shrank/re-derived
+  the sets (el-2b |E|=1 drop of the Prague-venue Zcash row; el-4b |E|=3
+  drop of the two Kaspersky-attribution rows; el-5b |E|=5 adding the
+  previously-unlabeled GLM-5.3 story; el-3b |E|=6 drop of the Helgoland
+  Bite row). The channel itself (title/body keywords, no entity leg) is
+  unchanged.
+- **cross-lingual 0.325 → 0.513: cascade of the same topical artifact**
+  (8 of 12 rows now carry the corrected sibling sets; xl-crypto-*
+  unchanged and byte-identical). New observation, recorded not fixed:
+  xl-cyber-* scores 0.25 against its sibling top-cyber-b's 0.75 — the
+  anchored "cybersecurity news" retrieves a different window than
+  "latest cybersecurity news"; xl-ai-* (0.688) tracks its sibling (0.75)
+  closely.
+- **overall 0.242 → 0.358 (n 51 → 59): the aggregate of the above plus 8
+  new rows — descriptive only.**
+
+With topical at n = 16 the sign test is now available for the campaign's
+retrieval deltas on that class (T1 floor: 6 one-directional discordant
+queries); everything else per-class remains smoke.
+
+### What these numbers do not settle (restated at n = 59)
+
+At n = 59 the overall binomial CI on a proportion still runs roughly
+**±0.13** — sub-floor deltas and per-class rankings below the floor remain
+unresolvable, and every class row except topical is smoke-only by rule G1.
+Topical (n = 16) is decision-grade for the T1 sign test, not for
+percentage-point ranking: its own CI runs roughly ±0.24, so within-class
+sub-slicing (per-topic rows) stays suggestive. Cross-language recall
+comparisons remain confounded by the anchor leg unless the anchored text is
+read (the 0/3 no-op share per language keeps that check possible). Temporal
+labels remain bound to the recorded fingerprint (rule D1): the corpus will
+drift and this section will still describe exactly the pinned world.
+Nothing here measures the chat agent's tool choice or prose — only the
+retrieval query.
+
+### Corrections this re-baseline consummates (18 supersedes pairs — corrections stay visible)
+
+All 18 pairs landed in M1-942 against the frozen fingerprint, adjudicated
+2026-08-27 (`.scratch/adjudication-report-20260827.md` +
+`.bench/retrieval-eval/` pools, operator-local provenance); dispositions
+restated here. Retired targets stay in the file byte-identical except the
+added `replaced_by`; retired records are skipped before execution
+(M1-943) and asserted excluded from both runs' manifests (59/18).
+
+**Entity-location (4):**
+
+- `el-2 → el-2b` (|E| 2→1): DROP the Zcash Shielded News row (body keyword
+  "prague" is a summit venue, not a story nexus); KEEP the BenCzechMark
+  story. Set = full adjudicated pool (2 rows adjudicated, 1 relevant).
+- `el-4 → el-4b` (|E| 5→3): DROP Mustang Panda/CoolClient and Cavern C2
+  (their only "Russia" is "Russian cybersecurity vendor Kaspersky said" —
+  researcher attribution, actors are China-/Iran-nexus); KEEP Dahua and
+  Manic under the tightened victims/targets-include-Russia reading; KEEP
+  the Russian OAuth-hijack story. Pool 5, adjudicated 3.
+- `el-5 → el-5b` (|E| 4→5): ADD "Reading Zhipu's GLM-5.3 results"
+  (returned rank 1, previously unlabeled); KEEP AI-boom, Jewelbug, vCenter
+  under the named China-nexus looseness and the arXiv China dry-anomaly
+  row. Set = full pool, 5.
+- `el-3 → el-3b` (|E| 7→6): DROP "Operation Helgoland Bite" (German-language
+  op merely mentioning Ukraine — weakest defensible row); six rows stand.
+
+**Topical relabels (6):** two-direction pooling (pooled SQL population ∪
+row-by-row adjudication of the FULL returned window, including
+previously-unlabeled relevant rows), deterministic 16-cap selection =
+window rows in returned rank order then pooled keeps newest-first:
+
+- `top-ai → top-ai-b` (|E| 8→16, pool 18): DROP "Fragments: August 24"
+  (Martin Fowler digest, precision miss); classroom/app-discovery essays
+  fall to the cap cut.
+- `top-cyber → top-cyber-b` (|E| 8→16, pool 17): DROP "HTTP Client SSRF
+  Mitigation" (Baeldung howto); ToxicPanda falls to the cap cut; DEFCON
+  tutorial and vendor-PR rows adjudicated NOT relevant stay unlabeled.
+- `top-ml → top-ml-b` (|E| 6→16, pool 18): no adjudicated drops; political-QA
+  and FL-MAESTRO rows fall to the cap cut.
+- `top-med → top-med-b` (|E| 8→12, pool 12 ≤ 16, no cut): 8 keeps + 4
+  previously-unlabeled adjudicated-relevant rows.
+- `top-bio → top-bio-b` (|E| 6→10, pool 10 ≤ 16, no cut): 6 keeps + 4
+  previously-unlabeled rows.
+- `top-robot → top-robot-b` (|E| 7→10, confirmatory): original labels
+  adjudicated good; set = full pool (7 keeps + 3 previously-unlabeled);
+  successor rides the supersedes record so the audit trail stays uniform.
+
+**Xling cascade (8):** each inherits its corrected English sibling's set
+verbatim (xling labels follow the English need; the validator asserts the
+equality); the non-English query form still exercises the D58 anchor leg at
+run time.
+
+- `xl-ai-cs → xl-ai-cs-b` (|E| 8→16)
+- `xl-ai-es → xl-ai-es-b` (|E| 8→16)
+- `xl-ai-ru → xl-ai-ru-b` (|E| 8→16)
+- `xl-ai-tr → xl-ai-tr-b` (|E| 8→16)
+- `xl-cyber-cs → xl-cyber-cs-b` (|E| 8→16)
+- `xl-cyber-es → xl-cyber-es-b` (|E| 8→16)
+- `xl-cyber-ru → xl-cyber-ru-b` (|E| 8→16)
+- `xl-cyber-tr → xl-cyber-tr-b` (|E| 8→16)
+
+**Extension (not corrections):** 8 NEW topical information needs
+(top-chips, top-climate, top-drones, top-gaming, top-misinfo, top-physics,
+top-quantum, top-space) labeled via the pooling pipeline against the same
+frozen fingerprint — no existing record touched.
+
+No label was edited in place; no NEW label defect surfaced in this run (a
+future one goes back through a `supersedes` correction ticket and the
+re-baseline re-runs).
+
+### Campaign gating note (queue discipline)
+
+THIS section is the gating reference for the RAG campaign (M1-931..941
+reference the baseline in their acceptance items): every retrieval-delta
+landing gates its owner-run delta against this corrected reading — same
+`golden_set_sha256`, same DB fingerprint, rule T1's sign test (floor 6
+one-directional discordant queries; topical's n = 16 now participates
+decision-grade). Non-retrieval tickets (M1-931 getPrice, M1-933 retention,
+M1-939 language pinning) proceed in parallel. The frozen stack stays frozen
+through the campaign's last delta run: no provider/collector boot against
+the test DB, no backfill, no retention deploy — the runner's
+fingerprint-refusal is the fence and scoring across drift never happens.
+
+### Corrections during this run
+
+None. The frozen M1-942 golden-set output was consumed read-only; its
+identity is pinned above (`golden_set_sha256`) and asserted by both runs'
+manifests.
+

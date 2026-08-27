@@ -1,7 +1,7 @@
 ---
 id: M1-944
 title: "Re-baseline the retrieval eval on the corrected set"
-status: pending
+status: done
 created: 2026-08-27
 last_updated: 2026-08-27
 flow: tick
@@ -101,11 +101,30 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-27
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: NOT-APPLICABLE; MAINTAINABILITY: PASS; SCOPE: PASS"
+    diff_stats: "3 files, +256/-9 (record +236 pure append, ticket frontmatter +15/-2, board +12/-9)"
+    notes: "5 falsification candidates dropped with citations (mean label size 8.25 = 487/59 integer consistency; run-timestamp pin vs dir-name convention matches the first reading's own pins; loopback endpoints vs 'no prod URL' wording; writeArtifacts-before-fail-fast mooted by both runs green with label_fingerprint_match=true; two same-date Results sections disambiguated by title). 1 RECOMMENDED-NEW-TICKET recorded under Review observations (xl-cyber anchored-window gap, TOUCHED-BY-THIS-DIFF: no). Verdict: .scratch/tick-review-M1-944-r1.txt"
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check: >-
+  start 2026-08-27: lint 0 findings; blocked_by M1-942/M1-943 both done.
+  Citations re-verified: record has exactly one results section
+  (grep '^## Results' = 1, :161; topical 0.153 :209); golden set end
+  state 77 lines / 18 supersedes / 18 retired = 59 active, sha256
+  4dfed2d3df02f48b6b0369c8f0323d871d874c25d97769bbc8d445e6ba8e1154;
+  M1-943 runner asserts label_fingerprint_match and refuses on drift
+  (:207-211), manifest pins golden_set_sha256 + active/retired counts
+  (:424-427); operator invocation in RetrievalEvalRunnerIT javadoc
+  (:43-52). Frozen fingerprint + bring-up surface from
+  .agents/memory-local/retrieval-eval-lane-and-rag-plan.md match the
+  ticket's pins. Doc-only committed diff: no test parses the record
+  (grep verified), mvn verify N/A per the inert-diff rule. No
+  ambiguity found.
 escalation_reason:
 ---
 
@@ -240,3 +259,18 @@ append-only convention the corrections section itself pre-registered).
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-944-retrieval-eval-rebaseline.md
 ```
+
+## Review observations
+
+- r1 RECOMMENDED-NEW-TICKET (recorded, not filed): the re-baseline
+  quantified a retrieval gap the record only observes (record :386-392) —
+  the anchored cross-lingual cyber queries (xl-cyber-*-b, mean raw recall
+  0.25) retrieve a materially worse window than the English sibling they
+  inherit labels from (top-cyber-b, 0.75 per-record) over the identical
+  expected set; the anchored text "cybersecurity news" surfaces a
+  different window than the sibling's "latest cybersecurity news".
+  TOUCHED-BY-THIS-DIFF: no — the diff measured a pre-existing retrieval
+  path (production code byte-identical between readings); the measurement
+  is new, the behavior is not. Candidate: a RAG-campaign-follow-up ticket
+  on the D58 anchor leg for that information need (parity with the English
+  sibling, or a recorded cause).
