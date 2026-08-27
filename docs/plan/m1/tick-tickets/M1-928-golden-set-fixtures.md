@@ -1,9 +1,9 @@
 ---
 id: M1-928
 title: "Golden-set fixtures for the fused-retrieval eval"
-status: pending
+status: done
 created: 2026-08-26
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 flow: tick
 reproduction: >-
   Probe (fixtures ticket; no test can exist before the set does — the
@@ -93,11 +93,23 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-26
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS: FAIL; SECURITY: PASS; TEST-ADEQUACY: FAIL; MAINTAINABILITY: PASS; SCOPE: PASS"
+    diff_stats: "5 files, +487/-10 (validator 390, jsonl 51, seed 38, board+ticket 18)"
+    rework: 2
+  - round: 2
+    date: 2026-08-27
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: PASS; MAINTAINABILITY: PASS; SCOPE: PASS"
+    diff_stats: "fix diff: validator only, +78/-12; full build green, 19/19"
+    notes: "both r1 items SATISFIED; 1 RECOMMENDED-NEW-TICKET observation recorded below"
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check: "start 2026-08-26: citations spot-verified (retrieval-separability pooling_pending 23/41; lookupScopeLanguage missing-row en; worldPredicateSql dm-zero-subs = live non-excluded bootstrap only; scope_preferences PK (scope_kind,scope_id) with language default en; LanguageRegistry enabled set exactly en/cs/es/ru/tr; migration head V86 so no schema surprise); floors/size reconciled to 49-56 in this change (review fix); analysis pitfalls P4/P5/P7/P10/P12/P14 coverage confirmed; labeling convention resolved without user question: the test stack is down (containers removed 2026-08-23, volumes preserved) so the corpus is FROZEN — temporal-class windows derive from the corpus max ready_at (P7's DB-state binding), stated in each record's rationale, not from wall-clock labeling day"
 escalation_reason:
 ---
 
@@ -208,3 +220,32 @@ pre-existing test is modified.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-928-golden-set-fixtures.md
 ```
+
+## Round 1 rework
+
+REWORK ITEMS (verbatim from .scratch/tick-review-M1-928-r1.txt):
+
+1. Finding 1: rewrite the supersedes validation at RetrievalGoldenSetTest.java:94-103
+   around an explicit retired-target representation (retirement marker on the target,
+   excluded from floors/rationale/xling checks; absent-target and unretired-target
+   rejections preserved; non-textual supersedes rejected), evaluated via
+   failureModeSupersedesRetiredTargetPasses (corrected copy passes validateAll) plus the
+   existing failureModeSupersedesTargetStillValidates / failureModeSupersedesAbsentTarget
+   legs and a non-textual-rejection leg, mvn verify green.
+2. Finding 2: add the sibling expected-set equality assertion in validateXling
+   (RetrievalGoldenSetTest.java:194-199), evaluated via the new
+   failureModeXlingSetDriftsFromSibling corrupted-copy leg (one-uid swap in an xl-*
+   row must fail with the named rejection) and xlingRowsCarryNeedAnchor staying green,
+   mvn verify green.
+
+## Review observations
+
+- r2 APPROVE carried one RECOMMENDED-NEW-TICKET (no DECIDE-BEFORE, so no
+  decision requested — recorded here for the eventual fixer): the
+  active-only record filter (retired rows excluded from
+  floors/rationales/xling, RetrievalGoldenSetTest.validateAll) is enforced
+  by no test — every corrupted-copy leg retires a record whose successor
+  stays in the same class, so passing `records` instead of `active` to the
+  four validators would survive the suite green. Fix shape: one
+  corrupted-copy leg retiring a temporal-today record with a successor of a
+  different class, asserting validateAll throws class-below-floor.
