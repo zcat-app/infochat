@@ -19,8 +19,14 @@ re-audit loop and no code-reviewer.
    `.scratch/`, never `target/` — a REWORK round runs `mvn verify` between
    reviews and the parent module's clean wipes `<repo-root>/target/`, so a
    round-N artifact written there is gone before round N+1 reads it.
-   - `git add -N` on any untracked files, then `git diff $(git merge-base
-     main HEAD) --stat` (files touched, added, removed)
+    - `git add -A` on any untracked files, then `git diff $(git merge-base
+      main HEAD) --stat` (files touched, added, removed). Full staging,
+      NEVER `git add -N`: intent-to-add entries make the `git stash create`
+      snapshot below fail with "Entry '…' not uptodate. Cannot merge", and
+      the failure's empty output then silently trips the HEAD fallback on a
+      DIRTY tree — round ≥ 2 would diff the full round diff, not the fix
+      hunks (verified git 2.53.0; independently re-derived in the M1-847/
+      865/866/915/917 rounds)
    - the ticket's files-to-touch list (from the Approach section) vs the
      diff's file set — both the untouched planned files and the unplanned
      touched files
