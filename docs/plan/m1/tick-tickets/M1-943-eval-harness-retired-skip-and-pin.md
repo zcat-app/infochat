@@ -1,27 +1,29 @@
 ---
 id: M1-943
 title: "Eval harness: skip retired records, pin golden-set id"
-status: pending
+status: done
 created: 2026-08-27
 last_updated: 2026-08-27
 flow: tick
 reproduction: >-
-  RetrievalGoldenSetLoaderTest.skipsRetiredRecords (to-be-written, run RED
-  before any fix code — workflow §0; the testable loader does not exist
-  yet, which is the point): feeds JSONL content containing a retired
-  record (textual replaced_by) + its successor + a normal record and
-  asserts the loaded golden rows EXCLUDE the retired id, include the
-  successor, and preserve file order. The behavior under test is verified
-  defective today by reading RetrievalEvalRunnerIT.loadGoldenSet
-  (RetrievalEvalRunnerIT.java:296-323): it parses EVERY line and never
-  reads supersedes/replaced_by, so after the first correction ever
-  (M1-942 lands 18 of them) the retired record would be executed and
-  scored as a duplicate query — per-class n inflates (topical would read
-  as 21+ instead of 16) and the T1 discordance accounting is polluted.
-  Companion RED leg: RetrievalGoldenSetLoaderTest.manifestPinsGoldenSet-
-  Identity — the manifest written by writeArtifacts (:437-459) carries
+  RetrievalGoldenSetLoaderTest.skipsRetiredRecords (written and run RED
+  first, workflow §0 — RED log .scratch/tick-red-M1-943-r1.log: against
+  the pre-fix loads-all-lines behavior all four legs failed, incl. the
+  mutation probe of acceptance item 2): feeds JSONL content containing a
+  retired record (textual replaced_by) + its successor + a normal record
+  and asserts the loaded golden rows EXCLUDE the retired id, include the
+  successor, and preserve file order. The behavior under test was
+  verified defective before the fix by reading the runner's then-inline
+  parsing loop `loadGoldenSet` (RetrievalEvalRunnerIT.java:296-323 in
+  the pre-M1-943 tree; since replaced by the loader delegation): it parsed EVERY line and never read supersedes/replaced_by, so after
+  the first correction ever (M1-942 lands 18 of them) the retired record
+  would be executed and scored as a duplicate query — per-class n
+  inflates (topical would read as 21+ instead of 16) and the T1
+  discordance accounting is polluted. Companion leg:
+  RetrievalGoldenSetLoaderTest.hashDiscriminatesOneByteAnswerKeyChange —
+  the manifest previously written by writeArtifacts (:437-459) carried
   golden_set_records as a bare COUNT and no content hash, so two runs
-  with different answer keys are indistinguishable (verified by reading
+  with different answer keys were indistinguishable (verified by reading
   the manifest keys).
 analysis_ref: docs/plan/m1/tick-analysis/golden-set-corrections.md
 blocked_by: []
@@ -104,11 +106,27 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-27
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: PASS; MAINTAINABILITY: PASS; SCOPE: PASS"
+    diff_stats: "5 files, +274/-66 (loader 87, loader test 119, runner 54, ticket 68, board 12)"
+    notes: "6 falsification candidates dropped with citations (manifest-pin CI leg vs approved operator split; List.copyOf record idiom vs §7; NoSuchAlgorithmException wrap vs §7; header-comment provenance vs §11; dual golden_set_records/active keys as deliberate compat; IllegalStateException wrap vs old IOException — no caller keyed on the old type). RED-first + mutation probe corroborated; smoke-run manifest hash triple-corroborated. Verdict: .scratch/tick-review-M1-943-r1.txt"
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check: >-
+  start 2026-08-27: all citations re-verified against the code
+  (loadGoldenSet :296-323 parses every line and never reads
+  supersedes/replaced_by; writeArtifacts :437-459 carries
+  golden_set_records as a bare count at :457, no content hash;
+  self-checks at :208-248; scorer K=16 at :28, capped recall
+  :139-140; POM excludedGroups single entry at
+  infochat-provider/pom.xml:245; fixture has zero replaced_by rows
+  today). Skip key resolved from the validator's own convention
+  (RetrievalGoldenSetTest.java:242 — textual replaced_by = retired).
+  No blocking ambiguity.
 escalation_reason:
 ---
 
@@ -241,3 +259,25 @@ name in `test_plan.modifies` with its new expected behavior
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-943-eval-harness-retired-skip-and-pin.md
 ```
+
+## Ticket notes (implementor, 2026-08-27)
+
+- RED run (before fix code): `.scratch/tick-red-M1-943-r1.log` — all
+  four loader-test legs failed against the loads-all-lines stub
+  (= the runner's pre-fix behavior); this doubles as the acceptance-2
+  mutation probe (`skipsRetiredRecords:34 expected: <[new-row,
+  keep-row]> but was: <[old-row, new-row, keep-row]>`).
+- Operator smoke run (recorded probe, P12; frozen DB pre-checked
+  `ready=5214 / max_ready_at=2026-08-24 16:00:57.001472+00`, stack
+  postgres+models only, torn down after):
+  `.bench/retrieval-eval/results/20260827-150743/manifest.json` —
+  `golden_set_sha256` = `d6366ab62e9f5d127f3addf291d10366c4250748
+  dc34d9491303eb43d90738ef` = `sha256sum` of the committed
+  golden-set.jsonl; `golden_set_active_records` 51 /
+  `golden_set_retired_records` 0 (matches the file — zero replaced_by
+  rows today); `label_fingerprint_match: true`;
+  `translator_fallback_records: []`; run green in 18.76 s. Log:
+  `.scratch/tick-run-M1-943-smoke.log`.
+- Full verify: `.scratch/tick-test-M1-943-r1.log` (BUILD SUCCESS;
+  RetrievalEvalRunnerIT absent from the failsafe run;
+  RetrievalGoldenSetLoaderTest 4/4 in the default suite).

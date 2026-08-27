@@ -2,8 +2,8 @@ package app.zcat.infochat.provider.chat.tool.eval;
 
 import app.zcat.infochat.llm.ModelTask;
 import app.zcat.infochat.provider.chat.tool.SemanticSearchTool;
+import app.zcat.infochat.provider.chat.tool.eval.RetrievalGoldenSetLoader.GoldenRow;
 import app.zcat.infochat.provider.translation.QueryTranslationCache;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.NullNode;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -130,14 +130,6 @@ class RetrievalEvalRunnerIT {
         }
     }
 
-    record GoldenRow(String id, String clazz, String query, String scopeLang, boolean noneExpected,
-                     List<String> expectedUids, String labeledFingerprint) {
-        RetrievalEvalScorer.GoldenRecord toScorerRecord() {
-            return new RetrievalEvalScorer.GoldenRecord(id, query, clazz, scopeLang,
-                    noneExpected, expectedUids);
-        }
-    }
-
     record QueryOutcome(List<RetrievalEvalScorer.ToolRow> rows, String cacheState, String anchoredText,
                         double translatorCallDelta) {}
 
@@ -183,7 +175,9 @@ class RetrievalEvalRunnerIT {
                     + "augmentation (see the provider test application.properties)");
         }
         Path resultsDir = resolveResultsDir();
-        List<GoldenRow> golden = loadGoldenSet();
+        byte[] goldenBytes = goldenSetBytes();
+        RetrievalGoldenSetLoader.GoldenSet goldenSet = RetrievalGoldenSetLoader.load(goldenBytes);
+        List<GoldenRow> golden = goldenSet.activeRows();
 
         Map<String, String> scopeLangs = assertEvalScopesSeeded();
         String fingerprint1 = dbFingerprint();
@@ -202,7 +196,7 @@ class RetrievalEvalRunnerIT {
 
         boolean labelMatch = golden.stream()
                 .allMatch(r -> r.labeledFingerprint().equals(fingerprint1));
-        writeArtifacts(resultsDir, golden, pass1, pass2, fingerprint1, fingerprint2,
+        writeArtifacts(resultsDir, goldenSet, pass1, pass2, fingerprint1, fingerprint2,
                 labelMatch, fallbackRecords);
 
         if (!fingerprint1.equals(fingerprint2)) {
@@ -293,41 +287,13 @@ class RetrievalEvalRunnerIT {
                 .counters().stream().mapToDouble(c -> c.count()).sum();
     }
 
-    private List<GoldenRow> loadGoldenSet() throws IOException {
+    private byte[] goldenSetBytes() throws IOException {
         try (var in = getClass().getClassLoader().getResourceAsStream("retrieval-eval/golden-set.jsonl")) {
             if (in == null) {
                 throw new IllegalStateException("golden-set.jsonl not on the test classpath (M1-928)");
             }
-            List<GoldenRow> rows = new ArrayList<>();
-            for (String line : new String(in.readAllBytes(), StandardCharsets.UTF_8).split("\n")) {
-                if (line.isBlank()) {
-                    continue;
-                }
-                JsonNode n = MAPPER.readTree(line);
-                JsonNode retrieval = n.path("expected").path("retrieval");
-                rows.add(new GoldenRow(
-                        n.path("id").asText(),
-                        n.path("class").asText(),
-                        n.path("query").asText(),
-                        n.path("scope_lang").asText(),
-                        retrieval.path("none_expected").asBoolean(false),
-                        retrieval.has("relevant_uids")
-                                ? listOfStrings(retrieval.get("relevant_uids")) : List.of(),
-                        n.path("labeled_against").path("db_fingerprint").asText(null)));
-            }
-            if (rows.isEmpty()) {
-                throw new IllegalStateException("golden set is empty");
-            }
-            return rows;
+            return in.readAllBytes();
         }
-    }
-
-    private static List<String> listOfStrings(JsonNode arr) {
-        List<String> out = new ArrayList<>();
-        for (JsonNode n : arr) {
-            out.add(n.asText());
-        }
-        return out;
     }
 
     /** Fail the run unless every eval scope's declared language matches the seed script's map. */
@@ -434,10 +400,11 @@ class RetrievalEvalRunnerIT {
         return results;
     }
 
-    private void writeArtifacts(Path dir, List<GoldenRow> golden,
+    private void writeArtifacts(Path dir, RetrievalGoldenSetLoader.GoldenSet goldenSet,
                                 Map<String, QueryOutcome> pass1, Map<String, QueryOutcome> pass2,
                                 String fingerprint1, String fingerprint2,
                                 boolean labelMatch, java.util.Set<String> fallbackRecords) throws IOException {
+        List<GoldenRow> golden = goldenSet.activeRows();
         Map<String, Object> manifest = new LinkedHashMap<>();
         manifest.put("ts", Instant.now().toString());
         manifest.put("git_commit", gitCommit());
@@ -455,6 +422,9 @@ class RetrievalEvalRunnerIT {
         config.put("translator_model", translatorModel);
         manifest.put("config", config);
         manifest.put("golden_set_records", golden.size());
+        manifest.put("golden_set_sha256", goldenSet.contentSha256());
+        manifest.put("golden_set_active_records", golden.size());
+        manifest.put("golden_set_retired_records", goldenSet.retiredCount());
         MAPPER.writerWithDefaultPrettyPrinter()
                 .writeValue(dir.resolve("manifest.json").toFile(), manifest);
 
