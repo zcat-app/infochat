@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 11 |
+| pending | 14 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 138 |
 | deferred | 1 |
 | abandoned | 5 |
-| **total** | **155** |
+| **total** | **158** |
 
 ---
 
@@ -32,6 +32,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-937 — Deterministic temporal-expression parser (complexity: low, risk: low)
 - M1-939 — Pin the native reply language per-turn and after fold-backs (complexity: medium, risk: medium)
 - M1-940 — Surface bounded post content in search tool emissions (complexity: medium, risk: medium)
+- M1-942 — Golden-set label corrections, relabel, and extension (complexity: medium, risk: medium)
+- M1-943 — Eval harness: skip retired records, pin golden-set id (complexity: low, risk: low)
 
 ---
 
@@ -52,6 +54,7 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-936 — blocked_by: M1-934 (pending)
 - M1-938 — blocked_by: M1-937 (pending)
 - M1-941 — blocked_by: M1-940 (pending)
+- M1-944 — blocked_by: M1-942 (pending), M1-943 (pending)
 
 ---
 
@@ -294,4 +297,8 @@ M1-937 (pending) ← runnable
 M1-939 (pending) ← runnable
 M1-940 (pending) ← runnable
   └── M1-941 (pending)
+M1-942 (pending) ← runnable
+  └── M1-944 (pending)
+M1-943 (pending) ← runnable
+  └── M1-944 (pending) [see above]
 ```
