@@ -73,8 +73,10 @@ class RetrievalEvalRunnerIT {
     /**
      * The five eval scopes; scripts/eval-scopes-seed.sql is the source of
      * truth and the boot assertion below fails the run on any drift.
+     * Package-private: RetrievalEvalCharacterizationIT dispatches the
+     * same scopes (M1-945).
      */
-    private static final Map<String, UUID> EVAL_SCOPES = Map.of(
+    static final Map<String, UUID> EVAL_SCOPES = Map.of(
             "en", UUID.fromString("99a41442-61e2-4c48-962d-26092c3995a7"),
             "cs", UUID.fromString("1213f0bd-723c-41ff-8d3e-89aaaf00dca4"),
             "es", UUID.fromString("f568a11b-ca60-436a-832d-ec24a55bfe88"),
@@ -82,7 +84,7 @@ class RetrievalEvalRunnerIT {
             "tr", UUID.fromString("5e2578ce-c5c6-4bc3-9b66-e392802090b8"));
 
     /** armToolConnection registers an in-memory cancellation handle only; no users row is read. */
-    private static final UUID EVAL_USER_ID = UUID.fromString("00000000-0000-0000-0000-000000000929");
+    static final UUID EVAL_USER_ID = UUID.fromString("00000000-0000-0000-0000-000000000929");
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -162,25 +164,15 @@ class RetrievalEvalRunnerIT {
 
     @Test
     void runGoldenSetThroughProductionTool() throws Exception {
-        if (TEST_SENTINEL.equals(embeddingsBaseUrl) || TEST_SENTINEL.equals(llmBaseUrl)) {
-            fail("eval profile did not win over the %test sentinel endpoints — pass "
-                    + "-Deval.embeddings.base-url / -Deval.llm.base-url (see the class javadoc)");
-        }
-        if (embeddingProviders.stream()
-                .anyMatch(b -> b instanceof app.zcat.infochat.provider.testing.StubEmbeddingProvider)
-                || llmProviders.stream()
-                .anyMatch(b -> b instanceof app.zcat.infochat.provider.testing.TestLlmProvider)) {
-            fail("test-classpath stubs are still selected — the %eval profile's "
-                    + "quarkus.arc.exclude-types entry did not reach this boot's "
-                    + "augmentation (see the provider test application.properties)");
-        }
-        Path resultsDir = resolveResultsDir();
+        assertEndpointsAreReal(embeddingsBaseUrl, llmBaseUrl);
+        assertNoTestStubsSelected(embeddingProviders, llmProviders);
+        Path resultsDir = resolveResultsDir("results");
         byte[] goldenBytes = goldenSetBytes();
         RetrievalGoldenSetLoader.GoldenSet goldenSet = RetrievalGoldenSetLoader.load(goldenBytes);
         List<GoldenRow> golden = goldenSet.activeRows();
 
-        Map<String, String> scopeLangs = assertEvalScopesSeeded();
-        String fingerprint1 = dbFingerprint();
+        Map<String, String> scopeLangs = assertEvalScopesSeeded(dataSource);
+        String fingerprint1 = dbFingerprint(dataSource);
         Map<String, QueryOutcome> pass1 = new LinkedHashMap<>();
         // Deduplicated across the two determinism passes: it names RECORDS,
         // not executions (per-pass state lives in queries.jsonl's cache field).
@@ -188,7 +180,7 @@ class RetrievalEvalRunnerIT {
         for (GoldenRow row : golden) {
             pass1.put(row.id(), executeGolden(row, scopeLangs, fallbackRecords));
         }
-        String fingerprint2 = dbFingerprint();
+        String fingerprint2 = dbFingerprint(dataSource);
         Map<String, QueryOutcome> pass2 = new LinkedHashMap<>();
         for (GoldenRow row : golden) {
             pass2.put(row.id(), executeGolden(row, scopeLangs, fallbackRecords));
@@ -199,30 +191,17 @@ class RetrievalEvalRunnerIT {
         writeArtifacts(resultsDir, goldenSet, pass1, pass2, fingerprint1, fingerprint2,
                 labelMatch, fallbackRecords);
 
-        if (!fingerprint1.equals(fingerprint2)) {
-            fail("DB fingerprint drift between passes (pass1=" + fingerprint1
-                    + " pass2=" + fingerprint2 + ") — corpus moved mid-run; NOT scored, "
-                    + "re-run on a frozen stack (D19/P7)");
-        }
-        if (!labelMatch) {
-            fail("DB fingerprint drift against the labels (run=" + fingerprint1
-                    + ") — scores refused; re-baseline requires a supersedes relabel "
-                    + "(M1-928 freeze, P7)");
-        }
-        List<String> divergent = new ArrayList<>();
+        assertNoInterPassDrift(fingerprint1, fingerprint2);
+        assertLabelFingerprintMatch(labelMatch, fingerprint1);
+        Map<String, List<String>> uids1ByRecord = new LinkedHashMap<>();
+        Map<String, List<String>> uids2ByRecord = new LinkedHashMap<>();
         for (GoldenRow row : golden) {
-            List<String> uids1 = pass1.get(row.id()).rows().stream()
-                    .map(RetrievalEvalScorer.ToolRow::uid).toList();
-            List<String> uids2 = pass2.get(row.id()).rows().stream()
-                    .map(RetrievalEvalScorer.ToolRow::uid).toList();
-            if (!uids1.equals(uids2)) {
-                divergent.add(row.id());
-            }
+            uids1ByRecord.put(row.id(), pass1.get(row.id()).rows().stream()
+                    .map(RetrievalEvalScorer.ToolRow::uid).toList());
+            uids2ByRecord.put(row.id(), pass2.get(row.id()).rows().stream()
+                    .map(RetrievalEvalScorer.ToolRow::uid).toList());
         }
-        if (!divergent.isEmpty()) {
-            fail("determinism self-check failed — pass1/pass2 uid lists differ for "
-                    + divergent + " on an unchanged fingerprint (D19)");
-        }
+        assertDeterminismIdentity(uids1ByRecord, uids2ByRecord);
         List<String> enCalled = new ArrayList<>();
         for (GoldenRow row : golden) {
             if ("en".equals(row.scopeLang())
@@ -231,15 +210,8 @@ class RetrievalEvalRunnerIT {
                 enCalled.add(row.id());
             }
         }
-        if (!enCalled.isEmpty()) {
-            fail("en-scope records issued translator calls (" + enCalled
-                    + ") — the en leg must be a strict no-op (D58)");
-        }
-        if (!fallbackRecords.isEmpty()) {
-            fail("translator fallback on " + fallbackRecords.size() + " cross-lingual record(s): "
-                    + fallbackRecords + " — scoring aborted, never silently degraded "
-                    + "(M1-859 counted-fallback rule, P8)");
-        }
+        assertEnLegsIssuedZeroTranslatorCalls(enCalled);
+        assertZeroTranslatorFallbacks(fallbackRecords);
 
         Instant worldNow = worldMaxReadyAt(fingerprint1);
         RetrievalEvalScorer.Scores scores = RetrievalEvalScorer.score(
@@ -282,6 +254,82 @@ class RetrievalEvalRunnerIT {
     }
 
     private double translatorCallCount() {
+        return translatorCallCount(registry);
+    }
+
+    // ---- Shared bring-up guards, fences, and helpers (M1-945): the
+    // characterization IT rides the same boot checks and the same named
+    // refusals — never a private copy that could drift.
+
+    static void assertEndpointsAreReal(String embeddingsBaseUrl, String llmBaseUrl) {
+        if (TEST_SENTINEL.equals(embeddingsBaseUrl) || TEST_SENTINEL.equals(llmBaseUrl)) {
+            fail("eval profile did not win over the %test sentinel endpoints — pass "
+                    + "-Deval.embeddings.base-url / -Deval.llm.base-url (see the class javadoc)");
+        }
+    }
+
+    static void assertNoTestStubsSelected(
+            jakarta.enterprise.inject.Instance<app.zcat.infochat.llm.EmbeddingProvider> embeddingProviders,
+            jakarta.enterprise.inject.Instance<app.zcat.infochat.llm.LlmProvider> llmProviders) {
+        if (embeddingProviders.stream()
+                .anyMatch(b -> b instanceof app.zcat.infochat.provider.testing.StubEmbeddingProvider)
+                || llmProviders.stream()
+                .anyMatch(b -> b instanceof app.zcat.infochat.provider.testing.TestLlmProvider)) {
+            fail("test-classpath stubs are still selected — the %eval profile's "
+                    + "quarkus.arc.exclude-types entry did not reach this boot's "
+                    + "augmentation (see the provider test application.properties)");
+        }
+    }
+
+    static void assertNoInterPassDrift(String fingerprint1, String fingerprint2) {
+        if (!fingerprint1.equals(fingerprint2)) {
+            fail("DB fingerprint drift between passes (pass1=" + fingerprint1
+                    + " pass2=" + fingerprint2 + ") — corpus moved mid-run; NOT scored, "
+                    + "re-run on a frozen stack (D19/P7)");
+        }
+    }
+
+    static boolean labelFingerprintMatches(List<GoldenRow> golden, String runFingerprint) {
+        return golden.stream().allMatch(r -> r.labeledFingerprint().equals(runFingerprint));
+    }
+
+    static void assertLabelFingerprintMatch(boolean labelMatch, String fingerprint1) {
+        if (!labelMatch) {
+            fail("DB fingerprint drift against the labels (run=" + fingerprint1
+                    + ") — scores refused; re-baseline requires a supersedes relabel "
+                    + "(M1-928 freeze, P7)");
+        }
+    }
+
+    static void assertDeterminismIdentity(Map<String, List<String>> uids1, Map<String, List<String>> uids2) {
+        List<String> divergent = new ArrayList<>();
+        for (Map.Entry<String, List<String>> e : uids1.entrySet()) {
+            if (!e.getValue().equals(uids2.get(e.getKey()))) {
+                divergent.add(e.getKey());
+            }
+        }
+        if (!divergent.isEmpty()) {
+            fail("determinism self-check failed — pass1/pass2 uid lists differ for "
+                    + divergent + " on an unchanged fingerprint (D19)");
+        }
+    }
+
+    static void assertEnLegsIssuedZeroTranslatorCalls(List<String> offenders) {
+        if (!offenders.isEmpty()) {
+            fail("en-scope records issued translator calls (" + offenders
+                    + ") — the en leg must be a strict no-op (D58)");
+        }
+    }
+
+    static void assertZeroTranslatorFallbacks(java.util.Set<String> fallbackRecords) {
+        if (!fallbackRecords.isEmpty()) {
+            fail("translator fallback on " + fallbackRecords.size() + " cross-lingual record(s): "
+                    + fallbackRecords + " — scoring aborted, never silently degraded "
+                    + "(M1-859 counted-fallback rule, P8)");
+        }
+    }
+
+    static double translatorCallCount(MeterRegistry registry) {
         return registry.find("llm.calls.total")
                 .tags("task", ModelTask.TRANSLATOR.keySegment())
                 .counters().stream().mapToDouble(c -> c.count()).sum();
@@ -297,7 +345,7 @@ class RetrievalEvalRunnerIT {
     }
 
     /** Fail the run unless every eval scope's declared language matches the seed script's map. */
-    private Map<String, String> assertEvalScopesSeeded() throws Exception {
+    static Map<String, String> assertEvalScopesSeeded(DataSource dataSource) throws Exception {
         Map<String, String> langs = new TreeMap<>();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
@@ -346,7 +394,7 @@ class RetrievalEvalRunnerIT {
                     + " OR p.source_id IN (SELECT source_id FROM source_subscription"
                     + " WHERE scope_kind = ? AND scope_id = ?))";
 
-    private String dbFingerprint() throws Exception {
+    static String dbFingerprint(DataSource dataSource) throws Exception {
         UUID scope = EVAL_SCOPES.get("en");
         MessageDigest sha = MessageDigest.getInstance("SHA-256");
         long count = 0;
@@ -386,7 +434,7 @@ class RetrievalEvalRunnerIT {
         return Instant.parse(rendered.replace(" ", "T").replaceFirst("\\+00$", "Z"));
     }
 
-    private static Path resolveResultsDir() throws IOException {
+    static Path resolveResultsDir(String leaf) throws IOException {
         Path dir = Path.of(System.getProperty("user.dir")).toAbsolutePath();
         while (dir != null && !Files.exists(dir.resolve(".git"))) {
             dir = dir.getParent();
@@ -394,7 +442,7 @@ class RetrievalEvalRunnerIT {
         if (dir == null) {
             throw new IllegalStateException("repo root not found above " + System.getProperty("user.dir"));
         }
-        Path results = dir.resolve(".bench/retrieval-eval/results/"
+        Path results = dir.resolve(".bench/retrieval-eval/" + leaf + "/"
                 + DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").withZone(ZoneOffset.UTC).format(Instant.now()));
         Files.createDirectories(results);
         return results;
@@ -469,7 +517,7 @@ class RetrievalEvalRunnerIT {
         MAPPER.writerWithDefaultPrettyPrinter().writeValue(dir.resolve("scores.json").toFile(), out);
     }
 
-    private static String gitCommit() {
+    static String gitCommit() {
         try {
             Process p = new ProcessBuilder("git", "rev-parse", "HEAD")
                     .redirectErrorStream(true).start();

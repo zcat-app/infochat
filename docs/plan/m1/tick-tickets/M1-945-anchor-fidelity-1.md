@@ -1,9 +1,9 @@
 ---
 id: M1-945
 title: "Characterize the anchor-leg gap: probes + counterfactuals"
-status: pending
+status: done
 created: 2026-08-27
-last_updated: 2026-08-27
+last_updated: 2026-08-28
 flow: tick
 reproduction: >-
   Child of a 2+ decomposition (analysis
@@ -22,12 +22,15 @@ reproduction: >-
   text would retrieve against the same frozen expected sets. Probes today:
   `grep -rn "counterfactual\|window overlap" docs/measurement/` → no
   hits; `ls docs/measurement/anchor-leg-characterization.md` → ENOENT.
-  Tests `to-be-written`:
+  Tests (converted at start, 2026-08-27, RED before fix code —
+  compile-failure evidence .scratch/tick-red-M1-945.log):
   AnchorLegCharacterizerTest#siblingPairDerivations — pure-function legs
   (window overlap, hit-rank distribution, per-pair raw-recall delta) over
-  a fixture pair; RED today (the class does not exist);
+  a fixture pair; GREEN after AnchorLegCharacterizer landed
+  (.scratch/tick-green-M1-945-unit.log);
   RetrievalEvalCharacterizationIT#threeArmsRideTheProductionTool —
-  operator leg (see test_plan), RED today (the IT does not exist).
+  operator leg (see test_plan); written, turns green on the frozen stack
+  (two operator invocations, determinism-asserted).
 analysis_ref: docs/plan/m1/tick-analysis/anchor-leg-query-fidelity.md
 blocked_by: []
 files_scope:
@@ -116,11 +119,26 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-27
+    verdict: APPROVE
+    checks: SPEC-TRUTHNESS-CHECK PASS, SECURITY-CHECK PASS, TEST-ADEQUACY-CHECK PASS, MAINTAINABILITY-CHECK PASS, SCOPE-CHECK PASS
+    diff_stats: 7 files, +912/-66 (4 new eval test-scope files, runner statics extraction, committed record, ticket+board)
+    notes: 0 rework, 0 critical/high; reviewer falsified-and-dropped 5 candidate findings (prompt-pin coverage via QueryAnchorTranslatorTest:201-203, record restatement convention, ASSUMPTION-class brief numbers re-derived, fingerprint fence reachability, cache-hygiene boot contract); verdict artifact .scratch/tick-review-M1-945-r1.txt; no naming suggestions.
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  2026-08-27: PASS — all file:line citations re-verified by read (QueryAnchorTranslator
+  :141-143/:202-204/:260-261/:279-298/:313; RetrievalEvalRunnerIT :431-441/:202-242;
+  SemanticSearchTool :108-113/:122/:133-134/:139/:145; golden-set.jsonl:57
+  "cybersecurity threats and vulnerabilities"; baseline record :386-392). Pitfalls
+  P1/P4-P10/P13/P14 all carried. No replaces. blocked_by empty. Preserves verified:
+  runner fences inline at RetrievalEvalRunnerIT.java:202-242; POM excludedGroups
+  retrieval-eval (infochat-provider/pom.xml:169-245). Frozen stack present locally,
+  stopped (infochat-test compose, exit 0) — operator invocations feasible from this
+  session.
 escalation_reason:
 ---
 
