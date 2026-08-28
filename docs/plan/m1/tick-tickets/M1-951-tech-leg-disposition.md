@@ -116,6 +116,12 @@ regression suite is stated nowhere. This ticket restores the world (or
 records the user's alternative ruling), records the caveat + demotion, and
 executes the 946/947 disposition. Shared analysis: `analysis_ref:`.
 
+**Ruling recorded (2026-08-28, user):** restore fork + the RECOMMENDED
+disposition (keep M1-946 re-gated on this ticket; abort M1-947 as
+superseded by M1-952) — the ticket-state half executed in frontmatter the
+same day (M1-946 blocked_by += M1-951; M1-947 abandoned); the restore,
+caveat section, and note remain this ticket's implementation.
+
 ## Root cause
 
 Verified: every golden record pins the frozen fingerprint (grep over

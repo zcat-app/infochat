@@ -23,7 +23,7 @@ reproduction: >-
   today: active cross-lingual rows = 20 class lines − 8 replaced_by
   retirees = 12 (golden-set.jsonl :40-51 retired, :44-47/:62-69 active).
 analysis_ref: docs/plan/m1/tick-analysis/anchor-leg-query-fidelity.md
-blocked_by: [M1-945]
+blocked_by: [M1-945, M1-951]
 files_scope:
   - infochat-provider/src/test/resources/retrieval-eval/golden-set.jsonl
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/eval/RetrievalGoldenSetTest.java
@@ -143,6 +143,16 @@ full re-label cycle against a new corpus world (D1), not four
 verbatim-inheritance rows. The gate is procedural and carried in this
 body only; the frontmatter mechanics are unchanged (blocked_by stays
 [M1-945]).
+
+**Ruling recorded (2026-08-28, user): fork (a)** — fix + widen + gate; the
+conservative T1/G1 reading holds and this ticket runs. Disposition per
+M1-951's recommended fork (same ruling): `blocked_by` gains M1-951 — the
+new rows bind to the frozen pin, which exists again only after M1-951's
+drift restore — superseding the "frontmatter mechanics unchanged" sentence
+above; and the widened set's reading consumer is M1-952's tech leg
+(M1-947 abandoned as superseded). Sequencing constraint stands: label
+before any M1-933 retention deploy or M1-934 sweep-backfill deploy touches
+the test stack, else the widening degrades to a full re-label cycle (D1).
 
 ## Root cause
 

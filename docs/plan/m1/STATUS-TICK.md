@@ -10,13 +10,13 @@
 
 | Status | Count |
 |---|---|
-| pending | 16 |
+| pending | 15 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 145 |
 | deferred | 1 |
-| abandoned | 5 |
+| abandoned | 6 |
 | **total** | **167** |
 
 ---
@@ -31,7 +31,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-938 — Window the temporal pre-fetch; deterministic window hint (complexity: medium, risk: medium)
 - M1-939 — Pin the native reply language per-turn and after fold-backs (complexity: medium, risk: medium)
 - M1-940 — Surface bounded post content in search tool emissions (complexity: medium, risk: medium)
-- M1-946 — Widen the cross-lingual golden slice to n = 16 (complexity: medium, risk: medium)
 - M1-948 — Isolated fam replica: dump, restore, pin fingerprint (complexity: medium, risk: medium)
 - M1-951 — Tech-leg disposition: drift restore, 946/947, caveat (complexity: low, risk: medium)
 
@@ -53,7 +52,7 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-935 — blocked_by: M1-932 (pending), M1-934 (pending)
 - M1-936 — blocked_by: M1-934 (pending)
 - M1-941 — blocked_by: M1-940 (pending)
-- M1-947 — blocked_by: M1-946 (pending)
+- M1-946 — blocked_by: M1-945 (done), M1-951 (pending)
 - M1-949 — blocked_by: M1-948 (pending)
 - M1-950 — blocked_by: M1-948 (pending), M1-949 (pending)
 - M1-952 — blocked_by: M1-949 (pending), M1-950 (pending), M1-951 (pending)
@@ -102,9 +101,10 @@ Tickets decided against — not implemented as this ticket. Terminal: not reopen
 ### decomposed (1)
 - M1-869 — Amend the spec for the v2 tag-tree taxonomy
 
-### superseded (2)
+### superseded (3)
 - M1-860 — Measure news-category tagger coverage on the local model
 - M1-861 — Seed validated news categories into the tag vocabulary
+- M1-947 — Re-baseline the retrieval eval on the widened set
 
 ### wont-do-infeasible (2)
 - M1-910 — Rootless IPv6 compose enablement, capability-derived
@@ -304,8 +304,8 @@ M1-942 (done)
 M1-943 (done)
   └── M1-944 (done) [see above]
 M1-945 (done)
-  └── M1-946 (pending) ← runnable
-        └── M1-947 (pending)
+  └── M1-946 (pending)
+        └── M1-947 (abandoned)
 M1-948 (pending) ← runnable
   ├── M1-949 (pending)
   │     ├── M1-950 (pending)
@@ -313,6 +313,7 @@ M1-948 (pending) ← runnable
   │     └── M1-952 (pending) [see above]
   └── M1-950 (pending) [see above]
 M1-951 (pending) ← runnable
+  ├── M1-946 (pending) [see above]
   └── M1-952 (pending) [see above]
 M1-953 (done)
 ```

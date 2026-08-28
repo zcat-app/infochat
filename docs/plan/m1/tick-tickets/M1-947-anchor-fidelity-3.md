@@ -1,9 +1,9 @@
 ---
 id: M1-947
 title: "Re-baseline the retrieval eval on the widened set"
-status: pending
+status: abandoned
 created: 2026-08-27
-last_updated: 2026-08-27
+last_updated: 2026-08-28
 flow: tick
 reproduction: >-
   Probe (measurement ticket, the M1-944 posture — the missing widened
@@ -84,10 +84,10 @@ decision_refs:
   - D29
 decomposed_from:
 replaces:
-replaced_by:
+replaced_by: M1-952
 deferred_on:
 deferred_reason:
-abandoned_reason:
+abandoned_reason: superseded
 spec_amend_for:
 spec_amend_parent:
 remediates:
@@ -184,6 +184,15 @@ harness's own, restated in the section.
 As the YAML block: no production/spec/test change, no rule edits, no
 history rewrites, no fix, no re-labeling, no PROD containers. A doc-only
 diff that names any other file is scope drift.
+
+## Disposition (2026-08-28, user ruling)
+
+Abandoned per M1-951's recommended fork: this ticket's widened-set
+re-baseline reading IS the tech leg of M1-952's mixed baseline — a
+separate section would duplicate the same run against the same frozen
+stack. M1-946 (the widening) is KEPT, re-gated on M1-951's restore;
+M1-952's tech leg is the widened set's first reading consumer
+(`replaced_by: M1-952`).
 
 ## Pre-flight self-check (author-side)
 
