@@ -501,3 +501,66 @@ None. The frozen M1-942 golden-set output was consumed read-only; its
 identity is pinned above (`golden_set_sha256`) and asserted by both runs'
 manifests.
 
+## Tech-leg disposition — representativeness, demotion, drift restore (appended 2026-08-28, M1-951)
+
+### Representativeness caveat
+
+Every number in this record — both Results sections, the campaign ladder
+built on them, and the golden set itself — describes the TECH test
+instance's world: the ready=5214 posts whose tag mix runs ~90% tech
+(ai 3615 / research 3009 / software-development 1134 / cybersecurity
+1000 / crypto 314; tail: medicine 28 / football 20 / other-sports 12).
+The product also runs live as a general-news instance (the fam
+deployment: economy/world/health/sports mainstream over ~7300 READY
+posts; ai 140 / cyber 94 as tail) on the SAME architecture. Findings
+split:
+
+- Instrument-local (do NOT generalize beyond the tech world): the
+  width-32 magnitude, the cyber-gap ladder, per-need PRF/rerank effects,
+  every per-class recall, the 4th-need selection of the pending widening.
+- Architecture-level (generalize by spec, D19/D29/D58): the translation
+  premise (queries anchored to English, corpus translated at rest into a
+  unified English space), the multilingual-embedder rejection,
+  embedding-coverage discipline, result-budget mechanics.
+
+### Demotion of the golden set
+
+The golden set is the TECH-instance regression suite. No decision-grade
+product-wide claim may rest on this record alone; such claims gate on
+both legs of the two-world instrument (the fam snapshot-replica leg plus
+this tech leg — the two-leg record owns those gating rules).
+
+### World drift and restore
+
+Between 2026-08-24 16:00:57 UTC (the frozen max_ready_at) and 2026-08-27
+23:54 UTC an external collector boot ingested posts beyond the freeze.
+The 2026-08-28 restore (M1-951) re-derived the mechanical drift set —
+world-visible READY posts with ready_at strictly after the frozen max —
+as 47 posts, all `rss.arxiv.org/rss/cs.AI` (ready_at 2026-08-27
+23:44:03–23:54:23 UTC). The same boot also produced one READY BBC post
+through a user-added source; that post is world-invisible under D59 and
+was left untouched. After a stopped-stack snapshot of the
+`infochat-test_infochat-pgdata` volume, one transaction deleted the 47
+posts and their dangling derivatives (36 `post_reference`, 67
+`post_entity`, 47 `post_embedding` rows; zero `quarantine` / `saved_post`
+/ `summary_anchor` rows). Post-restore fingerprint read, byte-exact the
+frozen pin:
+
+`ready=5214;max_ready_at=2026-08-24 16:00:57.001472+00;uid_sha256=06ed0de15eefad172062b4b6e3dfb11713e02017b103cc8ab8e064ffbe489727`
+
+Operator smoke (M1-929 runner, commit `04d56d45`, 2026-08-28): both
+passes report that same fingerprint and `label_fingerprint_match` true —
+the campaign gating note above is runnable again. The restore script is
+`scripts/tech-drift-restore.sql` (SELECT-first review; the delete
+aborts unless the post-delete fingerprint equals the pin byte-exactly).
+
+### M1-946 / M1-947 disposition
+
+Per the ruling recorded 2026-08-28: M1-946 (xling widening to n=16) is
+KEPT, re-gated on M1-951's restore — its rows label against the pin,
+which exists again — and its reading consumer is the two-leg record's
+tech leg, not M1-947. M1-947 (re-baseline on the widened set) is
+ABANDONED as superseded: its widened-set reading IS the tech leg of the
+mixed baseline (M1-952), and a separate section would duplicate the same
+run against the same frozen stack.
+

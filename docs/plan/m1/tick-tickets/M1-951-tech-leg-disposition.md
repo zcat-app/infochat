@@ -1,7 +1,7 @@
 ---
 id: M1-951
 title: "Tech-leg disposition: drift restore, 946/947, caveat"
-status: pending
+status: done
 created: 2026-08-28
 last_updated: 2026-08-28
 flow: tick
@@ -91,11 +91,33 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-28
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: NOT-APPLICABLE; MAINTAINABILITY: PASS; SCOPE: PASS"
+    diff_stats: "4 files, +295/-10 (SQL +178 new, record +63 pure append, ticket +50/-6 incl. Run notes, board +14/-10 regen)"
+    notes: "0 findings; 4 falsification candidates dropped with citations (dry-run/re-run TOCTOU defeated by in-tx re-derivation + two DO asserts; summary_anchor over-delete defeated by reviewed 0-count printout; predicate drift vs runner WORLD_WHERE defeated by byte-comparison + label_fingerprint_match empirical proof; uncovered derivative tables defeated by schema enumeration — six non-FK tables all deleted explicitly). Reviewer verified the smoke manifest on disk, pure-additions shape, 946/947 frontmatter, log freshness, no secrets. Verdict: .scratch/tick-review-M1-951-r1.txt"
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  start_repro: >-
+    No blocking question. Reproduction re-derived at start (2026-08-28,
+    read-only): the fingerprint read returns ready=5261;max_ready_at=2026-08-27
+    23:54:23.003542+00;uid_sha256=776e8c7c… (drift confirmed); the MECHANICAL
+    drift set (D59 world READY strictly after the frozen max) is 47 posts —
+    all arXiv cs.AI — and 5261-47=5214 closes the arithmetic. The brief's
+    "48, 47 arXiv + 1 BBC" counts one extra READY post beyond the frozen max
+    that is WORLD-INVISIBLE (BBC rss via a source_origin=user source, not
+    bootstrap, no subscription): the fingerprint cannot see it, the ticket's
+    mechanical definition excludes it, and it STAYS. The SELECT printout (47)
+    governs; the byte-exact fingerprint read is the oracle.
+  ruling: >-
+    The 946/947 disposition ruling is already recorded in Context and
+    executed in frontmatter (M1-946 blocked_by=[M1-945, M1-951] pending;
+    M1-947 abandoned superseded) — verified at start; only the record note
+    naming it remains.
 escalation_reason:
 ---
 
@@ -227,3 +249,33 @@ appended dated section, every existing line byte-identical
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-951-tech-leg-disposition.md
 ```
+
+## Run notes (operator, 2026-08-28)
+
+- Pre-mutation snapshot (P13): stopped-stack tar of the
+  `infochat-test_infochat-pgdata` volume at
+  `/home/infochat/infochat-test/backups/pgdata-pre-M1-951-20260828T153405Z.tar.gz`
+  (141 MB; postgres stopped for the tar, healthy immediately after).
+- SELECT-first review printout: drift set = **47 posts, all
+  `rss.arxiv.org/rss/cs.AI`**, ready_at 2026-08-27 23:44:03–23:54:23 UTC;
+  world arithmetic 5214 + 47 = 5261 (the pre-restore read returned
+  ready=5261;max_ready_at=2026-08-27 23:54:23.003542+00;uid_sha256=776e8c7c…).
+  The brief's "48, 47 arXiv + 1 BBC" counts one READY post beyond the
+  frozen max that is WORLD-INVISIBLE (BBC rss via a `source_origin=user`
+  source, not bootstrap, zero subscriptions): outside the mechanical set,
+  fingerprint cannot see it, left untouched (recorded in
+  `clarity_check.start_repro`).
+- Derivative delete counts, exactly as printed in review:
+  post_reference 36, post_entity 67, post_embedding 47, quarantine 0,
+  saved_post 0, summary_anchor 0, posts 47 — one transaction, COMMIT only
+  after the in-transaction fingerprint assert passed.
+- Post-delete fingerprint read (byte-exact the frozen pin):
+  `ready=5214;max_ready_at=2026-08-24 16:00:57.001472+00;uid_sha256=06ed0de15eefad172062b4b6e3dfb11713e02017b103cc8ab8e064ffbe489727`
+- M1-929 operator smoke (RetrievalEvalRunnerIT, commit `04d56d45`,
+  artifacts `.bench/retrieval-eval/results/20260828-171442/`):
+  `label_fingerprint_match: true`, both passes' fingerprints equal the
+  frozen pin, `translator_fallback_records: []`, BUILD SUCCESS.
+- FAILURE-MODE posture honored: no refusal occurred; no route-around was
+  needed (the first smoke attempt failed on an operator credential
+  mistake — placeholder env-expression passed instead of the real
+  password — not on a harness refusal; fixed and re-run).

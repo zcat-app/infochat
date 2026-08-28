@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 14 |
+| pending | 13 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 146 |
+| done | 147 |
 | deferred | 1 |
 | abandoned | 6 |
 | **total** | **167** |
@@ -31,8 +31,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-938 — Window the temporal pre-fetch; deterministic window hint (complexity: medium, risk: medium)
 - M1-939 — Pin the native reply language per-turn and after fold-backs (complexity: medium, risk: medium)
 - M1-940 — Surface bounded post content in search tool emissions (complexity: medium, risk: medium)
+- M1-946 — Widen the cross-lingual golden slice to n = 16 (complexity: medium, risk: medium)
 - M1-949 — Fam golden set: label the broad-distribution world (complexity: medium, risk: medium)
-- M1-951 — Tech-leg disposition: drift restore, 946/947, caveat (complexity: low, risk: medium)
 
 ---
 
@@ -52,9 +52,8 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-935 — blocked_by: M1-932 (pending), M1-934 (pending)
 - M1-936 — blocked_by: M1-934 (pending)
 - M1-941 — blocked_by: M1-940 (pending)
-- M1-946 — blocked_by: M1-945 (done), M1-951 (pending)
 - M1-950 — blocked_by: M1-948 (done), M1-949 (pending)
-- M1-952 — blocked_by: M1-949 (pending), M1-950 (pending), M1-951 (pending)
+- M1-952 — blocked_by: M1-949 (pending), M1-950 (pending), M1-951 (done)
 
 ---
 
@@ -74,6 +73,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-953 | Counted temporal form requires a left word boundary | 2026-08-28 | round 1 APPROVE |
+| M1-951 | Tech-leg disposition: drift restore, 946/947, caveat | 2026-08-28 | round 1 APPROVE |
 | M1-948 | Isolated fam replica: dump, restore, pin fingerprint | 2026-08-28 | round 2 APPROVE |
 | M1-945 | Characterize the anchor-leg gap: probes + counterfactuals | 2026-08-28 | round 1 APPROVE |
 | M1-937 | Deterministic temporal-expression parser | 2026-08-28 | round 3 APPROVE |
@@ -82,7 +82,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-943 | Eval harness: skip retired records, pin golden-set id | 2026-08-27 | round 1 APPROVE |
 | M1-942 | Golden-set label corrections, relabel, and extension | 2026-08-27 | round 2 APPROVE |
 | M1-930 | Baseline retrieval-eval measurement record | 2026-08-27 | round 1 APPROVE |
-| M1-929 | Harness: score golden set over production fused SQL | 2026-08-27 | round 2 APPROVE |
 
 ---
 
@@ -303,7 +302,7 @@ M1-942 (done)
 M1-943 (done)
   └── M1-944 (done) [see above]
 M1-945 (done)
-  └── M1-946 (pending)
+  └── M1-946 (pending) ← runnable
         └── M1-947 (abandoned)
 M1-948 (done)
   ├── M1-949 (pending) ← runnable
@@ -311,7 +310,7 @@ M1-948 (done)
   │     │     └── M1-952 (pending)
   │     └── M1-952 (pending) [see above]
   └── M1-950 (pending) [see above]
-M1-951 (pending) ← runnable
+M1-951 (done)
   ├── M1-946 (pending) [see above]
   └── M1-952 (pending) [see above]
 M1-953 (done)
