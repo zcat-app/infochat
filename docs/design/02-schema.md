@@ -941,7 +941,7 @@ post that reaches `READY` without successful tagging carries
 
 ---
 
-## 2.4 Tier-2 cross-linking (TTL 4 days, partitioned)
+## 2.4 Tier-2 cross-linking (partitioned; retention aligned with post)
 
 ### 2.4.1 `post_entity`
 
@@ -1056,7 +1056,7 @@ a partition requires parent-table ownership):
    the per-table retention horizon
    (`infochat.partitions.retention-days.<table>`):
    - `post` — 30 days (laptop/vps/remote-llm), 14 days (pi)
-   - `post_entity`, `post_embedding`, `post_reference` — 4 days (all profiles)
+   - `post_entity`, `post_embedding`, `post_reference` — 30 days (laptop/vps/remote-llm), 14 days (pi): the same horizon as `post`, so a post visible under retention always keeps its semantic surface
    - `price_snapshot` — 7 days (all profiles)
 
    A floor guard never drops the current or next month's partition,
@@ -1704,10 +1704,14 @@ selects it) changes:
 
 1. Add a new column `embedding_v2 vector(N)` on `post_embedding` matching
    the new dimension.
-2. Re-embed all `post` rows where `status = 'READY'` and `fetched_at >
-   now() - interval '4 days'`. The 4-day window self-heals fast.
+2. Re-embed all `post` rows where `status = 'READY'` and `fetched_at` is
+   newer than the post retention horizon (§2.4.4 — 30 days on
+   laptop/vps/remote-llm, 14 days on pi), so no post still visible under
+   retention is left without an embedding on the new dimension. The window
+   self-heals as posts age out of retention.
 3. Switch the LinkingJob to read `embedding_v2`.
-4. After 4 days, drop the old column and rename `embedding_v2 → embedding`.
+4. After the retention horizon has fully elapsed on every profile in use,
+   drop the old column and rename `embedding_v2 → embedding`.
 
 A migration script `prod/scripts/reembed.sh` would automate steps 1–3 (it is
 not shipped in v1 — see the deferral note above). The migration is
@@ -1898,9 +1902,9 @@ Recorded by `BootstrapLoader` after every successful idempotent load (see
 | Table                | Retention                                                 | Mechanism                                                                 |
 | -------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------- |
 | `post`               | 30 d (laptop/vps/remote-llm), 14 d (pi)                   | Drop partition (Invariant 6)                                              |
-| `post_entity`        | 4 d                                                       | Drop partition                                                            |
-| `post_embedding`     | 4 d                                                       | Drop partition                                                            |
-| `post_reference`     | 4 d                                                       | Drop partition                                                            |
+| `post_entity`        | 30 d (laptop/vps/remote-llm), 14 d (pi) — aligned with `post` | Drop partition                                                            |
+| `post_embedding`     | 30 d (laptop/vps/remote-llm), 14 d (pi) — aligned with `post` | Drop partition                                                            |
+| `post_reference`     | 30 d (laptop/vps/remote-llm), 14 d (pi) — aligned with `post` | Drop partition                                                            |
 | `price_snapshot`     | 7 d                                                       | Drop partition (Invariant 6)                                              |
 | `quarantine` `PENDING`        | 14 d (admin-review TTL → auto-`REJECTED`)         | Cron job (§2.5.1)                                                         |
 | `quarantine` `BENIGN_CLOSED`/`APPROVED`/`REJECTED` | indefinite (audit artefact)  | none (forensic record)                                                    |
@@ -1927,7 +1931,7 @@ exist.
 | -------------------------------------------------- | -------------------------------------------------------------- |
 | `/summary {tag} -w 24h` (scope-aware)              | `idx_post_tags_gin` → `idx_post_status_fetched`                |
 | Cluster lookup by post graph                       | `idx_post_ref_from` and `idx_post_ref_to`                      |
-| Tier-2 entity match                                | `idx_post_entity_text` (within 4-day partition)                |
+| Tier-2 entity match                                | `idx_post_entity_text` (within the retention horizon's partitions) |
 | Tier-2 semantic kNN                                | `idx_post_embedding_hnsw` on `post_embedding.embedding` (HNSW on every profile in v1; the profile-specific IVFFlat variant is deferred — §2.4.2) |
 | `/saved` filter by personal tag                    | `idx_saved_user_personal_tags` (GIN)                           |
 | Memory pre-fetch by keyword                        | `idx_chat_memory_keywords` (GIN)                               |

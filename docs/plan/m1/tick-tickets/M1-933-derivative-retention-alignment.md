@@ -1,16 +1,18 @@
 ---
 id: M1-933
 title: "Align derivative retention with post (30d base, 14d pi)"
-status: pending
+status: done
 created: 2026-08-26
-last_updated: 2026-08-26
+last_updated: 2026-08-28
 flow: tick
 reproduction: >-
   PartitionRetentionAlignmentIT#previousMonthDerivativePartitionsSurviveAlongsidePost
-  (to-be-written — converted at start per workflow §0: write the IT, run RED
-  before any config change) and
+  (RED 2026-08-28 against main: post_embedding_202002 DROPPED by onTick while
+  post_202002 survived — .scratch/tick-red-M1-933-it.log) and
   PartitionRetentionPropertiesTest#baseProfileAlignsDerivativeRetentionWithPost
-  (to-be-written, same conversion). The wrong behavior they state: with the
+  (RED: post-embedding parsed 4, expected 30) plus
+  #piProfileAlignsDerivativeRetentionWithPost (RED: the %pi derivative keys
+  are absent — found 0 declarations). The wrong behavior they state: with the
   Clock pinned to 2020-03-10T00:00:00Z and the shipped config,
   PartitionPruner.onTick() DROPS the February-2020 post_embedding /
   post_entity / post_reference partitions (shipped derivative retention 4 d →
@@ -117,11 +119,40 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-28
+    verdict: APPROVE
+    checks: SPEC-TRUTHNESS-CHECK PASS, SECURITY-CHECK PASS, TEST-ADEQUACY-CHECK PASS, MAINTAINABILITY-CHECK PASS, SCOPE-CHECK PASS
+    diff_stats: 10 files, +248/-40 (properties +15, restore.sh +6/-6, RestoreWiringTest +2/-2, UnresolvedRepost comment +3/-3, 02-schema +22, 07-deployment +12, 2 new tests +133/+54, ticket +26, board regen)
+    notes: >-
+      0 rework, 0 critical/high; reviewer falsified-and-dropped 5 candidate
+      findings (restore-floor trigger-set identity under either literal;
+      retention-disabled mutation caught by agedMonthStillDropsOnAllTables;
+      pi-drift caught by the missing-%pi-key failure mode; parity-gate
+      coverage via the existing <table> exemption row; the rewritten
+      V29-bootstrap comment claim permanently true). RED evidence
+      .scratch/tick-red-M1-933-it.log; log of record
+      target/tick-test-M1-933-r1.log (BUILD SUCCESS 10:30). One in-band
+      fix mid-round: 07-deployment profile-table row key template .* →
+      <table> after the first r1 verify run tripped
+      DocumentedConfigKeyParityTest (second full run green).
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  question: >-
+    RestoreWiringTest.java:1086-1088 carries the comment "months older than
+    the shipped 4d retention" inside the authorized floor test case; it goes
+    stale-truth under this change but the §8 authorization ends "No other
+    pre-existing test is modified" and the Census has no row for :1087.
+  resolution: >-
+    User-directed falsification check (2026-08-28) confirmed a P7-class
+    comment-only edit: §11 current-truth applies to live test source (the
+    frozen-history carve-out covers docs/plan ticket documents only), and §8
+    authorization may ride the commit message. Rewrite to "the shipped
+    derivative retention" (names no value); no assertion/body change;
+    explicitly authorized in the commit body alongside the :1130 literal.
 escalation_reason:
 ---
 

@@ -1084,7 +1084,7 @@ class RestoreWiringTest {
     @EnabledOnOs(OS.LINUX)
     void restoredOldDerivativePartitionsRaiseTheRetentionFloor(@TempDir Path tmp) throws Exception {
         // M1-906 reproduction (live D-17): restoring a bundle whose derivative partitions
-        // are months older than the shipped 4d retention let the Collector's first prune
+        // are months older than the shipped derivative retention let the Collector's first prune
         // tick DROP them — surfaces that never regenerate.
 
         // The restore must RAISE the three derivative retention keys on the placed
@@ -1127,7 +1127,7 @@ class RestoreWiringTest {
                     "the WARN must name the date the floor lapses (P1):\n" + r.output);
             assertTrue(r.output.contains("keep"),
                     "the WARN must name keeping the floor as the preserve action:\n" + r.output);
-            assertTrue(r.output.contains("back to 4"),
+            assertTrue(r.output.contains("back to 30"),
                     "the WARN must name lowering the key back to the prior value to accept"
                             + " the drop:\n" + r.output);
         }

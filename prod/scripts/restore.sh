@@ -786,7 +786,7 @@ if [[ "$failed_pair_rows" -gt 0 || "$failed_source_count" -gt 0 ]]; then
 fi
 
 # ── derivative retention floor (§7.10.1) ─────────────────────────────────
-# A bundle older than the shipped derivative retention (4d) would let the first
+# A bundle older than the shipped derivative retention (30d) would let the first
 # prune tick DROP the restored derivative partitions — never regenerated.
 
 # Raise the placed config's three derivative retention-days keys to cover the
@@ -829,7 +829,7 @@ then
     required=$((age_days + 30))
     key="infochat.partitions.retention-days.${parent//_/-}"
     effective="$(read_prop "$key")"
-    [[ -n "$effective" ]] || effective=4
+    [[ -n "$effective" ]] || effective=30
     if [[ "$required" -gt "$effective" ]]; then
       lapse="$(date -u -d "@$((end_epoch + required * 86400))" +%Y-%m-%d)"
       floor_keys+=("$key=$required")
@@ -862,7 +862,7 @@ then
 else
   echo "WARN: derivative-age probe failed (informational) — the restore-time derivative" >&2
   echo "      retention floor was NOT evaluated; if this bundle is older than the derivative" >&2
-  echo "      retention (4d shipped), the Collector's first prune tick may DROP its restored" >&2
+  echo "      retention (30d shipped), the Collector's first prune tick may DROP its restored" >&2
   echo "      derivative partitions. List them manually (likewise post_entity," >&2
   echo "      post_reference), then raise the retention-days keys on $CONFIG_FILE by hand" >&2
   echo "      (§7.10.1):" >&2

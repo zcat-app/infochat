@@ -93,6 +93,7 @@ Values that other design files forward-reference. The spec commits to the existe
 | Periodic-digest slot-window width | ±15 min | ±15 min | ±30 min | ±15 min | [../spec/deployment.md](../spec/deployment.md) §Configuration surface — Groups |
 | `chat_memory` TTL (D40) | 90 d | 90 d | 30 d | 90 d | [../spec/llm.md](../spec/llm.md), [02-schema.md](02-schema.md) |
 | `post` partition retention (`infochat.partitions.retention-days.post`) | 30 d | 30 d | 14 d | 30 d | [02-schema.md §2.4.4](02-schema.md) |
+| `post_embedding`/`post_entity`/`post_reference` partition retention (`infochat.partitions.retention-days.<table>`) | 30 d | 30 d | 14 d | 30 d | [02-schema.md §2.4.4](02-schema.md) — aligned with `post` |
 
 These are the values bound at startup unless an operator override fires. Forward references from other design files (e.g., 06-messaging.md §6.2.2 / §6.3.6) point here.
 
@@ -279,12 +280,13 @@ infochat.linking.interval=5m                     # LinkingJob tick (profile-driv
 infochat.partitions.check-interval=24h           # PartitionCreator: current+next month
 infochat.partitions.prune-interval=24h           # PartitionPruner: aged-partition drop
 # Per-table partition retention horizons in days (02-schema.md §2.4.4);
-# post is profile-driven (30 laptop/vps/remote-llm, 14 pi). The pruner's
+# post and the three derivative tables are profile-driven (30 laptop/vps/remote-llm, 14 pi) on one shared
+# horizon. The pruner's
 # floor guard keeps the current and next month regardless of these values.
 infochat.partitions.retention-days.post=30
-infochat.partitions.retention-days.post-embedding=4
-infochat.partitions.retention-days.post-entity=4
-infochat.partitions.retention-days.post-reference=4
+infochat.partitions.retention-days.post-embedding=30
+infochat.partitions.retention-days.post-entity=30
+infochat.partitions.retention-days.post-reference=30
 infochat.partitions.retention-days.price-snapshot=7
 # Partition-drop TTL is driven by infochat.partitions.prune-interval above
 # (PartitionPruner); there is no separate ttl-prune cron key.
@@ -1223,7 +1225,7 @@ for it; the manual steps 1-5 above remain the under-the-hood description of what
   recovers — the restore never fails or auto-resets inherited failure state.
   The same probe pass applies a **derivative retention floor**: when the restored
   `post_embedding` / `post_entity` / `post_reference` partitions are older than the
-  effective retention (shipped default 4 days), the first prune tick after the
+  effective retention (shipped default 30 days), the first prune tick after the
   Collector start would DROP them — surfaces that never regenerate — so `restore.sh`
   APPENDS raised derivative retention keys (`infochat.partitions.retention-days.post-embedding`
   and its `post-entity` / `post-reference` siblings) to the placed

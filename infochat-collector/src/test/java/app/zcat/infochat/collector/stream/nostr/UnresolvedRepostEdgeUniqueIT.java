@@ -32,9 +32,9 @@ class UnresolvedRepostEdgeUniqueIT {
 
     /**
      * Pinned created_at inside the current-month partition. A fixed past
-     * date cannot work here: post_reference retention is 4 days, so the
-     * PartitionPruner drops month partitions almost as soon as they end
-     * (the V29 May-2026 bootstrap partition is already gone by IT time).
+     * date cannot work here: the PartitionPruner drops a month's partitions
+     * once they age past retention (02-schema.md §2.4.4) — the V29 May-2026
+     * bootstrap partition is already gone by IT time.
      * The value is captured once so both INSERTs collide on the same key.
      */
     private static final Timestamp CREATED_AT =

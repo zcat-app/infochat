@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 13 |
+| pending | 12 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 147 |
+| done | 148 |
 | deferred | 1 |
 | abandoned | 6 |
 | **total** | **167** |
@@ -26,7 +26,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-932 — Add a text filter parameter to searchPosts (complexity: medium, risk: medium)
-- M1-933 — Align derivative retention with post (30d base, 14d pi) (complexity: low, risk: low)
 - M1-934 — search_tags column, tagger free-tags emission, sweep backfill (complexity: medium, risk: medium)
 - M1-938 — Window the temporal pre-fetch; deterministic window hint (complexity: medium, risk: medium)
 - M1-939 — Pin the native reply language per-turn and after fold-backs (complexity: medium, risk: medium)
@@ -77,11 +76,11 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-948 | Isolated fam replica: dump, restore, pin fingerprint | 2026-08-28 | round 2 APPROVE |
 | M1-945 | Characterize the anchor-leg gap: probes + counterfactuals | 2026-08-28 | round 1 APPROVE |
 | M1-937 | Deterministic temporal-expression parser | 2026-08-28 | round 3 APPROVE |
+| M1-933 | Align derivative retention with post (30d base, 14d pi) | 2026-08-28 | round 1 APPROVE |
 | M1-931 | Add deterministic getPrice chat tool for price_snapshot | 2026-08-28 | round 1 APPROVE-WITH-FIXES |
 | M1-944 | Re-baseline the retrieval eval on the corrected set | 2026-08-27 | round 1 APPROVE |
 | M1-943 | Eval harness: skip retired records, pin golden-set id | 2026-08-27 | round 1 APPROVE |
 | M1-942 | Golden-set label corrections, relabel, and extension | 2026-08-27 | round 2 APPROVE |
-| M1-930 | Baseline retrieval-eval measurement record | 2026-08-27 | round 1 APPROVE |
 
 ---
 
@@ -288,7 +287,7 @@ M1-928 (done)
 M1-931 (done)
 M1-932 (pending) ← runnable
   └── M1-935 (pending)
-M1-933 (pending) ← runnable
+M1-933 (done)
 M1-934 (pending) ← runnable
   ├── M1-935 (pending) [see above]
   └── M1-936 (pending)
