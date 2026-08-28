@@ -47,6 +47,51 @@ class RetrievalGoldenSetTest {
     private static final Set<String> KNOWN_CHECK_BLOCKS = Set.of("retrieval");
     private static final int MAX_EXPECTED_UIDS = 16;
 
+    private static final String TECH_FINGERPRINT =
+            "ready=5214;max_ready_at=2026-08-24 16:00:57.001472+00;"
+            + "uid_sha256=06ed0de15eefad172062b4b6e3dfb11713e02017b103cc8ab8e064ffbe489727";
+
+    // The fam replica's pinned end state (M1-948 run record,
+    // .bench/retrieval-eval/fam-replica/pin-read-1.txt — reads byte-identical);
+    // a tech pin on a fam record is the wrong-world collision.
+    private static final String FAM_REPLICA_FINGERPRINT =
+            "ready=<redacted>;max_ready_at=<replica-pin>;"
+            + "uid_sha256=<replica-uid-pin>";
+
+    // Per-world validator parameters (M1-949): tech carries the exact
+    // pre-existing constants (byte-identical tech behavior); fam adds its
+    // own vocabulary/floors/cap and the cs-only xling requirement.
+    private record World(String resource, Set<String> classes,
+            Map<String, Integer> floors, int capLo, int capHi,
+            Set<String> xlingRequiredLangs, String xlingLangNote,
+            Map<String, Integer> xlingMinRowsPerLang, int xlingMinNeeds,
+            String fingerprint, String fingerprintToken, String capNote) { }
+
+    private static final World TECH = new World(GOLDEN_SET, KNOWN_CLASSES,
+            CLASS_FLOORS, 57, 66, NON_EN,
+            "every information need appears in all four of cs/es/ru/tr",
+            Map.of(), 0, TECH_FINGERPRINT, null,
+            "M1-942 re-derived cap");
+
+    private static final Set<String> FAM_CLASSES = Set.of(
+            "temporal-today", "temporal-2h", "temporal-24h",
+            "topical", "cross-lingual");
+
+    private static final Map<String, Integer> FAM_CLASS_FLOORS = Map.of(
+            "temporal-today", 5, "temporal-2h", 5, "temporal-24h", 4,
+            "topical", 16, "cross-lingual", 16);
+
+    private static final World FAM = new World(
+            "/retrieval-eval/golden-set-fam.jsonl", FAM_CLASSES, FAM_CLASS_FLOORS,
+            46, 55, Set.of("cs"),
+            "cs is the fam world's required xling language per real usage;"
+            + " es/ru/tr rows are optional",
+            Map.of("cs", 12), 4, FAM_REPLICA_FINGERPRINT,
+            "wrong-world-fingerprint",
+            "M1-949 re-derived cap (floors sum 46, cap = floors + 9,"
+            + " the M1-942 headroom precedent)");
+
+
     // Adjudicated row identities (2026-08-27, .bench/retrieval-eval/ +
     // .scratch/adjudication-report-20260827.md) pinned by the corrections leg.
     private static final String ZCASH_NEWSLETTER =
@@ -65,10 +110,14 @@ class RetrievalGoldenSetTest {
     // ---- loading ----
 
     private static List<JsonNode> load() throws Exception {
+        return load(TECH);
+    }
+
+    private static List<JsonNode> load(World world) throws Exception {
         try (InputStream in = RetrievalGoldenSetTest.class
-                .getResourceAsStream(GOLDEN_SET)) {
+                .getResourceAsStream(world.resource())) {
             if (in == null) {
-                throw new IllegalStateException(GOLDEN_SET + " not on classpath");
+                throw new IllegalStateException(world.resource() + " not on classpath");
             }
             String content = new String(in.readAllBytes(), StandardCharsets.UTF_8);
             return parse(content);
@@ -90,13 +139,17 @@ class RetrievalGoldenSetTest {
     // ---- validators (shared by happy path and corrupted-copy legs) ----
 
     private static void validateSchema(List<JsonNode> records) {
+        validateSchema(TECH, records);
+    }
+
+    private static void validateSchema(World world, List<JsonNode> records) {
         Set<String> ids = new HashSet<>();
         for (JsonNode r : records) {
             String id = text(r, "id");
             assertTrue(id != null && !id.isBlank(), "schema: record without id");
             assertTrue(ids.add(id), "duplicate-id: " + id);
             String cls = text(r, "class");
-            assertTrue(cls != null && KNOWN_CLASSES.contains(cls),
+            assertTrue(cls != null && world.classes().contains(cls),
                     "unknown-class: " + cls);
             assertTrue(text(r, "query") != null && !text(r, "query").isBlank(),
                     "schema: " + id + " without query");
@@ -167,17 +220,22 @@ class RetrievalGoldenSetTest {
     }
 
     private static void validateFloors(List<JsonNode> records) {
+        validateFloors(TECH, records);
+    }
+
+    private static void validateFloors(World world, List<JsonNode> records) {
         Map<String, Long> counts = records.stream().collect(Collectors.groupingBy(
                 r -> text(r, "class"), Collectors.counting()));
-        assertEquals(KNOWN_CLASSES, counts.keySet(),
+        assertEquals(world.classes(), counts.keySet(),
                 "class coverage: every known class must appear");
-        counts.forEach((cls, n) -> assertTrue(n >= CLASS_FLOORS.get(cls),
+        counts.forEach((cls, n) -> assertTrue(n >= world.floors().get(cls),
                 "class-below-floor: " + cls + " has " + n
-                + ", floor is " + CLASS_FLOORS.get(cls)));
+                + ", floor is " + world.floors().get(cls)));
         long total = records.size();
-        assertTrue(total >= 57 && total <= 66,
-                "set size " + total + " outside 57-66 over ACTIVE records"
-                + " (floors sum to 57; M1-942 re-derived cap)");
+        assertTrue(total >= world.capLo() && total <= world.capHi(),
+                "set size " + total + " outside " + world.capLo() + "-" + world.capHi()
+                + " over ACTIVE records (floors sum to " + world.capLo() + "; "
+                + world.capNote() + ")");
     }
 
     private static void validateRationales(List<JsonNode> records) {
@@ -208,11 +266,16 @@ class RetrievalGoldenSetTest {
     }
 
     private static void validateXling(List<JsonNode> records) {
+        validateXling(TECH, records);
+    }
+
+    private static void validateXling(World world, List<JsonNode> records) {
         Map<String, JsonNode> byId = records.stream().collect(
                 HashMap::new,
                 (m, r) -> m.put(text(r, "id"), r),
                 HashMap::putAll);
         Map<String, Set<String>> langsPerNeed = new TreeMap<>();
+        Map<String, Long> rowsPerLang = new TreeMap<>();
         for (JsonNode r : records) {
             if (!"cross-lingual".equals(text(r, "class"))) {
                 continue;
@@ -220,6 +283,7 @@ class RetrievalGoldenSetTest {
             String lang = text(r, "scope_lang");
             assertTrue(NON_EN.contains(lang),
                     "xling-row-in-english-scope: " + text(r, "id"));
+            rowsPerLang.merge(lang, 1L, Long::sum);
             String notes = r.path("notes").asText("");
             String sibling = Arrays.stream(notes.split("\\s+"))
                     .filter(byId::containsKey).findFirst().orElse(null);
@@ -241,9 +305,34 @@ class RetrievalGoldenSetTest {
                     + " none_expected shape differs from sibling " + sibling);
             langsPerNeed.computeIfAbsent(sibling, k -> new TreeSet<>()).add(lang);
         }
-        langsPerNeed.forEach((need, langs) -> assertEquals(NON_EN, langs,
+        langsPerNeed.forEach((need, langs) -> assertTrue(
+                langs.containsAll(world.xlingRequiredLangs()),
                 "xling-need-missing-languages: " + need + " covers " + langs
-                + " — every information need appears in all four of cs/es/ru/tr"));
+                + " — must cover at least " + world.xlingRequiredLangs()
+                + " (" + world.xlingLangNote() + ")"));
+        world.xlingMinRowsPerLang().forEach((lang, min) -> assertTrue(
+                rowsPerLang.getOrDefault(lang, 0L) >= min,
+                "xling-lang-below-floor: " + lang + " has "
+                + rowsPerLang.getOrDefault(lang, 0L) + " xling rows, floor is "
+                + min));
+        assertTrue(langsPerNeed.size() >= world.xlingMinNeeds(),
+                "xling-needs-below-floor: " + langsPerNeed.size()
+                + " distinct needs, floor is " + world.xlingMinNeeds());
+    }
+
+    private static void validateFingerprint(World world, List<JsonNode> records) {
+        for (JsonNode r : records) {
+            String fp = r.path("labeled_against").path("db_fingerprint").asText();
+            if (world.fingerprintToken() == null) {
+                assertEquals(world.fingerprint(), fp,
+                        "record " + text(r, "id") + " carries a different fingerprint"
+                        + " — mixed-fingerprint sets are drift, not a set (P7)");
+            } else {
+                assertEquals(world.fingerprint(), fp,
+                        world.fingerprintToken() + ": record " + text(r, "id")
+                        + " pins " + fp + " — this set pins " + world.fingerprint());
+            }
+        }
     }
 
     private static Set<String> uidSet(JsonNode record) {
@@ -254,13 +343,17 @@ class RetrievalGoldenSetTest {
     }
 
     private static void validateAll(List<JsonNode> records) {
-        validateSchema(records);
+        validateAll(TECH, records);
+    }
+
+    private static void validateAll(World world, List<JsonNode> records) {
+        validateSchema(world, records);
         List<JsonNode> active = records.stream()
                 .filter(r -> !r.path("replaced_by").isTextual()).toList();
-        validateFloors(active);
+        validateFloors(world, active);
         validateRationales(active);
         validateNoneExpected(active);
-        validateXling(active);
+        validateXling(world, active);
     }
 
     private static String text(JsonNode r, String field) {
@@ -270,9 +363,15 @@ class RetrievalGoldenSetTest {
 
     private static List<JsonNode> corrupted(java.util.function.Consumer<List<ObjectNode>> mutation)
             throws Exception {
+        return corrupted(TECH, mutation);
+    }
+
+    private static List<JsonNode> corrupted(World world,
+            java.util.function.Consumer<List<ObjectNode>> mutation)
+            throws Exception {
         ObjectMapper mapper = new ObjectMapper();
         List<ObjectNode> records = new ArrayList<>();
-        for (JsonNode r : load()) {
+        for (JsonNode r : load(world)) {
             records.add((ObjectNode) mapper.readTree(mapper.writeValueAsString(r)));
         }
         mutation.accept(records);
@@ -319,13 +418,7 @@ class RetrievalGoldenSetTest {
 
     @Test
     void fingerprintPinnedOnEveryRecord() throws Exception {
-        for (JsonNode r : load()) {
-            String fp = r.path("labeled_against").path("db_fingerprint").asText();
-            assertEquals("ready=5214;max_ready_at=2026-08-24 16:00:57.001472+00;"
-                    + "uid_sha256=06ed0de15eefad172062b4b6e3dfb11713e02017b103cc8ab8e064ffbe489727",
-                    fp, "record " + text(r, "id") + " carries a different fingerprint"
-                    + " — mixed-fingerprint sets are drift, not a set (P7)");
-        }
+        validateFingerprint(TECH, load());
     }
 
     @Test
@@ -679,6 +772,106 @@ class RetrievalGoldenSetTest {
         });
         AssertionError e = assertThrows(AssertionError.class,
                 () -> validateAll(records));
+        assertTrue(e.getMessage().contains("class-below-floor"), e.getMessage());
+    }
+
+    // ---- fam world (M1-949): the broad-distribution leg over the isolated
+    // replica — labels pinned to the REPLICA fingerprint, the two-world
+    // instrument's second answer key ----
+
+    @Test
+    void famSetMeetsWorldFloors() throws Exception {
+        List<JsonNode> records = load(FAM);
+        List<JsonNode> active = records.stream()
+                .filter(r -> !r.path("replaced_by").isTextual()).toList();
+        validateAll(FAM, records);
+        Map<String, List<Integer>> sizesPerClass = new TreeMap<>();
+        for (JsonNode r : active) {
+            int size = r.path("expected").path("retrieval").path("relevant_uids").size();
+            sizesPerClass.computeIfAbsent(text(r, "class"), k -> new ArrayList<>()).add(size);
+        }
+        System.out.println("fam golden-set per-class label-set sizes: " + sizesPerClass);
+    }
+
+    @Test
+    void famRecordsCarryTheReplicaFingerprint() throws Exception {
+        validateFingerprint(FAM, load(FAM));
+    }
+
+    @Test
+    void famRationaleAndPoolingFieldsPresent() throws Exception {
+        validateRationales(load(FAM));
+    }
+
+    @Test
+    void famFailureModeWrongWorldFingerprint() throws Exception {
+        // A fam record carrying the TECH world's pin is the wrong-world
+        // collision the world-keyed fingerprint leg must reject by name.
+        List<JsonNode> records = corrupted(FAM, rs -> ((ObjectNode) rs.get(0)
+                .get("labeled_against")).put("db_fingerprint", TECH_FINGERPRINT));
+        AssertionError e = assertThrows(AssertionError.class,
+                () -> validateFingerprint(FAM, records));
+        assertTrue(e.getMessage().contains("wrong-world-fingerprint"), e.getMessage());
+    }
+
+    @Test
+    void famFailureModeOversizedExpectedSet() throws Exception {
+        List<JsonNode> records = corrupted(FAM, rs -> padExpectedTo(rs.get(0), 17));
+        AssertionError e = assertThrows(AssertionError.class,
+                () -> validateSchema(FAM, records));
+        assertTrue(e.getMessage().contains("label cap"), e.getMessage());
+    }
+
+    @Test
+    void famFailureModeXlingSetDriftsFromSibling() throws Exception {
+        List<JsonNode> records = corrupted(FAM, rs -> rs.stream()
+                .filter(r -> "cross-lingual".equals(r.get("class").asText()))
+                .findFirst().ifPresent(r -> {
+                    // a uid guaranteed foreign to the row's set (several fam
+                    // needs share rows, so scan for one outside this set)
+                    Set<String> own = uidSet(r);
+                    String foreign = rs.stream()
+                            .flatMap(x -> java.util.stream.StreamSupport.stream(
+                                    x.path("expected").path("retrieval")
+                                            .path("relevant_uids").spliterator(), false))
+                            .map(JsonNode::asText)
+                            .filter(u -> !own.contains(u)).findFirst().orElseThrow();
+                    ((ArrayNode) r.get("expected").get("retrieval")
+                            .get("relevant_uids")).set(0, foreign);
+                }));
+        AssertionError e = assertThrows(AssertionError.class,
+                () -> validateXling(FAM, records));
+        assertTrue(e.getMessage().contains("xling-set-drift"), e.getMessage());
+    }
+
+    @Test
+    void famFailureModeRetiredRecordDoubleCounts() throws Exception {
+        // Active-only floors: retiring a temporal-today fam record whose
+        // successor is of a DIFFERENT class must drop the class below its
+        // floor — the retired row must never count toward coverage.
+        List<JsonNode> records = corrupted(FAM, rs -> {
+            try {
+                ObjectMapper mapper = new ObjectMapper();
+                JsonNode tt = rs.stream()
+                        .filter(r -> "temporal-today".equals(r.get("class").asText()))
+                        .filter(r -> !r.path("replaced_by").isTextual())
+                        .findFirst().orElseThrow();
+                ObjectNode successor = (ObjectNode) mapper.readTree(
+                        mapper.writeValueAsString(tt));
+                successor.put("id", "fam-tt-corrupt-b");
+                successor.put("supersedes", tt.get("id").asText());
+                successor.put("class", "topical");
+                ((ObjectNode) rs.stream()
+                        .filter(r -> tt.get("id").asText().equals(r.get("id").asText()))
+                        .findFirst().orElseThrow())
+                        .put("replaced_by", "fam-tt-corrupt-b");
+                rs.add(successor);
+            } catch (Exception ex) {
+                throw new IllegalStateException(ex);
+            }
+        });
+        AssertionError e = assertThrows(AssertionError.class,
+                () -> validateAll(FAM, records));
         assertTrue(e.getMessage().contains("class-below-floor"), e.getMessage());
     }
 }

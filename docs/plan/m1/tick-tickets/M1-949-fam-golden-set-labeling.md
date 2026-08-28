@@ -1,7 +1,7 @@
 ---
 id: M1-949
 title: "Fam golden set: label the broad-distribution world"
-status: pending
+status: done
 created: 2026-08-28
 last_updated: 2026-08-28
 flow: tick
@@ -110,15 +110,71 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-28
+    verdict: APPROVE
+    checks: 'SPEC-TRUTHNESS: PASS, SECURITY: PASS, TEST-ADEQUACY: PASS, MAINTAINABILITY: PASS, SCOPE: PASS; 5 candidate findings falsified-and-dropped (tech xling equivalence via the NON_EN guard, fixture-uid resolution against the captured pools, census-vs-run-record equality, validateAll coverage, floors/cap arithmetic)'
+    diff_stats: '4 files, +320/-32 (fixture +46, validator +237/-32 incl. re-homes, ticket census/arithmetic +55, board regen 14)'
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  verdict: pass
+  checked: 2026-08-28
+  notes: >-
+    Citations verified (GOLDEN_SET :33, KNOWN_CLASSES/CLASS_FLOORS :35-43,
+    fam resource absent); replica up on the replica port with the pinned
+    fingerprint (pin-read-1/2 byte-identical); test-stack embedder published
+    on 18080 for the returned-window probe (P7 posture); no in-flight tick
+    ticket (module boundary trivially clean); floors sum 46 over the
+    5-class fam vocabulary; cap band re-derived below with the M1-942
+    arithmetic.
 escalation_reason:
 ---
 
 # M1-949: Fam golden set: label the broad-distribution world
+
+## Fam census (operator pre-flight, 2026-08-28; the selection evidence base, P1)
+
+Pin restated from M1-948's run record
+(`.bench/retrieval-eval/fam-replica/run-record-20260828T154628Z.txt`;
+re-verified at start with two byte-identical consecutive reads):
+
+- world_fingerprint `ready=<redacted>;max_ready_at=<replica-pin>;uid_sha256=<replica-uid-pin>`
+- world_embedding_coverage `8260/8260`; embedding_metadata `nomic-embed-text|768`
+- scope_language_census <redacted-language-census> (real users <redacted>,
+  <redacted> + the five seeded eval scopes); eval_scopes 5/0/0
+
+Tag distribution over the D59 world (READY ∩ eval-en world predicate;
+`.bench/retrieval-eval/fam-replica/census-20260828.txt`, top rows):
+economy 867, asia 699, environment 571, americas 517, world 511,
+middle-east 483, africa 337, other-culture 312, europe 305, public-health 246,
+medicine 214, other-sports 210, music 185, ai 176, other-business 148,
+movies 126, football 121, art 98, cybersecurity 95, other-tech 89 —
+ai/cyber are the TAIL (the exact inversion of the tech world). Source
+concentration: G1 Globo 2386, The Hindu 1394, Times of India 553,
+Novinky.cz 479, Vanguard 414, SCMP 287, Al Jazeera 278, ABC AU 214, NYT 211,
+Haaretz 186, RT 182, Japan Times 173, Premium Times 156, Sputnik 154,
+Echo24 121 (Czech sources = the cs-slice usage base). Temporal windows
+derived from the REPLICA's max ready_at (P7): today (2026-08-28) 1614,
+last-2h (>= 13:43:18.001688+00) 353, trailing-24h 2581.
+
+## Floors and cap arithmetic (P15)
+
+Fam class vocabulary sized to fam's own distribution: temporal-today 5,
+temporal-2h 5, temporal-24h 4, topical 16, cross-lingual 16 — floors sum
+5+5+4+16+16 = 46; the shipped set meets every floor exactly (46 active).
+Topical = 16 DISTINCT needs, every one census-cited: economy, world,
+public-health, medicine, football, other-sports (the mandated six), asia,
+middle-east, americas (three regional, floor demands >= 2), environment,
+africa, europe, culture, music, ai, cyber — each maps to the census row
+above. Cross-lingual = 16 rows: 12 cs across 12 needs (cs floor 12) + one
+es (economy), one ru (world), one tr (environment), one es (football) for
+cross-leg comparability. Total cap band re-derived over ACTIVE records the
+M1-942 way: lower bound = floors sum (46), upper = floors + 9 = 55 (the
+M1-942 precedent's absolute headroom: 57-66 for a 57 floor; room for
+future extension needs without re-deriving).
 
 ## Context
 
