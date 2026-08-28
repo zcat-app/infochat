@@ -78,7 +78,11 @@ independently:
   recall on injection-shaped content and for throughput.
 - Tagger — produces a list of zero-or-more controlled-vocabulary tags
   (Tier 1) that conform to the supplied vocabulary set; output is
-  validated against the vocabulary before use.
+  validated against the vocabulary before use. The same call also
+  emits, best-effort, zero-or-more free retrieval tags (`search_tags`)
+  outside the vocabulary — post-normalization form per `commands.md`
+  §Surface conventions, stored on the post for retrieval only; a
+  missing or empty field means none were emitted.
 - Entity extractor — produces structured output (named entities) that
   conforms to a fixed JSON schema; schema-violating output is treated
   as unparseable per `security.md` §Failure handling.
@@ -558,6 +562,15 @@ stage.
   of untaggable posts stays far below the threshold and fires
   nothing (window size, minimum sample, and threshold in design
   notes).
+  **Free-tag emission (recap).** The `search_tags` field of the
+  tagger reply is a best-effort passenger of the same call: a
+  missing, null, or non-array field stores an empty array; entries
+  failing that form are dropped and counted; the field never
+  triggers a retry, never the bootstrap fallback, and never changes
+  the tags-array outcome chain above — a clean-empty categories
+  proposal that carries free tags stores them and stays a no-tags
+  outcome. The line-oriented fallback prompt and the bootstrap path
+  emit no free tags.
 - Entity extractor — on failure or schema-violating output, release without
   entities; cross-source linking degrades to embedding-only for that post.
 - Embedding — release without a vector (see Embedding pipeline above);

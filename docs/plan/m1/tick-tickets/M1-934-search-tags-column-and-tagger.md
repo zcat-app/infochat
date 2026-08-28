@@ -1,15 +1,17 @@
 ---
 id: M1-934
 title: "search_tags column, tagger free-tags emission, sweep backfill"
-status: pending
+status: done
 created: 2026-08-26
-last_updated: 2026-08-26
+last_updated: 2026-08-28
 flow: tick
 reproduction: >-
   SearchTagsCaptureTest.freeTagsRideTheSameCallIntoSearchTags
-  `to-be-written` (child of a 2+ decomposition — needs the search_tags
-  column; /tick start converts the marker: write the test and run it RED
-  against the unmodified code before any fix code, workflow §0).
+  — RED 2026-08-28 on unmodified main (690a8e46): PSQL "column
+  "search_tags" does not exist", sole failure of the module run
+  (.scratch/tick-red-M1-934.log); registered in
+  integration-test-naming-baseline.txt per the TagCandidatesCaptureTest
+  precedent, Clock pinned per the ScanWindowFixtureGuard remedy.
   Intended wrong behavior it states: the tagger's single LLM call is
   answered with {"tags": ["europe"], "search_tags": ["czechia",
   "prague-eu-summit"]} and the pipeline DISCARDS the second field —
@@ -125,11 +127,27 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-28
+    verdict: APPROVE-WITH-FIXES
+    checks: "SPEC-TRUTHNESS PASS; SECURITY PASS; TEST-ADEQUACY PASS; MAINTAINABILITY WARN (1 low, javadoc indent); SCOPE PASS"
+    diff_stats: "12 files, +753/-72 vs merge-base; verdict .scratch/tick-review-M1-934-r1.txt; 5 falsified-and-dropped findings incl. V87 header mandate and tagger.md never-invent reconciliation"
+    fixes_applied: "r1 finding 1: re-indented 3 class-javadoc lines TaggerWorker.java:140-142 (comment-only); EVALUATED-AS grep zero-lines PASS; mvn -pl infochat-collector -am test-compile exit 0; fixes-tree ad888b3449db9d368bced6d467d9e83cde456dbb; round-1 full-verify log .scratch/tick-test-M1-934-r1.log remains log of record"
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  2026-08-28: all file:line citations re-verified on main 690a8e46
+  (parseTags/persistCursor/sweepFingerprint/enumerateSweepCandidates,
+  V7, V83, head=V86). SweepIT legs traced under the planned OR-arm:
+  every eligibility leg seeds post tags='{}' so stays eligible;
+  fallbackRowsAreNeverSwept is excluded by the tagger_fallback
+  predicate, not tags — the only sweep-file change needed is the
+  authorized-(c) fingerprint signature. TagCandidatesCaptureTest/
+  TaggerWorkerIT read columns, not the cursor statement — green
+  unmodified. No blocking ambiguity; worktree
+  .opencode/worktrees/M1-934 (--parallel, no in-flight tick ticket).
 escalation_reason:
 ---
 

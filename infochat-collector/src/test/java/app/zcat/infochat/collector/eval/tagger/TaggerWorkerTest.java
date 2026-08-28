@@ -399,6 +399,30 @@ class TaggerWorkerTest {
         assertFalse(rendered.contains("\n- news\n"), "a flipped-to-top name must stop rendering");
     }
 
+    @Test
+    void renderedPrimaryPromptStatesSearchTagsOnceFallbackNever() {
+        // The free-tags contract is primary-prompt-only: the instruction
+        // renders exactly once and the fallback prompt carries none
+        // (its replies produce search_tags='{}').
+        String primary = TaggerWorker.loadResource(TaggerWorker.PRIMARY_PROMPT_RESOURCE);
+        String fallback = TaggerWorker.loadResource(TaggerWorker.FALLBACK_PROMPT_RESOURCE);
+        TaggerWorker.PostRow row = new TaggerWorker.PostRow(
+            UUID.fromString("00000000-0000-0000-0000-000000000003"),
+            Instant.EPOCH, "title", "body", List.of());
+
+        String rendered = taggerWorker.renderPrompt(primary, "DELIM-TOKEN-3", row);
+
+        String instruction = "\"search_tags\" is a separate";
+        int first = rendered.indexOf(instruction);
+        assertTrue(first >= 0, "the search_tags instruction must render");
+        assertEquals(first, rendered.lastIndexOf(instruction),
+            "the search_tags instruction renders exactly once");
+        assertTrue(rendered.contains("emit [] when none fit"),
+            "the canonicalization rules ride the instruction");
+        assertFalse(fallback.contains("search_tags"),
+            "the fallback prompt stays tags-only");
+    }
+
     // ---------- M1-735: aggregate no-tags rate detector ----------
 
     @Test

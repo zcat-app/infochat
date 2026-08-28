@@ -138,8 +138,8 @@ import java.util.regex.Pattern;
  * <h2>Persistence cursor</h2>
  *
  * <p>The {@code UPDATE post SET tags=..., tag_candidates=...,
- * tagger_done=true, tagger_fallback=...} statement writes the tag array,
- * the Tier-2 candidate array and the per-stage flags atomically per Invariant 5
+ * search_tags=..., tagger_done=true, tagger_fallback=...} writes all
+ * tag arrays and per-stage flags atomically per Invariant 5
  * ({@code docs/spec/schema.md} §Invariants — "the per-stage flags
  * are the durable cursor"). Splitting the write into two UPDATEs
  * would create a crash window where {@code tagger_done=true} but
@@ -172,8 +172,9 @@ import java.util.regex.Pattern;
  * for the inputs that produced it: the controlled vocabulary grows
  * (TagVocabulary's refresh path) and the configured tagger model can
  * change. After the live batch each tick, the worker re-runs the SAME
- * chain ({@link #processOne}) over posts with {@code tags='{}' AND
- * tagger_done=TRUE AND tagger_fallback=FALSE} that have not yet been
+ * chain ({@link #processOne}) over posts with {@code (tags='{}' OR
+ * search_tags='{}') AND tagger_done=TRUE AND tagger_fallback=FALSE}
+ * that have not yet been
  * swept for the current input generation. Live first-pass pickup always
  * wins: the sweep only ever fills the tick's leftover batch capacity
  * ({@code maxConcurrency - live}, further capped by
@@ -184,8 +185,9 @@ import java.util.regex.Pattern;
  * <p>The generation marker lives in the singleton
  * {@code tagger_sweep_state} row (V66) and bumps when a SHA-256
  * fingerprint of the tagger's cheaply-identifiable inputs — the sorted
- * normalized vocabulary names plus the configured
- * {@code infochat.llm.tagger.model} string — changes. The baseline is
+ * normalized vocabulary names, the configured
+ * {@code infochat.llm.tagger.model} string, and the loaded prompt
+ * templates — changes. The baseline is
  * recorded as generation 0 on the first sweep-capable tick and existing
  * rows default {@code tagger_swept_generation=0}, so a deploy alone
  * never triggers a backlog sweep; only the first real input change
@@ -222,6 +224,10 @@ public class TaggerWorker {
      * overlap query (M1-328).
      */
     static final int MAX_TAGS_PER_POST = 8;
+
+    /** Structural bound on free-tag emission (docs/spec/llm.md §SPI shape):
+     * 2x headroom over the design-intended 1-4, mirroring {@link #MAX_TAGS_PER_POST}. */
+    static final int MAX_SEARCH_TAGS_PER_POST = 8;
 
     private static final Logger LOG = LoggerFactory.getLogger(TaggerWorker.class);
 
@@ -428,7 +434,7 @@ public class TaggerWorker {
         AttemptResult first = tryOnce(provider, row, primaryPromptTemplate, /* attempt */ 1);
 
         if (isAnswered(first.kind())) {
-            return llmOutcome(first.validTags(), row.id());
+            return llmOutcome(first.validTags(), first.searchTags(), row.id());
         }
 
         // Decide the retry shape from the first-attempt failure mode.
@@ -461,7 +467,7 @@ public class TaggerWorker {
         }
 
         if (isAnswered(second.kind())) {
-            return llmOutcome(second.validTags(), row.id());
+            return llmOutcome(second.validTags(), second.searchTags(), row.id());
         }
 
         // Second failure on any path → bootstrap-fallback audit log +
@@ -475,15 +481,15 @@ public class TaggerWorker {
             ERROR_CLASS_TAGGER_FALLBACK,
             "Tagger fallback to bootstrap_tags for post_id=" + row.id()
                 + " (first=" + first.kind() + " second=" + second.kind() + ")");
-        return new TaggerOutcome(Outcome.BOOTSTRAP, row.bootstrapTags(), List.of());
+        return new TaggerOutcome(Outcome.BOOTSTRAP, row.bootstrapTags(), List.of(), List.of());
     }
 
-    /** LLM terminal: resolve the validated, capped set to ONE stored leaf (identity passthrough pre-seed, M1-865 P6); the losing leaves become the Tier-2 candidate array (M1-868). The bootstrap path never resolves. */
-    private TaggerOutcome llmOutcome(List<String> validTags, UUID postId) {
+    /** LLM terminal: resolve the validated, capped set to ONE stored leaf (identity passthrough pre-seed, M1-865 P6); the losing leaves become the Tier-2 candidate array (M1-868). Free tags never enter resolve(). The bootstrap path never resolves. */
+    private TaggerOutcome llmOutcome(List<String> validTags, List<String> searchTags, UUID postId) {
         TagTreeResolver.Resolution resolution =
             tagTreeResolver.resolve(validTags, tagVocabulary.tree());
         return new TaggerOutcome(Outcome.LLM, resolution.stored(),
-            cappedCandidates(postId, resolution.losers()));
+            cappedCandidates(postId, resolution.losers()), searchTags);
     }
 
     /** Tier-2 array bound (M1-868 P15): first {@link #MAX_TAGS_PER_POST} losers in emission order, overflow counted and logged, never silent. Structural defense-in-depth — validate() already caps below it; package-private for the failure-mode test. */
@@ -538,6 +544,10 @@ public class TaggerWorker {
         if (parsed == null) {
             return AttemptResult.schemaViolating();
         }
+        // Free tags ride the same answered reply as best-effort passengers
+        // (docs/spec/llm.md §SPI shape): they never steer the outcome chain.
+        List<String> searchTags = validateSearchTags(
+            parseSearchTags(response.text()), row.id(), attempt);
 
         ValidationResult validated = validate(parsed);
         // Partial-valid log: emit the counts on every attempt where
@@ -556,10 +566,10 @@ public class TaggerWorker {
             // Only the latter is a failure worth a retry and the
             // bootstrap fallback (M1-726).
             return validated.invalidCount() == 0
-                ? AttemptResult.noTags()
+                ? AttemptResult.noTags(searchTags)
                 : AttemptResult.zeroValid();
         }
-        return AttemptResult.success(validated.valid());
+        return AttemptResult.success(validated.valid(), searchTags);
     }
 
     /**
@@ -660,6 +670,62 @@ public class TaggerWorker {
         }
     }
 
+    /** Best-effort second output field: raw free tags from the same JSON
+     * reply. Missing/null/non-array and line-shaped replies yield an empty
+     * list — never an error (docs/spec/llm.md §Failure handling). */
+    List<String> parseSearchTags(@Nullable String text) {
+        if (text == null) {
+            return List.of();
+        }
+        String trimmed = text.trim();
+        if (trimmed.isEmpty() || trimmed.startsWith("TAGS:")) {
+            return List.of();
+        }
+        try {
+            JsonNode root = objectMapper.readTree(LlmJson.stripCodeFence(trimmed));
+            JsonNode freeTags = root.get("search_tags");
+            if (freeTags == null || !freeTags.isArray()) {
+                return List.of();
+            }
+            List<String> out = new ArrayList<>();
+            freeTags.forEach(node -> {
+                if (node.isTextual()) {
+                    out.add(node.asText());
+                }
+            });
+            return out;
+        } catch (IOException e) {
+            return List.of();
+        }
+    }
+
+    /** Normalize free tags (character class only, no vocabulary check),
+     * collapse duplicates, cap at {@link #MAX_SEARCH_TAGS_PER_POST} in
+     * emission order; rejects and overflow counted+logged, never silent. */
+    List<String> validateSearchTags(List<String> parsed, UUID postId, int attempt) {
+        Set<String> valid = new LinkedHashSet<>();
+        int dropped = 0;
+        int capped = 0;
+        for (String raw : parsed) {
+            String normalized = normalizeTag(raw);
+            if (normalized == null) {
+                dropped++;
+                continue;
+            }
+            if (valid.size() < MAX_SEARCH_TAGS_PER_POST) {
+                valid.add(normalized);
+            } else if (!valid.contains(normalized)) {
+                capped++;
+            }
+        }
+        if (dropped > 0 || capped > 0) {
+            LOG.info(
+                "TaggerWorker: post_id={} attempt={} search_tags kept={} dropped={} capped={}",
+                postId, attempt, valid.size(), dropped, capped);
+        }
+        return List.copyOf(valid);
+    }
+
     /**
      * Normalize every parsed tag and partition into valid / invalid
      * by vocabulary membership. Duplicates after normalization are
@@ -703,26 +769,29 @@ public class TaggerWorker {
     }
 
     /**
-     * Atomic write of tags + Tier-2 candidates + per-stage cursor flags.
-     * Per Invariant 5 this single statement is the durable cursor for the
-     * Tagger boundary; splitting it would create a crash window.
+     * Atomic write of tags + Tier-2 candidates + free tags + per-stage
+     * cursor flags. Per Invariant 5 this single statement is the durable
+     * cursor for the Tagger boundary; splitting it would create a crash window.
      */
     private void persistCursor(PostRow row, TaggerOutcome outcome) {
         boolean fallback = outcome.outcome() == Outcome.BOOTSTRAP;
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                 "UPDATE post SET tags = ?, tag_candidates = ?, tagger_done = TRUE,"
-                     + " tagger_fallback = ? "
+                 "UPDATE post SET tags = ?, tag_candidates = ?, search_tags = ?,"
+                     + " tagger_done = TRUE, tagger_fallback = ? "
                      + "WHERE id = ? AND fetched_at = ?")) {
             Array tagsArray = conn.createArrayOf(
                 "text", outcome.tags().toArray(new String[0]));
             Array candidatesArray = conn.createArrayOf(
                 "text", outcome.losers().toArray(new String[0]));
+            Array searchTagsArray = conn.createArrayOf(
+                "text", outcome.searchTags().toArray(new String[0]));
             ps.setArray(1, tagsArray);
             ps.setArray(2, candidatesArray);
-            ps.setBoolean(3, fallback);
-            ps.setObject(4, row.id());
-            ps.setTimestamp(5, Timestamp.from(row.fetchedAt()));
+            ps.setArray(3, searchTagsArray);
+            ps.setBoolean(4, fallback);
+            ps.setObject(5, row.id());
+            ps.setTimestamp(6, Timestamp.from(row.fetchedAt()));
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException(
@@ -773,8 +842,8 @@ public class TaggerWorker {
     }
 
     /**
-     * Enumerate the next batch of sweep candidates: posts whose first pass
-     * ended in the M1-726 no-tags outcome ({@code tags='{}' AND
+     * Enumerate the next batch of sweep candidates: posts whose arrays are
+     * incomplete ({@code (tags='{}' OR search_tags='{}') AND
      * tagger_done=TRUE}), excluding bootstrap-fallback rows (their source
      * tags are by design), posts already swept at {@code generation}, and
      * posts that reached the per-post attempt cap
@@ -793,7 +862,7 @@ public class TaggerWorker {
                 + "  JOIN source s ON s.id = p.source_id "
                 + " WHERE p.tagger_done = TRUE "
                 + "   AND p.tagger_fallback = FALSE "
-                + "   AND p.tags = '{}'::text[] "
+                + "   AND (p.tags = '{}'::text[] OR p.search_tags = '{}') "
                 + "   AND p.tagger_swept_generation < ? "
                 + "   AND p.tagger_sweep_attempts < ? "
                 + "   AND p.fetched_at >= ? "
@@ -831,7 +900,8 @@ public class TaggerWorker {
      * against a second collector instance racing the same tick.
      */
     private int currentSweepGeneration() throws SQLException {
-        String fingerprint = sweepFingerprint(tagVocabulary.names(), taggerModel);
+        String fingerprint = sweepFingerprint(
+            tagVocabulary.names(), taggerModel, primaryPromptTemplate, fallbackPromptTemplate);
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
@@ -900,11 +970,14 @@ public class TaggerWorker {
      * SHA-256 hex over the tagger's cheaply-identifiable inputs: the
      * configured model string, then the normalized vocabulary names SORTED
      * (the vocabulary is an unordered {@link Set}, so the fingerprint must
-     * not depend on iteration order). NUL separators keep the
+     * not depend on iteration order), then the loaded prompt templates
+     * (primary then fallback — a template edit is an input change the
+     * sweep must see). NUL separators keep the
      * (model, names) boundary unambiguous. Package-private so the sweep
      * IT can assert the model leg changes the fingerprint.
      */
-    static String sweepFingerprint(Set<String> vocabularyNames, @Nullable String model) {
+    static String sweepFingerprint(Set<String> vocabularyNames, @Nullable String model,
+                                   String primaryTemplate, String fallbackTemplate) {
         MessageDigest digest;
         try {
             digest = MessageDigest.getInstance("SHA-256");
@@ -918,6 +991,9 @@ public class TaggerWorker {
             digest.update(name.getBytes(StandardCharsets.UTF_8));
             digest.update((byte) 0);
         }
+        digest.update(primaryTemplate.getBytes(StandardCharsets.UTF_8));
+        digest.update((byte) 0);
+        digest.update(fallbackTemplate.getBytes(StandardCharsets.UTF_8));
         return HexFormat.of().formatHex(digest.digest());
     }
 
@@ -957,28 +1033,33 @@ public class TaggerWorker {
      * the audit-fallback set. {@code losers} carries the resolution's
      * losing leaves for the Tier-2 candidate array (M1-868); always
      * empty for BOOTSTRAP, whose tags never pass through the resolver.
+     * {@code searchTags} carries the validated free tags — empty for
+     * BOOTSTRAP and every failed attempt (best-effort passengers,
+     * docs/spec/llm.md §Failure handling).
      */
-    private record TaggerOutcome(Outcome outcome, List<String> tags, List<String> losers) {
+    private record TaggerOutcome(Outcome outcome, List<String> tags, List<String> losers,
+                                 List<String> searchTags) {
     }
 
     private enum Outcome { LLM, BOOTSTRAP }
 
-    /** Per-attempt result classification driving the retry shape. */
-    private record AttemptResult(AttemptKind kind, List<String> validTags) {
-        static AttemptResult success(List<String> validTags) {
-            return new AttemptResult(AttemptKind.SUCCESS, validTags);
+    /** Per-attempt result classification driving the retry shape;
+     * {@code searchTags} rides only answered attempts. */
+    private record AttemptResult(AttemptKind kind, List<String> validTags, List<String> searchTags) {
+        static AttemptResult success(List<String> validTags, List<String> searchTags) {
+            return new AttemptResult(AttemptKind.SUCCESS, validTags, searchTags);
         }
         static AttemptResult schemaViolating() {
-            return new AttemptResult(AttemptKind.SCHEMA_VIOLATING, List.of());
+            return new AttemptResult(AttemptKind.SCHEMA_VIOLATING, List.of(), List.of());
         }
         static AttemptResult zeroValid() {
-            return new AttemptResult(AttemptKind.ZERO_VALID, List.of());
+            return new AttemptResult(AttemptKind.ZERO_VALID, List.of(), List.of());
         }
-        static AttemptResult noTags() {
-            return new AttemptResult(AttemptKind.NO_TAGS, List.of());
+        static AttemptResult noTags(List<String> searchTags) {
+            return new AttemptResult(AttemptKind.NO_TAGS, List.of(), searchTags);
         }
         static AttemptResult unreachable() {
-            return new AttemptResult(AttemptKind.UNREACHABLE, List.of());
+            return new AttemptResult(AttemptKind.UNREACHABLE, List.of(), List.of());
         }
     }
 

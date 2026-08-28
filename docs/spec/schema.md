@@ -355,7 +355,10 @@ connect with (see decision D34 and `security.md`).
 - **Post.** The fetched, sanitized, evaluated unit. Carries status
   (`RAW`, `READY`, `QUARANTINED`, `NEEDS_REVIEW`), Stage-1 / Stage-2 /
   tagger / embedding outcome flags, body, title, URL, timestamps, and
-  Tier-1 tags. The status state machine: ingest enters `RAW`; Stage 2
+  Tier-1 tags. Tier-1 tags may be accompanied by free retrieval tags
+  (`search_tags`) in the post-normalization form of `commands.md`
+  §Surface conventions — retrieval-only: never digest-counted, never a
+  follow/bootstrap/tag-tree surface. The status state machine: ingest enters `RAW`; Stage 2
   verdict `BENIGN` (or no Stage 2 because Stage 1 was clean) → `READY`;
   Stage 2 verdict `INJECTION` / `MALWARE` / `UNKNOWN` → `QUARANTINED`;
   re-evaluation queue (security.md §Re-evaluation job) exhausting its

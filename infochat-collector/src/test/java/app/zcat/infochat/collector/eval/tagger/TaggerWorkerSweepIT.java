@@ -34,8 +34,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Integration test for the M1-736 re-evaluation sweep: posts whose first
- * tagger pass ended in the M1-726 no-tags outcome ({@code tags='{}'},
- * {@code tagger_done=TRUE}, {@code tagger_fallback=FALSE}) are re-evaluated
+ * tagger pass left arrays empty ({@code tags='{}'} and/or, post-V87,
+ * {@code search_tags='{}'}; {@code tagger_done=TRUE},
+ * {@code tagger_fallback=FALSE}) are re-evaluated
  * once per input generation, with the per-post attempt cap, the per-sweep
  * batch cap, and the live-pickup-first ordering the ticket pins.
  *
@@ -247,6 +248,38 @@ class TaggerWorkerSweepIT {
         assertEquals(0, state.sweepAttempts);
     }
 
+    @Test
+    void searchTagsEmptyDonePostIsBackfilledByThePromptGenerationBump() throws Exception {
+        // The prompt edit is a fingerprint leg: the generation bump makes
+        // the done search_tags='{}' post eligible (V87's bounded backfill).
+        SeededPost post = seedSweptPost("backfill", FETCHED_BASE, false,
+            List.of("ai"), List.of("ai", "java"), List.of());
+        stub().setNextResponse(
+            "{\"tags\":[\"tagger-fixture-news\"],\"search_tags\":[\"czechia\"]}");
+
+        setSweepBatchSize(4);
+        taggerWorker.onTick();
+
+        assertEquals(1, stub().callCount(),
+            "the OR-arm makes the search_tags='{}' post eligible despite non-empty tags");
+        PostState state = readPost(post.id);
+        assertEquals(Set.of("tagger-fixture-news"), state.tags,
+            "the re-drive re-derives the categories through the normal chain");
+        assertEquals(2, state.sweptGeneration, "swept at the bumped generation");
+        assertEquals(1, state.sweepAttempts);
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "SELECT search_tags FROM post WHERE id = ?")) {
+            ps.setObject(1, post.id);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next());
+                assertEquals(List.of("czechia"),
+                    Arrays.asList((String[]) rs.getArray("search_tags").getArray()),
+                    "the re-drive writes the free tags through the same cursor UPDATE");
+            }
+        }
+    }
+
     // ---------- ordering ----------
 
     @Test
@@ -255,8 +288,12 @@ class TaggerWorkerSweepIT {
         SeededPost swept = seedSweptPost("swept", FETCHED_BASE, false, List.of("ai"), List.of());
         // The stub's FIFO order is the observation: the first queued reply
         // answers the FIRST LLM call, so whichever row carries
-        // "tagger-fixture-news" was processed first.
-        stub().setNextResponses("{\"tags\":[\"tagger-fixture-news\"]}", "{\"tags\":[\"tagger-fixture-security\"]}");
+        // "tagger-fixture-news" was processed first. The live reply carries
+        // a search_tags field so the freshly-tagged row does not itself
+        // become sweep-eligible mid-tick under the OR-arm.
+        stub().setNextResponses(
+            "{\"tags\":[\"tagger-fixture-news\"],\"search_tags\":[\"live-done\"]}",
+            "{\"tags\":[\"tagger-fixture-security\"]}");
 
         setSweepBatchSize(4);
         taggerWorker.onTick();
@@ -292,16 +329,25 @@ class TaggerWorkerSweepIT {
     // ---------- fingerprint ----------
 
     @Test
-    void sweepFingerprintChangesOnModelOrVocabularyChange() {
+    void sweepFingerprintChangesOnModelOrVocabularyOrPromptChange() {
         Set<String> vocab = Set.of("news", "security");
-        String base = TaggerWorker.sweepFingerprint(vocab, "llama3.1:8b");
-        assertEquals(base, TaggerWorker.sweepFingerprint(vocab, "llama3.1:8b"),
+        String base = TaggerWorker.sweepFingerprint(vocab, "llama3.1:8b", "primary", "fallback");
+        assertEquals(base, TaggerWorker.sweepFingerprint(vocab, "llama3.1:8b", "primary", "fallback"),
             "the fingerprint is stable for unchanged inputs");
-        assertNotEquals(base, TaggerWorker.sweepFingerprint(vocab, "llama3.2:1b"),
+        assertNotEquals(base, TaggerWorker.sweepFingerprint(vocab, "llama3.2:1b", "primary", "fallback"),
             "a model change bumps the generation via the fingerprint");
         assertNotEquals(base,
-            TaggerWorker.sweepFingerprint(Set.of("news", "quantum", "security"), "llama3.1:8b"),
+            TaggerWorker.sweepFingerprint(Set.of("news", "quantum", "security"), "llama3.1:8b",
+                "primary", "fallback"),
             "a vocabulary change bumps the generation via the fingerprint");
+        assertNotEquals(base, TaggerWorker.sweepFingerprint(vocab, "llama3.1:8b", "primary-v2", "fallback"),
+            "a primary prompt change bumps the generation via the fingerprint");
+        assertNotEquals(base, TaggerWorker.sweepFingerprint(vocab, "llama3.1:8b", "primary", "fallback-v2"),
+            "a fallback prompt change bumps the generation via the fingerprint");
+        assertNotEquals(
+            TaggerWorker.sweepFingerprint(vocab, "llama3.1:8b", "alpha", "beta"),
+            TaggerWorker.sweepFingerprint(vocab, "llama3.1:8b", "beta", "alpha"),
+            "the template legs are positional slots, not load-order dependent");
     }
 
     // ---------- helpers ----------
@@ -311,6 +357,15 @@ class TaggerWorkerSweepIT {
      *  attempts). */
     private SeededPost seedSweptPost(String slug, Instant fetchedAt, boolean fallback,
                                      List<String> bootstrapTags, List<String> tags)
+            throws Exception {
+        return seedSweptPost(slug, fetchedAt, fallback, bootstrapTags, tags, List.of());
+    }
+
+    /** Same, with an explicit {@code search_tags} seed (the V87 backfill
+     *  leg needs a done post whose free-tag array is still empty). */
+    private SeededPost seedSweptPost(String slug, Instant fetchedAt, boolean fallback,
+                                     List<String> bootstrapTags, List<String> tags,
+                                     List<String> searchTags)
             throws Exception {
         UUID sourceId = seedRssSource(
             "https://sweep-it.example.test/" + slug + "/feed.xml",
@@ -323,10 +378,10 @@ class TaggerWorkerSweepIT {
                      + "  id, uid, source_id, upstream_identifier, title, body,"
                      + "  fetched_at, status,"
                      + "  stage1_done, stage2_done, tagger_done, embedding_done,"
-                     + "  stage1_flagged, stage2_failed, tagger_fallback, tags"
+                     + "  stage1_flagged, stage2_failed, tagger_fallback, tags, search_tags"
                      + ") VALUES ("
                      + "  gen_random_uuid(), ?, ?, ?, ?, ?, ?, 'RAW',"
-                     + "  TRUE, FALSE, TRUE, FALSE, FALSE, FALSE, ?, ?"
+                     + "  TRUE, FALSE, TRUE, FALSE, FALSE, FALSE, ?, ?, ?"
                      + ") RETURNING id")) {
             ps.setString(1, uid);
             ps.setObject(2, sourceId);
@@ -336,6 +391,7 @@ class TaggerWorkerSweepIT {
             ps.setTimestamp(6, Timestamp.from(fetchedAt));
             ps.setBoolean(7, fallback);
             ps.setArray(8, conn.createArrayOf("text", tags.toArray(new String[0])));
+            ps.setArray(9, conn.createArrayOf("text", searchTags.toArray(new String[0])));
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return new SeededPost((UUID) rs.getObject(1), uid);
