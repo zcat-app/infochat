@@ -34,9 +34,15 @@ final class ChatToolCatalog {
                             + "Use this for questions about recent, latest, today's or "
                             + "top news posts — anything with a time dimension. 'Top' means "
                             + "most recent, not most important: present the results with "
-                            + "their dates and say so.",
+                            + "their dates and say so. An optional text filter narrows "
+                            + "results to posts whose title or body mention the given "
+                            + "English keywords — use it with tags and window to focus on "
+                            + "named things (companies, products, people). Put time "
+                            + "expressions (today, yesterday, last 2h) in `window`, never "
+                            + "in `text`: `text` carries entity/topic terms only.",
                     List.of(new ToolArg("tags", "array", false, "[\"tag1\"]"),
                             new ToolArg("window", "string", false, "\"P7D\""),
+                            new ToolArg("text", "string", false, "\"qwen\""),
                             new ToolArg("limit", "integer", false, "10"))),
             new Tool("semanticSearch",
                     "find posts semantically or by keyword related to a free-text "

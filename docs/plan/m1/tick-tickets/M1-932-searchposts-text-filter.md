@@ -1,15 +1,16 @@
 ---
 id: M1-932
 title: "Add a text filter parameter to searchPosts"
-status: pending
+status: done
 created: 2026-08-26
-last_updated: 2026-08-26
+last_updated: 2026-08-28
 flow: tick
 reproduction: >-
   SearchPostsToolTest#textFilterNarrowsWithinWindowToPostsMentioningTheText
-  `to-be-written` (single-ticket analysis, `analysis_ref: self`; /tick start
-  converts the marker: write the test and run it RED against the unmodified
-  code before any fix code, workflow §0).
+  (marker converted at /tick start 2026-08-28: written and run RED against
+  unmodified code — .scratch/tick-red-M1-932.log, the text-carrying call
+  returned the unfiltered four-post set — green after the fix, full
+  mvn verify green).
   The wrong behavior it states: a searchPosts call carrying a "text" argument
   is answered with the UNFILTERED window set. Verified in-tree today:
   SearchPostsTool.execute() reads exactly three args — tags, window, limit
@@ -161,11 +162,35 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-28
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY FAIL (1 low), MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "10 files, +571/-31"
+    rework_items: 1
+    verdict_file: .scratch/tick-review-M1-932-r1.txt
+  - round: 2
+    date: 2026-08-28
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS PASS, SECURITY PASS, TEST-ADEQUACY PASS, MAINTAINABILITY PASS, SCOPE PASS"
+    diff_stats: "fix-only: 3 files, +32/-5 (full diff 10 files, +603/-36)"
+    rework_items: 0
+    verdict_file: .scratch/tick-review-M1-932-r2.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check: >-
+  start 2026-08-28: lint 0 findings. All file:line citations re-verified by
+  read; two line-drift-only offsets from later landings (args read :69-74
+  not :66-71; byte-pin test at :1412 not :1374-1399) — substance holds
+  everywhere. Census re-run clean (no 'text' read, no search_tsv in the
+  tool; exactly two direct constructions at :133/:377). No blocked_by
+  tests to trace. No §8-authorized fifth test touched. Spec wording
+  user-approved with edits (§Secrets retention + snapshot sentences,
+  blank-or-wholly-sanitized-away, design 05 "all four legs"); the
+  unbackticked searchPosts in §Rate limiting deviates from the Approach
+  draft deliberately — the acceptance grep 'searchPosts text' must hit.
 escalation_reason:
 ---
 
@@ -579,3 +604,13 @@ unmodified.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-932-searchposts-text-filter.md
 ```
+
+## Round 1 rework
+
+REWORK ITEMS (verbatim from .scratch/tick-review-M1-932-r1.txt):
+
+1. Finding 1: add the wholly-sanitized-away arm to
+   SearchPostsToolTest.blankTextBehavesAsNoFilter (text="?!" must return the
+   same uid set as no-text on the same fixture), evaluated via the round-2 run
+   of SearchPostsToolTest with that assertion green plus the mutation probe
+   (deleting SearchPostsTool.java:263-265 must fail it).

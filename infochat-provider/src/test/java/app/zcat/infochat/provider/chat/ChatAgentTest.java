@@ -1349,6 +1349,7 @@ class ChatAgentTest {
         assertTrue(instructions.contains("\"tags\""), "searchPosts must document tags param");
         assertTrue(instructions.contains("\"window\""), "searchPosts must document window param");
         assertTrue(instructions.contains("\"limit\""), "searchPosts must document limit param");
+        assertTrue(instructions.contains("\"text\""), "searchPosts must document text param");
     }
 
     @Test
@@ -1410,11 +1411,17 @@ class ChatAgentTest {
 
     @Test
     void renderedInstructionTableIsByteIdentical() {
-        String expected = "- searchPosts {\"tags\": [\"tag1\"], \"window\": \"P7D\", \"limit\": 10}"
+        String expected = "- searchPosts {\"tags\": [\"tag1\"], \"window\": \"P7D\","
+                + " \"text\": \"qwen\", \"limit\": 10}"
                 + " — search posts by tags within a time window, newest first. Use this"
                 + " for questions about recent, latest, today's or top news posts —"
                 + " anything with a time dimension. 'Top' means most recent, not most"
-                + " important: present the results with their dates and say so.\n"
+                + " important: present the results with their dates and say so. An"
+                + " optional text filter narrows results to posts whose title or body"
+                + " mention the given English keywords — use it with tags and window to"
+                + " focus on named things (companies, products, people). Put time"
+                + " expressions (today, yesterday, last 2h) in `window`, never in"
+                + " `text`: `text` carries entity/topic terms only.\n"
                 + "- semanticSearch {\"query\": \"free-text topic\", \"limit\": 10}"
                 + " — find posts semantically or by keyword related to a free-text query,"
                 + " for topical or theme questions with no time dimension. It has no time"

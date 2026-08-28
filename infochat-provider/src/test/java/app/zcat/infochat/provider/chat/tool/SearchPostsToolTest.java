@@ -2,10 +2,16 @@ package app.zcat.infochat.provider.chat.tool;
 
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import app.zcat.infochat.llm.LlmProvider;
+import app.zcat.infochat.llm.LlmResponse;
+import app.zcat.infochat.llm.ModelTask;
+import app.zcat.infochat.llm.routing.LlmCircuitBreakerRegistry;
+import app.zcat.infochat.llm.routing.LlmRouter;
 import app.zcat.infochat.provider.chat.CancellationService;
 import app.zcat.infochat.provider.chat.InFlightTracker;
 import app.zcat.infochat.provider.summary.EligiblePostQuery;
 import app.zcat.infochat.provider.testsupport.SeedDataSource;
+import app.zcat.infochat.provider.translation.QueryTranslationCache;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -15,10 +21,12 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import org.jspecify.annotations.Nullable;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -66,6 +74,9 @@ class SearchPostsToolTest {
 
     @Inject
     CancellationService cancellationService;
+
+    @Inject
+    QueryAnchorTranslator queryAnchorTranslator;
 
     @Inject
     InFlightTracker inFlightTracker;
@@ -130,7 +141,7 @@ class SearchPostsToolTest {
         // InFlightTracker is the injected singleton). The tool runs real SQL;
         // the wrapper only observes connection acquisitions and executed SQL.
         CountingRecordingDataSource countingDs = new CountingRecordingDataSource(dataSource);
-        SearchPostsTool directTool = new SearchPostsTool(countingDs, cancellationService);
+        SearchPostsTool directTool = new SearchPostsTool(countingDs, cancellationService, queryAnchorTranslator);
 
         // Hold the in-flight slot as ChatAgent.handle() does for a chat turn,
         // so the tool has a handle to register the backend pid on.
@@ -374,7 +385,7 @@ class SearchPostsToolTest {
         // requested tags: the batched validation must issue exactly one,
         // not one per tag.
         CountingRecordingDataSource countingDs = new CountingRecordingDataSource(dataSource);
-        SearchPostsTool directTool = new SearchPostsTool(countingDs, cancellationService);
+        SearchPostsTool directTool = new SearchPostsTool(countingDs, cancellationService, queryAnchorTranslator);
         InFlightTracker.CancellationHandle slot =
                 Objects.requireNonNull(inFlightTracker.tryAcquire(userId, "dm", userId));
         try {
@@ -429,6 +440,284 @@ class SearchPostsToolTest {
                 "the byte cap must drop entries past the budget (returned " + returned
                         + " of " + seeded + " seeded posts)");
         assertTrue(returned > 0, "at least one entry must fit under the budget; got " + returned);
+    }
+
+    // ---------- M1-932: the optional `text` filter ----------
+
+    @Test
+    void textFilterNarrowsWithinWindowToPostsMentioningTheText() throws Exception {
+        UUID userId = seedUser("text-narrow");
+        UUID sourceId = seedSource("text-narrow-src", "Text-narrow source");
+        seedSubscription("dm", userId, sourceId);
+        Instant publishedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+                .minus(1, ChronoUnit.HOURS);
+        seedReadyPostWithTitleAndBody("text-hit-title", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES),
+                "Qwen model released", "no keyword here");
+        seedReadyPostWithTitleAndBody("text-hit-body", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES),
+                "no keyword here", "the qwen body text");
+        seedReadyPostWithTitleAndBody("text-miss-one", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES),
+                "Unrelated title", "unrelated body");
+        seedReadyPostWithTitleAndBody("text-miss-two", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES),
+                "Another title", "another body");
+
+        String filtered = tool.execute(userId, "dm", userId,
+                Map.of("window", "PT24H", "text", "qwen"));
+
+        assertEquals(Set.of(PREFIX + "text-hit-title", PREFIX + "text-hit-body"),
+                uidsFromJson(filtered),
+                "text=qwen must return exactly the posts whose title or body mention "
+                        + "it; got: " + filtered);
+
+        String unfiltered = tool.execute(userId, "dm", userId, Map.of("window", "PT24H"));
+
+        assertEquals(Set.of(PREFIX + "text-hit-title", PREFIX + "text-hit-body",
+                        PREFIX + "text-miss-one", PREFIX + "text-miss-two"),
+                uidsFromJson(unfiltered),
+                "the same fixture with no text arg returns all four — the compose "
+                        + "discriminator (a mutation filtering unconditionally fails "
+                        + "this arm); got: " + unfiltered);
+    }
+
+    @Test
+    void textFilterComposesWithWindowAndTagPredicates() throws Exception {
+        UUID userId = seedUser("text-compose");
+        UUID sourceId = seedSource("text-compose-src", "Text-compose source");
+        seedSubscription("dm", userId, sourceId);
+        seedTag(TAG_PREFIX + "compose");
+        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        // (a) matches the text but readied 3 days ago — outside a 24h window.
+        seedReadyPostWithTitleBodyAndTags("compose-stale", sourceId,
+                now.minus(3, ChronoUnit.DAYS),
+                now.minus(3, ChronoUnit.DAYS).plus(5, ChronoUnit.MINUTES),
+                "Qwen stale", "body", TAG_PREFIX + "compose");
+        // (b) in-window and matching, but tagged off the requested subtree.
+        seedReadyPostWithTitleAndBody("compose-offtag", sourceId, now.minus(1, ChronoUnit.HOURS),
+                now.minus(55, ChronoUnit.MINUTES), "Qwen off-tag", "body");
+        // (c) in-window, matching, on-tag.
+        seedReadyPostWithTitleBodyAndTags("compose-hit", sourceId, now.minus(1, ChronoUnit.HOURS),
+                now.minus(55, ChronoUnit.MINUTES), "Qwen hit", "body", TAG_PREFIX + "compose");
+
+        String json = tool.execute(userId, "dm", userId, Map.of(
+                "window", "PT24H", "text", "qwen",
+                "tags", List.of(TAG_PREFIX + "compose")));
+
+        assertEquals(Set.of(PREFIX + "compose-hit"), uidsFromJson(json),
+                "text narrows WITHIN window+tags, never replaces them: the stale qwen "
+                        + "post is excluded by the window, the off-tag qwen post by the "
+                        + "tag predicate (commands.md §Content); got: " + json);
+    }
+
+    @Test
+    void textFilterNeverSurfacesOutOfWorldOrNonReadyPosts() throws Exception {
+        UUID userId = seedUser("text-leak");
+        UUID sourceId = seedSource("text-leak-src", "Text-leak source");
+        seedSubscription("dm", userId, sourceId);
+        Instant publishedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+                .minus(1, ChronoUnit.HOURS);
+        // An UNSUBSCRIBED custom source's keyword post — outside the caller's
+        // world (D59); never subscribed.
+        UUID strangerSourceId = seedSource("text-leak-stranger", "Stranger source");
+        seedReadyPostWithTitleAndBody("leak-stranger", strangerSourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), "Qwen stranger", "body");
+        // A subscribed source's keyword post still RAW — not READY.
+        seedPostWithStatus("leak-raw", sourceId, publishedAt, "RAW", "Qwen raw", "body");
+        // The in-world control that must surface.
+        seedReadyPostWithTitleAndBody("leak-hit", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), "Qwen hit", "body");
+
+        String json = tool.execute(userId, "dm", userId,
+                Map.of("window", "PT24H", "text", "qwen"));
+
+        assertEquals(Set.of(PREFIX + "leak-hit"), uidsFromJson(json),
+                "the text predicate must compose AND inside the one statement with "
+                        + "READY + the world predicate — an unsubscribed source's or a "
+                        + "non-READY keyword post must never surface (the M1-589 leak "
+                        + "class); got: " + json);
+    }
+
+    @Test
+    void blankTextBehavesAsNoFilter() throws Exception {
+        UUID userId = seedUser("text-blank");
+        UUID sourceId = seedSource("text-blank-src", "Text-blank source");
+        seedSubscription("dm", userId, sourceId);
+        Instant publishedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+                .minus(1, ChronoUnit.HOURS);
+        seedReadyPostWithTitleAndBody("blank-hit", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), "Qwen hit", "body");
+        seedReadyPostWithTitleAndBody("blank-miss", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), "Unrelated", "body");
+
+        String blank = tool.execute(userId, "dm", userId,
+                Map.of("window", "PT24H", "text", "   "));
+        String none = tool.execute(userId, "dm", userId, Map.of("window", "PT24H"));
+
+        assertEquals(uidsFromJson(none), uidsFromJson(blank),
+                "present-but-blank text means no filter — the param is optional and "
+                        + "its absence-meaning is the superset; got: " + blank);
+
+        // The assembly-empty case carries the same no-filter meaning (P7):
+        // non-blank text whose terms all sanitize away binds no tsquery —
+        // a zero-term assembly must not reach to_tsquery as "".
+        String sanitizedAway = tool.execute(userId, "dm", userId,
+                Map.of("window", "PT24H", "text", "?!"));
+
+        assertEquals(uidsFromJson(none), uidsFromJson(sanitizedAway),
+                "text whose terms all sanitize away is no filter, not an error; "
+                        + "got: " + sanitizedAway);
+    }
+
+    @Test
+    void textFilterMatchesPrefixLexemes() throws Exception {
+        UUID userId = seedUser("text-prefix");
+        UUID sourceId = seedSource("text-prefix-src", "Text-prefix source");
+        seedSubscription("dm", userId, sourceId);
+        Instant publishedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+                .minus(1, ChronoUnit.HOURS);
+        // The tokenizer conjoins family names: "Qwen3-32B" indexes lexemes
+        // qwen3/32b — a bare `qwen` lexeme exists only in the standalone
+        // title. The bound value is `qwen:*`, so every family member matches.
+        seedReadyPostWithTitleAndBody("prefix-conjoined", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), "Qwen3-32B released", "body");
+        seedReadyPostWithTitleAndBody("prefix-bare", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), "Qwen", "body");
+        seedReadyPostWithTitleAndBody("prefix-two", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), "Qwen2", "body");
+        seedReadyPostWithTitleAndBody("prefix-25", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), "Qwen2.5 weights", "body");
+        seedReadyPostWithTitleAndBody("prefix-miss", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), "Llama4 ships", "body");
+
+        String json = tool.execute(userId, "dm", userId,
+                Map.of("window", "PT24H", "text", "qwen"));
+
+        assertEquals(Set.of(PREFIX + "prefix-conjoined", PREFIX + "prefix-bare",
+                        PREFIX + "prefix-two", PREFIX + "prefix-25"),
+                uidsFromJson(json),
+                "qwen:* must prefix-match the conjoined lexemes qwen3/qwen2 — a "
+                        + "bare-lexeme plainto_tsquery mutation returns only the "
+                        + "standalone \"Qwen\" post; got: " + json);
+    }
+
+    @Test
+    void textFilterPrefixLexemesDiscriminateVersions() throws Exception {
+        UUID userId = seedUser("text-disc");
+        UUID sourceId = seedSource("text-disc-src", "Text-disc source");
+        seedSubscription("dm", userId, sourceId);
+        Instant publishedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+                .minus(1, ChronoUnit.HOURS);
+        seedReadyPostWithTitleAndBody("disc-35", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), "Qwen3-35B posted", "body");
+        seedReadyPostWithTitleAndBody("disc-27", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), "Qwen 27B posted", "body");
+
+        String json = tool.execute(userId, "dm", userId,
+                Map.of("window", "PT24H", "text", "qwen 27B"));
+
+        assertEquals(Set.of(PREFIX + "disc-27"), uidsFromJson(json),
+                "the assembled `qwen:* & 27b:*` ANDs its terms — 27b:* does not "
+                        + "prefix-match lexeme 35b, so the Qwen3-35B post is excluded; "
+                        + "an OR-widened assembly (the sanitization failure mode) "
+                        + "returns both and fails; got: " + json);
+    }
+
+    @Test
+    void temporalWordInTextBehavesAsLiteralTermFilter() throws Exception {
+        UUID userId = seedUser("text-temporal");
+        UUID sourceId = seedSource("text-temporal-src", "Text-temporal source");
+        seedSubscription("dm", userId, sourceId);
+        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        // In-window, body carries BOTH lexemes.
+        seedReadyPostWithTitleAndBody("temporal-both", sourceId, now.minus(1, ChronoUnit.HOURS),
+                now.minus(55, ChronoUnit.MINUTES), "Qwen news", "qwen shipped today");
+        // In-window, qwen only — excluded by the AND with today:*.
+        seedReadyPostWithTitleAndBody("temporal-qwen", sourceId, now.minus(1, ChronoUnit.HOURS),
+                now.minus(55, ChronoUnit.MINUTES), "Qwen news", "qwen shipped");
+        // qwen+today but readied 3 days ago — excluded by the window: the
+        // window governs time, the text governs words.
+        seedReadyPostWithTitleAndBody("temporal-stale", sourceId, now.minus(3, ChronoUnit.DAYS),
+                now.minus(3, ChronoUnit.DAYS).plus(5, ChronoUnit.MINUTES),
+                "Qwen news", "qwen shipped today");
+
+        String json = tool.execute(userId, "dm", userId,
+                Map.of("window", "PT24H", "text", "qwen today"));
+
+        assertEquals(Set.of(PREFIX + "temporal-both"), uidsFromJson(json),
+                "a temporal word in text is a DEFINED literal-term degradation "
+                        + "(qwen:* & today:*) — over-narrowing, never an error, never a "
+                        + "window redefinition; got: " + json);
+    }
+
+    @Test
+    void nonEnglishScopeAnchorsTheTextBeforeMatching() throws Exception {
+        UUID userId = seedUser("text-anchor");
+        UUID sourceId = seedSource("text-anchor-src", "Text-anchor source");
+        seedSubscription("dm", userId, sourceId);
+        seedScopeLanguage("dm", userId, "cs");
+        Instant publishedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+                .minus(1, ChronoUnit.HOURS);
+        // The seeded post carries ONLY the translated string in its body —
+        // the raw cs text does not match it, so a skip-the-translation
+        // mutation returns nothing.
+        seedReadyPostWithTitleAndBody("anchor-hit", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES),
+                "Title", "quantum router exploit");
+        seedReadyPostWithTitleAndBody("anchor-miss", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES),
+                "Title", "unrelated body");
+
+        RecordingAnchorTranslator translator =
+                new RecordingAnchorTranslator("quantum router exploit");
+        SearchPostsTool anchoredTool =
+                new SearchPostsTool(dataSource, cancellationService, translator);
+
+        String json = anchoredTool.execute(userId, "dm", userId,
+                Map.of("window", "PT24H", "text", "kvantový router"));
+
+        assertEquals(Set.of(PREFIX + "anchor-hit"), uidsFromJson(json),
+                "a non-en scope's text must be anchored to the corpus language "
+                        + "BEFORE matching (D58); got: " + json);
+        assertEquals(List.of("kvantový router|cs|dm|" + userId), translator.calls,
+                "the translator must be called exactly once with the raw text and "
+                        + "the scope-partitioned coordinates (R2)");
+    }
+
+    @Test
+    void enScopeTextFilterIssuesNoTranslatorCall() throws Exception {
+        UUID userId = seedUser("text-en");
+        UUID sourceId = seedSource("text-en-src", "Text-en source");
+        seedSubscription("dm", userId, sourceId);
+        // No scope_preferences row: the declared language defaults to 'en'
+        // (D43) — the en safe-no-op posture must hold on the new leg.
+        Instant publishedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+                .minus(1, ChronoUnit.HOURS);
+        seedReadyPostWithTitleAndBody("en-hit", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), "Qwen hit", "body");
+        seedReadyPostWithTitleAndBody("en-miss", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), "Unrelated", "body");
+
+        // The REAL translator over a provider stub that fails the test on
+        // any invocation: an en scope issues no TRANSLATOR call at all.
+        SearchPostsTool enTool = new SearchPostsTool(dataSource, cancellationService,
+                new QueryAnchorTranslator(
+                        new LlmRouter(
+                                List.of(new LlmRouter.Entry("stub",
+                                        new FailingTranslatorProvider(), Set.of())),
+                                LlmRouter.ConfigReader.fromMap(Map.of())),
+                        new QueryTranslationCache(),
+                        new LlmCircuitBreakerRegistry(3, 30_000, Clock.systemUTC(),
+                                LlmRouter.ConfigReader.fromMap(Map.of())),
+                        500));
+
+        String json = enTool.execute(userId, "dm", userId,
+                Map.of("window", "PT24H", "text", "qwen"));
+
+        assertEquals(Set.of(PREFIX + "en-hit"), uidsFromJson(json),
+                "the en scope returns the text-filtered result with zero "
+                        + "TRANSLATOR calls; got: " + json);
     }
 
     // ---------- helpers ----------
@@ -556,6 +845,71 @@ class SearchPostsToolTest {
         }
     }
 
+    private void seedReadyPostWithTitleAndBody(String slug, UUID sourceId, Instant publishedAt,
+                                               Instant readyAt, String title,
+                                               String body) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO post (uid, source_id, title, body, url, published_at, "
+                     + "fetched_at, status, ready_at, tags, upstream_identifier) "
+                     + "VALUES (?, ?, ?, ?, ?, ?, ?, 'READY', ?, '{}', ?)")) {
+            ps.setString(1, PREFIX + slug);
+            ps.setObject(2, sourceId);
+            ps.setString(3, title);
+            ps.setString(4, body);
+            ps.setString(5, "https://example.com/" + slug);
+            ps.setTimestamp(6, Timestamp.from(publishedAt));
+            ps.setTimestamp(7, Timestamp.from(FETCHED_AT));
+            ps.setTimestamp(8, Timestamp.from(readyAt));
+            ps.setString(9, PREFIX + slug);
+            ps.executeUpdate();
+        }
+    }
+
+    private void seedReadyPostWithTitleBodyAndTags(String slug, UUID sourceId, Instant publishedAt,
+                                                   Instant readyAt, String title, String body,
+                                                   String... tags) throws Exception {
+        String tagLiteral = "{" + String.join(",", tags) + "}";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO post (uid, source_id, title, body, url, published_at, "
+                     + "fetched_at, status, ready_at, tags, upstream_identifier) "
+                     + "VALUES (?, ?, ?, ?, ?, ?, ?, 'READY', ?, ?::TEXT[], ?)")) {
+            ps.setString(1, PREFIX + slug);
+            ps.setObject(2, sourceId);
+            ps.setString(3, title);
+            ps.setString(4, body);
+            ps.setString(5, "https://example.com/" + slug);
+            ps.setTimestamp(6, Timestamp.from(publishedAt));
+            ps.setTimestamp(7, Timestamp.from(FETCHED_AT));
+            ps.setTimestamp(8, Timestamp.from(readyAt));
+            ps.setString(9, tagLiteral);
+            ps.setString(10, PREFIX + slug);
+            ps.executeUpdate();
+        }
+    }
+
+    /** Seeds a post in a caller-chosen status; non-READY rows carry no ready_at yet. */
+    private void seedPostWithStatus(String slug, UUID sourceId, Instant publishedAt,
+                                    String status, String title, String body) throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO post (uid, source_id, title, body, url, published_at, "
+                     + "fetched_at, status, ready_at, tags, upstream_identifier) "
+                     + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, '{}', ?)")) {
+            ps.setString(1, PREFIX + slug);
+            ps.setObject(2, sourceId);
+            ps.setString(3, title);
+            ps.setString(4, body);
+            ps.setString(5, "https://example.com/" + slug);
+            ps.setTimestamp(6, Timestamp.from(publishedAt));
+            ps.setTimestamp(7, Timestamp.from(FETCHED_AT));
+            ps.setString(8, status);
+            ps.setString(9, PREFIX + slug);
+            ps.executeUpdate();
+        }
+    }
+
     private UUID seedTag(String name) throws Exception {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
@@ -588,6 +942,53 @@ class SearchPostsToolTest {
             ps.setString(1, scopeKind);
             ps.setObject(2, scopeId);
             ps.executeUpdate();
+        }
+    }
+
+    /** Declares the scope's /lang (scope_preferences.language) — D58 (c). */
+    private void seedScopeLanguage(String scopeKind, UUID scopeId, String language)
+            throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO scope_preferences (scope_kind, scope_id, language) "
+                     + "VALUES (?, ?, ?)")) {
+            ps.setString(1, scopeKind);
+            ps.setObject(2, scopeId);
+            ps.setString(3, language);
+            ps.executeUpdate();
+        }
+    }
+
+    /** Records every {@code translate} call and returns a fixed string. */
+    static class RecordingAnchorTranslator extends QueryAnchorTranslator {
+        final List<String> calls = new ArrayList<>();
+        private final String cannedTranslation;
+
+        RecordingAnchorTranslator(String cannedTranslation) {
+            super(new LlmRouter(
+                    List.of(new LlmRouter.Entry("stub",
+                            new FailingTranslatorProvider(), Set.of())),
+                    LlmRouter.ConfigReader.fromMap(Map.of())),
+                    new QueryTranslationCache(),
+                    new LlmCircuitBreakerRegistry(3, 30_000, Clock.systemUTC(),
+                            LlmRouter.ConfigReader.fromMap(Map.of())),
+                    500);
+            this.cannedTranslation = cannedTranslation;
+        }
+
+        @Override
+        public String translate(String query, String sourceLanguage,
+                                String scopeKind, UUID scopeId) {
+            calls.add(query + "|" + sourceLanguage + "|" + scopeKind + "|" + scopeId);
+            return cannedTranslation;
+        }
+    }
+
+    /** An LLM stub that fails the test if the leg ever reaches it. */
+    static class FailingTranslatorProvider implements LlmProvider {
+        @Override
+        public LlmResponse generate(ModelTask task, String systemPrompt, String userPrompt) {
+            throw new AssertionError("an en scope must not issue a TRANSLATOR call");
         }
     }
 

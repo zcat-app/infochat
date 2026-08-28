@@ -45,7 +45,7 @@ class ChatToolCatalogTest {
 
     @Test
     void everyCatalogArgsShapeMatchesToolParsing() {
-        assertArgs("searchPosts", List.of("tags:array", "window:string", "limit:integer"));
+        assertArgs("searchPosts", List.of("tags:array", "window:string", "text:string", "limit:integer"));
         assertArgs("semanticSearch", List.of("query:string", "limit:integer"));
         assertArgs("getPost", List.of("uid:string"));
         assertArgs("getReferences", List.of("uid:string", "limit:integer"));
@@ -83,6 +83,21 @@ class ChatToolCatalogTest {
                 "semanticSearch must disclaim its missing time dimension");
         assertTrue(semanticSearch.contains("use searchPosts instead"),
                 "semanticSearch must steer temporal intents to searchPosts");
+    }
+
+    @Test
+    void searchPostsDescriptionDocumentsTheTextFilter() {
+        String description = ChatToolCatalog.tool("searchPosts").description();
+        assertTrue(description.contains("text filter"),
+                "the description must name the text param");
+        assertTrue(description.contains("narrows results"),
+                "the description must state the keyword-narrowing role");
+        assertTrue(description.contains("English keywords"),
+                "the description must state the English expectation");
+        assertTrue(description.contains("Put time expressions") && description.contains("window"),
+                "the description must carry the temporal-to-window routing rule");
+        assertTrue(description.contains("entity/topic terms only"),
+                "the description must confine text to entity/topic terms");
     }
 
     @Test

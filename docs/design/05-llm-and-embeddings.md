@@ -546,7 +546,14 @@ steers temporal/top-news intents — "recent", "latest", "today", "top" — to
 it, binding "top" to most recent (never most important) and requiring dated,
 honest presentation of results; the `semanticSearch` catalog description
 scopes it to topical/theme questions with no time dimension and steers
-temporal questions back to `searchPosts`. The guidance lives only in the
+temporal questions back to `searchPosts`. The `searchPosts` catalog
+description also documents the optional `text` filter: a keyword-narrowing
+parameter matching posts whose title or body mention the given English
+terms (prefix lexemes over `post.search_tsv`, composed AND with
+tag/window/world inside the one statement, never reordering), plus the
+temporal-to-window routing sentence — time expressions go to `window`,
+never `text`; `text` carries entity/topic terms only. The guidance lives
+only in the
 two catalog strings (`ChatToolCatalog`), single-sourced into both the
 instruction table and the wire declarations.                                                                                                                                                       
 
@@ -736,8 +743,11 @@ AND what `plainto_tsquery('english', ?)` receives (still bind-only), so
 both arms always see the same text and the READY + D59 predicates,
 fusion and emission shape are untouched. The same `TRANSLATOR` task key
 serves the ingest and presentation legs ("shares today"), so the
-temperature-0 emission applies to all three translation legs — a
-determinism win, not a behavior risk.
+temperature-0 emission applies to all four translation legs — a
+determinism win, not a behavior risk. The `searchPosts` text filter leg
+anchors identically to the `semanticSearch` query leg: same
+declared-language lookup, same scope-partitioned cache, `en` a strict
+no-op, any failure falling back to the raw text.
 
 **Retrieval-provenance notice (D58).** ChatAgent tracks the
 DISTINCT post UIDs the turn retrieved — the deterministic pre-fetch plus

@@ -1,10 +1,13 @@
 package app.zcat.infochat.provider.chat.tool;
 
+import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.core.util.JsonEscaper;
 import app.zcat.infochat.provider.chat.CancellationService;
 import app.zcat.infochat.provider.chat.ChatToolRegistry;
 import app.zcat.infochat.provider.summary.TagTreeExpansion;
 import org.jspecify.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -22,9 +25,11 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @ApplicationScoped
 public class SearchPostsTool implements ChatToolRegistry.ChatTool {
@@ -45,8 +50,16 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
      */
     static final int MAX_RESULT_BYTES = 16 * 1024;
 
+    // The scope's declared language (D58 (c)): identical SQL to
+    // SemanticSearchTool's lookup — a missing row means 'en' (D43).
+    private static final String SELECT_SCOPE_LANGUAGE_SQL =
+            "SELECT language FROM scope_preferences WHERE scope_kind = ? AND scope_id = ?";
+
+    private static final Logger LOG = LoggerFactory.getLogger(SearchPostsTool.class);
+
     private final DataSource dataSource;
     private final CancellationService cancellationService;
+    private final QueryAnchorTranslator queryAnchorTranslator;
 
     // The ready_at retrieval-window cutoff is a decision-gate "now", so it
     // reads from the injected Clock to stay pinnable in tests (M1-454,
@@ -56,9 +69,11 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
     Clock clock = Clock.systemUTC();
 
     @Inject
-    public SearchPostsTool(DataSource dataSource, CancellationService cancellationService) {
+    public SearchPostsTool(DataSource dataSource, CancellationService cancellationService,
+                           QueryAnchorTranslator queryAnchorTranslator) {
         this.dataSource = dataSource;
         this.cancellationService = cancellationService;
+        this.queryAnchorTranslator = queryAnchorTranslator;
     }
 
     @Override
@@ -72,9 +87,19 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
                 ? Duration.parse((String) args.get("window")) : WINDOW_MAX;
         int limit = args.containsKey("limit")
                 ? ((Number) args.get("limit")).intValue() : 50;
+        String text = args.containsKey("text") ? (String) args.get("text") : null;
 
         if (window.compareTo(WINDOW_MIN) < 0) window = WINDOW_MIN;
         if (window.compareTo(WINDOW_MAX) > 0) window = WINDOW_MAX;
+
+        // D58 anchoring (the SemanticSearchTool discipline): translate the
+        // text on the DECLARED scope language BEFORE the main pooled
+        // connection — the HTTP round-trip must not hold a pool slot.
+        String anchoredText = null;
+        if (text != null && !text.isBlank()) {
+            String scopeLanguage = lookupScopeLanguage(scopeKind, scopeId);
+            anchoredText = queryAnchorTranslator.translate(text, scopeLanguage, scopeKind, scopeId);
+        }
 
         // One pooled connection per tool call. Arm it for /stop first
         // (statement_timeout safety net + register this connection's backend
@@ -90,7 +115,8 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
 
             // Follow preferences narrow the digest only — chat search stays
             // world-broad (D59); never wire scope_tag into queryPosts.
-            return queryPosts(conn, scopeKind, scopeId, tags, !tags.isEmpty(), cutoff, limit);
+            return queryPosts(conn, scopeKind, scopeId, tags, !tags.isEmpty(), cutoff, limit,
+                    anchoredText);
         }
     }
 
@@ -126,7 +152,7 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
     private String queryPosts(Connection conn, String scopeKind, UUID scopeId,
                                List<String> requestedTags, boolean hasTagFilter,
                                Instant cutoff,
-                               int limit) throws SQLException {
+                               int limit, @Nullable String anchoredText) throws SQLException {
         StringBuilder sql = new StringBuilder();
         // ready_at is the window filter, and the emitted ready_at field
         // carries the ready_at column per the spec's tool catalogue result
@@ -165,6 +191,15 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
             params.add(requestedTags.toArray(new String[0]));
         }
 
+        // Filter-only narrowing (D19): the text predicate joins the WHERE
+        // and nothing else — SELECT list, ORDER BY and LIMIT are untouched
+        // (llm.md §Determinism boundary: no ranking, ever).
+        String textTsquery = assemblePrefixTsquery(anchoredText);
+        if (textTsquery != null) {
+            sql.append("AND p.search_tsv @@ to_tsquery('english', ?) ");
+            params.add(textTsquery);
+        }
+
         sql.append("ORDER BY COALESCE(p.published_at, p.fetched_at) DESC, p.id DESC LIMIT ?");
         params.add(limit);
 
@@ -201,6 +236,55 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
                 json.append(']');
                 return json.toString();
             }
+        }
+    }
+
+    // Prefix lexemes are load-bearing: the tokenizer conjoins family names
+    // into lexemes like `qwen3`, so a bare `qwen` term never matches them —
+    // each sanitized term rides as `term:*`, AND-joined.
+    static @Nullable String assemblePrefixTsquery(@Nullable String anchoredText) {
+        if (anchoredText == null || anchoredText.isBlank()) {
+            return null;
+        }
+        List<String> terms = new ArrayList<>();
+        // Terms are letters/digits only, so the model-supplied text can
+        // contribute no tsquery operator bytes — only code emits the `:*`
+        // and ` & ` scaffolding; zero terms is no filter.
+        for (String token : anchoredText.split("[^\\p{L}\\p{N}]+")) {
+            if (token.isEmpty()) {
+                continue;
+            }
+            String term = token.toLowerCase(Locale.ROOT);
+            terms.add(term.length() > 64 ? term.substring(0, 64) : term);
+            if (terms.size() == 16) {
+                break;
+            }
+        }
+        if (terms.isEmpty()) {
+            return null;
+        }
+        return terms.stream().map(t -> t + ":*").collect(Collectors.joining(" & "));
+    }
+
+    // The scope's declared language — the same SQL and missing-row default
+    // ('en', D43) as SemanticSearchTool.lookupScopeLanguage, on its own
+    // short connection; failure degrades to 'en' and logs.
+    private String lookupScopeLanguage(String scopeKind, UUID scopeId) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(SELECT_SCOPE_LANGUAGE_SQL)) {
+            ps.setString(1, scopeKind);
+            ps.setObject(2, scopeId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return "en";
+                }
+                return rs.getString("language");
+            }
+        } catch (SQLException e) {
+            SafeLog.warn(LOG, "SearchPostsTool.lookupScopeLanguage failed for scope_kind="
+                    + scopeKind + " scope_id=" + scopeId
+                    + "; degrading to 'en'", e);
+            return "en";
         }
     }
 

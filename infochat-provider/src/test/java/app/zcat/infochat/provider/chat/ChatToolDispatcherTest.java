@@ -107,6 +107,21 @@ class ChatToolDispatcherTest {
                 d.dispatch("searchPosts", args, USER_A, "dm", SCOPE_A);
 
         assertInstanceOf(ChatToolDispatcher.ToolResult.ValidationError.class, result);
+
+        // The searchPosts text param rides the same generic cap: an
+        // over-cap text is rejected typed, naming the input, before any
+        // SQL executes (validateValue recurses over every String arg).
+        Map<String, Object> textArgs = new HashMap<>();
+        textArgs.put("text", "a".repeat(11));
+
+        ChatToolDispatcher.ToolResult textResult =
+                d.dispatch("searchPosts", textArgs, USER_A, "dm", SCOPE_A);
+
+        assertInstanceOf(ChatToolDispatcher.ToolResult.ValidationError.class, textResult);
+        assertTrue(((ChatToolDispatcher.ToolResult.ValidationError) textResult)
+                .reason().contains("'text'"),
+                "the rejection must name the input; got: "
+                        + ((ChatToolDispatcher.ToolResult.ValidationError) textResult).reason());
     }
 
     // --- Redteam finding 1: oversized list ---
