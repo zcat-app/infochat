@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 11 |
+| pending | 16 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 144 |
 | deferred | 1 |
 | abandoned | 5 |
-| **total** | **161** |
+| **total** | **166** |
 
 ---
 
@@ -32,6 +32,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-939 — Pin the native reply language per-turn and after fold-backs (complexity: medium, risk: medium)
 - M1-940 — Surface bounded post content in search tool emissions (complexity: medium, risk: medium)
 - M1-946 — Widen the cross-lingual golden slice to n = 16 (complexity: medium, risk: medium)
+- M1-948 — Isolated fam replica: dump, restore, pin fingerprint (complexity: medium, risk: medium)
+- M1-951 — Tech-leg disposition: drift restore, 946/947, caveat (complexity: low, risk: medium)
 
 ---
 
@@ -52,6 +54,9 @@ Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 - M1-936 — blocked_by: M1-934 (pending)
 - M1-941 — blocked_by: M1-940 (pending)
 - M1-947 — blocked_by: M1-946 (pending)
+- M1-949 — blocked_by: M1-948 (pending)
+- M1-950 — blocked_by: M1-948 (pending), M1-949 (pending)
+- M1-952 — blocked_by: M1-949 (pending), M1-950 (pending), M1-951 (pending)
 
 ---
 
@@ -301,4 +306,12 @@ M1-943 (done)
 M1-945 (done)
   └── M1-946 (pending) ← runnable
         └── M1-947 (pending)
+M1-948 (pending) ← runnable
+  ├── M1-949 (pending)
+  │     ├── M1-950 (pending)
+  │     │     └── M1-952 (pending)
+  │     └── M1-952 (pending) [see above]
+  └── M1-950 (pending) [see above]
+M1-951 (pending) ← runnable
+  └── M1-952 (pending) [see above]
 ```
