@@ -1,7 +1,7 @@
 ---
 id: M1-948
 title: "Isolated fam replica: dump, restore, pin fingerprint"
-status: pending
+status: done
 created: 2026-08-28
 last_updated: 2026-08-28
 flow: tick
@@ -95,11 +95,36 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-28
+    verdict: REWORK
+    checks: 'SPEC-TRUTHNESS: PASS, SECURITY: PASS, TEST-ADEQUACY: FAIL, MAINTAINABILITY: PASS, SCOPE: PASS'
+    diff_stats: '4 files, +1091/-10 (script 461, test 607, board+frontmatter)'
+  - round: 2
+    date: 2026-08-28
+    verdict: APPROVE
+    checks: 'SPEC-TRUTHNESS: PASS, SECURITY: PASS, TEST-ADEQUACY: PASS, MAINTAINABILITY: PASS, SCOPE: PASS; r1 item 1 SATISFIED'
+    diff_stats: 'fix hunks: test probe +1/-1; bookkeeping +16 (reviews entry, Round 1 rework section, board row)'
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  2026-08-28: >-
+    Lint 0 findings. Census re-ran clean (no fam-replica mention in scripts/,
+    docs/measurement/, infochat-provider/, src/test/). All file:line citations
+    spot-checked true (backup.sh:135-138, restore.sh:12-17, eval-scopes-seed.sql:5-12,
+    RetrievalEvalRunnerIT dbFingerprint :397-429 + FINGERPRINT_INSTANT render :91-93).
+    Analysis pitfalls P2/P3/P4/P5/P6-half/P9-half/P13-adj/P14/P16 all present in
+    ticket. blocked_by empty (no seam tests to trace). replaces empty; the M1-945-eval
+    worktree is P16-forbidden as a source, not prior art to read. No in-flight tick
+    tickets → no module overlap; --parallel runs in this ticket's own fresh worktree. Live facts verified
+    read-only: fam postgres container the source postgres container (the live source port),
+    test stack postgres up at 15432 (refusal targets), checkout migration head V86,
+    fam at prod rev ae295434 → behind-head migration case is the live one. No
+    blocking question: replica port/project/image defaults and flyway-CLI tag
+    resolution are execution choices inside the ticket's stated behavior. The
+    worktree is this ticket's own fresh worktree — never the P16 probe one.
 escalation_reason:
 ---
 
@@ -242,3 +267,14 @@ pre-existing test is modified.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-948-fam-replica-extraction.md
 ```
+
+## Round 1 rework
+
+REWORK ITEMS:
+1. Finding 1: change the `admin` probe at
+   FamReplicaRestoreWiringTest.java:345 to
+   `argv.indexOf("-f /tmp/admin-role.sql")` so the psql EXEC line (not the
+   docker-cp line) is the pinned position, evaluated via
+   FamReplicaRestoreWiringTest.restoreOrderingPostgresAloneDockerCpRestoreSchemaSeedPinLast:
+   green on the unchanged script, RED under the mutation "move
+   scripts/fam-replica-restore.sh:283 to immediately after :286".
