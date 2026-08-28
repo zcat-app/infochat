@@ -14,10 +14,10 @@
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 144 |
+| done | 145 |
 | deferred | 1 |
 | abandoned | 5 |
-| **total** | **166** |
+| **total** | **167** |
 
 ---
 
@@ -75,6 +75,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-953 | Counted temporal form requires a left word boundary | 2026-08-28 | round 1 APPROVE |
 | M1-945 | Characterize the anchor-leg gap: probes + counterfactuals | 2026-08-28 | round 1 APPROVE |
 | M1-937 | Deterministic temporal-expression parser | 2026-08-28 | round 3 APPROVE |
 | M1-931 | Add deterministic getPrice chat tool for price_snapshot | 2026-08-28 | round 1 APPROVE-WITH-FIXES |
@@ -84,7 +85,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-930 | Baseline retrieval-eval measurement record | 2026-08-27 | round 1 APPROVE |
 | M1-929 | Harness: score golden set over production fused SQL | 2026-08-27 | round 2 APPROVE |
 | M1-928 | Golden-set fixtures for the fused-retrieval eval | 2026-08-27 | round 2 APPROVE |
-| M1-927 | Date and honestly frame the chat semantic grounding set | 2026-08-24 | round 1 APPROVE-WITH-FIXES |
 
 ---
 
@@ -314,4 +314,5 @@ M1-948 (pending) ← runnable
   └── M1-950 (pending) [see above]
 M1-951 (pending) ← runnable
   └── M1-952 (pending) [see above]
+M1-953 (done)
 ```

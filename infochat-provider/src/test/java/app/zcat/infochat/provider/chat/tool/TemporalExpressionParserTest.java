@@ -148,4 +148,21 @@ class TemporalExpressionParserTest {
         assertWindow("last week and the past 7 days", UTC,
                 Duration.ofHours(7 * 24), "last week");
     }
+
+    @Test
+    void countedFormRequiresALeftWordBoundary() {
+        // The counted form's left edge is a word boundary, the calendar
+        // arm's discipline: a keyword or prefix fused inside a larger
+        // word is not a recency phrase.
+        assertNoMatch("blast 3 days", UTC);
+        assertNoMatch("inlast 2 hours", UTC);
+
+        // The tighten removes substring matches ONLY: a standalone
+        // expression still matches, sited at its own word boundary —
+        // never inside the preceding word.
+        assertWindow("sin the last 2 hours", UTC,
+                Duration.ofHours(2), "the last 2 hours");
+        assertWindow("thin last 3 days", UTC,
+                Duration.ofHours(72), "last 3 days");
+    }
 }

@@ -20,8 +20,11 @@ final class TemporalExpressionParser {
 
     record Window(Duration window, String phrase) {}
 
+    // Left edge is a word boundary and the prefix joins with real
+    // whitespace (like the `the` junction), so "blast"/"inlast" cannot
+    // match — the calendar arm's \btoday\b discipline.
     private static final Pattern COUNTED = Pattern.compile(
-            "(?:in|within|over|during)?\\s*(?:the\\s+)?(?:last|past|previous)\\s+(\\d+)\\s*"
+            "\\b(?:(?:in|within|over|during)\\s+)?(?:the\\s+)?(?:last|past|previous)\\s+(\\d+)\\s*"
                     + "(hours?|hrs?|h|days?|d|weeks?|w|months?|mo|minutes?|mins?)\\b",
             Pattern.CASE_INSENSITIVE);
 
