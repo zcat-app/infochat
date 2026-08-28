@@ -5,6 +5,7 @@ Thumbs.db
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
 .claude/worktrees/
+.worktree/
 .quarkus/
 .idea/
 .reviews/

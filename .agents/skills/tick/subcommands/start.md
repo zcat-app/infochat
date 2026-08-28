@@ -49,9 +49,11 @@ plan and was approved at draft time).
 Set `status: in-progress` (frontmatter) and `last_updated`. Create branch
 `m<N>/M<N>-NNN-<slug>` off `main`. For `--parallel`: the ticket's changes
 must land in a different Maven module from every in-flight ticket's (no
-in-flight `migration_touch: true`), and the work happens in a git worktree;
-degrade to sequential if the tool cannot operate in another working
-directory. Check the module boundary MECHANICALLY, never from memory: list
+in-flight `migration_touch: true`), and the work happens in a git worktree
+under the repo-root `.worktree/` directory — git-unversioned, one worktree
+per ticket, named for the ticket id (e.g. `.worktree/M1-936`); never the
+home directory, never `/tmp`. Degrade to sequential if the tool cannot
+operate in another working directory. Check the module boundary MECHANICALLY, never from memory: list
 the tick tickets with `status: in-progress` or `in-review` (frontmatter
 under `docs/plan/m1/tick-tickets/`), take the Maven-module root of each
 one's `files_scope` paths (or its worktree's changed modules when the scope
