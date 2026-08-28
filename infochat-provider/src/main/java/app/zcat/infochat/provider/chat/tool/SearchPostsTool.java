@@ -29,8 +29,11 @@ import java.util.UUID;
 @ApplicationScoped
 public class SearchPostsTool implements ChatToolRegistry.ChatTool {
 
-    private static final Duration WINDOW_MIN = Duration.ofHours(1);
-    private static final Duration WINDOW_MAX = Duration.ofDays(30);
+    // Package-private: the single source of the chat window vocabulary —
+    // TemporalExpressionParser clamps to these same bounds so one
+    // conversation cannot hold two window definitions (M1-689).
+    static final Duration WINDOW_MIN = Duration.ofHours(1);
+    static final Duration WINDOW_MAX = Duration.ofDays(30);
 
     /**
      * Aggregate byte budget for the returned JSON array, measured in

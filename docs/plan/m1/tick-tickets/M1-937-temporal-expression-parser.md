@@ -1,9 +1,9 @@
 ---
 id: M1-937
 title: "Deterministic temporal-expression parser"
-status: pending
+status: done
 created: 2026-08-26
-last_updated: 2026-08-26
+last_updated: 2026-08-28
 flow: tick
 reproduction: >-
   Probe (new-class ticket; no test can exist before the parser does — the
@@ -15,11 +15,11 @@ reproduction: >-
   arg), never a query-text parse (verified 2026-08-26). Observed wrong
   behavior (the live instance is M1-927's recorded reproduction): a turn
   asking "in the last 2 hours" grounds on week-old posts because nothing
-  deterministic derives a window from the text. Intended tests
-  `to-be-written` (child of a 2+ decomposition, analysis
-  docs/plan/m1/tick-analysis/temporal-parse-windowing.md; /tick start
-  converts the markers: write the tests, run them RED — the class does not
-  compile-exist yet, so the compile failure IS the red state, workflow §0):
+  deterministic derives a window from the text. Tests landed at start
+  (child of a 2+ decomposition, analysis
+  docs/plan/m1/tick-analysis/temporal-parse-windowing.md; the /tick start
+  marker conversion ran 2026-08-28 — written, run RED as the pinned
+  compile failure, then green with the class):
   TemporalExpressionParserTest#parsesExplicitRelativeExpressionsAndNothingElse,
   #clampsToTheSearchPostsWindowBounds,
   #calendarExpressionsAnchorToTheScopeZone,
@@ -32,7 +32,7 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/TemporalExpressionParserTest.java
 complexity: low
 risk: low
-round_cap: 2
+round_cap: 3
 security_relevant: false
 migration_touch: false
 out_of_scope:
@@ -58,7 +58,7 @@ out_of_scope:
     package-private (single clamp source, analysis P7).
 acceptance:
   - "REPRODUCTION closed (the class exists and the grammar table passes): TemporalExpressionParserTest.parsesExplicitRelativeExpressionsAndNothingElse — anchored-form inputs \"today\", \"yesterday\", \"this week\", \"this month\", \"last week\", \"last month\", \"what happened in tech news in the last 2 hours?\", \"in the past 3 days\", \"past 24h\", \"over the last 12 hours\", \"world news in last 2h\" each yield a Window with the expected clamped Duration and the matched phrase; the NEGATIVE table — \"recent news\", \"latest headlines\", \"top news\", \"new posts\", \"what happened with qwen\", \"\", \"this year\", \"on August 20\" — yields NO match (analysis P3/P8; a mutation matching vague recency or a year-scale expression fails the negative arm)."
-  - "Clamp parity, single source (analysis P7): TemporalExpressionParserTest.clampsToTheSearchPostsWindowBounds — \"last 30 minutes\" clamps UP to SearchPostsTool.WINDOW_MIN (PT1H), \"last 45 days\" and \"last 8 weeks\" clamp DOWN to SearchPostsTool.WINDOW_MAX (PT720H); the assertions reference the SHARED constants (widened to package-private in this diff), so a drift in either direction fails compilation or the test — one window vocabulary across surfaces (commands.md §Content, What the window measures)."
+  - "Clamp parity, single source (analysis P7): TemporalExpressionParserTest.clampsToTheSearchPostsWindowBounds — \"last 30 minutes\" clamps UP to SearchPostsTool.WINDOW_MIN (PT1H), \"last 45 days\" and \"last 8 weeks\" clamp DOWN to SearchPostsTool.WINDOW_MAX (PT720H); the assertions reference the SHARED constants (widened to package-private in this diff), so a drift in either direction fails compilation or the test — one window vocabulary across surfaces (commands.md §Content, What the window measures). Round-2 refine (user, 2026-08-28): oversized counts are bounded by VALUE after stripping leading zeros — \"in the last 0000000002 hours\" yields PT2H (not the ceiling), \"last 0000000000000 hours\" clamps up to WINDOW_MIN, unpadded >9-digit runs still take WINDOW_MAX, and parse never throws on any digit run."
   - "Calendar anchoring discriminates the zone (analysis P5): TemporalExpressionParserTest.calendarExpressionsAnchorToTheScopeZone — fixed instant 2026-08-26T09:00:00Z: \"today\" with Zone Europe/Prague yields PT11H (local midnight = 22:00Z prior day) while Zone UTC yields PT9H; \"yesterday\" (Prague) yields the bounding window PT35H (since start of yesterday); \"this week\" anchors at the ISO-Monday week start and \"this month\" at the zone's month start in the same zone — a UTC-hardcoded mutation fails the Prague arm."
   - "Multi-match determinism (analysis P3): TemporalExpressionParserTest.narrowestExpressionWinsWhenSeveralMatch — \"what happened today in the last 2 hours\" yields PT2H (the NARROWEST matched window), not the today window; two expressions yielding EQUAL windows resolve to the first-mentioned (pinned); the rule is code-fixed, never configuration."
   - "Match discipline: case-insensitive with word boundaries — \"Today\", \"TODAY\", and \"today's news\" match; \"hotdays\" does not (TemporalExpressionParserTest cases); the negation limitation (\"not today\" still matches) is asserted as DESIGNED behavior with a comment naming the recorded trade-off (analysis P8: a false positive narrows grounding, never answers wrongly; a false negative is the original defect)."
@@ -89,11 +89,78 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-28
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: FAIL; TEST-ADEQUACY: WARN; MAINTAINABILITY: PASS; SCOPE: PASS"
+    diff_stats: "5 files, +282/-17 (parser +117 new, test +133 new, SearchPostsTool +5/-2, ticket +30/-7, board +12/-12)"
+    notes: >-
+      1 REWORK item (low, SECURITY): unbounded counted digit runs —
+      NumberFormatException past Long.MAX_VALUE, ArithmeticException in
+      Duration.ofDays, and 7*n/30*n long wrap landing a corrupted negative
+      window that clamp() lifts to WINDOW_MIN; must clamp to WINDOW_MAX and
+      never throw (M1-938 feeds raw 500-char user text verbatim). Reviewer
+      falsified-and-dropped the @Nullable signature nit (D48: green build
+      is the proof) and the minutes-unit divergence (acceptance item 2 is
+      the contract — the under-clamp arm is unsatisfiable without
+      minutes). 1 RECOMMENDED-NEW-TICKET carried DECIDE-BEFORE: M1-938
+      (counted-form leading word boundary — "blast 3 days" matches) —
+      relayed to the user. Verdict: .scratch/tick-review-M1-937-r1.txt
+  - round: 2
+    date: 2026-08-28
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: FAIL; MAINTAINABILITY: WARN; SCOPE: PASS"
+    diff_stats: "round-2 fix hunks: 3 files, +61/-3 (parser +9/-1, test +10, ticket +42 bookkeeping) vs round-1 baseline 5 files +282/-17 — every dimension shrank"
+    notes: >-
+      Round-1 REWORK item dispositioned SATISFIED (guard present,
+      three named probes green in-suite, log of record newer than every
+      staged file). New low FINDING (TEST-ADEQUACY): the >9-DIGIT-LENGTH
+      shortcut counts characters, not value — zero-padded small counts
+      ("in the last 0000000002 hours", 10 chars, value 2) regress to
+      WINDOW_MAX where the round-1 code correctly returned PT2H; fix is
+      strip-leading-zeros before the length test plus one assertion.
+      Reviewer falsified-and-dropped: 9-digit overflow risk (worst case
+      30n days ~2.6e15 s, far under Long.MAX), vacuous test arms (each
+      catches a distinct mutation), comment-cap and diff-growth concerns.
+      Round cap 2 reached on REWORK → escalated (round-cap). Verdict:
+      .scratch/tick-review-M1-937-r2.txt
+  - round: 3
+    date: 2026-08-28
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: PASS; MAINTAINABILITY: PASS; SCOPE: PASS"
+    diff_stats: "round-3 fix hunks: 4 files, +59/-8 (parser +12/-5 zero-strip + comment, test +8 two arms, ticket +45 bookkeeping, board +1/-1); full branch 5 files vs merge-base"
+    notes: >-
+      Post-refine round (user ruling 2026-08-28, round_cap 3). Round-2
+      item dispositioned SATISFIED (strip runs before the length test,
+      comment states the value premise, PT2H arm beside the intact
+      oversized arms, in-suite green, log of record newer than both code
+      files). Reviewer falsified-and-dropped five candidates (all-zero
+      non-match vs the refine-amended acceptance; char-count regression
+      claim vs strip ordering; 9-digit month overflow arithmetic; minutes
+      unit vs the every-clamp-bound wording; must-shrink vs the stats).
+      The word-boundary RECOMMENDED-NEW-TICKET was restated carrying the
+      standing user ruling (route through /tick analyze before M1-938) —
+      no new decision requested. No MAINTAINABILITY rename suggestions.
+      Verdict: .scratch/tick-review-M1-937-r3.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  result: pass
+  checked: 2026-08-28
+  notes: >-
+    Lint 0/0. Reproduction probes re-run clean (no TemporalExpressionParser
+    hit; Duration.parse on the chat path only at SearchPostsTool:69 and
+    ListSavesTool:79 — model-supplied window args, never a query-text
+    parse; the ticket's "hits only in SearchPostsTool" enumeration is
+    loose about ListSavesTool but the load-bearing claim holds). Spec
+    citations verified (commands.md "What the window measures" names the
+    chat post-search tool; llm.md Determinism boundary). Pitfalls P3/P5/
+    P7/P8 all present. Calendar expectations recomputed at
+    2026-08-26T09:00Z (Wednesday, Prague CEST): today PT11H/PT9H,
+    yesterday PT35H, this-week PT59H, this-month PT611H. No blocked_by,
+    no replaces, no in-flight overlap.
 escalation_reason:
 ---
 
@@ -237,3 +304,52 @@ exist).
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-937-temporal-expression-parser.md
 ```
+
+## Round 1 rework
+
+Verbatim from the round-1 verdict (`.scratch/tick-review-M1-937-r1.txt`):
+
+1. FINDING 1: bound the counted magnitude in TemporalExpressionParser.collectCounted
+   /durationOf (TemporalExpressionParser.java:61-79) so oversized digit runs
+   and over-max counts clamp to SearchPostsTool.WINDOW_MAX instead of throwing
+   (NumberFormatException at :64, ArithmeticException inside Duration.ofDays)
+   or wrapping (7 * n / 30 * n long overflow at :73/:76), evaluated via
+   TemporalExpressionParserTest: parse("in the last 99999999999999999999 hours"),
+   parse("last 999999999999999 days"), and parse("last 2635249153387078802 weeks")
+   each return a present Window with window() == SearchPostsTool.WINDOW_MAX
+   (the third must not return WINDOW_MIN), no exception, mvn verify green.
+
+## Review observations
+
+- Round 1 RECOMMENDED-NEW-TICKET (counted-form leading word boundary:
+  "blast 3 days" / "inlast 2 hours" match inside larger words; the calendar
+  arm already carries the `\b` discipline) carried `DECIDE-BEFORE: M1-938`.
+  Relayed to the user 2026-08-28; ruling: route through `/tick analyze`
+  (compare with existing in-tree boundary methods) before M1-938 starts —
+  no ticket filed yet. Checked against the 2026-08-27/28 night handoff
+  (M1-945 embedding-measurement campaign): surfaces are disjoint (eval
+  lane + frozen test DB vs a plain-JUnit regex change) — no sequencing
+  interaction with the pending shadow-eval or the M1-946/947 window.
+
+## Round 2 rework
+
+Verbatim from the round-2 verdict (`.scratch/tick-review-M1-937-r2.txt`):
+
+1. FINDING 1: in TemporalExpressionParser.collectCounted, strip leading zeros
+   from the captured digit run before the >9-digit shortcut
+   (TemporalExpressionParser.java:67) and amend the comment at :64-66 to
+   match, evaluated via TemporalExpressionParserTest.
+   clampsToTheSearchPostsWindowBounds asserting parse("in the last 0000000002
+   hours") returns PT2H with the three existing oversized arms still
+   asserting SearchPostsTool.WINDOW_MAX, and a green mvn verify.
+
+## Round 2 refine (user)
+
+Escalation ruling 2026-08-28, refine arm: the zero-padding regression was
+INTRODUCED by this ticket's round-2 fix (the round-1 value-based code read
+the number correctly), so the strip-leading-zeros fix belongs in THIS
+ticket rather than a successor — the corner case is improbable
+(zero-padded counts, extreme magnitudes) but the fix is two production
+lines plus assertions. Amendments: acceptance item 2 extended (value-based
+bound after zero-strip); round_cap 2 → 3 with this authorization recorded
+here. The commit message carries the refine reason.
