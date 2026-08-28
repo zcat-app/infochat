@@ -238,6 +238,17 @@ independently implementable and verifiable — a ticket whose Approach
 names more than a handful of files is a decomposition failure. When a
 problem is genuinely one change, one ticket with `analysis_ref: self`.
 
+**Placement classification (engineering-rules §13, binding).** Every
+artifact your plan names — files to touch, fixtures, scripts, working
+data — is either committed (instance-free) or operator-local. Anything
+bound to a real deployment (container/host/network names, live or
+replica ports, non-fixture fingerprints or state pins, aggregates over
+real users' rows, dumps, run records) NEVER enters a files-to-touch plan
+under the repo root: it lands in `.agents/memory-local/` or `.bench/`
+and the ticket says so by naming the store, not the instance. A brief
+that asks for instance-bound material in the repo is a placement
+SPEC-GAP-equivalent: surface it in the analysis, do not paper over it.
+
 **Fixtures are calibrated to the family's END state.** An earlier ticket in
 a decomposition must not pin, by test, a behavior or representation a later
 sibling is mandated to change: either write the fixture against the state

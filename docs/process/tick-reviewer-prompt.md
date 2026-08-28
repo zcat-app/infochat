@@ -140,6 +140,11 @@ orphan the diff itself created is a FAIL; an `out_of_scope` violation is a
 FAIL. An unplanned file whose lines all trace to acceptance is a PASS.
 Round-N must-shrink is ADVISORY: on rounds ≥ 2, growth beyond the named
 REWORK items is a WARN, never a FAIL.
+Placement leg (engineering-rules §13): any NEW or touched committed
+artifact carrying deployment-identifying material — real-instance names,
+ports, non-fixture state pins or fingerprints, aggregates derived from
+real users' rows — is a FAIL regardless of what the ticket authorizes;
+the ticket itself cannot license a placement the rules forbid.
 
 ---
 

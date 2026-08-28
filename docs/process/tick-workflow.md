@@ -166,6 +166,14 @@ The analyst produces:
    (the subset, numbered consistently), Approach (spec-derived steps, the
    files-to-touch plan, implementation order), Definition of done,
    Verification (pitfall→test mapping), Out-of-scope.
+3. A **placement classification** for every artifact the plan names:
+   committed (instance-free procedure or fixture, engineering-rules §13)
+   vs operator-local (instance-bound scripts, dumps, run records, and any
+   deployment-identifying fact — real-instance names, ports, non-fixture
+   fingerprints, aggregates over real users' rows). A files-to-touch plan
+   that routes deployment-identifying material into the repo is a
+   draft-time failure, corrected before the user sees the ticket set;
+   the reviewer's placement leg catches anything that slips through.
 
 The user reviews the analysis + ticket set before anything is filed (a
 ticket file is never created without explicit user confirmation). If the
