@@ -564,3 +564,21 @@ ABANDONED as superseded: its widened-set reading IS the tech leg of the
 mixed baseline (M1-952), and a separate section would duplicate the same
 run against the same frozen stack.
 
+
+## Two-leg gating redirect (appended 2026-08-30, M1-952)
+
+The campaign gating reference for PRODUCT-WIDE retrieval claims moves to
+[retrieval-eval-two-leg.md](retrieval-eval-two-leg.md): such claims gate
+only when the per-leg sign test clears on BOTH legs independently
+(rule TL1 there, an addition to — never a refit of — the T1/G1/N1/D1
+rules above, which stand byte-identical). THIS record remains the TECH
+LEG's reading history and the tech-instance regression reference: its
+two Results sections are history (the 2026-08-27 defective-key reading
+and the 2026-08-27 corrected re-baseline at the pre-widening
+`golden_set_sha256`), and the current tech-instance regression reading —
+the widened set at `ccea13ba…` on the same frozen fingerprint — is the
+tech leg section of the two-leg record. Tech-instance claims (same-set
+deltas on the tech world alone) keep gating per rule T1 against the
+current tech-leg reading; corrections stay visible everywhere. The
+append-only discipline is unchanged: everything above this section is
+byte-identical to what landed before it.

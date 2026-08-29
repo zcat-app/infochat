@@ -1,9 +1,9 @@
 ---
 id: M1-952
 title: "Two-leg baseline record + pre-registered gating rules"
-status: pending
+status: done
 created: 2026-08-28
-last_updated: 2026-08-29
+last_updated: 2026-08-30
 flow: tick
 reproduction: >-
   Probe (measurement ticket, the M1-930/M1-944 posture — the missing record
@@ -96,11 +96,36 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-30
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: NOT-APPLICABLE (doc-only, no tests added/modified); MAINTAINABILITY: PASS; SCOPE: PASS"
+    diff_stats: "5 files, +354/-12 (two-leg record +317 new in two commits rules->results; baseline +18 append-only redirect; README +1 index row; board+frontmatter bookkeeping)"
+    notes: >-
+      0 rework items, 0 critical/high. Reviewer independently re-verified:
+      rules commit 9bc41854 precedes results 2850e608 with no measured
+      values in the rules text; results append is pure additions; baseline
+      redirect 18+/0-; both golden-set shas byte-equal the recorded pins
+      and all four run manifests; label-set counts/max|E|/none_expected
+      claims match the committed files. Three candidates falsified with
+      citations (fam replica pin under §13 = fixture-label precedent;
+      18080/18081 = committed precedent; fam determinism divergence =
+      truthful report, out-of-scope to fix, rules-commit text anticipated
+      it). One RECOMMENDED-NEW-TICKET recorded under Review observations.
+      Verdict on disk: .scratch/tick-review-M1-952-r1.txt (worktree).
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  checked: 2026-08-30
+  result: >-
+    No blocking question. Citations verified (retrieval-eval-baseline.md:64-92
+    rules block present as cited; README indexes the baseline row already, so
+    only the two-leg row is owed). No test parses docs/measurement/**; the
+    runs consume the unchanged RetrievalEvalRunnerIT with the M1-949/950
+    world seam. M1-930 precedent confirms the two-commit discipline is
+    verified on the ticket branch by the review gate, then squashed.
 escalation_reason:
 ---
 
@@ -219,3 +244,11 @@ modified — authorized in `test_plan.modifies`: pure additions
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-952-mixed-baseline-and-gating.md
 ```
+
+## Review observations (r1)
+
+- docs/measurement/anchor-leg-characterization.md has no index row in
+  docs/measurement/README.md (pre-existing; grep returns 0). This
+  ticket's acceptance mandated only the two-leg row plus the baseline
+  if unindexed (it is indexed), so it was left untouched. Filing an
+  index-row ticket is the user's call.
