@@ -146,6 +146,7 @@ public class HelpCommandHandler implements CommandHandler {
             new CommandHelp("get-tags", BundleKeys.HELP_CMD_GET_TAGS_SHORT, BundleKeys.HELP_CMD_GET_TAGS_USAGE, BundleKeys.HELP_CMD_GET_TAGS_EXAMPLES, HelpTier.USER),
             new CommandHelp("get-sources", BundleKeys.HELP_CMD_GET_SOURCES_SHORT, BundleKeys.HELP_CMD_GET_SOURCES_USAGE, BundleKeys.HELP_CMD_GET_SOURCES_EXAMPLES, HelpTier.USER),
             new CommandHelp("summary", BundleKeys.HELP_CMD_SUMMARY_SHORT, BundleKeys.HELP_CMD_SUMMARY_USAGE, BundleKeys.HELP_CMD_SUMMARY_EXAMPLES, HelpTier.USER),
+            new CommandHelp("topic", BundleKeys.HELP_CMD_TOPIC_SHORT, BundleKeys.HELP_CMD_TOPIC_USAGE, BundleKeys.HELP_CMD_TOPIC_EXAMPLES, HelpTier.USER),
             new CommandHelp("list-sources", BundleKeys.HELP_CMD_LIST_SOURCES_SHORT, BundleKeys.HELP_CMD_LIST_SOURCES_USAGE, BundleKeys.HELP_CMD_LIST_SOURCES_EXAMPLES, HelpTier.USER),
             new CommandHelp("save", BundleKeys.HELP_CMD_SAVE_SHORT, BundleKeys.HELP_CMD_SAVE_USAGE, BundleKeys.HELP_CMD_SAVE_EXAMPLES, HelpTier.USER),
             new CommandHelp("saved", BundleKeys.HELP_CMD_SAVED_SHORT, BundleKeys.HELP_CMD_SAVED_USAGE, BundleKeys.HELP_CMD_SAVED_EXAMPLES, HelpTier.USER),

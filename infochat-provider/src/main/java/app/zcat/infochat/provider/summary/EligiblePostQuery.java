@@ -155,7 +155,32 @@ public class EligiblePostQuery {
             @Nullable Integer sourceWindowPosts,
             @Nullable String sourceLanguage,
             @Nullable String titleEn,
-            @Nullable String bodyEn) {
+            @Nullable String bodyEn,
+            List<String> searchTags) {
+        /** Pre-search-tags shape: older sites compile with an empty list. */
+        public Post(UUID id,
+                    String uid,
+                    UUID sourceId,
+                    String sourceDisplayName,
+                    String title,
+                    String url,
+                    String body,
+                    @Nullable Instant publishedAt,
+                    List<String> tags,
+                    List<String> classification,
+                    @Nullable Integer reposts,
+                    @Nullable Integer likes,
+                    @Nullable Integer comments,
+                    @Nullable String sourceKind,
+                    @Nullable Integer sourceWindowPosts,
+                    @Nullable String sourceLanguage,
+                    @Nullable String titleEn,
+                    @Nullable String bodyEn) {
+            this(id, uid, sourceId, sourceDisplayName, title, url, body,
+                    publishedAt, tags, classification, reposts, likes, comments,
+                    sourceKind, sourceWindowPosts, sourceLanguage, titleEn, bodyEn,
+                    List.of());
+        }
         /**
          * Pre-M1-724 shape: every prominence signal absent. Keeps the
          * ~26 construction sites that predate the ranking (tests,
@@ -349,6 +374,40 @@ public class EligiblePostQuery {
         };
     }
 
+    /** The /topic drill-down fetch: D59 world, READY, ready_at window,
+     * prefix-tolerant free-tag match. The prefix is LIKE-escaped and only
+     * code appends the wildcard ({@code qw%n} matches nothing). */
+    public Result fetchByTopicPrefix(String scopeKind, UUID scopeId,
+                                     String prefix, Duration window) {
+        Instant cutoff = clock.instant().minus(window);
+        try (Connection conn = dataSource.getConnection()) {
+            cancellationService.applyStatementTimeout(conn);
+            // TagMode deliberately unread: the category arms do not apply.
+            Selection selection = selectPosts(conn, scopeKind, scopeId,
+                    Optional.empty(), cutoff, TagMode.ALL, List.of(), prefix);
+            int total = selection.totalBeforeCap();
+            List<Post> capped = selection.posts();
+            int excluded = total - capped.size();
+            return new Result(capped, total, excluded, clusterCap, profileLabel,
+                    Optional.empty());
+        } catch (SQLException e) {
+            throw new IllegalStateException("EligiblePostQuery.fetchByTopicPrefix failed", e);
+        }
+    }
+
+    /** {@code \% \_ \\} — every LIKE metacharacter in {@code value}, backslash-escaped. */
+    private static String escapeLike(String value) {
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c == '%' || c == '_' || c == '\\') {
+                sb.append('\\');
+            }
+            sb.append(c);
+        }
+        return sb.toString();
+    }
+
     // ----- private SQL helpers ------------------------------------------
 
     /** Bounded row set plus the true pre-LIMIT match count. */
@@ -358,6 +417,14 @@ public class EligiblePostQuery {
     private Selection selectPosts(Connection conn, String scopeKind, UUID scopeId,
                                     Optional<String> positionalTag, Instant cutoff,
                                     TagMode tagMode, List<String> restrictedTags) throws SQLException {
+        return selectPosts(conn, scopeKind, scopeId, positionalTag, cutoff, tagMode,
+                restrictedTags, null);
+    }
+
+    private Selection selectPosts(Connection conn, String scopeKind, UUID scopeId,
+                                    Optional<String> positionalTag, Instant cutoff,
+                                    TagMode tagMode, List<String> restrictedTags,
+                                    @Nullable String topicPrefix) throws SQLException {
         // The SELECT pins:
         //   - status='READY' (exclude RAW, QUARANTINED, NEEDS_REVIEW)
         //   - ready_at >= cutoff (window filter). ready_at, not published_at:
@@ -386,7 +453,7 @@ public class EligiblePostQuery {
         sql.append("SELECT p.id, p.uid, p.source_id, s.display_name, p.title, ")
            .append("       p.url, p.body, p.published_at, p.tags, p.classification, ")
            .append("       p.reposts, p.likes, p.comments, s.kind, s.language, ")
-           .append("       p.title_en, p.body_en, ")
+           .append("       p.title_en, p.body_en, p.search_tags, ")
            .append("       COUNT(*) OVER (PARTITION BY p.source_id)::int AS source_window_posts, ")
            .append("       COUNT(*) OVER () AS total_count ")
            .append("  FROM post p ")
@@ -422,6 +489,13 @@ public class EligiblePostQuery {
             params.add(scopeId);
         }
         // tag_mode='ALL' + no positional tag + ≤5 followed → no tag filter.
+        if (topicPrefix != null) {
+            // The /topic drill-down arm: free-tag prefix match, escaped
+            // literal + code-owned wildcard (see fetchByTopicPrefix).
+            sql.append("   AND EXISTS (SELECT 1 FROM unnest(p.search_tags) AS t")
+               .append("                WHERE t LIKE ? || '%') ");
+            params.add(escapeLike(topicPrefix));
+        }
 
         // COALESCE, not a bare published_at: published_at is nullable and
         // Postgres sorts NULLs FIRST under DESC, so once the window predicate
@@ -482,12 +556,18 @@ public class EligiblePostQuery {
                     // "never translated" — see the Post javadoc (M1-759).
                     String titleEn = rs.getString("title_en");
                     String bodyEn = rs.getString("body_en");
+                    // Free tags (V87): NOT NULL DEFAULT '{}' but a
+                    // hand-stubbed ResultSet may still hand back null.
+                    java.sql.Array searchTagsArray = rs.getArray("search_tags");
+                    List<String> searchTags = searchTagsArray == null
+                            ? List.of()
+                            : List.of((String[]) searchTagsArray.getArray());
                     // Same value on every row; zero rows → total stays 0.
                     totalBeforeCap = rs.getInt("total_count");
                     out.add(new Post(id, uid, sourceId, displayName, title, url, body,
                             publishedAt, tags, classification,
                             reposts, likes, comments, sourceKind, sourceWindowPosts,
-                            sourceLanguage, titleEn, bodyEn));
+                            sourceLanguage, titleEn, bodyEn, searchTags));
                 }
                 return new Selection(out, totalBeforeCap);
             }

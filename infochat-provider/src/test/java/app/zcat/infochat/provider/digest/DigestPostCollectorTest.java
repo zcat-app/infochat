@@ -405,6 +405,9 @@ class DigestPostCollectorTest {
                             yield switch (col) {
                                 case "tags" -> stubArray(row.tags());
                                 case "classification" -> stubArray(row.classification());
+                                // V87 column the collector now projects; the
+                                // stub models the DB's NOT NULL DEFAULT '{}'.
+                                case "search_tags" -> stubArray(new String[0]);
                                 default -> throw new UnsupportedOperationException(
                                         "getArray(" + col + ")");
                             };

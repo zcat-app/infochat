@@ -1,15 +1,17 @@
 ---
 id: M1-936
 title: "/topic command and digest topics footer"
-status: pending
+status: done
 created: 2026-08-26
-last_updated: 2026-08-26
+last_updated: 2026-08-29
 flow: tick
 reproduction: >-
   DigestTopicsFooterIT#fullModeDigestWithFreeTagsAppendsOneTopicsLineToLastSection
-  `to-be-written` (child of a 2+ decomposition — needs M1-934's
-  post.search_tags column and writer; /tick start converts the marker:
-  write the IT, run it RED against the unmodified code, workflow §0).
+  (child of a 2+ decomposition — marker converted at /tick start
+  2026-08-29: the IT was written and run RED against unmodified code,
+  4 footer tests failing on the absent topics line, the byte-identity
+  golden passing as the pre-fix fence; log in the session's
+  .scratch/M1-936-red-it.txt).
   Intended wrong behavior it states: a full-mode group
   digest whose collected posts carry free tags (search_tags seeded on
   the posts, post-V87) renders NO topics line anywhere — verified
@@ -25,8 +27,9 @@ reproduction: >-
   topics line (top 5-7 free tags by weighted count + a "+N more"
   overflow count), positioned after the overflow line and BEFORE the
   closing affordance, with no new message and no change to section
-  count, order, or the window line. Companion `to-be-written` (same
-  conversion at /tick start):
+  count, order, or the window line. Companion (converted at
+  /tick start 2026-08-29, run RED against the handler shell; log
+  .scratch/M1-936-red-unit.txt):
   TopicCommandHandlerTest#bareTopicListsWindowTopicsRankedByWeightedCount.
 analysis_ref: docs/plan/m1/tick-analysis/category-tag-split.md
 blocked_by:
@@ -106,7 +109,17 @@ test_plan:
     - infochat-provider/src/test/java/app/zcat/infochat/provider/digest/DigestTopicsFooterIT.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/command/TopicCommandHandlerTest.java
     - infochat-provider/src/test/java/app/zcat/infochat/provider/command/TopicCommandHandlerIT.java
-  modifies: []
+  modifies:
+    - >-
+      DigestPostCollectorTest.java:405-410 — §8 authorization: acceptance
+      11's projection gain (DigestPostCollector SELECTs gain p.search_tags)
+      forces the stub ResultSet to know the new column; stub returns the
+      DB's NOT NULL DEFAULT '{}' shape (empty array); no assertion touched.
+    - >-
+      LangCommandIT.java:118-121 — §8 authorization: acceptance 10's
+      parity-mandated HelpCommandHandler.CATALOGUE entry forces the cs
+      /help golden listing to gain the /topic line in CATALOGUE order; no
+      assertion weakened.
   preserves:
     - >-
       all tests currently green on main — explicitly DigestRendererTest,
@@ -138,11 +151,43 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-29
+    verdict: REWORK
+    checks: SPEC-TRUTHNESS PASS; SECURITY PASS; TEST-ADEQUACY FAIL;
+      MAINTAINABILITY WARN; SCOPE PASS
+    diff_stats: 22 files, +1926/-20
+    findings: 3 low (over-cap drill-down branch untested; missing §8
+      authorization record for the two modified pre-existing tests; unused
+      TranslationPipeline field in the handler)
+    verdict_file: .scratch/tick-review-M1-936-r1.txt
+  - round: 2
+    date: 2026-08-29
+    verdict: APPROVE
+    checks: SPEC-TRUTHNESS PASS; SECURITY PASS; TEST-ADEQUACY PASS;
+      MAINTAINABILITY WARN; SCOPE PASS
+    diff_stats: fix hunks 206 lines; full diff 22 files, +1970/-25
+    findings: none; round-1 items dispositioned SATISFIED (mutation
+      executed and reverted in-session, 9/9 then full verify green)
+    verdict_file: .scratch/tick-review-M1-936-r2.txt
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  2026-08-28: all file:line citations re-verified on main 52e3014a
+  (renderSectionsUnderBudget affordance folds :489-554; summary vocab gate
+  :254-263; identity keying :392-397; commands.md index :206-251 has no
+  /topic; V87 + TaggerWriter exist per M1-934). M1-935 pending — not a
+  blocker (blocked_by is M1-934 only); /topic owns its tolerant query per
+  out_of_scope. M1-938 files_scope overlaps this module but its board
+  status is pending with an idle worktree — no in-flight collision.
+  files_scope deviation noted: HelpCommandHandler lives at
+  messaging/HelpCommandHandler.java, not command/. Census grep re-run:
+  23 paths returned, grouped rows cover the digest families; completed
+  table with live output lands at review time (the M1-867 pattern);
+  seed-safety verified (grep search_tags over provider src/test is
+  empty). No blocking ambiguity.
 escalation_reason:
 ---
 
@@ -306,8 +351,11 @@ construction; /summary and its anchors untouched (no /retry for /topic
 — deliberate, recorded); category-only surfaces unchanged; M1-935's
 tool untouched; normal/brief footer modes deferred with the mechanism
 note landed (binding launch-full-first); eval lane untouched;
-embedding enrichment out. No pre-existing test is modified (the
-acceptance-2 fence probe enforces it).
+embedding enrichment out. No pre-existing test is modified EXCEPT the two
+§8-authorized entries under `test_plan.modifies` (the collector stub's
+search_tags column, forced by the projection gain; the cs /help golden's
+/topic line, forced by the CATALOGUE entry) — every preserves-listed suite
+is untouched.
 
 ## Census
 
@@ -327,3 +375,20 @@ infochat-provider/src/test/java` — every returned file gets a row:
 
 The completed table (with the live grep output) is recorded in this
 ticket at review time, the M1-867 pattern.
+
+## Round 1 rework
+
+1. FINDING 1: add TopicCommandHandlerTest.overCapDrillDownRendersDegradedForm
+   (summarizerPostCap=2, 3 seeded drill posts; assert the too-large notice,
+   zero prose calls, zero rate-cap draws, per-section degraded delivery, no
+   anchor), evaluated by deleting the branch at TopicCommandHandler.java:640
+   failing that test, plus a green full `mvn verify`.
+2. FINDING 2: record the §8 test-modification authorization for
+   DigestPostCollectorTest.java:405-410 and LangCommandIT.java:118-121 in
+   the round-2 commit body (and optionally test_plan.modifies), evaluated
+   by `git log -1 --format=%B | grep -e DigestPostCollectorTest -e
+   LangCommandIT` matching both names.
+3. FINDING 3: delete the unused TranslationPipeline field, import, and test
+   assignment from TopicCommandHandler, evaluated by `grep -c
+   translationPipeline` over the handler returning 0 and
+   `mvn -pl infochat-provider test-compile` green.

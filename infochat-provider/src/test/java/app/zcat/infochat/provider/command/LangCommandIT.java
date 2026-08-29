@@ -118,6 +118,7 @@ class LangCommandIT {
                 bundleLoader.get(BundleKeys.HELP_CMD_GET_TAGS_SHORT, "cs"),
                 bundleLoader.get(BundleKeys.HELP_CMD_GET_SOURCES_SHORT, "cs"),
                 bundleLoader.get(BundleKeys.HELP_CMD_SUMMARY_SHORT, "cs"),
+                bundleLoader.get(BundleKeys.HELP_CMD_TOPIC_SHORT, "cs"),
                 bundleLoader.get(BundleKeys.HELP_CMD_LIST_SOURCES_SHORT, "cs"),
                 bundleLoader.get(BundleKeys.HELP_CMD_SAVE_SHORT, "cs"),
                 bundleLoader.get(BundleKeys.HELP_CMD_SAVED_SHORT, "cs"),

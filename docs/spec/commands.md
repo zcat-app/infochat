@@ -243,6 +243,7 @@ them to the marked region — doing so would red the build.
 /status
 /stop
 /summary
+/topic
 /unban
 /unfollow-source
 /unfollow-tag
@@ -529,6 +530,29 @@ them to the marked region — doing so would red the build.
   periodic group digest's period and the chat agent's post-search
   tool, so "the last N hours" cannot mean two different things
   within one conversation.
+- `/topic [tag] [-w …] [--full]` — discovery over free tags
+  (`post.search_tags`): the listing and the drill-down. With no
+  argument, a deterministic, bundle-localized listing of the window's
+  top free topics ranked by weighted count (story count plus source
+  corroboration; ties by story count then name) — top entries plus a
+  "+N more" overflow count; no LLM call, no rate-cap token, no
+  in-flight slot. `--full` lists every multi-story topic up to a
+  configured cap (a "+N more" overflow beyond it) plus one "+N more
+  single-story topics" overflow line. The default window equals the
+  previous digest boundary in a group (the period the digest footer
+  covers) and 24h in a DM or a group with no prior digest; `-w`
+  overrides, measured on the same arrival rule as `/summary`
+  (§Content, What the window measures). `<tag>` drills into one topic
+  over prefix-tolerant matching (a stored canonical tag is
+  `[a-z0-9-]`, so a value can never forge a command token) bounded by
+  the caller's world and the window, mirroring `/summary`'s render
+  forms, guards, and per-section delivery; `--full` is uncapped. An
+  unknown or zero-match tag is NEVER a vocabulary error: `/topic`
+  replies with a friendly zero-match message with fuzzy suggestions
+  drawn from the window's actual free tags — free tags have no tree,
+  no `/get-tags` membership, and no bounded-vocabulary admission. DM
+  and group; any non-banned user (read-only, scope-filtered). No
+  summary anchor is written — `/retry` does not replay `/topic` runs.
 - `/save <uid> [-t personal-tags]` — bookmark a post into the calling
   user's library. **Saves are per-user-globally** (decision D13): a
   save made in DM is visible from any group, and vice versa. Personal
@@ -2219,6 +2243,20 @@ determinism boundary to the digest's structure. The degraded
   DM-worded overflow line and emits no closing affordance — that one
   steers group readers to `@mention`, which is meaningless in the
   interactive surface `/summary` serves.
+
+**Topics footer.** A non-degraded `full` digest whose collected posts
+carry free tags appends one localized topics footer line to the LAST
+section's text, after the section-cap overflow line and before the
+closing affordance: the period's top free topics by weighted count
+(story count plus source corroboration), capped at a configured number
+of entries (default 7), the remainder collapsed into one "+N more"
+count. The footer is computed inside the render pass and rides the
+persisted section bytes, so a `/retry --digest` replay re-delivers it
+byte-faithfully with no recomputation. It is never a section: no
+qualifying threshold, no section-cap slot, no category message, and
+never counted in the window line's section count. A digest whose posts
+carry no free tags appends no line, and the degraded digest (D17)
+carries none.
 
 **Digest lead (M1-725).** A non-degraded `normal` or `full` digest
 with at least a minimum number of clusters

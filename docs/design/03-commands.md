@@ -602,6 +602,33 @@ excluded count, e.g. `Showing 100 of 137 posts (cap: vps=100; 37 oldest excluded
 See [05-llm-and-embeddings.md §5.7](05-llm-and-embeddings.md) for cluster
 sizing and prompt budget interactions.
 
+### `/topic [tag] [-w 24h] [--full]`
+
+Arg grammar: optional positional `[tag]` (a free tag — prefix-matched
+at query time, never vocabulary-checked), optional `-w <duration>`
+(same grammar/range as /summary; absent = previous digest boundary in
+groups, 24h in DMs), optional `--full`.
+
+Caps (profile-driven): bare listing `infochat.topic.listing-size`
+(default 7, floor 5) + one "(+N more)" overflow segment; `--full`
+floors at ≥2-story topics, hard cap `infochat.topic.full-cap`
+(default 50) + one "(+N more)" overflow segment + one "+N
+single-story topics" line; digest topics footer
+`infochat.digest.topics-footer-size` (default 7, floor 5 — the floors
+are documented operator minimums, not enforced in code). Ranking:
+weightedCount = postCount + round(100 × distinctSources ÷
+activeSources), ties postCount DESC then name ASC — integer
+arithmetic, one mechanism shared with the digest topics footer (the
+listing and the footer display story counts; only the order is
+weighted).
+
+Normal/brief footer mechanism note: the footer fires on FULL digests
+only today. Extending the line to the batched single-message digests
+is one edit at the same fold site — the line would append to the
+single joined body before the closing affordance, still never a
+section and never a message — decided with bundle copy when that
+surface asks for it.
+
 ### `/save <uid>` / `/save <uid> -t tag1,tag2`
 
 Saves a post into the calling user's library. **Saves are per-user-globally**

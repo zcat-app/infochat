@@ -152,7 +152,16 @@ public class DigestPostCollector {
                 // two columns, or the two queries render different primary
                 // lines for the same post (M1-759).
                 rs.getString("title_en"),
-                rs.getString("body_en"));
+                rs.getString("body_en"),
+                // Free tags (V87) — the digest footer's only structural
+                // input beyond post.tags; null-guarded for hand-stubbed
+                // ResultSets like the arrays above.
+                searchTagsOf(rs));
+    }
+
+    private static List<String> searchTagsOf(ResultSet rs) throws SQLException {
+        java.sql.Array array = rs.getArray("search_tags");
+        return array == null ? List.of() : List.of((String[]) array.getArray());
     }
 
     private static final String SCOPE_PREFS_SQL = """
@@ -169,7 +178,7 @@ public class DigestPostCollector {
             SELECT p.id, p.uid, p.source_id, s.display_name, p.title,
                    p.url, p.body, p.published_at, p.tags, p.classification,
                    p.reposts, p.likes, p.comments, s.kind, s.language,
-                   p.title_en, p.body_en,
+                   p.title_en, p.body_en, p.search_tags,
                    COUNT(*) OVER (PARTITION BY p.source_id)::int AS source_window_posts
               FROM post p
               JOIN source s ON s.id = p.source_id
@@ -190,7 +199,7 @@ public class DigestPostCollector {
             SELECT p.id, p.uid, p.source_id, s.display_name, p.title,
                    p.url, p.body, p.published_at, p.tags, p.classification,
                    p.reposts, p.likes, p.comments, s.kind, s.language,
-                   p.title_en, p.body_en,
+                   p.title_en, p.body_en, p.search_tags,
                    COUNT(*) OVER (PARTITION BY p.source_id)::int AS source_window_posts
               FROM post p
               JOIN source s ON s.id = p.source_id

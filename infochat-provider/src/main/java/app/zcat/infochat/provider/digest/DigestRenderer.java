@@ -198,6 +198,10 @@ public class DigestRenderer {
     @ConfigProperty(name = "infochat.digest.lead-minimum", defaultValue = "6")
     int leadMinimum = 6;
 
+    /** The topics footer's rendered-topic cap (floor 5 documented in design 03). */
+    @ConfigProperty(name = "infochat.digest.topics-footer-size", defaultValue = "7")
+    int topicsFooterSize = 7;
+
     /**
      * The lead section's {@link RenderedSection#tag()} — the value
      * {@code DigestSectionRepository.slugOf} maps to its
@@ -536,6 +540,16 @@ public class DigestRenderer {
                             bundleLoader.get(BundleKeys.REPLY_DIGEST_CATEGORIES_MORE, langCode),
                             droppedCategories));
                 }
+                // The topics footer folds after the overflow line,
+                // before the closing affordance — never a D62 section,
+                // absent on free-tag-less and degraded renders.
+                if (mode == DigestMode.FULL) {
+                    String topicsLine = topicsFooterLine(
+                            TopicRanking.rank(posts), langCode);
+                    if (topicsLine != null) {
+                        sb.append("\n\n").append(topicsLine);
+                    }
+                }
                 sb.append("\n\n").append(
                         bundleLoader.get(BundleKeys.REPLY_DIGEST_CLOSING_AFFORDANCE, langCode));
             }
@@ -570,6 +584,31 @@ public class DigestRenderer {
         return MessageFormat.format(
                 bundleLoader.get(BundleKeys.REPLY_DIGEST_CATEGORY_MORE, langCode),
                 overflow, section.tag());
+    }
+
+    /** The topics footer line, or {@code null} on a free-tag-less render
+     * (byte-identity gate). Tokens show POST counts; ORDER is weighted. */
+    private @Nullable String topicsFooterLine(List<TopicRanking.RankedTopic> ranked, String langCode) {
+        if (ranked.isEmpty()) {
+            return null;
+        }
+        int shown = Math.min(ranked.size(), topicsFooterSize);
+        StringBuilder tokens = new StringBuilder();
+        for (int i = 0; i < shown; i++) {
+            if (i > 0) {
+                tokens.append(", ");
+            }
+            TopicRanking.RankedTopic topic = ranked.get(i);
+            tokens.append(topic.name()).append(" (").append(topic.postCount()).append(')');
+        }
+        if (ranked.size() > shown) {
+            tokens.append(' ').append(MessageFormat.format(
+                    bundleLoader.get(BundleKeys.REPLY_DIGEST_TOPICS_FOOTER_MORE, langCode),
+                    ranked.size() - shown));
+        }
+        return MessageFormat.format(
+                bundleLoader.get(BundleKeys.REPLY_DIGEST_TOPICS_FOOTER, langCode),
+                tokens.toString());
     }
 
     /**

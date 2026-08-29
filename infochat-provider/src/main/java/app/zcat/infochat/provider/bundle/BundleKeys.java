@@ -32,6 +32,9 @@ public final class BundleKeys {
     /** Short-help line for {@code /summary}. Authored here so T1-F's implementation lands without bundle churn. */
     public static final String HELP_CMD_SUMMARY_SHORT = "help.cmd.summary.short";
 
+    /** Short-help line for {@code /topic}. */
+    public static final String HELP_CMD_TOPIC_SHORT = "help.cmd.topic.short";
+
     // ----- /help per-tier catalogue (M1-138) ------------------------------
     // Per docs/spec/commands.md §Discovery (Bundle composition): /help is
     // composed from one short-help bundle key per command, filtered by the
@@ -261,6 +264,12 @@ public final class BundleKeys {
 
     /** {@code /summary} examples. */
     public static final String HELP_CMD_SUMMARY_EXAMPLES = "help.cmd.summary.examples";
+
+    /** {@code /topic} usage detail. */
+    public static final String HELP_CMD_TOPIC_USAGE = "help.cmd.topic.usage";
+
+    /** {@code /topic} examples. */
+    public static final String HELP_CMD_TOPIC_EXAMPLES = "help.cmd.topic.examples";
 
     /** {@code /list-sources} usage detail (non-admin surface). */
     public static final String HELP_CMD_LIST_SOURCES_USAGE = "help.cmd.list-sources.usage";
@@ -671,6 +680,29 @@ public final class BundleKeys {
     /** {@code >5 followed tags} top-3 restriction prefix. {@code {0}} = N = followed-tag count. */
     public static final String REPLY_SUMMARY_TOP_3_OF_N_PREFIX =
             "reply.summary.top_3_of_n_prefix";
+
+    // ----- /topic replies --------------------------------------------------
+    // Discovery surfaces over free tags; composition is code-side over
+    // these templates, tokens are inert MessageFormat arguments.
+
+    /** Bare listing header. No tokens; resolved via the 2-arg accessor. */
+    public static final String REPLY_TOPIC_LISTING_HEADER = "reply.topic.listing_header";
+
+    /** Listing overflow segment appended after the tokens: {0} = unshown topic count ({0,choice}). */
+    public static final String REPLY_TOPIC_MORE = "reply.topic.more";
+
+    /** {@code --full} overflow segment: {0} = single-post topic count ({0,choice}). */
+    public static final String REPLY_TOPIC_MORE_SINGLE_POST = "reply.topic.more_single_post";
+
+    /** Bare listing with zero free tags in the window. No tokens. */
+    public static final String REPLY_TOPIC_NONE = "reply.topic.none";
+
+    /** Drill-down zero-match reply: {0} = tag echo, {1} = joined suggestions. */
+    public static final String REPLY_TOPIC_NO_MATCH = "reply.topic.no_match";
+
+    /** Suggestion footer closing {@link #REPLY_TOPIC_NO_MATCH}: {0} = the joined suggestion list. */
+    public static final String REPLY_TOPIC_SUGGESTIONS_FOOTER = "reply.topic.suggestions_footer";
+
 
     // ----- /summary + /retry cluster block labels (M1-303) ----------------
     // Per docs/design/05-llm.md §418 ("Cluster headers, classification
@@ -2163,6 +2195,13 @@ public final class BundleKeys {
 
     /** One closing affordance line ending every non-degraded digest: steers to {@code /summary <tag>} for topic depth and {@code @mention} chat for an individual story. No tokens; resolved via the 2-arg accessor. */
     public static final String REPLY_DIGEST_CLOSING_AFFORDANCE = "reply.digest.closing_affordance";
+
+    /** Topics footer line: {0} = the joined {@code name (count)} tokens. */
+    public static final String REPLY_DIGEST_TOPICS_FOOTER = "reply.digest.topics_footer";
+
+    /** Topics footer overflow segment: {0} = unshown topic count ({0,choice}). */
+    public static final String REPLY_DIGEST_TOPICS_FOOTER_MORE =
+            "reply.digest.topics_footer_more";
 
     // ----- Conceptual topic corpus (M1-649, D68) -----------------------------
     // Per docs/spec/commands.md §Chat mode + decision D68. The corpus is
