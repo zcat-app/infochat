@@ -21,8 +21,8 @@ The user invokes the skill as `/tick <subcommand> [args]`. Each subcommand's ful
 |---|---|
 | `/tick analyze <brief>` | [subcommands/analyze.md](subcommands/analyze.md) — mandatory analysis (workflow §0b), run on §0's reproduction: analyst gate turns a brief into an analysis doc + small tickets |
 | `/tick next` | [subcommands/next.md](subcommands/next.md) — list runnable tick tickets |
-| `/tick start <id>` | [subcommands/start.md](subcommands/start.md) — begin work; lint pre-flight; no plan-writer (the §0 reproduction is the contract) |
-| `/tick start <id> --parallel` | [subcommands/start.md](subcommands/start.md) — worktree; needs a different Maven module from every in-flight ticket |
+| `/tick start <id>` | [subcommands/start.md](subcommands/start.md) — begin work in a `.worktree/<ID>` worktree; lint pre-flight; no plan-writer (the §0 reproduction is the contract) |
+| `/tick start <id> --parallel` | [subcommands/start.md](subcommands/start.md) — needs a different Maven module from every in-flight ticket |
 | `/tick hurdle <id>` | [subcommands/hurdle.md](subcommands/hurdle.md) — the implementor's stop-and-report: one of the four hurdle triggers |
 | `/tick review <id>` | [subcommands/review.md](subcommands/review.md) — spawn the merged tick-reviewer gate |
 | `/tick commit <id>` | [subcommands/commit.md](subcommands/commit.md) — finalize the per-ticket commit |

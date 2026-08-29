@@ -21,8 +21,8 @@ Each subcommand's full procedure lives under `.agents/skills/tick/subcommands/` 
 |---|---|
 | `/tick analyze <brief>` | `.agents/skills/tick/subcommands/analyze.md` — mandatory analysis (workflow §0b), run on §0's reproduction: analyst gate turns a brief into an analysis doc + small tickets |
 | `/tick next` | `.agents/skills/tick/subcommands/next.md` — list runnable tick tickets |
-| `/tick start <id>` | `.agents/skills/tick/subcommands/start.md` — begin work; lint pre-flight; no plan-writer (the §0 reproduction is the contract) |
-| `/tick start <id> --parallel` | `.agents/skills/tick/subcommands/start.md` — worktree; needs a different Maven module from every in-flight ticket |
+| `/tick start <id>` | `.agents/skills/tick/subcommands/start.md` — begin work in a `.worktree/<ID>` worktree; lint pre-flight; no plan-writer (the §0 reproduction is the contract) |
+| `/tick start <id> --parallel` | `.agents/skills/tick/subcommands/start.md` — needs a different Maven module from every in-flight ticket |
 | `/tick hurdle <id>` | `.agents/skills/tick/subcommands/hurdle.md` — the implementor's stop-and-report: one of the four hurdle triggers |
 | `/tick review <id>` | `.agents/skills/tick/subcommands/review.md` — spawn the merged tick-reviewer gate |
 | `/tick commit <id>` | `.agents/skills/tick/subcommands/commit.md` — finalize the per-ticket commit |
@@ -41,7 +41,7 @@ If the args match no row, print the table and stop.
 - **Gate agents** are spawned with the `Agent` tool: `subagent_type: "analyst"` for `/tick analyze`, `subagent_type: "tick-reviewer"` for `/tick review`. Definitions live in `.claude/agents/`. Run them in the **foreground** (`run_in_background: false`) — the driver needs the verdict before it can dispatch.
 - **Rendered prompts** are produced by `scripts/m1-render-prompt.py`, exactly as the subcommand files describe. Pass the rendered path to the agent as an absolute path, along with every placeholder path it substitutes.
 - **Blocking menus** (the six-way escalation, any Skip/Run decision) use `AskUserQuestion`. Never pair a menu with same-turn prose — the menu hides it; explain in one turn and ask in the next.
-- **`--parallel`** uses a git worktree. Note that a worktree-isolated session refuses git aimed outside its own tree, so cross-worktree merges must be driven from the main checkout.
+- **Every ticket runs in a git worktree** (`.worktree/<ID>`). Note that a worktree-isolated session refuses git aimed outside its own tree, so cross-worktree merges must be driven from the main checkout.
 
 ## Cross-cutting rules this skill must obey
 

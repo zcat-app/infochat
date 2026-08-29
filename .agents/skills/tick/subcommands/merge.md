@@ -5,7 +5,13 @@ main). Invocation: `/tick merge <id>`. Idempotent.
 
 ## Preconditions
 
-- Ticket `status: done`; working tree clean; the branch
+- Ticket `status: done` READ FROM THE BRANCH TIP
+  (`git show <branch>:docs/plan/m1/tick-tickets/M<N>-NNN-*.md`) — the
+  primary's `main` copy still says `pending` at merge time, because the
+  done flip rides the ticket branch until the squash lands. Working tree
+  clean IN THE TICKET WORKTREE `.worktree/<ID>` (all work committed at
+  `/tick commit`); the primary's tree is irrelevant except on the
+  primary squash path below. The branch
   `m<N>/M<N>-NNN-<slug>` resolves per the branch-resolution procedure of
   the m1 flow (same naming conventions) OR the canonical implementation
   commit (subject exactly `M<N>-NNN: <title>`) already exists on `main`
@@ -30,17 +36,22 @@ main). Invocation: `/tick merge <id>`. Idempotent.
 
 ## Squash-merge path
 
-The squash runs where `main` is checked out. From the primary ONLY when
-it sits clean on `main`. A primary on another session's branch — worse,
-a dirty one — is never touched: no checkout, no stash of its WIP (a
-stash round-trip races the live session and `apply --index` does not
-reliably restore staged-ness). Merge from a throwaway worktree instead:
-`git worktree add .worktree/tmp-main main` → `git merge --squash
-<branch>` → `git commit -C <branch-tip>` (reuses the commit message
-verbatim, keeping the `Reviewed-by:` / `Renames:` / `Alternatives
-considered:` trailers) → `git worktree remove .worktree/tmp-main` →
-`git branch -D <branch>` (only after the ticket worktree is removed —
-the branch-delete guard is the worktree, not the primary).
+Run `/tick merge` from the primary repo root — the relative paths below
+resolve there. The squash runs where `main` is checked out. From the
+primary ONLY when it sits clean on `main`. A primary on another session's
+branch (clean or dirty) — or dirty on `main` — is never touched: no
+checkout, no stash of its WIP (a stash round-trip races the live session
+and `apply --index` does not reliably restore staged-ness). A primary on
+a foreign branch: merge from a throwaway worktree instead — `git worktree
+add .worktree/tmp-main main` (legal there: `main` is checked out
+nowhere) → `git merge --squash <branch>` → `git commit -C <branch-tip>`
+(reuses the commit message verbatim, keeping the `Reviewed-by:` /
+`Renames:` / `Alternatives considered:` trailers) → `git worktree remove
+.worktree/tmp-main` → `git branch -D <branch>` (only after the ticket
+worktree is removed — the branch-delete guard is the worktree, not the
+primary). A primary DIRTY ON `main`: REFUSE — `git worktree add … main`
+is refused by git anyway, and the tree belongs to its live session; the
+merge re-runs once that session commits or cleans its WIP.
 
 ## Conflicts
 

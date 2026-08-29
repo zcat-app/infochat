@@ -46,22 +46,25 @@ plan and was approved at draft time).
 
 ## Step 2 — branch
 
-Set `status: in-progress` (frontmatter) and `last_updated`. Create branch
-`m<N>/M<N>-NNN-<slug>` off `main`. For `--parallel`: the ticket's changes
-must land in a different Maven module from every in-flight ticket's (no
-in-flight `migration_touch: true`), and the work happens in a git worktree
-under the repo-root `.worktree/` directory — git-unversioned, one worktree
-per ticket, named for the ticket id (e.g. `.worktree/M1-936`); never the
-home directory, never `/tmp`. Degrade to sequential if the tool cannot
-operate in another working directory. A worktree does not inherit the
-gitignored `tick-analysis/`: copy the ticket's `analysis_ref:` file from
-the primary into the worktree (untracked in both) BEFORE the step-1a
-lint, or `ANALYSIS-REF-RESOLVABLE` false-blocks the start. The primary
-checkout is NEVER a workspace: do not check the ticket branch out there
-and do not edit ticket files in it — a primary found on a foreign branch
-with a dirty tree belongs to that session; leave it untouched. All
-ticket work happens in the `.worktree/<ID>` worktree, branched off
-`main`. Check the module boundary MECHANICALLY, never from memory: list
+Set `status: in-progress` (frontmatter) and `last_updated`. All ticket
+work happens in a git worktree under the repo-root `.worktree/` directory
+— git-unversioned, one worktree per ticket, named for the ticket id (e.g.
+`.worktree/M1-936`) — branched off `main`: create branch
+`m<N>/M<N>-NNN-<slug>` there. Never the home directory, never `/tmp`. The
+primary checkout is NEVER a workspace: do not check the ticket branch out
+there and do not edit ticket files in it — a primary found on a foreign
+branch with a dirty tree belongs to that session; leave it untouched. If
+the tool cannot operate in another working directory, the ticket cannot
+start — surface that to the user; working in the primary is not a
+fallback. A worktree does not inherit the gitignored `tick-analysis/`:
+copy the ticket's `analysis_ref:` file from the primary into the worktree
+(untracked in both) BEFORE the step-1a lint, or
+`ANALYSIS-REF-RESOLVABLE` false-blocks the start.
+
+For `--parallel` additionally: the ticket's changes must land in a
+different Maven module from every in-flight ticket's (no in-flight
+`migration_touch: true`). Check the module boundary MECHANICALLY, never
+from memory: list
 the tick tickets with `status: in-progress` or `in-review` (frontmatter
 under `docs/plan/m1/tick-tickets/`), take the Maven-module root of each
 one's `files_scope` paths (or its worktree's changed modules when the scope

@@ -30,7 +30,7 @@ everywhere.
 | 2 | Prompt render | `python3 scripts/m1-render-prompt.py <template> <out> KEY=VALUE… [KEY=@file]` substitutes `{{KEY}}` slots in a `docs/process/*` template and writes the rendered prompt to disk. Already tool-agnostic. |
 | 3 | Verdict-file readback | The orchestrating session treats the ON-DISK artifact as the result; the gate agent's chat reply is a 3–4 line summary parsed literally. Never accept a chat-only verdict. |
 | 4 | Blocking user menu | Present fixed options, stop, wait for the human's typed choice. |
-| 5 | Worktree parallelism | Optional. `--parallel` tickets run in git worktrees; `scripts/verify-serialized.sh` (flock) serializes full-suite verifies across them. |
+| 5 | Worktree workspaces | Every ticket runs in a git worktree (`.worktree/<ID>`); `scripts/verify-serialized.sh` (flock) serializes full-suite verifies across them. |
 | 6 | Cross-harness gate | Optional. Fan the SAME rendered prompt through several coding-agent CLIs headlessly, then cross-examine their verdicts. Single-sourced in §7; the wrapper script is `scripts/redteam-multi.sh`. |
 
 ## 2. Gate-agent bindings

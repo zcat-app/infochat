@@ -238,7 +238,9 @@ flip against a new degrade rule, no shared file — reached main red.)
   verified; the §Census enumeration re-runs clean). A genuine ambiguity
   raises one blocking question. Result recorded under `clarity_check:`.
 - Set `status: in-progress`, create branch `m<N>/M<N>-NNN-<slug>` off
-  `main`, regenerate `STATUS-TICK.md`.
+  `main`, regenerate `STATUS-TICK.md`. All ticket work happens in that
+  git worktree, under the repo-root `.worktree/` directory; the primary
+  checkout is never a workspace.
 - No plan-writer at start: the §0b analysis IS the plan and was approved at
   draft time. The contract is the §0 reproduction plus acceptance; the
   Approach is a route, not a gate (§Principles 4).
