@@ -1,7 +1,7 @@
 ---
 id: M1-954
 title: "Re-land the fam replica restore procedure instance-free"
-status: pending
+status: done
 created: 2026-08-29
 last_updated: 2026-08-29
 flow: tick
@@ -25,8 +25,10 @@ reproduction: >-
   (RetrievalGoldenSetTest.java:59) — bind to a replica whose committed
   reproduction procedure does not exist: the broad leg is irreproducible
   from a fresh checkout, and M1-952 (pending) must cite a committed
-  procedure. Intended entry, written RED at start against the absent
-  script (workflow §0): to-be-written:
+  procedure. Entry, run RED at start against the absent
+  script (workflow §0), .scratch/tick-red-M1-954.log (2026-08-29, 15/15
+  legs red — 14 assertion failures + the source-scan NoSuchFile error on
+  the missing script):
   ReplicaRestoreWiringTest#restoreOrderingPostgresAloneDockerCpRestoreSchemaSeedPinLast
   — the ordering leg drives the absent script via ProcessBuilder under a
   fake docker (argv log, the RestoreWiringTest pattern), so it compiles
@@ -121,11 +123,61 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-29
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS: WARN; SECURITY: PASS; TEST-ADEQUACY: WARN; MAINTAINABILITY: WARN; SCOPE: PASS"
+    diff_stats: "4 files, +1125/-11 (script 495 new, wiring test 598 new, board/frontmatter bookkeeping)"
+    notes: >-
+      3 REWORK items (all low): (1) the acceptance items 1/2b promised probe
+      names usageRequiresEveryInstanceShapedFlag and
+      carriesNoPortShapedLiteralOutsideTheAllowlist, but the behaviors
+      landed as missingInstanceFlagFailsLoudNamingTheFlag and
+      sourceScanHoldsThePortAllowlistAndNoPseudoTty — rename to the
+      promised names; (2) nothing ties the script's flyway_checksum copy to
+      the pinned prod original (RestoreFlywayChecksumIT extracts
+      prod/scripts/restore.sh only) — add a byte-identity leg; (3) the
+      script header retells the M1-948 re-land chronicle (§11) — rewrite
+      contract-only. Gate binding deviation recorded in the round's
+      mechanical report (general-purpose spawn per harness-mapping §2
+      fallback; contamination check clean).
+  - round: 2
+    date: 2026-08-29
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: PASS; MAINTAINABILITY: PASS; SCOPE: PASS"
+    diff_stats: "fix hunks: 3 files, +63/-4 (renames x2, byte-identity leg + helper, header rewrite); cumulative 4 files, +1184/-12"
+    notes: >-
+      All three round-1 items SATISFIED (reviewer-verified: independent
+      python extraction of both flyway_checksum bodies reports
+      byte-identical; the mutate-one-byte probe went RED then green on
+      restore). r2 log: full suite green, ReplicaRestoreWiringTest 16/16
+      in the default suite. No RECOMMENDED-NEW-TICKET entries.
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-29
+  result: passed
+  note: >-
+    All Root cause/Approach citations re-verified in the worktree at 549e0917:
+    scripts/ holds exactly the named files (glob); the 46-record
+    golden-set-fam.jsonl; RetrievalGoldenSetTest FAM_REPLICA_FINGERPRINT
+    (~:58-61); tech-drift-restore.sql:28-40 WORLD_WHERE shape matches the
+    operator-local pin-read; eval-scopes-seed.sql ends in the 5/0/0 probes;
+    V87 is the checkout head, V86 the replica's restore point;
+    docker-compose.yml:45 pins pgvector/pgvector:pg16 (restore.sh:73
+    pinned-image precedent); flyway-core 12.0.0 (RestoreFlywayChecksumIT
+    posture) -> flyway/flyway:12; restore.sh:12-17/535-544/587-610 shapes
+    and backup.sh:135-138 read and adopted (backup.sh's literal exec -T is
+    the docker-29 breakage P6 names — not adopted). blocked_by is empty
+    (nothing to trace). Design resolution for the re-validation: the
+    existing pinned replica was created with an EXPLICIT container_name, so
+    the derivation is container_name: <project>-postgres in the generated
+    compose (volume <project>_pgdata, network <project>_default) — the
+    committed script stays instance-free while the fingerprint verb still
+    addresses the existing container via the recorded gitignored flag
+    value; disclosed in the README fam-restore section and the run record.
 escalation_reason:
 ---
 
@@ -404,3 +456,11 @@ pre-existing test is modified (test_plan.modifies is empty).
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-954-fam-replica-restore-reland.md
 ```
+
+## Round 1 rework
+
+REWORK ITEMS (verbatim from .scratch/tick-review-M1-954-r1.txt):
+
+1. Finding 1: rename ReplicaRestoreWiringTest.java:126 and :157 to the acceptance-promised probe names (usageRequiresEveryInstanceShapedFlag, carriesNoPortShapedLiteralOutsideTheAllowlist), or amend the ticket's acceptance citations to the landed names — one binding, evaluated via the EVALUATED-AS grep returning both @Test definitions plus `mvn -pl infochat-provider test -Dtest=ReplicaRestoreWiringTest` green (15 tests).
+2. Finding 2: add a byte-identity leg to ReplicaRestoreWiringTest tying flyway_checksum (scripts/fam-replica-restore.sh:213) to the pinned original (prod/scripts/restore.sh:635), the RestoreFlywayChecksumIT extraction pattern, evaluated via the mutate-one-byte probe described in EVALUATED-AS plus the module test run green (16 tests).
+3. Finding 3: rewrite the header comment at scripts/fam-replica-restore.sh:2-3 to contract-only wording (drop the "re-land of the M1-948 instrument" chronicle; keep the §13/D34 pointers), evaluated via the sed probe plus `bash -n` and the shellcheck container run exiting 0.
