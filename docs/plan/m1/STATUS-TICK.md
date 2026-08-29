@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 6 |
+| pending | 7 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 154 |
+| done | 155 |
 | deferred | 1 |
 | abandoned | 6 |
-| **total** | **167** |
+| **total** | **169** |
 
 ---
 
@@ -28,7 +28,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-935 — searchPosts topics filter over search_tags (complexity: medium, risk: medium)
 - M1-940 — Surface bounded post content in search tool emissions (complexity: medium, risk: medium)
 - M1-946 — Widen the cross-lingual golden slice to n = 16 (complexity: medium, risk: medium)
-- M1-952 — Two-leg baseline record + pre-registered gating rules (complexity: medium, risk: low)
+- M1-954 — Re-land the fam replica restore procedure instance-free (complexity: medium, risk: medium)
 
 ---
 
@@ -46,6 +46,8 @@ _(none)_
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-941 — blocked_by: M1-940 (pending)
+- M1-952 — blocked_by: M1-949 (done), M1-950 (done), M1-951 (done), M1-954 (pending)
+- M1-955 — blocked_by: M1-940 (pending)
 
 ---
 
@@ -74,7 +76,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-948 | Isolated fam replica: dump, restore, pin fingerprint | 2026-08-28 | round 2 APPROVE |
 | M1-945 | Characterize the anchor-leg gap: probes + counterfactuals | 2026-08-28 | round 1 APPROVE |
 | M1-937 | Deterministic temporal-expression parser | 2026-08-28 | round 3 APPROVE |
-| M1-934 | search_tags column, tagger free-tags emission, sweep backfill | 2026-08-28 | round 1 APPROVE-WITH-FIXES |
 
 ---
 
@@ -289,7 +290,8 @@ M1-937 (done)
   └── M1-938 (done)
 M1-939 (done)
 M1-940 (pending) ← runnable
-  └── M1-941 (pending)
+  ├── M1-941 (pending)
+  └── M1-955 (pending)
 M1-942 (done)
   └── M1-944 (done)
 M1-943 (done)
@@ -300,11 +302,13 @@ M1-945 (done)
 M1-948 (done)
   ├── M1-949 (done)
   │     ├── M1-950 (done)
-  │     │     └── M1-952 (pending) ← runnable
+  │     │     └── M1-952 (pending)
   │     └── M1-952 (pending) [see above]
   └── M1-950 (done) [see above]
 M1-951 (done)
   ├── M1-946 (pending) [see above]
   └── M1-952 (pending) [see above]
 M1-953 (done)
+M1-954 (pending) ← runnable
+  └── M1-952 (pending) [see above]
 ```

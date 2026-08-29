@@ -3,7 +3,7 @@ id: M1-952
 title: "Two-leg baseline record + pre-registered gating rules"
 status: pending
 created: 2026-08-28
-last_updated: 2026-08-28
+last_updated: 2026-08-29
 flow: tick
 reproduction: >-
   Probe (measurement ticket, the M1-930/M1-944 posture — the missing record
@@ -21,7 +21,7 @@ reproduction: >-
   world=fam against the isolated replica), landing the record in TWO
   commits (rules, then results — the M1-930 pre-registration discipline).
 analysis_ref: docs/plan/m1/tick-analysis/two-world-retrieval-instrument.md
-blocked_by: [M1-949, M1-950, M1-951]
+blocked_by: [M1-949, M1-950, M1-951, M1-954]
 files_scope:
   - docs/measurement/retrieval-eval-two-leg.md
   - docs/measurement/retrieval-eval-baseline.md
