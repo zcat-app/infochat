@@ -26,20 +26,29 @@ import app.zcat.infochat.provider.messaging.HelpCommandHandler;
 import app.zcat.infochat.provider.messaging.HelpCommandHandler.CallerTier;
 import app.zcat.infochat.provider.messaging.HelpCommandHandler.HelpTier;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.chat.tool.QueryAnchorTranslator;
+import app.zcat.infochat.provider.chat.tool.TemporalExpressionParser;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.text.MessageFormat;
+import java.time.Clock;
+import java.time.DateTimeException;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.HashMap;
@@ -281,6 +290,19 @@ public class ChatAgent {
     private final CancellationService cancellationService;
     private final ChatLiveTextStreamer liveTextStreamer;
     private final ThrottledAdminNotifier throttledAdminNotifier;
+    private final QueryAnchorTranslator queryAnchorTranslator;
+
+    // The temporal parse's DM-scope zone: the deployment default
+    // (GroupRepository.defaultTimezone seam — "UTC" initializer keeps
+    // hand-built test instances DDL-consistent; the container overwrites).
+    @ConfigProperty(name = "infochat.groups.default-timezone", defaultValue = "UTC")
+    String defaultTimezone = "UTC";
+
+    // The temporal parse's "now" is a decision-gate instant — injected
+    // Clock, pinnable in tests (engineering-rules §9; SearchPostsTool
+    // precedent: initializer for constructor-built instances, CDI wins).
+    @Inject
+    Clock clock = Clock.systemUTC();
 
     @Inject
     public ChatAgent(InFlightTracker inFlightTracker,
@@ -300,7 +322,8 @@ public class ChatAgent {
                      HelpCommandHandler helpHandler,
                      CancellationService cancellationService,
                      ChatLiveTextStreamer liveTextStreamer,
-                     ThrottledAdminNotifier throttledAdminNotifier) {
+                     ThrottledAdminNotifier throttledAdminNotifier,
+                     QueryAnchorTranslator queryAnchorTranslator) {
         this.inFlightTracker = inFlightTracker;
         this.promptBuilder = promptBuilder;
         this.toolDispatcher = toolDispatcher;
@@ -319,6 +342,7 @@ public class ChatAgent {
         this.cancellationService = cancellationService;
         this.liveTextStreamer = liveTextStreamer;
         this.throttledAdminNotifier = throttledAdminNotifier;
+        this.queryAnchorTranslator = queryAnchorTranslator;
     }
 
     /**
@@ -552,6 +576,7 @@ public class ChatAgent {
                     userId, scopeKind, scopeId, userMessage, turnContext, retrievedPostUids);
         }
         String semanticBlock = preFetch.promptBlock();
+        String windowHint = preFetch.windowHint();
 
         // 3b. Conversational-refinement directive (M1-618), derived from the
         // deterministic pre-fetch signal and appended AFTER the untrusted
@@ -635,7 +660,11 @@ public class ChatAgent {
         // refinementDirective unchanged — the no-match path is
         // untouched (acceptance item 3).
         boolean deterministicDelivery = deliveredTopicSlug != null || deliveredCommandName != null;
-        String turnDirective = deterministicDelivery ? DETERMINISTIC_DELIVERY_DIRECTIVE : refinementDirective;
+        // The hint rides the trusted directive region AFTER the resolved
+        // directive: it is sized by the promptBuilder's turnDirective slot
+        // and survives compaction — it addresses the question, not the block.
+        String turnDirective = (deterministicDelivery ? DETERMINISTIC_DELIVERY_DIRECTIVE
+                : refinementDirective) + windowHint;
 
         // 4. Resolve LLM provider for chat task
         LlmProvider provider = llmRouter.forTask(ModelTask.CHAT_AGENT, scopeLanguage);
@@ -666,9 +695,11 @@ public class ChatAgent {
         // directive may reference posts that were not folded in. (Delivery
         // steering points at the post-reply block, so it survives.)
         boolean semanticDropped = prompt.compaction().semanticBlockDropped();
+        // The hint outlives a dropped block: an empty window is itself the
+        // answer, and the model must stay steered (and forbidden to widen).
         String effectiveDirective =
-                deterministicDelivery ? DETERMINISTIC_DELIVERY_DIRECTIVE
-                        : (semanticDropped ? "" : refinementDirective);
+                (deterministicDelivery ? DETERMINISTIC_DELIVERY_DIRECTIVE
+                        : (semanticDropped ? "" : refinementDirective)) + windowHint;
 
         // 4b. Live-text eligibility combines transport/mode and LLM support;
         // null reveal preserves today's stage-label path.
@@ -841,14 +872,17 @@ public class ChatAgent {
 
     /**
      * The deterministic semantic pre-fetch outcome: the prompt block to fold
-     * in (empty when nothing grounds), plus whether the grounding is only
+     * in (empty when nothing grounds), whether the grounding is only
      * MARGINAL (M1-618) — the signal that drives the clarifying-question
-     * path. {@code marginalGrounding} is meaningful only when
+     * path — and the deterministic temporal window hint (empty on a parse
+     * miss). {@code marginalGrounding} is meaningful only when
      * {@code promptBlock} is non-empty; the empty case is the
-     * general-knowledge path, never a clarify turn.
+     * general-knowledge path, never a clarify turn. {@code windowHint}
+     * survives both an empty window and a compaction drop of the block.
      */
-    record SemanticPreFetch(String promptBlock, boolean marginalGrounding) {
-        static final SemanticPreFetch EMPTY = new SemanticPreFetch("", false);
+    record SemanticPreFetch(String promptBlock, boolean marginalGrounding,
+                            String windowHint) {
+        static final SemanticPreFetch EMPTY = new SemanticPreFetch("", false, "");
     }
 
     /**
@@ -875,32 +909,109 @@ public class ChatAgent {
                                                Set<String> retrievedPostUids) {
         String query = userMessage.length() > SEMANTIC_QUERY_MAX_CHARS
                 ? userMessage.substring(0, SEMANTIC_QUERY_MAX_CHARS) : userMessage;
+        // D19 temporal parse (commands.md §Chat mode): regex + java.time
+        // over the ANCHORED query, inside the breaker gate; the translate
+        // reuses the tool's cache key; a hit windows the dispatch + hints.
+        String anchored = queryAnchorTranslator.translate(
+                query, inboundContext.effectiveLanguage(), scopeKind, scopeId);
+        TemporalExpressionParser.Window parsed = TemporalExpressionParser
+                .parse(anchored, zoneFor(scopeKind, scopeId), clock.instant())
+                .orElse(null);
+        Map<String, Object> dispatchArgs = parsed != null
+                ? Map.of("query", query, "_window", parsed.window().toString())
+                : Map.of("query", query);
         ChatToolDispatcher.ToolResult result;
         try {
             result = toolDispatcher.dispatch("semanticSearch",
-                    Map.of("query", query), userId, scopeKind, scopeId, turnContext);
+                    dispatchArgs, userId, scopeKind, scopeId, turnContext);
         } catch (RuntimeException e) {
             // Embedding-backend or DB failure. The exception may wrap
             // LLM/DB internals but never user prose — safe to log (D37).
             SafeLog.error(log, "semanticSearch pre-fetch failed for userId=" + userId
                     + "; answering without retrieval", e);
-            return SemanticPreFetch.EMPTY;
+            return new SemanticPreFetch("", false,
+                    parsed == null ? "" : windowHint(parsed));
         }
         if (!(result instanceof ChatToolDispatcher.ToolResult.Success success)
                 || "[]".equals(success.content())) {
-            return SemanticPreFetch.EMPTY;
+            // An empty WINDOWED set keeps the hint and never retries
+            // unwindowed (analysis P10) — the model reports the empty window.
+            return new SemanticPreFetch("", false,
+                    parsed == null ? "" : windowHint(parsed));
         }
         collectPostUids("semanticSearch", success.content(), retrievedPostUids);
         boolean marginal = isMarginalGrounding(success.content(), CONFIDENT_SIMILARITY_CUTOFF);
         String marker = UUID.randomUUID().toString();
         String block = "\n\nPosts from the user's subscribed feed semantically related "
-                + "to their message — matched by topic similarity only, not "
-                + "filtered by time: they may be of any age, and each post's "
-                + "ready_at says when it became readable:\n"
+                + "to their message — matched by topic similarity "
+                + (parsed != null
+                        ? "within " + phraseBody(parsed.phrase())
+                                + " (posts that became readable in that window):\n"
+                        : "only, not "
+                                + "filtered by time: they may be of any age, and each post's "
+                                + "ready_at says when it became readable:\n")
                 + String.format(ChatPromptBuilder.UNTRUSTED_CONTENT_OPEN_FORMAT, marker)
                 + "\n" + success.content() + "\n"
                 + String.format(ChatPromptBuilder.UNTRUSTED_CONTENT_CLOSE_FORMAT, marker);
-        return new SemanticPreFetch(block, marginal);
+        return new SemanticPreFetch(block, marginal,
+                parsed == null ? "" : windowHint(parsed));
+    }
+
+    // The deterministic window hint (commands.md §Chat mode; the M1-916
+    // steering strings stay untouched): static text, interpolated only
+    // with the parse's phrase and clamped ISO duration (D19-safe).
+    private static final String TEMPORAL_WINDOW_HINT_FORMAT =
+            "\n\nThe user asked about %s. When calling searchPosts, use window=%s — "
+                    + "its window counts posts by when they became readable (ready_at). "
+                    + "If the window is empty, say so; do not silently widen it.";
+
+    private static String windowHint(TemporalExpressionParser.Window parsed) {
+        return String.format(TEMPORAL_WINDOW_HINT_FORMAT,
+                phraseBody(parsed.phrase()), parsed.window());
+    }
+
+    // The parser records the optional leading preposition ("in the last
+    // 2 hours"); skeletons interpolate the BODY so their own preposition
+    // composes into one phrase ("within the last 2 hours").
+    private static String phraseBody(String phrase) {
+        for (String prefix : new String[] {"in ", "within ", "over ", "during "}) {
+            if (phrase.regionMatches(true, 0, prefix, 0, prefix.length())) {
+                return phrase.substring(prefix.length());
+            }
+        }
+        return phrase;
+    }
+
+    // The parse zone is READ, never inferred from text (P5): group →
+    // groups.timezone, DM → deployment default, any failure degrades to
+    // UTC (D37-safe log). Package-private: the delivery-probe override seam.
+    ZoneId zoneFor(String scopeKind, UUID scopeId) {
+        if (!"group".equals(scopeKind)) {
+            return zoneOrDefault(defaultTimezone);
+        }
+        String sql = "SELECT timezone FROM groups WHERE id = ?";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setObject(1, scopeId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? zoneOrDefault(rs.getString("timezone")) : ZoneOffset.UTC;
+            }
+        } catch (SQLException | RuntimeException e) {
+            SafeLog.warn(log, "temporal parse zone lookup failed for scope_kind="
+                    + scopeKind + " scope_id=" + scopeId + "; degrading to UTC", e);
+            return ZoneOffset.UTC;
+        }
+    }
+
+    private static ZoneId zoneOrDefault(@Nullable String zoneName) {
+        if (zoneName == null || zoneName.isBlank()) {
+            return ZoneOffset.UTC;
+        }
+        try {
+            return ZoneId.of(zoneName);
+        } catch (DateTimeException e) {
+            return ZoneOffset.UTC;
+        }
     }
 
     /**

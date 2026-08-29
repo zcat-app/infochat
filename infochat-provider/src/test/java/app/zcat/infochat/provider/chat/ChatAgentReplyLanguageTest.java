@@ -10,6 +10,7 @@ import app.zcat.infochat.provider.bundle.BundleKeys;
 import app.zcat.infochat.provider.bundle.BundleLoader;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.testsupport.AnchorTranslatorDoubles;
 import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
 import app.zcat.infochat.provider.testsupport.TranslationFixtures;
 import app.zcat.infochat.provider.translation.TranslationCache;
@@ -284,7 +285,8 @@ class ChatAgentReplyLanguageTest {
                       InboundContext context, LlmCircuitBreakerRegistry breakerRegistry) {
             super(tracker, builder, dispatcher, repo, router,
                     sanitizer, pipeline, bundle, autoCompressTrigger, null, null,
-                    context, breakerRegistry, null, null, null, null, null);
+                    context, breakerRegistry, null, null, null, null, null,
+                    AnchorTranslatorDoubles.passthrough());
         }
 
         @Override

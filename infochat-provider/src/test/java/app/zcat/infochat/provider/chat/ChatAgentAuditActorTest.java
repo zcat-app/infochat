@@ -4,6 +4,7 @@ import app.zcat.infochat.core.audit.AuditAction;
 import app.zcat.infochat.core.audit.AuditLogWriter;
 import app.zcat.infochat.core.audit.RedactionHook;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.testsupport.AnchorTranslatorDoubles;
 import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
 import org.junit.jupiter.api.Test;
 
@@ -48,7 +49,7 @@ class ChatAgentAuditActorTest {
         ChatAgent agent = new ChatAgent(
                 null, null, null, null, null, null, null, null, null,
                 capturingWriter, SanitizerTestDoubles.noOpDataSource(), inboundContext,
-                null, null, null, null, null, null);
+                null, null, null, null, null, null, AnchorTranslatorDoubles.passthrough());
 
         agent.writeAuditRow(UUID.randomUUID(), "dm", UUID.randomUUID());
 

@@ -16,9 +16,9 @@ import java.util.regex.Pattern;
 /**
  * Deterministic temporal-expression parse of the ENGLISH-ANCHORED chat query (D19: regex + java.time, no model, no config) — pure by construction: the zone and now are parameters because their resolution (groups.timezone lookup, injected Clock) is the caller's (docs/plan/m1/tick-analysis/temporal-parse-windowing.md P5). Translation is language-only per D58 (d), so the anchored text is English and one grammar serves every scope language. Grammar boundary (analysis P8): explicit relative expressions only — vague recency ("recent", "latest", "top", "new"), year-scale ("this year"), absolute dates, and number words are deliberate non-matches, since an inferred window would silently hide posts the user did not bound; the regex is also negation-blind ("not today"), an accepted trade-off recorded there. Every result is clamped to [SearchPostsTool.WINDOW_MIN, WINDOW_MAX] from the single shared source (P7, M1-689): one conversation, one window vocabulary. Multi-match resolution is code-fixed, never configuration (P3 — same message, same window): narrowest window wins, equal windows resolve to the first-mentioned expression.
  */
-final class TemporalExpressionParser {
+public final class TemporalExpressionParser {
 
-    record Window(Duration window, String phrase) {}
+    public record Window(Duration window, String phrase) {}
 
     // Left edge is a word boundary and the prefix joins with real
     // whitespace (like the `the` junction), so "blast"/"inlast" cannot
@@ -46,7 +46,7 @@ final class TemporalExpressionParser {
     private TemporalExpressionParser() {
     }
 
-    static Optional<Window> parse(String anchoredQuery, ZoneId zone, Instant now) {
+    public static Optional<Window> parse(String anchoredQuery, ZoneId zone, Instant now) {
         if (anchoredQuery == null || anchoredQuery.isBlank()) {
             return Optional.empty();
         }

@@ -574,7 +574,9 @@ anti-parametric price lookup over price_snapshot) rides the same
 never-droppable TOOL_INSTRUCTIONS scaffolding and is absorbed by the same
 headroom; M1-917's 16-entry semantic injection (~800 tokens ≈ 13% of
 budget) drops whole at ladder step 2 before history does — no separate window
-bound is added. Over budget, the ladder compacts in fixed order: (1) history
+bound is added; M1-938's temporal window hint adds ~30-40 tokens on temporal
+turns only (parse-miss turns stay byte-identical, zero cost), riding the
+never-dropped directive region. Over budget, the ladder compacts in fixed order: (1) history
 oldest-first against min(`infochat.context-window`, budget remainder after
 fixed parts); (2) the whole retrieval block, never mid-JSON; (3) memory hits
 oldest-first, then the whole memory block. The injection-defence scaffolding,
@@ -616,6 +618,18 @@ prompt inside the same `UNTRUSTED_CONTENT` wrapper as in-loop tool results;
 the fold's deterministic header discloses what the set is — posts matched by
 topic similarity only, never filtered or ordered by time, possibly of any
 age, with each entry's `ready_at` saying when the post became readable.
+On a parse hit of an explicit relative time expression, the fold's header
+states the window instead: posts matched by topic similarity within the
+parsed expression (posts that became readable in that window), and a
+deterministic hint in the directive region names the same window for
+`searchPosts` with the `ready_at` meaning and an explicit
+do-not-silently-widen instruction. The parse runs on the anchored query
+text (regex + `java.time`, no model), takes its zone from the scope's
+group timezone (the deployment default for DM scopes, degrading to UTC),
+clamps to the shared searchPosts window bounds, resolves multi-match by
+narrowest window (first-mentioned on ties), and treats vague recency as
+a non-match; a parse miss leaves the fold and the dispatch byte-identical
+to the unwindowed shape.
 `infochat.chat.semantic-threshold` (cosine distance, default 0.40 —
 calibrated against the live corpus; deliberately a separate key from
 `infochat.linking.semantic-threshold`, whose 0.18 gates the different

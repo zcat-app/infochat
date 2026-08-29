@@ -1,33 +1,33 @@
 ---
 id: M1-938
 title: "Window the temporal pre-fetch; deterministic window hint"
-status: pending
+status: done
 created: 2026-08-26
-last_updated: 2026-08-26
+last_updated: 2026-08-29
 flow: tick
 reproduction: >-
-  Two tests `to-be-written` (child of a 2+ decomposition — needs M1-937's
-  parser; /tick start converts the markers: write both, run them RED against
-  the unmodified code before any fix code, workflow §0), each stating
-  today's wrong behavior (the recorded live instance is M1-927's: "What
-  happened in tech news in the last 2 hours?" served a week-old post as a
-  recent highlight from the unwindowed pre-fetch):
+  Two tests, both RED against unmodified main (bfae640b) on 2026-08-29
+  (child of a 2+ decomposition — the recorded live instance is M1-927's:
+  "What happened in tech news in the last 2 hours?" served a week-old post
+  as a recent highlight from the unwindowed pre-fetch):
   SemanticSearchToolIT#windowedFusedSearchBoundsBothArmsToReadyAtCutoff —
   seeds two READY subscribed posts near the query vector, one fresh
   (ready_at inside) one old (ready_at outside a 2h window), executes the
-  tool with {"query": …, "_window": "PT2H"} under a pinned Clock: today the
-  extra arg is IGNORED (verified: SemanticSearchTool.execute reads exactly
+  tool with {"query": …, "_window": "PT2H"}: RED observed = the extra arg
+  is IGNORED (verified: SemanticSearchTool.execute reads exactly
   "query" and "limit", SemanticSearchTool.java:108-113, and the fused SQL
   carries no ready_at predicate — grep -n 'ready_at' over the file returns
-  hits only in SELECT lists, the COALESCE, and the emission), so BOTH posts
-  return and the test fails; AND
+  hits only in SELECT lists, the COALESCE, and the emission), so BOTH
+  posts return ("a post whose ready_at sits OUTSIDE the dispatched window
+  must never surface ... got: [windowed-fresh, windowed-old]"); the
+  companion arm WITHOUT _window must keep returning both; AND
   ChatAgentTest#temporalTurnWindowsThePreFetchAndHandsTheModelAWindowHint —
   feeds "what happened in tech news in the last 2 hours?" with the counting
-  stub capturing dispatch args: today the single semanticSearch pre-fetch
-  dispatch carries exactly {"query": …} (ChatAgent.java:880-881) with no
-  window, the folded header is the not-time-filtered one (:896-899), and no
-  window hint exists anywhere in the first-call user prompt — all three
-  assertions fail today.
+  stub capturing dispatch args: RED observed = the single semanticSearch
+  pre-fetch dispatch carries exactly {query} (ChatAgent.java:880-881;
+  "expected: <[_window, query]> but was: <[query]>"), the folded header is
+  the not-time-filtered one (:896-899), and no window hint exists anywhere
+  in the first-call user prompt.
 analysis_ref: docs/plan/m1/tick-analysis/temporal-parse-windowing.md
 blocked_by: [M1-937]
 files_scope:
@@ -42,6 +42,7 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentPromptExceededTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentReplyLanguageTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentReplyModeTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatToolDispatcherTest.java
   - docs/spec/security.md
   - docs/spec/commands.md
   - docs/design/05-llm-and-embeddings.md
@@ -171,11 +172,68 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-29
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS: WARN; SECURITY: PASS; TEST-ADEQUACY: FAIL; MAINTAINABILITY: PASS; SCOPE: PASS"
+    diff_stats: "21 files, +736/-89 (2 prod + 1 visibility widen, 11 test files + 1 new double, 3 docs)"
+    notes: >-
+      2 REWORK items (both low): (1) the unwindowed fused SQL gained one
+      stray space per arm — worldPredicateSql followed by "+ \" \"" +
+      empty readyBound — breaking acceptance item 3's byte-identical
+      statement probe (behavior unaffected); fixed by dropping the "+ \" \""
+      (readyBound carries its own spacing), python byte-assembly proof:
+      IDENTICAL to pre-change. (2) the REAL groups.timezone read was never
+      exercised with a row (the Prague arm overrode the very method that
+      reads); fixed by ChatAgentTest.groupScopeZoneReadResolvesTheGroupsRow
+      over proxy JDBC stubs through the REAL ChatAgent.zoneFor — green
+      normally, red under the UTC-hardcode mutation (PT9H ≠ PT11H),
+      reverted. FALSIFIED-AND-DROPPED: item 6's "fails on ANY invocation"
+      literal (en no-op is a zero-GENERATION property, pinned as such);
+      the two out-of-files_scope constructor-thread files (compile-forced
+      11b-class, zero assertion changes, pre-declared); _window overflow
+      (DateTimeParseException empirically verified in the typed arm);
+      hint-phrase injection (parser grammar bounds the phrase);
+      zone-SELECT per-turn cost (PK-indexed read inside existing buckets).
+      Gate deviation recorded in the mech report: headless opencode run
+      failed (endpoint UnknownError ×2) → Task-tool fresh-context spawn
+      with the standard stub per harness-mapping §2.
+  - round: 2
+    date: 2026-08-29
+    verdict: APPROVE
+    checks: "round-1 items: 1 SATISFIED, 2 SATISFIED; full suite green; comment-cap 0"
+    diff_stats: "fix hunks: 4 files, +123/-9 (probe drops ×2, zone-read test + proxies + DataSource seam, ticket/board bookkeeping)"
+    notes: >-
+      Both round-1 REWORK items SATISFIED against their EVALUATED-AS
+      probes (grep 0 + byte-identity re-verified by the reviewer; test
+      green + mutation red). No RECOMMENDED-NEW-TICKET entries, no naming
+      suggestions. Verdict: .scratch/tick-review-M1-938-r2.txt.
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  result: pass
+  checked: 2026-08-28
+  notes: >-
+    Lint 0/0. All file:line citations verified on bfae640b (ChatAgent
+    548-553/880-881/896-899; SemanticSearchTool 108-113/133-134 with
+    ready_at only in SELECT/COALESCE/emission; ChatToolDispatcher
+    passthrough + cache key + DateTimeParseException typed arm;
+    SearchPostsTool WINDOW_MIN/MAX widened by M1-937; TemporalExpressionParser
+    + its test landed; commands.md 512-531; security.md 1730-1732;
+    llm.md 475-480). Census re-run returned two paths without rows
+    (ChatPromptBudgetTest — static synthetic block fixture, not
+    agent-driven; SearchPostsToolTest — comment-only matches): rows
+    added in-band. files_scope gained ChatToolDispatcherTest.java
+    (named by test_plan.adds item 10; was an omission). P14: M1-935
+    (searchPosts topics lane) still pending but shares no file with
+    this scope and blocked_by lists only M1-937 (done) — order noted,
+    not blocking. --parallel module check: zero tick tickets
+    in-progress/in-review, paired with git worktree list (M1-936
+    worktree clean, status pending). M1-937's added tests traced:
+    TemporalExpressionParserTest and SearchPostsToolTest clamps
+    preserved — parser and SearchPostsTool untouched by this diff.
 escalation_reason:
 ---
 
@@ -393,9 +451,29 @@ tool/eval`). Every site disposed:
 | SemanticSearchToolIT/HybridIT/DiversityIT, RetrievalWorldPredicateIT | **Unchanged** + three added windowed arms (isolation, identity, bounds) |
 | ChatToolDispatcherTest | **Added arm** only (malformed _window) |
 | QueryAnchorTranslatorTest, ChatAgentProvenanceTest, ChatToolRegistryTest, ChatToolAllowlistSpecParityTest | **Unchanged** — no translator-behavior, provenance, names, or allowlist change |
+| ChatPromptBudgetTest | **Unchanged** — static synthetic SEMANTIC_POSTS_BLOCK fixture, not agent-driven; observes neither dispatch nor production header |
+| SearchPostsToolTest | **Unchanged** — comment-only grep matches; searchPosts lane untouched |
 
 ## Pre-flight self-check (author-side)
 
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-938-prefetch-windowing-and-hint.md
 ```
+
+## Round 1 rework
+
+REWORK ITEMS (verbatim from `.scratch/tick-review-M1-938-r1.txt`):
+
+1. Finding 1: restore the byte-identical unwindowed SQL — drop the
+   unconditional `+ " "` after worldPredicateSql("p") at
+   SemanticSearchTool.java:284 and :300 (the windowed readyBound keeps its
+   own spacing), evaluated via `grep -c 'worldPredicateSql("p") + " '
+   infochat-provider/src/main/java/app/zcat/infochat/provider/chat/tool/SemanticSearchTool.java`
+   returning 0 plus SemanticSearchToolIT.windowedFusedSearchBoundsBothArmsToReadyAtCutoff
+   (windowed and unwindowed arms) green in the round-2 log.
+2. Finding 2: add ChatAgentTest#groupScopeZoneReadResolvesTheGroupsRow —
+   stubbed groups row returning Europe/Prague through the REAL
+   ChatAgent.zoneFor (no override), pinned clock 09:00Z, assert
+   _window == "PT11H" (no-row companion: "PT9H") — evaluated via that test
+   passing in the round-2 log and failing under the UTC-hardcode mutation
+   at ChatAgent.java:997.

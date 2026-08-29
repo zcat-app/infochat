@@ -21,6 +21,7 @@ import app.zcat.infochat.provider.chat.ChatToolDispatcher;
 import app.zcat.infochat.provider.chat.ChatToolRegistry;
 import app.zcat.infochat.provider.chat.InFlightTracker;
 import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
+import app.zcat.infochat.provider.testsupport.AnchorTranslatorDoubles;
 import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
 import org.junit.jupiter.api.Test;
@@ -430,7 +431,8 @@ class StageProgressNotifierLiveTextTest {
                 router, sanitizer, pipeline, bundle, noopTrigger,
                 auditWriter,
                 SanitizerTestDoubles.noOpDataSource(),
-                context, breakerRegistry, embeddingProvider, null, null, streamer, null);
+                context, breakerRegistry, embeddingProvider, null, null, streamer, null,
+                AnchorTranslatorDoubles.passthrough());
         return new LiveTextRig(adapter, notifier, agent, provider);
     }
 

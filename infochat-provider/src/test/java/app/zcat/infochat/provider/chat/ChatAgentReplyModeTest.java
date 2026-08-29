@@ -13,6 +13,7 @@ import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.messaging.HelpCommandHandler;
 import app.zcat.infochat.provider.messaging.HelpCommandHandler.CallerTier;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.testsupport.AnchorTranslatorDoubles;
 import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
 import org.junit.jupiter.api.BeforeEach;
@@ -353,7 +354,8 @@ class ChatAgentReplyModeTest {
             super(tracker, builder, dispatcher, repo, router,
                     sanitizer, pipeline, bundle, autoCompressTrigger, null, null,
                     inboundContextWith(language, replyMode), breakerRegistry,
-                    embeddingProvider, helpHandler, null, null, null);
+                    embeddingProvider, helpHandler, null, null, null,
+                    AnchorTranslatorDoubles.passthrough());
         }
 
         @Override

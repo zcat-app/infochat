@@ -1,6 +1,7 @@
 package app.zcat.infochat.provider.messaging;
 
 import app.zcat.infochat.provider.chat.ChatAgent;
+import app.zcat.infochat.provider.testsupport.AnchorTranslatorDoubles;
 import org.junit.jupiter.api.Test;
 
 import java.util.Optional;
@@ -82,7 +83,8 @@ class InboundRouterChatProvenanceTest {
 
         StubChatAgent(ChatTurnResult result) {
             super(null, null, null, null, null, null, null, null, null, null,
-                    null, null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null,
+                    AnchorTranslatorDoubles.passthrough());
             this.result = result;
         }
 

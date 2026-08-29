@@ -17,7 +17,9 @@ import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.messaging.HelpCommandHandler;
 import app.zcat.infochat.provider.messaging.HelpCommandHandler.CallerTier;
 import app.zcat.infochat.provider.messaging.InboundContext;
+import app.zcat.infochat.provider.chat.tool.QueryAnchorTranslator;
 import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
+import app.zcat.infochat.provider.translation.QueryTranslationCache;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,7 +27,12 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.lang.reflect.Proxy;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -67,6 +74,16 @@ class ChatAgentTest {
     private String dispatcherLastToolName;
     private int semanticSearchCalls;
     private String semanticSearchLastQuery;
+    private Map<String, Object> semanticSearchLastArgs;
+    private RecordingAnchorTranslator anchorTranslator;
+    // M1-938 seams (null = passthrough, set per test): translatorOverride
+    // swaps in the real translator over a counting provider (en no-op
+    // arm); zoneForOverride drives the Prague arm via the zoneFor seam.
+    private QueryAnchorTranslator anchorTranslatorOverride;
+    private java.time.ZoneId zoneForOverride;
+    // Round-1 rework item 2: feeds ChatAgent.zoneFor's REAL groups.timezone
+    // SELECT (null = the default null DataSource of every other test).
+    private javax.sql.DataSource agentDataSource;
     private String semanticSearchResult;
     private boolean semanticSearchThrow;
     private int auditCalls;
@@ -116,6 +133,11 @@ class ChatAgentTest {
         dispatcherCalls = 0;
         semanticSearchCalls = 0;
         semanticSearchLastQuery = null;
+        semanticSearchLastArgs = null;
+        anchorTranslator = new RecordingAnchorTranslator();
+        anchorTranslatorOverride = null;
+        zoneForOverride = null;
+        agentDataSource = null;
         semanticSearchResult = "[]";
         semanticSearchThrow = false;
         auditCalls = 0;
@@ -849,8 +871,9 @@ class ChatAgentTest {
     }
 
     // Reproduction (M1-927): an unwindowed grounding set must disclose its
-    // framing and carry dates, or week-old posts get labeled "recent" (the
-    // observed failure). Boundary: the first-call user prompt.
+    // framing and carry dates, or week-old posts get labeled "recent".
+    // M1-938 moved the fixture to a NON-TEMPORAL phrasing — the header
+    // now belongs to parse-miss turns (assertions unchanged in intent).
     @Test
     void preFetchBlockDisclosesItIsNotTimeFiltered() {
         String datedEntries =
@@ -860,8 +883,7 @@ class ChatAgentTest {
         semanticSearchResult = datedEntries;
         llmProvider.responses.add(new LlmResponse("Grounded answer."));
 
-        agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "what happened in tech news "
-                + "in the last 2 hours?");
+        agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "what is happening in tech news?");
 
         String firstCall = llmProvider.lastUserPrompt;
         assertTrue(firstCall.contains("matched by topic similarity only, not filtered by time"),
@@ -881,6 +903,282 @@ class ChatAgentTest {
                         + "included; prompt: " + firstCall);
         assertTrue(open >= 0 && open < json && json < close,
                 "the dated JSON must sit inside the UNTRUSTED_CONTENT wrapper");
+    }
+
+    // Reproduction (M1-938 agent half): a temporal turn windows the
+    // pre-fetch (dispatch carries _window) and hands the model the
+    // deterministic hint (windowed header + searchPosts steering).
+    @Test
+    void temporalTurnWindowsThePreFetchAndHandsTheModelAWindowHint() {
+        String datedEntries =
+                "[{\"uid\":\"tw-1\",\"title\":\"Fresh story\","
+                        + "\"url\":\"https://example.test/tw-1\","
+                        + "\"ready_at\":\"2026-08-28T08:00:00Z\",\"similarity\":0.93}]";
+        semanticSearchResult = datedEntries;
+        llmProvider.responses.add(new LlmResponse("Grounded answer."));
+
+        String message = "what happened in tech news in the last 2 hours?";
+        agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, message);
+
+        assertEquals(1, semanticSearchCalls,
+                "the temporal turn still dispatches the pre-fetch exactly once");
+        assertEquals(Set.of("query", "_window"), semanticSearchLastArgs.keySet(),
+                "the pre-fetch dispatch must carry the parsed _window alongside the "
+                        + "query; got args: " + semanticSearchLastArgs);
+        assertEquals(message, semanticSearchLastQuery,
+                "the pre-fetch query stays the user's truncated message");
+        assertEquals("PT2H", semanticSearchLastArgs.get("_window"),
+                "the dispatched window is the parsed, clamped ISO duration");
+
+        String firstCall = llmProvider.lastUserPrompt;
+        assertTrue(firstCall.contains("within the last 2 hours"),
+                "the windowed fold header must name the parsed phrase; prompt: "
+                        + firstCall);
+        assertFalse(firstCall.contains("not filtered by time"),
+                "a parse-hit turn replaces the not-time-filtered header; prompt: "
+                        + firstCall);
+        assertTrue(firstCall.contains("use window=PT2H"),
+                "the deterministic hint must name the window for searchPosts; "
+                        + "prompt: " + firstCall);
+        assertTrue(firstCall.contains("do not silently widen"),
+                "the hint must forbid silently widening an empty window; prompt: "
+                        + firstCall);
+    }
+
+    // Parse-miss byte identity (M1-938 P2): a non-temporal message is
+    // byte-identical to the pre-change shape on every surface — args,
+    // the M1-927 fold header verbatim, and zero hint bytes.
+    @Test
+    void nonTemporalTurnIsByteIdenticalToThePreChangeShape() {
+        semanticSearchResult = "[{\"uid\":\"nt-1\",\"title\":\"Zcash story\","
+                + "\"url\":\"https://example.test/nt-1\","
+                + "\"ready_at\":\"2026-08-20T10:00:00Z\",\"similarity\":0.88}]";
+        llmProvider.responses.add(new LlmResponse("Grounded answer."));
+
+        String message = "what happened with zcash?";
+        agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, message);
+
+        assertEquals(1, semanticSearchCalls);
+        assertEquals(Set.of("query"), semanticSearchLastArgs.keySet(),
+                "a parse-miss dispatch carries exactly the pre-change args shape; "
+                        + "got: " + semanticSearchLastArgs);
+        assertEquals(message, semanticSearchLastQuery);
+        String up = llmProvider.lastUserPrompt;
+        assertTrue(up.contains("matched by topic similarity only, not "
+                        + "filtered by time: they may be of any age, and each post's "
+                        + "ready_at says when it became readable:"),
+                "the parse-miss fold header stays byte-identical to the M1-927 "
+                        + "header; prompt: " + up);
+        assertFalse(up.contains("use window="),
+                "no hint bytes on a parse-miss turn (the prompt-byte ledger's "
+                        + "zero-cost arm); prompt: " + up);
+        assertFalse(up.contains("became readable in that window"),
+                "the windowed header never appears on a parse-miss turn; "
+                        + "prompt: " + up);
+    }
+
+    // Empty-window honest degradation (M1-938 P10): an empty WINDOWED set
+    // folds no block, never retries unwindowed, and KEEPS the hint.
+    @Test
+    void emptyWindowedPreFetchDegradesToGeneralKnowledgeNeverUnwindowed() {
+        // Default stub result "[]" = an empty windowed set.
+        llmProvider.responses.add(new LlmResponse("Nothing new in that window."));
+
+        agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID,
+                "what happened in tech news in the last 2 hours?");
+
+        assertEquals(1, semanticSearchCalls,
+                "EXACTLY ONE dispatch — an empty window is honest degradation, "
+                        + "never an unwindowed retry");
+        assertEquals("PT2H", semanticSearchLastArgs.get("_window"),
+                "the single dispatch stays windowed");
+        String up = llmProvider.lastUserPrompt;
+        assertFalse(up.contains("subscribed feed"),
+                "an empty windowed set folds no retrieval block; prompt: " + up);
+        assertTrue(up.contains("use window=PT2H"),
+                "the hint STAYS so the model can report the empty window via "
+                        + "searchPosts; prompt: " + up);
+    }
+
+    // Anchoring-leg discipline (M1-938 P9): an en-declared scope issues
+    // NO translation generation (counting provider behind the REAL
+    // translator — a passthrough stub cannot catch a regression).
+    @Test
+    void enScopeTemporalParseIssuesNoTranslatorCall() {
+        CountingGenerationLlmProvider provider = new CountingGenerationLlmProvider();
+        anchorTranslatorOverride = new QueryAnchorTranslator(
+                new LlmRouter(
+                        List.of(new LlmRouter.Entry("stub", provider, Set.of())),
+                        LlmRouter.ConfigReader.fromMap(Map.of())),
+                new QueryTranslationCache(),
+                new LlmCircuitBreakerRegistry(3, 30_000, Clock.systemUTC(),
+                        LlmRouter.ConfigReader.fromMap(Map.of())),
+                500);
+        agent = buildAgent("en");
+        llmProvider.responses.add(new LlmResponse("Grounded answer."));
+
+        agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID,
+                "what happened in tech news in the last 2 hours?");
+
+        assertEquals(0, provider.generations,
+                "an en-declared scope issues NO translation generation");
+        assertEquals("PT2H", semanticSearchLastArgs.get("_window"),
+                "anchored == raw for en: the turn still windows");
+    }
+
+    // A non-English scope parses the ANCHORED translation (M1-938 P9):
+    // the raw text has no English temporal phrase, so a windowed dispatch
+    // can only come from the anchor; every invocation gets IDENTICAL args.
+    @Test
+    void nonEnglishScopeParsesTheAnchoredTranslation() {
+        String raw = "co se deje v tech news za posledni 2 hodiny?";
+        anchorTranslator.cannedTranslation =
+                "what happened in tech news in the last 2 hours?";
+        agent = buildAgent("cs");
+        llmProvider.responses.add(new LlmResponse("Grounded answer."));
+
+        agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, raw);
+
+        assertEquals("PT2H", semanticSearchLastArgs.get("_window"),
+                "the parse reads the ANCHORED translation, never the raw text");
+        assertEquals(1, anchorTranslator.calls,
+                "exactly one anchor translation — the dispatch-layer call site "
+                        + "reuses the tool's translator (no second translator class)");
+        for (int i = 0; i < anchorTranslator.calls; i++) {
+            assertEquals(raw, anchorTranslator.queries.get(i),
+                    "identical truncated raw query on every invocation");
+            assertEquals("cs", anchorTranslator.languages.get(i),
+                    "the DECLARED scope language travels with every call");
+            assertEquals(SCOPE_KIND, anchorTranslator.scopeKinds.get(i));
+            assertEquals(SCOPE_ID, anchorTranslator.scopeIds.get(i));
+        }
+    }
+
+    // Breaker gate (M1-938 P9; security.md — an OPEN chat breaker means
+    // no translation, no embed round-trip, no pgvector probe): the parse
+    // and its translate sit INSIDE the wouldShortCircuit gate.
+    @Test
+    void temporalParseSitsInsideTheBreakerGate() {
+        chatBreakerOpen = true;
+        llmProvider.responses.add(new LlmResponse("Answer despite outage."));
+
+        agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID,
+                "what happened in tech news in the last 2 hours?");
+
+        assertEquals(0, anchorTranslator.calls,
+                "an OPEN chat breaker means NO translation — the parse sits "
+                        + "inside the wouldShortCircuit gate");
+        assertEquals(0, dispatcherCalls,
+                "an OPEN chat breaker dispatches nothing");
+        assertEquals(0, semanticSearchCalls);
+    }
+
+    // Timezone wiring (M1-938 P5): a group scope's zone anchors "today"
+    // at LOCAL midnight — 09:00Z in Prague (CEST) → PT11H; a UTC hardcode
+    // yields PT9H and fails. Seam: zoneFor override (probe precedent).
+    @Test
+    void groupScopeTodayUsesGroupsTimezone() {
+        llmProvider.responses.add(new LlmResponse("Grounded answer."));
+        agent.clock = Clock.fixed(Instant.parse("2026-08-29T09:00:00Z"), ZoneOffset.UTC);
+        zoneForOverride = ZoneId.of("Europe/Prague");
+
+        agent.handle(USER_ID, "group", SCOPE_ID, "what happened in tech news today?");
+
+        assertEquals("PT11H", semanticSearchLastArgs.get("_window"),
+                "the group scope's zone anchors 'today' at LOCAL midnight");
+    }
+
+    // The DM arm resolves infochat.groups.default-timezone (M1-938 P5):
+    // UTC default gives PT9H; a configured zone is actually READ.
+    @Test
+    void dmScopeTodayResolvesTheConfiguredDefaultTimezone() {
+        llmProvider.responses.add(new LlmResponse("Grounded answer."));
+        agent.clock = Clock.fixed(Instant.parse("2026-08-29T09:00:00Z"), ZoneOffset.UTC);
+
+        agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "what happened in tech news today?");
+        assertEquals("PT9H", semanticSearchLastArgs.get("_window"),
+                "the DM default (UTC) anchors 'today' at UTC midnight");
+
+        agent = buildAgent("en");
+        agent.clock = Clock.fixed(Instant.parse("2026-08-29T09:00:00Z"), ZoneOffset.UTC);
+        agent.defaultTimezone = "Europe/Prague";
+        agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "what happened in tech news today?");
+        assertEquals("PT11H", semanticSearchLastArgs.get("_window"),
+                "a DM turn resolves infochat.groups.default-timezone, never a "
+                        + "hardcode");
+    }
+
+    // Zone-lookup failure degrades to UTC (M1-938 P5): a group-scope turn
+    // in this suite carries the null test DataSource, so the REAL read
+    // throws inside ChatAgent.zoneFor — the turn must still window.
+    @Test
+    void zoneLookupFailureDegradesToUtc() {
+        llmProvider.responses.add(new LlmResponse("Grounded answer."));
+        agent.clock = Clock.fixed(Instant.parse("2026-08-29T09:00:00Z"), ZoneOffset.UTC);
+
+        agent.handle(USER_ID, "group", SCOPE_ID, "what happened in tech news today?");
+
+        assertEquals("PT9H", semanticSearchLastArgs.get("_window"),
+                "a zone-lookup failure degrades to UTC and the turn still windows");
+    }
+
+    // Round-1 rework item 2: the REAL groups.timezone read decides
+    // production group-scope windows — a stubbed row through ChatAgent.zoneFor
+    // with NO override; the UTC-hardcode mutation turns this red.
+    @Test
+    void groupScopeZoneReadResolvesTheGroupsRow() {
+        agentDataSource = zoneRowDataSource("Europe/Prague");
+        agent = buildAgent("en");
+        llmProvider.responses.add(new LlmResponse("Grounded answer."));
+        agent.clock = Clock.fixed(Instant.parse("2026-08-29T09:00:00Z"), ZoneOffset.UTC);
+
+        agent.handle(USER_ID, "group", SCOPE_ID, "what happened in tech news today?");
+
+        assertEquals("PT11H", semanticSearchLastArgs.get("_window"),
+                "the REAL zone read resolves the groups row — Prague midnight "
+                        + "(22:00Z prior day), not UTC midnight");
+
+        agentDataSource = zoneRowDataSource(null);   // no row
+        agent = buildAgent("en");
+        llmProvider.responses.add(new LlmResponse("Grounded answer."));
+        agent.clock = Clock.fixed(Instant.parse("2026-08-29T09:00:00Z"), ZoneOffset.UTC);
+
+        agent.handle(USER_ID, "group", SCOPE_ID, "what happened in tech news today?");
+
+        assertEquals("PT9H", semanticSearchLastArgs.get("_window"),
+                "a missing groups row degrades to UTC midnight");
+    }
+
+    // Minimal JDBC proxies for the zone SELECT (round-1 rework item 2):
+    // DataSource -> Connection -> PreparedStatement -> ResultSet returning
+    // one timezone value (null = no row); other methods get type-defaults.
+    private static javax.sql.DataSource zoneRowDataSource(String timezone) {
+        return proxy(javax.sql.DataSource.class, (name, args) ->
+                "getConnection".equals(name) ? proxy(Connection.class, (n2, a2) ->
+                        "prepareStatement".equals(n2) ? proxy(PreparedStatement.class, (n3, a3) ->
+                                "executeQuery".equals(n3) ? proxy(ResultSet.class, (n4, a4) ->
+                                        "next".equals(n4) ? timezone != null
+                                                : "getString".equals(n4) ? timezone
+                                                : jdbcDefault(n4))
+                                : jdbcDefault(n3))
+                        : jdbcDefault(n2))
+                : jdbcDefault(name));
+    }
+
+    private interface JdbcHandler {
+        Object handle(String name, Object[] args);
+    }
+
+    private static <T> T proxy(Class<T> type, JdbcHandler handler) {
+        return type.cast(Proxy.newProxyInstance(ChatAgentTest.class.getClassLoader(),
+                new Class<?>[]{type},
+                (p, method, args) -> handler.handle(method.getName(), args)));
+    }
+
+    private static Object jdbcDefault(String name) {
+        if ("toString".equals(name)) return "jdbc-stub";
+        if ("hashCode".equals(name)) return System.identityHashCode(name);
+        return null;
     }
 
     @Test
@@ -2472,6 +2770,7 @@ class ChatAgentTest {
                 if ("semanticSearch".equals(toolName)) {
                     semanticSearchCalls++;
                     semanticSearchLastQuery = (String) args.get("query");
+                    semanticSearchLastArgs = args;
                     if (semanticSearchThrow) {
                         throw new RuntimeException("embedding backend down");
                     }
@@ -2657,7 +2956,10 @@ class ChatAgentTest {
         return new TestChatAgent(
                 inFlightTracker, promptBuilder, dispatcher, sessionRepo,
                 router, sanitizer, pipeline, bundle, noopTrigger, language,
-                breakerRegistry, embeddingProvider, helpHandler);
+                breakerRegistry, embeddingProvider, helpHandler,
+                anchorTranslatorOverride != null ? anchorTranslatorOverride
+                        : anchorTranslator,
+                agentDataSource);
     }
 
     // Builds a test-scoped InboundContext carrying the scope language the
@@ -2681,11 +2983,13 @@ class ChatAgentTest {
                       TranslationPipeline pipeline, BundleLoader bundle,
                       AutoCompressTrigger autoCompressTrigger,
                       String language, LlmCircuitBreakerRegistry breakerRegistry,
-                      EmbeddingProvider embeddingProvider, HelpCommandHandler helpHandler) {
+                      EmbeddingProvider embeddingProvider, HelpCommandHandler helpHandler,
+                      QueryAnchorTranslator anchorTranslator,
+                      javax.sql.DataSource dataSource) {
             super(tracker, builder, dispatcher, repo, router,
-                    sanitizer, pipeline, bundle, autoCompressTrigger, null, null,
+                    sanitizer, pipeline, bundle, autoCompressTrigger, null, dataSource,
                     inboundContextWith(language), breakerRegistry,
-                    embeddingProvider, helpHandler, null, null, null);
+                    embeddingProvider, helpHandler, null, null, null, anchorTranslator);
         }
 
         @Override
@@ -2715,6 +3019,57 @@ class ChatAgentTest {
                                                  String scopeKind, UUID scopeId) {
             intentLookupCalls++;
             return Optional.ofNullable(triggerIntentMatch);
+        }
+
+        // M1-938 zone seam: the zone-dependent parse is drivable without
+        // DevServices Postgres (lookupTopicForDelivery precedent — the
+        // groups.timezone SELECT's column contract is DigestRetryService's).
+        @Override
+        java.time.ZoneId zoneFor(String scopeKind, UUID scopeId) {
+            if (zoneForOverride != null) {
+                return zoneForOverride;
+            }
+            return super.zoneFor(scopeKind, scopeId);
+        }
+    }
+
+    // M1-938: the constructor-threaded anchor-translator stub. Returns
+    // the input verbatim by default; a non-null cannedTranslation models
+    // one translated anchor; every call records its EXACT arguments.
+    static class RecordingAnchorTranslator extends QueryAnchorTranslator {
+        int calls;
+        final List<String> queries = new ArrayList<>();
+        final List<String> languages = new ArrayList<>();
+        final List<String> scopeKinds = new ArrayList<>();
+        final List<UUID> scopeIds = new ArrayList<>();
+        String cannedTranslation;
+
+        RecordingAnchorTranslator() {
+            super(null, null, null, 500);
+        }
+
+        @Override
+        public String translate(String query, String sourceLanguage,
+                                String scopeKind, UUID scopeId) {
+            calls++;
+            queries.add(query);
+            languages.add(sourceLanguage);
+            scopeKinds.add(scopeKind);
+            scopeIds.add(scopeId);
+            return cannedTranslation != null ? cannedTranslation : query;
+        }
+    }
+
+    // M1-938: generation-counting provider behind the REAL translator —
+    // the en no-op arm must observe zero generations (a throwing provider
+    // would be swallowed by the translator's own failure degrade).
+    private static final class CountingGenerationLlmProvider implements LlmProvider {
+        int generations;
+
+        @Override
+        public LlmResponse generate(ModelTask task, String systemPrompt, String userPrompt) {
+            generations++;
+            return new LlmResponse("translated anchor");
         }
     }
 

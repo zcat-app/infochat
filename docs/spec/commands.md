@@ -1825,7 +1825,12 @@ query. The lexical arm recovers keyword-exact queries (CVE ids, product
 names) whose embeddings fall outside the semantic threshold. The fused
 window is diversity-selected per source in SQL, so one prolific source
 cannot fill the result window while other in-world candidates exist; the
-selection is deterministic (D19).
+selection is deterministic (D19). The dispatch layer deterministically
+parses explicit relative time expressions from the English-anchored query
+(regex + `java.time`, no model — D19); a parse hit windows the pre-fetch
+to the same `ready_at` rule and appends a deterministic window hint
+steering `searchPosts`; a parse miss changes nothing, and vague recency
+never infers a window.
 
 **Retrieval provenance is explicit in every reply** (decision D58). Every
 successful chat reply carries a deterministic, bundle-localized notice

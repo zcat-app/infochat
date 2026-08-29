@@ -80,6 +80,30 @@ class ChatToolDispatcherTest {
                 .content().contains("sem-1"));
     }
 
+    // --- M1-938: a malformed _window surfaces as the typed,
+    // self-correctable ValidationError BEFORE any SQL — the dispatcher's
+    // existing DateTimeParseException arm, pinned on the semanticSearch seam. ---
+
+    @Test
+    void malformedWindowArgYieldsTypedValidationError() {
+        ChatToolDispatcher d = dispatcher(Map.of("semanticSearch",
+                (u, sk, si, a) -> {
+                    throw new java.time.format.DateTimeParseException(
+                            "not a duration", (String) a.get("_window"), 0);
+                }));
+
+        ChatToolDispatcher.ToolResult result = d.dispatch("semanticSearch",
+                new HashMap<>(Map.of("query", "anything", "_window", "not-a-duration")),
+                USER_A, "dm", SCOPE_A);
+
+        assertInstanceOf(ChatToolDispatcher.ToolResult.ValidationError.class, result);
+        assertTrue(((ChatToolDispatcher.ToolResult.ValidationError) result)
+                .reason().contains("Invalid argument type or format"),
+                "the malformed window must surface the typed arm's fixed reason, "
+                        + "never the raw exception text; got: "
+                        + ((ChatToolDispatcher.ToolResult.ValidationError) result).reason());
+    }
+
     // --- Acceptance item 2: unknown tool name ---
 
     @Test

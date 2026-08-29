@@ -22,6 +22,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -296,6 +297,92 @@ class SemanticSearchToolIT {
                         + "between url and similarity; got: " + newEntry);
     }
 
+    // Reproduction (M1-938 tool half): the windowed fused search bounds
+    // BOTH arms to ready_at at the cutoff — PT2H returns EXACTLY the
+    // in-window post; the SAME fixture WITHOUT _window keeps both.
+    @Test
+    void windowedFusedSearchBoundsBothArmsToReadyAtCutoff() throws Exception {
+        UUID userId = seedUser("windowed");
+        UUID sourceId = seedSource("windowed-src", "Windowed source");
+        seedSubscription("dm", userId, sourceId);
+        Instant freshReady = Instant.now().minus(Duration.ofMinutes(30));
+        Instant oldReady = Instant.now().minus(Duration.ofHours(3));
+        seedEmbeddedPostReadyAt("windowed-fresh", sourceId, vectorAtAngle(0.2), freshReady);
+        seedEmbeddedPostReadyAt("windowed-old", sourceId, vectorAtAngle(0.3), oldReady);
+
+        String windowed = tool.execute(userId, "dm", userId,
+                Map.of("query", "anything", "_window", "PT2H"));
+
+        assertTrue(windowed.contains(PREFIX + "windowed-fresh"),
+                "the in-window post must survive the windowed fused search; got: " + windowed);
+        assertFalse(windowed.contains(PREFIX + "windowed-old"),
+                "a post whose ready_at sits OUTSIDE the dispatched window must never "
+                        + "surface in the windowed fused search; got: " + windowed);
+
+        String unwindowed = tool.execute(userId, "dm", userId, Map.of("query", "anything"));
+
+        assertTrue(unwindowed.contains(PREFIX + "windowed-fresh")
+                        && unwindowed.contains(PREFIX + "windowed-old"),
+                "the SAME fixture without _window must keep the unwindowed behavior "
+                        + "(both posts) — the predicate is conditional, never "
+                        + "always-on; got: " + unwindowed);
+    }
+
+    // FAILURE-MODE isolation (M1-938, the M1-589 leak class): an
+    // UNSUBSCRIBED source's fresh near-match and a non-READY fresh post,
+    // both INSIDE the window, never surface (AND-composed in-arm).
+    @Test
+    void windowedArmsNeverSurfaceOutOfWorldOrNonReadyPosts() throws Exception {
+        UUID userId = seedUser("wiso");
+        UUID subscribedSource = seedSource("wiso-sub-src", "Subscribed source");
+        UUID otherSource = seedSource("wiso-other-src", "Unsubscribed source");
+        seedSubscription("dm", userId, subscribedSource);
+        Instant fresh = Instant.now().minus(Duration.ofMinutes(30));
+        seedEmbeddedPostReadyAt("wiso-leak", otherSource, vectorAtAngle(0.2), fresh);
+        seedEmbeddedPost("wiso-notready", subscribedSource, vectorAtAngle(0.3),
+                fresh, "RAW");
+        seedEmbeddedPostReadyAt("wiso-wanted", subscribedSource, vectorAtAngle(0.6),
+                fresh);
+
+        String json = tool.execute(userId, "dm", userId,
+                Map.of("query", "anything", "_window", "PT2H"));
+
+        assertTrue(json.contains(PREFIX + "wiso-wanted"),
+                "the subscribed READY in-window post must be returned; got: " + json);
+        assertFalse(json.contains(PREFIX + "wiso-leak"),
+                "an UNSUBSCRIBED source's post must never surface, windowed or not; "
+                        + "got: " + json);
+        assertFalse(json.contains(PREFIX + "wiso-notready"),
+                "a non-READY post must never surface even inside the window; "
+                        + "got: " + json);
+    }
+
+    // D19 windowed determinism (M1-938): two identical windowed executions
+    // on an unchanged DB return byte-identical JSON under a pinned clock —
+    // the window adds no nondeterminism to the fused set/order.
+    @Test
+    void windowedFusedResultIsByteIdenticalAcrossConsecutiveCallsOnUnchangedDb()
+            throws Exception {
+        UUID userId = seedUser("wdet");
+        UUID sourceId = seedSource("wdet-src", "Determinism source");
+        seedSubscription("dm", userId, sourceId);
+        Instant fixedNow = Instant.parse("2026-08-29T09:00:00Z");
+        tool.clock = Clock.fixed(fixedNow, java.time.ZoneOffset.UTC);
+        Instant freshReady = fixedNow.minus(Duration.ofMinutes(30));
+        Instant oldReady = fixedNow.minus(Duration.ofHours(3));
+        seedEmbeddedPostReadyAt("wdet-fresh", sourceId, vectorAtAngle(0.2), freshReady);
+        seedEmbeddedPostReadyAt("wdet-old", sourceId, vectorAtAngle(0.3), oldReady);
+
+        String first = tool.execute(userId, "dm", userId,
+                Map.of("query", "anything", "_window", "PT2H"));
+        String second = tool.execute(userId, "dm", userId,
+                Map.of("query", "anything", "_window", "PT2H"));
+
+        assertEquals(first, second,
+                "identical windowed calls on an unchanged DB must be byte-identical "
+                        + "(D19); first: " + first + " second: " + second);
+    }
+
     // The '{'-to-'}' span around a uid occurrence — entries are flat JSON
     // objects, so the nearest braces bound the whole entry.
     private static String entryContaining(String json, String uid) {
@@ -365,12 +452,18 @@ class SemanticSearchToolIT {
     /** Same, with the post's own READY-transition instant (M1-927 dating fixture). */
     private void seedEmbeddedPostReadyAt(String slug, UUID sourceId, float[] embedding,
                                          Instant readyAt) throws Exception {
+        seedEmbeddedPost(slug, sourceId, embedding, readyAt, "READY");
+    }
+
+    /** Same, with an explicit status — the isolation fixtures seed non-READY posts (M1-938). */
+    private void seedEmbeddedPost(String slug, UUID sourceId, float[] embedding,
+                                  Instant readyAt, String status) throws Exception {
         UUID postId;
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                  "INSERT INTO post (uid, source_id, title, body, url, published_at, "
                      + "fetched_at, status, ready_at, tags, upstream_identifier) "
-                     + "VALUES (?, ?, ?, ?, ?, ?, ?, 'READY', ?, '{}', ?) RETURNING id")) {
+                     + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?) RETURNING id")) {
             ps.setString(1, PREFIX + slug);
             ps.setObject(2, sourceId);
             ps.setString(3, "Title " + slug);
@@ -378,8 +471,9 @@ class SemanticSearchToolIT {
             ps.setString(5, "https://example.com/" + slug);
             ps.setTimestamp(6, Timestamp.from(FETCHED_AT));
             ps.setTimestamp(7, Timestamp.from(FETCHED_AT));
-            ps.setTimestamp(8, Timestamp.from(readyAt));
-            ps.setString(9, PREFIX + slug);
+            ps.setString(8, status);
+            ps.setTimestamp(9, Timestamp.from(readyAt));
+            ps.setString(10, PREFIX + slug);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 postId = (UUID) rs.getObject(1);

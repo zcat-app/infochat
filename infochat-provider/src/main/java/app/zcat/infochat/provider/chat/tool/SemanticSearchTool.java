@@ -8,6 +8,7 @@ import app.zcat.infochat.provider.chat.ChatToolRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,6 +18,10 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -82,6 +87,12 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
     private final double distanceThreshold;
     private final int defaultLimit;
 
+    // The windowed pre-fetch's cutoff is a decision-gate "now" — injected
+    // Clock, pinnable in tests (§9; SearchPostsTool precedent: initializer
+    // for constructor-built instances, CDI wins).
+    @Inject
+    Clock clock = Clock.systemUTC();
+
     @Inject
     public SemanticSearchTool(DataSource dataSource,
                               CancellationService cancellationService,
@@ -111,6 +122,20 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
         }
         int limit = args.containsKey("limit")
                 ? ((Number) args.get("limit")).intValue() : defaultLimit;
+        // INTERNAL window arg (commands.md §Chat mode): dispatch-layer
+        // temporal parse only, never advertised; a model-guessed value is
+        // honored identically (same clamp/binding); malformed → typed error.
+        Duration window = null;
+        Object windowArg = args.get("_window");
+        if (windowArg instanceof String s && !s.isBlank()) {
+            window = Duration.parse(s);
+            if (window.compareTo(SearchPostsTool.WINDOW_MIN) < 0) {
+                window = SearchPostsTool.WINDOW_MIN;
+            }
+            if (window.compareTo(SearchPostsTool.WINDOW_MAX) > 0) {
+                window = SearchPostsTool.WINDOW_MAX;
+            }
+        }
 
         // D58 (c) DECLARED: the source language is the scope's declared
         // /lang (scope_preferences.language, defaulting to 'en' for a
@@ -142,7 +167,9 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
         try (Connection conn = dataSource.getConnection()) {
             cancellationService.armToolConnection(conn, userId, scopeKind, scopeId);
             enableIterativeScan(conn);
-            return queryFusedPosts(conn, scopeKind, scopeId, vectorLiteral, anchoredQuery, limit);
+            Instant cutoff = window != null ? clock.instant().minus(window) : null;
+            return queryFusedPosts(conn, scopeKind, scopeId, vectorLiteral, anchoredQuery,
+                    cutoff, limit);
         }
     }
 
@@ -196,7 +223,8 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
     }
 
     private String queryFusedPosts(Connection conn, String scopeKind, UUID scopeId,
-                                   String vectorLiteral, String query, int limit)
+                                   String vectorLiteral, String query,
+                                   @Nullable Instant cutoff, int limit)
             throws SQLException {
         // ONE fused statement, two arms, both fully filtered BEFORE their
         // LIMIT — the isolation predicates (READY + the shared D59 world
@@ -221,6 +249,11 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
         // (distance/ts_rank, tie-broken by post_id — never input row
         // order), and the window selection below is cap-then-fill over
         // those same ranks only, so same DB state -> same set/order (D19).
+        // Windowed calls compose the ready_at bound AND inside BOTH arms
+        // before their LIMITs — never a fused-pool post-filter; unwindowed
+        // calls append nothing (byte-identical SQL; D19; never time-ordered).
+        final String readyBound = cutoff != null
+                ? "               AND p.ready_at >= ? " : "";
         final String sql =
             "SELECT uid, title, url, ready_at, distance "
                 + "  FROM ( "
@@ -249,6 +282,7 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
                 + "              JOIN post p ON p.id = pe.post_id "
                 + "             WHERE p.status = 'READY' "
                 + "               AND " + SearchPostsTool.worldPredicateSql("p")
+                + readyBound
                 + "               AND (pe.embedding <=> ?::vector) < ? "
                 + "             ORDER BY pe.embedding <=> ?::vector "
                 + "             LIMIT ? "
@@ -264,6 +298,7 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
                 + "              FROM post p "
                 + "             WHERE p.status = 'READY' "
                 + "               AND " + SearchPostsTool.worldPredicateSql("p")
+                + readyBound
                 + "               AND p.search_tsv @@ plainto_tsquery('english', ?) "
                 + "             ORDER BY lex_score DESC, post_id ASC "
                 + "             LIMIT ? "
@@ -275,26 +310,34 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
                 + " LIMIT ?";
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             // Each arm's world predicate binds two (scope_kind, scope_id)
-            // pairs: exclusion probe, then subscription arm
-            // (SearchPostsTool.worldPredicateSql bind contract).
-            ps.setString(1, vectorLiteral);
-            ps.setString(2, scopeKind);
-            ps.setObject(3, scopeId);
-            ps.setString(4, scopeKind);
-            ps.setObject(5, scopeId);
-            ps.setString(6, vectorLiteral);
-            ps.setDouble(7, distanceThreshold);
-            ps.setString(8, vectorLiteral);
-            ps.setInt(9, limit);
-            ps.setString(10, query);
-            ps.setString(11, scopeKind);
-            ps.setObject(12, scopeId);
-            ps.setString(13, scopeKind);
-            ps.setObject(14, scopeId);
-            ps.setString(15, query);
-            ps.setInt(16, limit);
-            ps.setInt(17, perSourceCap(limit));
-            ps.setInt(18, limit);
+            // pairs (worldPredicateSql bind contract); a windowed call
+            // binds its cutoff once per arm — the shared incrementing
+            // index keeps positions in SQL order.
+            int i = 0;
+            ps.setString(++i, vectorLiteral);
+            ps.setString(++i, scopeKind);
+            ps.setObject(++i, scopeId);
+            ps.setString(++i, scopeKind);
+            ps.setObject(++i, scopeId);
+            if (cutoff != null) {
+                ps.setTimestamp(++i, Timestamp.from(cutoff));
+            }
+            ps.setString(++i, vectorLiteral);
+            ps.setDouble(++i, distanceThreshold);
+            ps.setString(++i, vectorLiteral);
+            ps.setInt(++i, limit);
+            ps.setString(++i, query);
+            ps.setString(++i, scopeKind);
+            ps.setObject(++i, scopeId);
+            ps.setString(++i, scopeKind);
+            ps.setObject(++i, scopeId);
+            if (cutoff != null) {
+                ps.setTimestamp(++i, Timestamp.from(cutoff));
+            }
+            ps.setString(++i, query);
+            ps.setInt(++i, limit);
+            ps.setInt(++i, perSourceCap(limit));
+            ps.setInt(++i, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 // '[' + ']' — every appended entry adds its own bytes (plus
                 // a joining comma) against MAX_RESULT_BYTES, exactly as
