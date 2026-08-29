@@ -53,7 +53,10 @@ in-flight `migration_touch: true`), and the work happens in a git worktree
 under the repo-root `.worktree/` directory — git-unversioned, one worktree
 per ticket, named for the ticket id (e.g. `.worktree/M1-936`); never the
 home directory, never `/tmp`. Degrade to sequential if the tool cannot
-operate in another working directory. Check the module boundary MECHANICALLY, never from memory: list
+operate in another working directory. A worktree does not inherit the
+gitignored `tick-analysis/`: copy the ticket's `analysis_ref:` file from
+the primary into the worktree (untracked in both) BEFORE the step-1a
+lint, or `ANALYSIS-REF-RESOLVABLE` false-blocks the start. Check the module boundary MECHANICALLY, never from memory: list
 the tick tickets with `status: in-progress` or `in-review` (frontmatter
 under `docs/plan/m1/tick-tickets/`), take the Maven-module root of each
 one's `files_scope` paths (or its worktree's changed modules when the scope

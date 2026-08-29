@@ -47,7 +47,14 @@ For a long brief, take a pointer (`/tick analyze ".scratch/V1.1.0-TEST-REPORT-CL
    - analysis: `docs/plan/m1/tick-analysis/<slug>.md` — pre-allocated,
      but the analyst writes it ONLY for a 2+ ticket decomposition; a
      single-ticket outcome embeds the analysis in the ticket with
-     `analysis_ref: self` and no analysis file.
+     `analysis_ref: self` and no analysis file. **Canonical store rule:**
+     the analysis file ALWAYS lands in the PRIMARY checkout's
+     `docs/plan/m1/tick-analysis/` — the dir is gitignored, so a worktree
+     never inherits it and a worktree-local copy dies with the worktree
+     (eight analyses were lost that way before this rule, 2026-08-29).
+     When the session sits in a worktree, resolve the primary root via
+     `git rev-parse --git-common-dir` (its parent) and hand the analyst
+     the ABSOLUTE primary path; never the session-relative one.
    - tickets: `docs/plan/m1/tick-tickets/M<N>-NNN-<slug>.md` (one path per
      ticket the analyst will draft; the analyst may draft fewer than the
      count you allocate — it writes what it writes)

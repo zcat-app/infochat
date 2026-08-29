@@ -43,4 +43,15 @@ the `Reviewed-by:` / `Renames:` / `Alternatives considered:` trailers) →
 - Anything else → refuse; the user rebases the branch onto fresh `main` and
   re-runs.
 
+## Worktree cleanup (only when `.worktree/<ID>` exists)
+
+The gitignored artifacts of record live in worktrees at death's door:
+BEFORE `git worktree remove`, rescue anything the primary lacks —
+`docs/plan/m1/tick-analysis/` files first (the canonical store is the
+primary; a worktree-only copy is the loss that closed the 2026-08-29 gap),
+then any `.scratch/` logs the ticket's frontmatter cites. Copy them to the
+primary's same relative paths, THEN `git worktree remove <path> &&
+git worktree prune`. Never remove a worktree without diffing its
+gitignored dirs against the primary.
+
 Never push. The squash commit on `main` is the merge audit trail.
