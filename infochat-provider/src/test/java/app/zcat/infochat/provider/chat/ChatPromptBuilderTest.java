@@ -116,6 +116,35 @@ class ChatPromptBuilderTest {
                 "the framing must forbid constructing or altering a URL");
     }
 
+    // M1-941: grounding must demand a synthesized ANSWER shaped from the
+    // posts' content, never a post enumeration — pinned against the M1-857
+    // citation demand, which must survive in the same grounding clause.
+    @Test
+    void groundingFramingDemandsASynthesizedAnswerNotAList() {
+        ChatPromptBuilder builder = new ChatPromptBuilder(
+                noOpPreFetcher(), emptyRepository(), TOKEN_BUDGET, DEFAULT_MAX_TOKENS, PROMPT_TOKEN_BUDGET);
+
+        ChatPromptBuilder.BuiltPrompt prompt =
+                builder.build(USER_ID, "dm", USER_ID, "test", "", "", 0);
+
+        String sp = prompt.systemPrompt();
+        String clause = sp.substring(sp.indexOf("When the prompt includes"),
+                sp.indexOf("When no retrieved posts are"));
+        assertTrue(clause.contains("cite every post you rely on by its bare source URL"),
+                "the co-survival arm: the M1-857 bare-URL citation demand must "
+                        + "stay in the grounding clause");
+        assertTrue(clause.contains("ANSWER the user's question directly"),
+                "grounding must demand a direct answer to the question asked");
+        assertTrue(clause.contains("facts, figures, or quotations"),
+                "the answer must be built from the posts' content");
+        assertTrue(clause.contains("body_summary"),
+                "the clause must name where entry content lives (body_summary)");
+        assertTrue(clause.contains("getPost"),
+                "the clause must name where the full body lives (getPost)");
+        assertTrue(clause.contains("rather than listing or enumerating posts"),
+                "an enumeration of posts is not an acceptable grounded answer");
+    }
+
     // M1-690: the framing must no longer declare a topic scope a model can
     // read as a restriction, and must explicitly tell the model not to
     // decline merely because a question is off-feed. Pinned so the behavior

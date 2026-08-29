@@ -187,7 +187,7 @@ class ChatPromptBudgetTest {
         ChatPromptBuilder midBudget = new ChatPromptBuilder(
                 memoriesOf(twoMemoryHits(500)),
                 new StubChatSessionRepository(turnsOf(3, 2000, 300)),
-                300, DEFAULT_MAX_TOKENS, 1228);
+                300, DEFAULT_MAX_TOKENS, 1340);
         ChatPromptBuilder.BuiltPrompt arm2 = midBudget.build(
                 USER_ID, "dm", SCOPE_ID, "hello", SEMANTIC_POSTS_BLOCK, "", 0);
         assertTrue(arm2.compaction().historyTurnsDropped() > 0
@@ -213,7 +213,7 @@ class ChatPromptBudgetTest {
         ChatPromptBuilder tightBudget = new ChatPromptBuilder(
                 memoriesOf(twoMemoryHits(400)),
                 new StubChatSessionRepository(List.of()),
-                CONTEXT_WINDOW, DEFAULT_MAX_TOKENS, 660);
+                CONTEXT_WINDOW, DEFAULT_MAX_TOKENS, 740);
         ChatPromptBuilder.BuiltPrompt arm3 = tightBudget.build(
                 USER_ID, "dm", SCOPE_ID, padded("hello ", 600), "", "", 0);
         assertEquals(1, arm3.compaction().memoryHitsDropped(),

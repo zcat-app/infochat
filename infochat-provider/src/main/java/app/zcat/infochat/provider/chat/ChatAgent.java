@@ -139,8 +139,10 @@ public class ChatAgent {
     // tool turn: the citation demand binds cited URLs verbatim to the
     // tool-returned set and forbids invention or modification.
     static final String POST_TOOL_RESULT_INSTRUCTION =
-            "Please provide your response based on the tool result above. "
-          + "Cite each post you rely on by its bare source URL exactly as "
+            "Please provide your response based on the tool result above "
+          + "as a direct, synthesized answer to the user's question, not "
+          + "a list of results. Cite each post you rely on by its bare "
+          + "source URL exactly as "
           + "the tool result provided it, and never invent or modify a URL.";
 
     // M1-618 conversational-refinement: the similarity (1 - cosine distance)

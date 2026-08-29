@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 157 |
+| done | 158 |
 | deferred | 1 |
 | abandoned | 6 |
 | **total** | **169** |
@@ -26,7 +26,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-935 — searchPosts topics filter over search_tags (complexity: medium, risk: medium)
-- M1-941 — Answer-shaping synthesis directive in the chat prompt (complexity: low, risk: medium)
 - M1-946 — Widen the cross-lingual golden slice to n = 16 (complexity: medium, risk: medium)
 - M1-952 — Two-leg baseline record + pre-registered gating rules (complexity: medium, risk: low)
 - M1-955 — Re-pin the retrieval characterization emission shape (complexity: low, risk: low)
@@ -67,6 +66,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 |---|---|---|---|
 | M1-954 | Re-land the fam replica restore procedure instance-free | 2026-08-29 | round 2 APPROVE |
 | M1-950 | Eval harness two-world extension: per-world fences | 2026-08-29 | round 2 APPROVE-WITH-FIXES |
+| M1-941 | Answer-shaping synthesis directive in the chat prompt | 2026-08-29 | round 1 APPROVE-WITH-FIXES |
 | M1-940 | Surface bounded post content in search tool emissions | 2026-08-29 | round 2 APPROVE-WITH-FIXES |
 | M1-939 | Pin the native reply language per-turn and after fold-backs | 2026-08-29 | round 1 APPROVE |
 | M1-938 | Window the temporal pre-fetch; deterministic window hint | 2026-08-29 | round 2 APPROVE |
@@ -74,7 +74,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-953 | Counted temporal form requires a left word boundary | 2026-08-28 | round 1 APPROVE |
 | M1-951 | Tech-leg disposition: drift restore, 946/947, caveat | 2026-08-28 | round 1 APPROVE |
 | M1-949 | Fam golden set: label the broad-distribution world | 2026-08-28 | round 1 APPROVE |
-| M1-948 | Isolated fam replica: dump, restore, pin fingerprint | 2026-08-28 | round 2 APPROVE |
 
 ---
 
@@ -289,7 +288,7 @@ M1-937 (done)
   └── M1-938 (done)
 M1-939 (done)
 M1-940 (done)
-  ├── M1-941 (pending) ← runnable
+  ├── M1-941 (done)
   └── M1-955 (pending) ← runnable
 M1-942 (done)
   └── M1-944 (done)

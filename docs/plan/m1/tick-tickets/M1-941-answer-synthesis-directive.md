@@ -1,16 +1,19 @@
 ---
 id: M1-941
 title: "Answer-shaping synthesis directive in the chat prompt"
-status: pending
+status: done
 created: 2026-08-26
-last_updated: 2026-08-26
+last_updated: 2026-08-29
 flow: tick
 reproduction: >-
   ChatPromptBuilderTest#groundingFramingDemandsASynthesizedAnswerNotAList
-  `to-be-written` (child of a 2+ decomposition, analysis
-  docs/plan/m1/tick-analysis/answer-synthesis-language-pinning.md; /tick
-  start converts the marker: write the test, run it RED against the
-  unmodified code before any fix code, workflow §0). The wrong behavior
+  (child of a 2+ decomposition, analysis
+  docs/plan/m1/tick-analysis/answer-synthesis-language-pinning.md;
+  written and run RED against the unmodified code on 2026-08-29 — the
+  synthesis arms of this test and the ChatAgentTest fold-back sibling
+  postToolFoldingDemandsSynthesizedAnswerAndBareUrlCitation both red,
+  every citation co-survival arm green, pre-existing tests untouched).
+  The wrong behavior
   it states: the system prompt frames grounding as cite-and-ground but
   NEVER demands an answer synthesized from post content — verified by
   reading CHAT_SYSTEM_PROMPT_TEMPLATE end to end
@@ -78,7 +81,7 @@ acceptance:
   - "REPRODUCTION closed: ChatPromptBuilderTest.groundingFramingDemandsASynthesizedAnswerNotAList passes — the built system prompt carries a synthesis element asserting ALL of: answer the user's question directly (an answer, not a list/enumeration of posts), use the retrieved posts' content (their facts, figures, quotations — available via the entries' body_summary and getPost), and keep the bare-URL citation demand; the citation co-survival arm asserts the M1-857 framing demand is still present in the SAME clause (a synthesis-only rewrite that drops citation fails it)."
   - "Fold-back site: ChatAgentTest's POST_TOOL_RESULT_INSTRUCTION pins (:336-349, :1025 — contains-based) keep passing with the amended constant, and a NEW assertion (extending the :1025 test or a sibling) pins the folded prompt carrying BOTH the synthesis clause AND the bare-URL demand after a tool result — probe: grep -n 'Cite each post' infochat-provider/src/main/java/app/zcat/infochat/provider/chat/ChatAgent.java returns the surviving citation sentence inside the amended constant."
   - "FAILURE-MODE (clarify precedence, analysis P18): ChatAgentTest.lowConfidenceGroundingTriggersClarifyDirective, ChatAgentTest.confidentGroundingSurfacesMoreLikeThisAffordanceAndDoesNotClarify, and ChatAgentTest.emptyRetrievalInjectsNoRefinementDirective (the clarify/affordance selection pins, assertions at :1112-1152) pass UNMODIFIED — a marginal turn still appends CLARIFY_DIRECTIVE (do-not-answer-yet) whose precedence over the always-present framing is preserved by the framing's own conditionality (the synthesis element is worded as answer-SHAPE for when the model answers, never as an instruction to answer now); the wording review at implementation confirms the two sentences can be simultaneously true."
-  - "FAILURE-MODE (no per-turn drift, analysis P16): a non-grounded general-knowledge turn's user prompt is byte-identical to today (no new per-turn bytes — the directive lives only in the two every-turn instruction sites); ChatPromptBudgetTest and the M1-918 corner tests pass UNMODIFIED; renderedInstructionTableIsByteIdentical passes UNMODIFIED — probe: git diff names no ChatToolCatalog.java hunk."
+  - "FAILURE-MODE (no per-turn drift, analysis P16): a non-grounded general-knowledge turn's user prompt is byte-identical to today (no new per-turn bytes — the directive lives only in the two every-turn instruction sites); ChatPromptBudgetTest passes with EVERY ASSERTION UNCHANGED via an authorized test modification (engineering-rules §8, review r1): the approved template sentence measures ~75 estimated never-drop tokens, crossing two fixture calibration boundaries in ladderDropsHistoryThenRetrievalThenMemory, so two budget literals were recalculated from the test's own logged estimates (arm 2 1228→1340, arm 3 660→740) — zero assertion lines touched; the M1-918 corner tests and renderedInstructionTableIsByteIdentical pass UNMODIFIED — probe: git diff names no ChatToolCatalog.java hunk."
   - "Budget ledger (analysis P16; the M1-916 absorbed-by-headroom precedent): the two amended sites add ~2 sentences of never-drop instruction text (~40 tokens/turn), recorded in docs/design/05-llm-and-embeddings.md §5.4.6's prompt-budget ledger, and the citation-discipline paragraph (:851-867) is extended to record the third property the two sites now carry (synthesize an answer, cite bare URLs, never invent/modify) — probe: grep -n 'synthesi' docs/design/05-llm-and-embeddings.md returns the §5.4.6 mentions."
   - "Truthness ordering (analysis P17): this ticket lands AFTER M1-940 (blocked_by) — the synthesis element's content reference (the entries' body_summary) is truthful at landing; probe: the landed M1-940 spec rows carry body_summary (grep -n 'body_summary' docs/spec/security.md returns both tool rows) before this diff's wording review."
   - "OWNER-RUN live probe (verification ceiling, the M1-916/M1-927 posture — no unit test can prove register change; phrased owner-run with a recorded outcome, never claimed as a unit result): after landing, the owner re-asks a fact-bearing question (the class that motivated the campaign — e.g. a price/number question the feed answers) on the deployment and captures the reply: an ANSWER stating the fact with its cited source URL PASSES; a bare post list (or a fact-free enumeration) FAILS; the before/after record goes to the ticket/commit. The eval gap is stated honestly: M1-928 is retrieval-focused and does not measure answer quality (analysis P19) — no CI claim is made."
@@ -93,14 +96,23 @@ test_plan:
       infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatAgentTest.java
       — the fold-back dual assertion (synthesis clause + bare-URL demand
       in the folded prompt).
-  modifies: []
+  modifies:
+    - >-
+      infochat-provider/src/test/java/app/zcat/infochat/provider/chat/ChatPromptBudgetTest.java
+      — AUTHORIZED modification (engineering-rules §8, review r1): the
+      amended template's ~75 estimated never-drop tokens crossed two
+      fixture calibration boundaries in
+      ladderDropsHistoryThenRetrievalThenMemory; the budget literals
+      1228→1340 (arm 2) and 660→740 (arm 3) were recalculated from the
+      test's own logged estimates; every assertion is unchanged.
   preserves:
     - >-
       all tests currently green on main — explicitly the clarify/
-      affordance selection pins, ChatPromptBudgetTest, the M1-918 corner
-      tests, renderedInstructionTableIsByteIdentical, the M1-927 header
-      pins, and (once landed) M1-939's pin tests and M1-938's
-      byte-identity pin, unmodified.
+      affordance selection pins, ChatPromptBudgetTest's assertions (its
+      two fixture budget literals carry the authorized modifies: entry),
+      the M1-918 corner tests, renderedInstructionTableIsByteIdentical,
+      the M1-927 header pins, and (once landed) M1-939's pin tests and
+      M1-938's byte-identity pin, unmodified.
 spec_refs:
   - docs/spec/commands.md §Chat mode
   - docs/spec/llm.md §Determinism boundary
@@ -118,11 +130,52 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-29
+    verdict: APPROVE-WITH-FIXES
+    checks: 'SPEC-TRUTHNESS: PASS, SECURITY: PASS, TEST-ADEQUACY: WARN
+      (F1 low — ticket-of-record still claimed in four places that no
+      pre-existing test is touched while the diff carries the
+      ChatPromptBudgetTest recalibration; reviewer independently
+      re-derived the fixture arithmetic and confirmed every assertion
+      unchanged), MAINTAINABILITY: PASS, SCOPE: PASS; 3 candidate
+      findings falsified-and-dropped (deterministic-delivery override,
+      weakened-assertion, new injection/info-leak path). FIX ITEM 1
+      applied same day — ticket-record authorization edited (acceptance
+      item 4, test_plan modifies/preserves, Approach step 3,
+      Out-of-scope) with zero executable lines; EVALUATED-AS probes
+      re-run post-fix: (1) grep ChatPromptBudgetTest → authorization
+      wording at :84/:101/:111/:273/:341 PASS; (2) tick-lint 0 findings
+      PASS; (3) commit-body line staged for /tick commit: "Authorized
+      test modification (engineering-rules §8): ChatPromptBudgetTest
+      budget literals 1228→1340 (arm 2) and 660→740 (arm 3) in
+      ladderDropsHistoryThenRetrievalThenMemory, recalculated for the
+      amended template''s ~75 never-drop tokens; assertions unchanged."
+      Log of record .scratch/tick-test-M1-941-r1.log (full suite BUILD
+      SUCCESS, exit 0). Diff stats: 8 files, +128/−22.'
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  2026-08-29: >-
+    Start-time self-check passed with no blocking question. Every
+    file:line citation verifies in SUBSTANCE at post-sibling-landing
+    line numbers (POST_TOOL_RESULT_INSTRUCTION now at
+    ChatAgent.java:141-145, the ChatAgentTest pins at :379/:399/:409/
+    :1361/:2713, the clarify tests at :1435/:1458/:1478 — drafted
+    pre-M1-938/939/940, drifted, quotes verbatim). Census re-run: the
+    two every-turn amendment sites are exactly the ones named; all
+    per-turn directives enumerated out-of-scope. Analysis pitfalls
+    P15-P19 (+P20 context) all landed in the ticket. M1-940's added
+    tests live in the tool package (SearchPostsToolTest,
+    SemanticSearchToolIT, SemanticSearchToolDiversityIT) — no trace
+    conflict with the prompt-constant seam; ChatPromptBudgetTest
+    assertions are relational with slack (no exact drop-count pins), so
+    the UNMODIFIED-pass claim survives +~40 template tokens. --parallel
+    initially refused (M1-954 in-flight in infochat-provider,
+    mid-review); M1-954 merged (e0015979) before any start action,
+    leaving no in-flight ticket — gate re-run passed.
 escalation_reason:
 ---
 
@@ -214,8 +267,11 @@ to chat).
      answer to the user's question — not a list of results." — keeping
      the citation sentences intact (the constant's citation bytes are
      the pinned M1-857 substance; probe in acceptance item 2).
-  3. Tests per `test_plan.adds`; no modification to any pre-existing
-     test (the contains-based pins absorb the amended constants).
+  3. Tests per `test_plan.adds`; no pre-existing test ASSERTION is
+     modified (the contains-based pins absorb the amended constants);
+     the single authorized pre-existing-test touch is the
+     ChatPromptBudgetTest fixture-literal recalibration recorded in
+     `test_plan.modifies` (engineering-rules §8, review r1).
   4. Design-05 §5.4.6 sync: the ledger sentence + the
      citation-discipline paragraph's third property.
 - **Steps, in implementation order:** (1) confirm M1-940 landed (the
@@ -280,8 +336,10 @@ pins (no per-turn bytes added); the citation discipline's substance
 (extended, never weakened); digest//summary/rollup surfaces; the
 sanitizer and streamer; the eval lane; final wording authority (the
 user approves the exact sentences at implementation — this ticket pins
-the semantic elements). No pre-existing test is modified; two new tests
-are added.
+the semantic elements). No pre-existing test ASSERTION is modified; two
+new tests are added, and one authorized fixture-literal recalibration
+lands in ChatPromptBudgetTest (recorded in `test_plan.modifies`,
+engineering-rules §8).
 
 ## Census
 

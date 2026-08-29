@@ -580,7 +580,13 @@ never-dropped directive region; M1-939's native reply-language pin adds
 ~1 sentence on NATIVE-mode turns only — one in the never-dropped per-turn
 directive tail (counted in the builder's directive sizing) and one per
 tool-result fold-back (riding `scaffoldTail` through the fold budget), with
-translate-mode turns byte-identical. Over budget, the ladder compacts in fixed order: (1) history
+translate-mode turns byte-identical; M1-941's answer-synthesis directive
+adds ~2 sentences (~95 tokens/turn worst case) — one never-drop sentence in
+the system template's grounding clause (every call, both transports, ~75)
+and one clause in the post-tool fold-back instruction (every
+model-initiated tool turn, ~20) — both absorbed by the headroom, with
+non-grounded turns' user prompts byte-identical (the directive lives only
+in those two every-turn sites). Over budget, the ladder compacts in fixed order: (1) history
 oldest-first against min(`infochat.context-window`, budget remainder after
 fixed parts); (2) the whole retrieval block, never mid-JSON; (3) memory hits
 oldest-first, then the whole memory block. The injection-defence scaffolding,
@@ -899,8 +905,10 @@ path like any other reply — so it is translation-safe without a new
 en/cs bundle key (D43's bilateral-keyset rule has nothing new to cover).
 
 **Citation-discipline wording (M1-857).** Two prompt sites, both FIXED bot
-instructions in the trusted region, demand that a relied-on post is cited
-by its bare source URL and that URLs are never invented or modified:
+instructions in the trusted region, demand that a grounded reply is a
+synthesized answer shaped from the posts' content (never a bare
+enumeration), that a relied-on post is cited
+by its bare source URL, and that URLs are never invented or modified:
 (1) the framing sentence in `ChatPromptBuilder.CHAT_SYSTEM_PROMPT_TEMPLATE`
 demands a bare-URL citation for every post the answer relies on, copied
 exactly as it appears in the retrieved post or tool result, and forbids
@@ -908,7 +916,15 @@ inventing, modifying, or guessing a URL; (2)
 `ChatAgent.POST_TOOL_RESULT_INSTRUCTION` — the post-tool-result
 instruction line that closes every model-initiated tool turn — repeats the
 demand bound to the tool-returned set ("exactly as the tool result
-provided it"). Both refer to posts abstractly and embed no feed-derived
+provided it"). Since M1-941 both sites also carry the synthesis element:
+the framing clause's second sentence and the fold-back's opening sentence
+tell the model to ANSWER the user's question directly from the posts'
+content — the specific facts, figures, or quotations each entry's
+`body_summary` carries, `getPost` for the full body — synthesizing one
+coherent answer rather than listing or enumerating posts. The synthesis
+demand is answer-SHAPE only and worded on the grounding condition, so a
+marginal turn's CLARIFY do-not-answer-yet precedence is unchanged. Both
+refer to posts abstractly and embed no feed-derived
 literal (the CLARIFY/AFFORDANCE hygiene posture above); neither duplicates
 `REPLY_LANGUAGE_DIRECTIVE` (the single source of the translate-mode
 language contract; native mode's per-turn and fold-back pin, M1-939,

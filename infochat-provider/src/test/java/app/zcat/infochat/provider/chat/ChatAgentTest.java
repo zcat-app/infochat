@@ -1366,6 +1366,41 @@ class ChatAgentTest {
                 "the wire declarations render from the catalog's eight tools");
     }
 
+    // M1-941: after a tool result the folded instruction must demand a
+    // synthesized answer AND keep the M1-857 bare-URL citation demand —
+    // both, never one at the other's expense.
+    @Test
+    void postToolFoldingDemandsSynthesizedAnswerAndBareUrlCitation() {
+        Map<String, ChatToolRegistry.ChatTool> tools = new HashMap<>();
+        for (String name : new ChatToolRegistry().toolNames()) {
+            tools.put(name, (u, sk, si, a) -> "[]");
+        }
+        tools.put("searchPosts", (u, sk, si, a) ->
+                "[{\"uid\":\"p-1\",\"title\":\"T\",\"url\":\"https://e.x/1\"}]");
+        ChatToolDispatcher realDispatcher = new ChatToolDispatcher(
+                new ChatToolRegistry(), tools, 500, 200, 20);
+        nativeToolTransport = true;
+        llmProvider.supportsToolCalls = true;
+        agent = buildAgent("en", realDispatcher);
+        llmProvider.toolCallResponses.add(new LlmResponse("", null, null,
+                List.of(new LlmResponse.ToolCallRequest("searchPosts", "{\"tags\": [\"zcash\"]}")),
+                "tool_calls"));
+        llmProvider.toolCallResponses.add(new LlmResponse("done"));
+
+        agent.handle(USER_ID, SCOPE_KIND, SCOPE_ID, "any zcash posts?");
+
+        String fedBack = llmProvider.lastUserPrompt;
+        String folded = ChatAgent.POST_TOOL_RESULT_INSTRUCTION.trim();
+        assertTrue(fedBack.contains(folded),
+                "the fold-back instruction rides every model-initiated tool turn");
+        assertTrue(folded.contains("synthesized answer"),
+                "the folded instruction must demand a synthesized answer, not a list");
+        assertTrue(folded.contains("not a list of results"),
+                "an enumeration of results is not an acceptable post-tool response");
+        assertTrue(folded.contains("Cite each post you rely on by its bare source URL"),
+                "the M1-857 citation demand survives the amendment verbatim");
+    }
+
     @Test
     void structuredUnknownAndOverCapCallsReturnTypedValidationErrorsToTheModel() {
         Map<String, ChatToolRegistry.ChatTool> tools = new HashMap<>();
