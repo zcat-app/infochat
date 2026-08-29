@@ -1,9 +1,9 @@
 ---
 id: M1-950
 title: "Eval harness two-world extension: per-world fences"
-status: pending
+status: done
 created: 2026-08-28
-last_updated: 2026-08-28
+last_updated: 2026-08-29
 flow: tick
 reproduction: >-
   Child of a 2+ decomposition (analysis
@@ -22,7 +22,8 @@ reproduction: >-
   fam replica DB can be pointed at via -Deval.db.url but the run would
   execute the TECH golden set against it and score nothing meaningful, with
   no manifest evidence of which world ran (analysis P10). RED test
-  (to-be-written, converted at start):
+  (converted at start, run RED 2026-08-29 — .scratch/tick-red-M1-950.log:
+  test-compile fails `cannot find symbol RetrievalEvalWorlds`):
   RetrievalEvalWorldsTest#resolvesWorldToResourceAndLeaf
   — eval.world=fam must resolve golden-set-fam.jsonl + the results-fam leaf
   and eval.world=tech (default) golden-set.jsonl + results; observed today:
@@ -36,6 +37,10 @@ files_scope:
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/eval/RetrievalEvalWorldsTest.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/eval/RetrievalEvalRunnerIT.java
   - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/eval/RetrievalEvalCharacterizationIT.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/eval/RetrievalGoldenSetLoaderTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/eval/AnchorLegCharacterizerTest.java
+  - infochat-provider/src/test/java/app/zcat/infochat/provider/chat/tool/eval/RetrievalGoldenSetTest.java
+  - infochat-provider/src/test/resources/retrieval-eval/golden-set-fam.jsonl
 complexity: medium
 risk: medium
 round_cap: 2
@@ -68,7 +73,7 @@ out_of_scope:
     the harness paths (the M1-862 grep pattern).
 acceptance:
   - "REPRODUCTION closed: RetrievalEvalWorldsTest.resolvesWorldToResourceAndLeaf passes — the world seam maps tech → (retrieval-eval/golden-set.jsonl, results leaf 'results') and fam → (retrieval-eval/golden-set-fam.jsonl, 'results-fam'); an UNKNOWN world name fails loud with a named error at resolution, never falls back to tech (FAILURE-MODE leg: eval.world=bogus → the named refusal); pure JUnit, CI-runnable, no DB."
-  - "ALL five resource sites resolve through the one seam (analysis P10): RetrievalEvalRunnerIT.goldenSetBytes, RetrievalEvalCharacterizationIT's resource read, RetrievalGoldenSetLoaderTest, AnchorLegCharacterizerTest, RetrievalGoldenSetTest — probe: grep -n 'golden-set.jsonl' over the eval package returns matches ONLY inside RetrievalEvalWorlds.java (the single literal site) — a second hardcoded path anywhere fails the grep fence."
+  - "ALL five resource sites resolve through the one seam (analysis P10): RetrievalEvalRunnerIT.goldenSetBytes, RetrievalEvalCharacterizationIT's resource read, RetrievalGoldenSetLoaderTest, AnchorLegCharacterizerTest, RetrievalGoldenSetTest — probe: grep -n 'golden-set.jsonl' over the eval package returns matches ONLY inside RetrievalEvalWorlds.java plus RetrievalEvalWorldsTest.java's assertEquals pins (the executable form of acceptance item 1's mapping, not a second resolution site) — a second hardcoded path anywhere else fails the grep fence."
   - "world=tech is byte-identical to today's behavior (the campaign's gating reference depends on it; analysis P15): an operator tech smoke run against the frozen test stack produces the same manifest keys plus only the NEW keys, the same results leaf, and — on a fingerprint-matching DB — the same per-query uid lists as a pre-change run — probe: diff of the two runs' queries.jsonl is empty; manifest golden_set_sha256 equals sha256sum of the untouched golden-set.jsonl."
   - "Per-world fences (analysis P2/P6): the manifest gains world, golden_set_resource, and world_embedding_coverage (READY-world posts WITH a post_embedding row / total, computed over the RUN's DB); the label-fingerprint refusal stays world-keyed — FAILURE-MODE (operator leg): a fam-world run pointed at a DB whose fingerprint differs from the fam labels' pinned replica fingerprint exits with the runner's named refusal (label_fingerprint_match false is reported, never scored) — probe: grep over the fam smoke's manifest artifact (.bench/retrieval-eval/results-fam/<ts>/) shows world=fam + golden_set_resource + world_embedding_coverage each resolving with a value, and the mis-pointed-DB operator leg exits nonzero with label_fingerprint_match false in the run log and NO scores — the same fence that makes a mis-pointed live-fam URL refuse."
   - "The runner's existing self-checks are preserved UNMODIFIED in behavior (engineering-rules §10): sentinel, stub-exclusion, inter-pass drift, label-fingerprint match, double-run determinism, en-zero-translator-calls, fallback abort (RetrievalEvalRunnerIT.java:264-330) — probe: git diff shows no change to those methods beyond the resource/leaf/manifest wiring; the operator fam smoke passes all of them with label_fingerprint_match true."
@@ -96,6 +101,25 @@ test_plan:
       RetrievalEvalCharacterizationIT (AUTHORIZED: its resource read
       delegates to the seam; the characterization stays tech-world-pinned —
       its fixtures are tech rows; no behavior change).
+    - >-
+      RetrievalGoldenSetLoaderTest, AnchorLegCharacterizerTest (AUTHORIZED:
+      their tech resource literals resolve through the seam — tech-pinned,
+      no behavior change; clarity_check 2026-08-29).
+    - >-
+      RetrievalGoldenSetTest (AUTHORIZED: its TECH and FAM World.resource
+      strings derive from the seam — same values, byte-identical behavior;
+      clarity_check 2026-08-29).
+    - >-
+      golden-set-fam.jsonl + RetrievalGoldenSetTest.FAM_REPLICA_FINGERPRINT
+      (AUTHORIZED 2026-08-29, user-directed fold-in of the M1-949 defect
+      repair: all 46 records and the validator constant shipped the
+      placeholder `ready=<redacted>;…` in 81ae8b36, making the pin vacuous
+      and every fam run refuse at the label fence; this diff substitutes
+      the real replica pin recorded by M1-948 (value redacted here per
+      §13/M1-949 ticket style — it is committed where the instrument
+      needs it: the fixture records + the validator constant);
+      per the user's instruction to fix it here rather than a new defect
+      ticket; the squash-merge carries it).
   preserves:
     - >-
       every runner fence (sentinel, stub-exclusion, inter-pass drift,
@@ -125,11 +149,31 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-29
+    verdict: REWORK
+    checks: 'SPEC-TRUTHNESS: PASS, SECURITY: PASS, TEST-ADEQUACY: PASS, MAINTAINABILITY: PASS, SCOPE: FAIL (replica address published in the ticket body, §13 placement); 4 candidate findings falsified-and-dropped (fingerprint-in-fixture §13 carve-out, D2 probe satisfaction via the manifest artifact, A/B base-point equivalence via stack frames + identical fingerprints, memory-rider provenance)'
+    diff_stats: '11 files, +364/-96 (8 files_scope paths, board regen, ticket; the .agents/memory rider is excluded at commit per the binding exclusion)'
+  - round: 2
+    date: 2026-08-29
+    verdict: APPROVE-WITH-FIXES
+    checks: 'SPEC-TRUTHNESS: PASS, SECURITY: PASS, TEST-ADEQUACY: PASS, MAINTAINABILITY: WARN (bullet merge), SCOPE: FAIL carried by two low text-only findings (the round-1 rework record quoted the port literal inside the probe; the D2 bullet merge) — both within the fix-apply conditions; round-1 items dispositioned SATISFIED/SATISFIED; 2 candidate findings falsified-and-dropped (committed precedent for state-pin values; mech-report self-reference = the same FINDING-1 residual)'
+    diff_stats: 'round-2 fix hunks: ticket only, +49/-6 (scrub, defang, mandated records)'
+    fixes_applied: 'FIX-1 port literal masked in the quoted probe (grep probe returns no match over tracked files); FIX-2 D2 bullet split (grep probe returns no match); test-compile -pl infochat-provider -am exit 0; fixed-tree snapshot .scratch/tick-fixes-M1-950.tree (gitignored)'
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  date: 2026-08-29
+  result: resolved
+  note: >-
+    acceptance item 2's grep fence (five resource sites through the seam)
+    vs item 8's exactly-files_scope probe conflicted as drafted; user
+    confirmed extending files_scope to the three unit consumers
+    (RetrievalGoldenSetLoaderTest, AnchorLegCharacterizerTest,
+    RetrievalGoldenSetTest) with tech-pinned seam wiring; Approach step 4
+    "two unit consumers" corrected to three.
 escalation_reason:
 ---
 
@@ -204,8 +248,10 @@ half), P16, P17.
      `world_embedding_coverage` (a ready-with-embedding count query over the
      run's DB, same connection posture as `dbFingerprint`); javadoc fam
      invocation (P10, P6).
-  4. Wire the characterization IT + the two unit consumers through the seam
-     (tech-pinned) (P10).
+  4. Wire the characterization IT + the three unit consumers
+      (RetrievalGoldenSetLoaderTest, AnchorLegCharacterizerTest,
+      RetrievalGoldenSetTest — the latter's fam World.resource too)
+      through the seam (tech-pinned) (P10).
   5. Operator tech smoke (byte-identity regression vs a pre-change run on a
      fingerprint-matching DB) + fam smoke on the replica (all fences)
      (P2/P15/P14).
@@ -230,22 +276,56 @@ outside `files_scope`.
 
 ## Verification
 
-- P10 → the grep fence (`golden-set.jsonl` literals only inside
-  RetrievalEvalWorlds.java) + resolvesWorldToResourceAndLeaf.
-- P2 → the operator failure-mode leg: fam world + wrong-fingerprint DB → the
-  named refusal, label_fingerprint_match false, no scores.
-- P6 → the manifest key resolves in both smokes with the with/total shape.
-- P7/P8 → README grep probes for each enumerated entry.
+- Operator legs, 2026-08-29 (the isolated replica's eval.db.url, test-stack
+  model endpoints; invocation + address live in the operator-local
+  .bench/retrieval-eval/README.md;
+  logs .scratch/tick-smoke-{A,C,C2,D,D2}-M1-950.log):
+  - C2 fam smoke GREEN (235s, all self-checks, label_fingerprint_match
+    true): manifest world=fam, golden_set_resource=retrieval-eval/
+    golden-set-fam.jsonl, world_embedding_coverage 8260/8260 (= M1-948's
+    pin byte-equal), db fingerprint = the replica pin both passes,
+    scores.json written (operator-local, no numbers published here — the
+    M1-929 posture).
+  - D2 mis-pointed-DB leg: fam world + tech DB → exit nonzero,
+    label_fingerprint_match false in the manifest, NO scores.json; the
+    inter-pass drift fence co-fired (the tech DB ingests live, ready
+    5456→5467 mid-run) — on a frozen wrong DB the label refusal is the
+    sole named error; the manifest evidence is identical either way.
+  - A/B tech byte-identity PROVEN 2026-08-29 14:39-14:42Z (logs
+    .scratch/tick-smoke-{A2,B}-M1-950.log; window log
+    .scratch/tick-freeze-M1-950.log): the test stack had been removed by
+    an external restructure mid-window; the operator restarted ONLY
+    postgres + embedder + gemma (collector never up → DB frozen at
+    ready=5569), ran A (pre-change, main@6aa73f26 in the detached
+    .worktree/M1-950-ab) and B (this branch) against the identical
+    corpus, then removed the containers again (volumes kept). Probes:
+    A/B queries.jsonl byte-identical (empty diff); B manifest = A's keys
+    plus exactly {world, golden_set_resource, world_embedding_coverage},
+    every shared value identical; golden_set_sha256 = sha256sum of the
+    untouched golden-set.jsonl (4dfed2d3…154, equal to the M1-944-era
+    reference); both legs refused at the label fence identically (labels
+    pin 5214, DB at 5569 — expected; artifacts are written before the
+    fence, which is what the byte-identity compares).
+- P10 → the grep fence (path literals only in RetrievalEvalWorlds.java +
+  the test's own assertEquals pins) + resolvesWorldToResourceAndLeaf.
+- P2 → the D2 operator failure-mode leg above.
+- P6 → world_embedding_coverage resolves in C2 and D2 manifests with the
+  with/total shape (8260/8260 on the replica).
+- P7/P8 → README grep probes for each enumerated entry (cross-instance
+  embedder numerics, doc_embedding boot re-embed, seed writes,
+  coverage-as-pin).
 - P14 → the fam-smoke bring-up (postgres + embedder + translator only)
-  restated in the ticket notes; no app-container step anywhere in the
-  invocation.
-- P15 → the tech-smoke byte-identity diff (queries.jsonl empty diff; sha pin
-  equal to sha256sum of the untouched tech file); git diff over the fences
-  shows behavior-identical methods.
-- P16/P17 → git status fence; no config/application.properties change in the
-  diff.
+  is the README fam invocation; no app-container step anywhere.
+- P15 → the tech-smoke byte-identity diff pending the freeze window
+  (above); git diff over the fences shows behavior-identical methods
+  (only resource/leaf/manifest wiring touched).
+- P16/P17 → git status fence; no config/application.properties change in
+  the diff.
 - acceptance items → the named legs/probes; the final item via
-  `git diff --name-only`, the verify-log probe, and repo-root `mvn verify`.
+  `git diff --name-only` (the 8 files_scope paths + board/ticket regen),
+  the verify-log probe (391 tests green, runner/characterization ITs
+  absent from failsafe; log .scratch/tick-test-M1-950-r1.log), and
+  repo-root `mvn verify`.
 
 ## Out-of-scope
 
@@ -262,3 +342,41 @@ containers. The runner and characterization IT ARE modified — authorized in
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-950-eval-harness-two-world-extension.md
 ```
+
+## Round 1 rework
+
+1. Finding 1: scrub the replica address (and optionally the pin-value
+   quote) from the ticket body at
+   docs/plan/m1/tick-tickets/M1-950-eval-harness-two-world-extension.md:267,
+   evaluated via `grep -rn "<replica-port>" docs/ scripts/ infochat-provider/`
+   (the operator substitutes the real port from the gitignored
+   .bench/retrieval-eval/README.md when running the probe)
+   returning no match over tracked files.
+2. (Binding exclusion, no code change) The .agents/memory/
+   v1-0-0-tag-pulled-pre-announcement.md rider must not enter the commit,
+   per the mechanical report's plan; evaluated via the committed diff
+   (`git diff --name-only <fork-point>..HEAD`) naming no .agents/memory
+   path — the committed file set must be exactly the eight files_scope
+   paths plus the board and ticket regen.
+
+Disposition: item 1 fixed (address + endpoints scrubbed from the
+Verification bullet; the pin-value quote in test_plan.modifies defanged —
+the value stays committed only in the fixture records and the validator
+constant, where the instrument needs it); the grep probe returns no
+match. Item 2 is honored at the commit step (the rider is staged but the
+commit stages exactly the ticket's file set).
+
+## Review observations (round 1, RECOMMENDED-NEW-TICKET, TOUCHED-BY-THIS-DIFF: no)
+
+- The committed analysis doc (docs/plan/m1/tick-analysis/
+  two-world-retrieval-instrument.md:13-21,134-142) names live deployment
+  facts — the live fam postgres port, the fam checkout host path,
+  volume/project names, the real users' language split, live census
+  tallies — §13-class material; M1-948/949's ticket bodies carry
+  redaction markers (a scrub event this analysis doc escaped). Candidate
+  scrub ticket, user's call.
+- M1-948's committed artifacts are absent (scripts/fam-replica-restore.sh,
+  FamReplicaRestoreWiringTest.java) against a done ticket whose acceptance
+  references both — the replica bring-up is not reproducible from a fresh
+  checkout. Known to the user: the squash-merge dropped the code; re-land
+  queued after this family.

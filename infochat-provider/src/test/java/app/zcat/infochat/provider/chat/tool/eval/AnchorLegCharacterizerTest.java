@@ -76,8 +76,9 @@ class AnchorLegCharacterizerTest {
                 new QueryTranslationCache(), new NeverOpenBreaker(), 500);
 
         byte[] goldenBytes;
-        try (var in = getClass().getClassLoader().getResourceAsStream("retrieval-eval/golden-set.jsonl")) {
-            assertTrue(in != null, "golden-set.jsonl not on the test classpath (M1-928)");
+        String resource = RetrievalEvalWorlds.tech().resource();
+        try (var in = getClass().getClassLoader().getResourceAsStream(resource)) {
+            assertTrue(in != null, resource + " not on the test classpath (M1-928)");
             goldenBytes = in.readAllBytes();
         }
         List<RetrievalGoldenSetLoader.GoldenRow> xling = RetrievalGoldenSetLoader.load(goldenBytes)

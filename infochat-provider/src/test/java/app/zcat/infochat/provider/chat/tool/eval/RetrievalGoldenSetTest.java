@@ -30,7 +30,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 // Corrections RETIRE the target in-file (replaced_by) and supersede it.
 class RetrievalGoldenSetTest {
 
-    private static final String GOLDEN_SET = "/retrieval-eval/golden-set.jsonl";
+    // Resource paths resolve through RetrievalEvalWorlds — the validator
+    // never spells a golden-set path itself (M1-950 P10 single-literal-site).
+    private static final String GOLDEN_SET = RetrievalEvalWorlds.tech().classResource();
 
     private static final Set<String> KNOWN_CLASSES = Set.of(
             "temporal-today", "temporal-2h", "temporal-24h",
@@ -55,8 +57,8 @@ class RetrievalGoldenSetTest {
     // .bench/retrieval-eval/fam-replica/pin-read-1.txt — reads byte-identical);
     // a tech pin on a fam record is the wrong-world collision.
     private static final String FAM_REPLICA_FINGERPRINT =
-            "ready=<redacted>;max_ready_at=<replica-pin>;"
-            + "uid_sha256=<replica-uid-pin>";
+            "ready=8260;max_ready_at=2026-08-28 15:43:18.001688+00;"
+            + "uid_sha256=2b385059297e4fa11cf172f458b4b959d37729619d4efbb8b514415378346d51";
 
     // Per-world validator parameters (M1-949): tech carries the exact
     // pre-existing constants (byte-identical tech behavior); fam adds its
@@ -82,7 +84,7 @@ class RetrievalGoldenSetTest {
             "topical", 16, "cross-lingual", 16);
 
     private static final World FAM = new World(
-            "/retrieval-eval/golden-set-fam.jsonl", FAM_CLASSES, FAM_CLASS_FLOORS,
+            RetrievalEvalWorlds.fam().classResource(), FAM_CLASSES, FAM_CLASS_FLOORS,
             46, 55, Set.of("cs"),
             "cs is the fam world's required xling language per real usage;"
             + " es/ru/tr rows are optional",

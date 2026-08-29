@@ -37,8 +37,8 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /**
- * Operator-run retrieval eval (M1-929): executes the committed golden set
- * (retrieval-eval/golden-set.jsonl, M1-928) through the PRODUCTION
+ * Operator-run retrieval eval (M1-929): executes the world-selected golden
+ * set (RetrievalEvalWorlds, M1-950) through the PRODUCTION
  * SemanticSearchTool bean on the operator-named test DB.
  * <pre>{@code
 ./mvnw verify -pl infochat-provider \
@@ -50,6 +50,9 @@ import static org.junit.jupiter.api.Assertions.fail;
   -Deval.embeddings.base-url=http://127.0.0.1:&lt;embed-port&gt;/v1 \
   -Deval.llm.base-url=http://127.0.0.1:&lt;gen-port&gt;/v1
 }</pre>
+ * World selection (M1-950): -Deval.world=tech (default; the frozen set,
+ * byte-identical to the pre-M1-950 behavior) or fam (the fam replica set
+ * via the replica's eval.db.url); an unknown name refuses, never falls back.
  * Never in the default suite: @Tag("retrieval-eval") + the POM's failsafe
  * excludedGroups (engineering-rules §8/§5); stack bring-up and the
  * residual-divergence disclosure live in .bench/retrieval-eval/README.md.
@@ -57,7 +60,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  * passes or vs the labels (D19/P7 — reported, not scored); double-run
  * uid-list identity; en records issue zero translator calls (D58); a
  * non-zero xling fallback count aborts scoring (M1-859 rule, P8).
- * Artifacts land under .bench/retrieval-eval/results/&lt;ts&gt;/ (manifest,
+ * Artifacts land under .bench/retrieval-eval/&lt;world leaf&gt;/&lt;ts&gt;/ (manifest,
  * queries, scores). No DB writes at all: the query-anchor cache is
  * in-memory (Caffeine) and the tool path performs no DML.
  */
@@ -166,8 +169,11 @@ class RetrievalEvalRunnerIT {
     void runGoldenSetThroughProductionTool() throws Exception {
         assertEndpointsAreReal(embeddingsBaseUrl, llmBaseUrl);
         assertNoTestStubsSelected(embeddingProviders, llmProviders);
-        Path resultsDir = resolveResultsDir("results");
-        byte[] goldenBytes = goldenSetBytes();
+        // Resolved once; the resource read, the results leaf, and the
+        // manifest world keys all ride this single world selection.
+        RetrievalEvalWorlds.World world = RetrievalEvalWorlds.resolve();
+        Path resultsDir = resolveResultsDir(world.resultsLeaf());
+        byte[] goldenBytes = goldenSetBytes(world);
         RetrievalGoldenSetLoader.GoldenSet goldenSet = RetrievalGoldenSetLoader.load(goldenBytes);
         List<GoldenRow> golden = goldenSet.activeRows();
 
@@ -188,7 +194,7 @@ class RetrievalEvalRunnerIT {
 
         boolean labelMatch = golden.stream()
                 .allMatch(r -> r.labeledFingerprint().equals(fingerprint1));
-        writeArtifacts(resultsDir, goldenSet, pass1, pass2, fingerprint1, fingerprint2,
+        writeArtifacts(resultsDir, world, goldenSet, pass1, pass2, fingerprint1, fingerprint2,
                 labelMatch, fallbackRecords);
 
         assertNoInterPassDrift(fingerprint1, fingerprint2);
@@ -335,10 +341,10 @@ class RetrievalEvalRunnerIT {
                 .counters().stream().mapToDouble(c -> c.count()).sum();
     }
 
-    private byte[] goldenSetBytes() throws IOException {
-        try (var in = getClass().getClassLoader().getResourceAsStream("retrieval-eval/golden-set.jsonl")) {
+    private byte[] goldenSetBytes(RetrievalEvalWorlds.World world) throws IOException {
+        try (var in = getClass().getClassLoader().getResourceAsStream(world.resource())) {
             if (in == null) {
-                throw new IllegalStateException("golden-set.jsonl not on the test classpath (M1-928)");
+                throw new IllegalStateException(world.resource() + " not on the test classpath (M1-928)");
             }
             return in.readAllBytes();
         }
@@ -428,6 +434,34 @@ class RetrievalEvalRunnerIT {
                 HexFormat.of().formatHex(sha.digest())).render();
     }
 
+    // The manifest's world_embedding_coverage: READY-world posts with a
+    // post_embedding row vs total over the RUN's DB — a PIN of the run's
+    // state, not an invariant (analysis P6; M1-952 registers the rule).
+    static Map<String, Object> worldEmbeddingCoverage(DataSource dataSource) throws Exception {
+        UUID scope = EVAL_SCOPES.get("en");
+        long total;
+        long withEmbedding;
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT count(*), count(*) FILTER (WHERE EXISTS"
+                             + " (SELECT 1 FROM post_embedding pe WHERE pe.post_id = p.id))"
+                             + " FROM post p WHERE " + WORLD_WHERE)) {
+            ps.setString(1, "dm");
+            ps.setObject(2, scope);
+            ps.setString(3, "dm");
+            ps.setObject(4, scope);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                total = rs.getLong(1);
+                withEmbedding = rs.getLong(2);
+            }
+        }
+        Map<String, Object> coverage = new LinkedHashMap<>();
+        coverage.put("with_embedding", withEmbedding);
+        coverage.put("total", total);
+        return coverage;
+    }
+
     private static Instant worldMaxReadyAt(String fingerprint) {
         String rendered = fingerprint.substring(fingerprint.indexOf("max_ready_at=") + 13,
                 fingerprint.indexOf(";uid_sha256="));
@@ -448,14 +482,17 @@ class RetrievalEvalRunnerIT {
         return results;
     }
 
-    private void writeArtifacts(Path dir, RetrievalGoldenSetLoader.GoldenSet goldenSet,
+    private void writeArtifacts(Path dir, RetrievalEvalWorlds.World world,
+                                RetrievalGoldenSetLoader.GoldenSet goldenSet,
                                 Map<String, QueryOutcome> pass1, Map<String, QueryOutcome> pass2,
                                 String fingerprint1, String fingerprint2,
-                                boolean labelMatch, java.util.Set<String> fallbackRecords) throws IOException {
+                                boolean labelMatch, java.util.Set<String> fallbackRecords) throws Exception {
         List<GoldenRow> golden = goldenSet.activeRows();
         Map<String, Object> manifest = new LinkedHashMap<>();
         manifest.put("ts", Instant.now().toString());
         manifest.put("git_commit", gitCommit());
+        manifest.put("world", world.name());
+        manifest.put("golden_set_resource", world.resource());
         manifest.put("db_fingerprint_pass1", fingerprint1);
         manifest.put("db_fingerprint_pass2", fingerprint2);
         manifest.put("label_fingerprint_match", labelMatch);
@@ -473,6 +510,7 @@ class RetrievalEvalRunnerIT {
         manifest.put("golden_set_sha256", goldenSet.contentSha256());
         manifest.put("golden_set_active_records", golden.size());
         manifest.put("golden_set_retired_records", goldenSet.retiredCount());
+        manifest.put("world_embedding_coverage", worldEmbeddingCoverage(dataSource));
         MAPPER.writerWithDefaultPrettyPrinter()
                 .writeValue(dir.resolve("manifest.json").toFile(), manifest);
 

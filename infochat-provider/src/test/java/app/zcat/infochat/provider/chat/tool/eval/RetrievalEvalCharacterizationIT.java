@@ -401,9 +401,11 @@ class RetrievalEvalCharacterizationIT {
     }
 
     private byte[] goldenSetBytes() throws IOException {
-        try (var in = getClass().getClassLoader().getResourceAsStream("retrieval-eval/golden-set.jsonl")) {
+        // Tech-pinned: the characterization fixtures are tech rows (M1-945).
+        String resource = RetrievalEvalWorlds.tech().resource();
+        try (var in = getClass().getClassLoader().getResourceAsStream(resource)) {
             if (in == null) {
-                throw new IllegalStateException("golden-set.jsonl not on the test classpath (M1-928)");
+                throw new IllegalStateException(resource + " not on the test classpath (M1-928)");
             }
             return in.readAllBytes();
         }

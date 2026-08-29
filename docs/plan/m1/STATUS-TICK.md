@@ -28,7 +28,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-935 — searchPosts topics filter over search_tags (complexity: medium, risk: medium)
 - M1-940 — Surface bounded post content in search tool emissions (complexity: medium, risk: medium)
 - M1-946 — Widen the cross-lingual golden slice to n = 16 (complexity: medium, risk: medium)
-- M1-950 — Eval harness two-world extension: per-world fences (complexity: medium, risk: medium)
+- M1-952 — Two-leg baseline record + pre-registered gating rules (complexity: medium, risk: low)
 
 ---
 
@@ -46,7 +46,6 @@ _(none)_
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
 - M1-941 — blocked_by: M1-940 (pending)
-- M1-952 — blocked_by: M1-949 (done), M1-950 (pending), M1-951 (done)
 
 ---
 
@@ -65,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-950 | Eval harness two-world extension: per-world fences | 2026-08-29 | round 2 APPROVE-WITH-FIXES |
 | M1-939 | Pin the native reply language per-turn and after fold-backs | 2026-08-29 | round 1 APPROVE |
 | M1-938 | Window the temporal pre-fetch; deterministic window hint | 2026-08-29 | round 2 APPROVE |
 | M1-936 | /topic command and digest topics footer | 2026-08-29 | round 2 APPROVE |
@@ -299,10 +299,10 @@ M1-945 (done)
         └── M1-947 (abandoned)
 M1-948 (done)
   ├── M1-949 (done)
-  │     ├── M1-950 (pending) ← runnable
-  │     │     └── M1-952 (pending)
+  │     ├── M1-950 (done)
+  │     │     └── M1-952 (pending) ← runnable
   │     └── M1-952 (pending) [see above]
-  └── M1-950 (pending) [see above]
+  └── M1-950 (done) [see above]
 M1-951 (done)
   ├── M1-946 (pending) [see above]
   └── M1-952 (pending) [see above]

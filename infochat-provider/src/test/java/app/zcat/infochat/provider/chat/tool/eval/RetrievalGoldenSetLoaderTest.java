@@ -76,9 +76,10 @@ class RetrievalGoldenSetLoaderTest {
     @Test
     void committedSetLoadsActiveOnly() throws Exception {
         byte[] content;
+        String resource = RetrievalEvalWorlds.tech().resource();
         try (InputStream in = RetrievalGoldenSetLoaderTest.class
-                .getResourceAsStream("/retrieval-eval/golden-set.jsonl")) {
-            assertTrue(in != null, "golden-set.jsonl not on classpath");
+                .getResourceAsStream("/" + resource)) {
+            assertTrue(in != null, resource + " not on classpath");
             content = in.readAllBytes();
         }
         RetrievalGoldenSetLoader.GoldenSet loaded = RetrievalGoldenSetLoader.load(content);
