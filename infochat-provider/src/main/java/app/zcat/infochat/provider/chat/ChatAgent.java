@@ -272,6 +272,16 @@ public class ChatAgent {
             "ru", "Russian",
             "tr", "Turkish");
 
+    // M1-939 per-turn native pin: the system-prompt directive alone lost to
+    // the English context live (English replies on Czech-scope native turns,
+    // 2026-08-26) — this pays the last trusted position before generation.
+    static String nativeTurnPin(String scopeLanguage) {
+        String name = LANGUAGE_NAMES.getOrDefault(scopeLanguage, scopeLanguage);
+        return "\n\nReminder: write your reply in " + name + ", whatever language "
+             + "the user writes in and whatever language the posts or tool "
+             + "results are in.";
+    }
+
     private final InFlightTracker inFlightTracker;
     private final ChatPromptBuilder promptBuilder;
     private final ChatToolDispatcher toolDispatcher;
@@ -680,11 +690,18 @@ public class ChatAgent {
         String languageDirective = replyMode == ChatReplyMode.NATIVE
                 ? nativeReplyDirective(scopeLanguage)
                 : REPLY_LANGUAGE_DIRECTIVE;
+        // Native-only (M1-939): re-pins the reply language at the two
+        // positions nearest generation — the per-turn tail and every
+        // fold-back scaffold; translate turns stay byte-identical.
+        String nativePin = replyMode == ChatReplyMode.NATIVE
+                ? nativeTurnPin(scopeLanguage)
+                : null;
         int systemSuffixTokens = ChatSessionRepository.estimateTokens(
                 languageDirective + TOOL_INSTRUCTIONS);
         ChatPromptBuilder.BuiltPrompt prompt = promptBuilder.build(
                 userId, scopeKind, scopeId, userMessage,
-                semanticBlock, turnDirective, systemSuffixTokens);
+                semanticBlock, turnDirective + (nativePin == null ? "" : nativePin),
+                systemSuffixTokens);
         // First-call report per the M1-923 gate: the turn's own
         // estimate-vs-budget evidence for the named-degrade catch arm.
         firstCompactionCarrier[0] = prompt.compaction();
@@ -716,9 +733,10 @@ public class ChatAgent {
                         == LlmRouter.ToolTransport.NATIVE;
 
         String finalText = runToolLoop(provider, augmentedSystemPrompt, baseSystemPrompt,
-                prompt.userPrompt() + (semanticDropped ? "" : semanticBlock) + effectiveDirective,
+                prompt.userPrompt() + (semanticDropped ? "" : semanticBlock)
+                        + effectiveDirective + (nativePin == null ? "" : nativePin),
                 userId, scopeKind, scopeId, turnContext, retrievedPostUids, reveal,
-                nativeToolsTransport, prompt.compaction().tokenBudget());
+                nativeToolsTransport, prompt.compaction().tokenBudget(), nativePin);
 
         // 6. Sanitize first: everything below evaluates the sanitized text
         // — sanitize itself can surface a protocol token (security.md
@@ -1064,6 +1082,8 @@ public class ChatAgent {
      * boundary with the shared TurnContext. Whole requests stay under
      * {@code promptTokenBudget}: fold-backs admit WHOLE JSON-array entries
      * only; an over-budget iteration routes to the final call instead.
+     * A non-null {@code nativePin} reasserts the native reply-language
+     * contract after every fold-back (M1-939).
      */
     String runToolLoop(LlmProvider provider, String systemPrompt,
                        String baseSystemPrompt, String userPrompt,
@@ -1071,7 +1091,8 @@ public class ChatAgent {
                        ChatToolDispatcher.TurnContext turnContext,
                        Set<String> retrievedPostUids,
                        ChatLiveTextStreamer.@Nullable LiveTextReveal reveal,
-                       boolean nativeToolsTransport, int promptTokenBudget) {
+                       boolean nativeToolsTransport, int promptTokenBudget,
+                       @Nullable String nativePin) {
         StringBuilder conversation = new StringBuilder(userPrompt);
         int systemTokens = ChatSessionRepository.estimateTokens(systemPrompt);
 
@@ -1146,7 +1167,8 @@ public class ChatAgent {
             String scaffoldTail = "\n"
                     + String.format(ChatPromptBuilder.UNTRUSTED_CONTENT_CLOSE_FORMAT,
                             resultMarker)
-                    + "\n\n" + POST_TOOL_RESULT_INSTRUCTION;
+                    + "\n\n" + POST_TOOL_RESULT_INSTRUCTION
+                    + (nativePin == null ? "" : nativePin);
             String fittedResultText = fitWithinBudget(
                     conversation.toString(), scaffoldHead, resultText, scaffoldTail,
                     systemTokens, promptTokenBudget);

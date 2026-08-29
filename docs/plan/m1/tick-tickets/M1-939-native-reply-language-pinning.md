@@ -1,16 +1,18 @@
 ---
 id: M1-939
 title: "Pin the native reply language per-turn and after fold-backs"
-status: pending
+status: done
 created: 2026-08-26
-last_updated: 2026-08-26
+last_updated: 2026-08-29
 flow: tick
 reproduction: >-
-  ChatAgentReplyModeTest#nativeTurnCarriesTheScopeLanguagePinOnThePerTurnTail
-  `to-be-written` (child of a 2+ decomposition, analysis
-  docs/plan/m1/tick-analysis/answer-synthesis-language-pinning.md; /tick
-  start converts the marker: write the test, run it RED against the
-  unmodified code before any fix code, workflow §0). The wrong behavior
+  ChatAgentReplyModeTest#nativeTurnCarriesTheScopeLanguagePinOnThePerTurnTail,
+  RED against unmodified main (14bad7dd) on 2026-08-29 along with its four
+  siblings — all five fail on pin presence, the rest of the module green
+  (2066 run, 5 failures; log .scratch/tick-red-M1-939.log) (child of a 2+
+  decomposition, analysis
+  docs/plan/m1/tick-analysis/answer-synthesis-language-pinning.md). The
+  wrong behavior
   it states: on a NATIVE-mode turn the scope-language contract appears
   ONLY in the system prompt — the assembled user prompt carries NO
   language pin anywhere in its tail. Verified in-tree today: the native
@@ -120,11 +122,32 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-29
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: PASS; MAINTAINABILITY: PASS; SCOPE: PASS"
+    diff_stats: "5 files, +257/-22 (1 prod ChatAgent, 1 test ChatAgentReplyModeTest, 1 design doc, ticket+board flow artifacts; owner memory edit excluded+disclosed)"
+    notes: >-
+      Zero rework/fix items, zero critical/high. Falsified-and-dropped:
+      /lang injection into pin (LangCommandHandler closed registry gate),
+      fold-back entry squeeze (fitWithinBudget prices full scaffoldTail,
+      whole-entry admission), pin-comment history retelling (stable-pointer
+      idiom, same shape as the M1-778 comment), sizing over-estimate on
+      dropped turns (directive slot fixed in ladder remainder, mirrors the
+      window-hint composition). Post-landing obligation: owner-run Czech
+      leak re-probe with recorded tally (acceptance item 10, ticket A's
+      gate input).
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  2026-08-29: passed — all Root cause/Approach citations re-verified on main
+  post-M1-938 (line drift only, semantics exact); P1-P8+P20 all present;
+  preserves traced (ChatAgentTest rig defaults TRANSLATE, InboundContext:70;
+  M1-918 corner tests ride scaffoldTail in translate mode, byte-identical).
+  Parallel mode refused: M1-936 in flight in infochat-provider (dirty
+  .worktree/M1-936, worktree ticket status in-progress) — module overlap.
 escalation_reason:
 ---
 

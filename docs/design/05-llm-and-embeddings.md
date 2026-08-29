@@ -576,7 +576,11 @@ headroom; M1-917's 16-entry semantic injection (~800 tokens ≈ 13% of
 budget) drops whole at ladder step 2 before history does — no separate window
 bound is added; M1-938's temporal window hint adds ~30-40 tokens on temporal
 turns only (parse-miss turns stay byte-identical, zero cost), riding the
-never-dropped directive region. Over budget, the ladder compacts in fixed order: (1) history
+never-dropped directive region; M1-939's native reply-language pin adds
+~1 sentence on NATIVE-mode turns only — one in the never-dropped per-turn
+directive tail (counted in the builder's directive sizing) and one per
+tool-result fold-back (riding `scaffoldTail` through the fold budget), with
+translate-mode turns byte-identical. Over budget, the ladder compacts in fixed order: (1) history
 oldest-first against min(`infochat.context-window`, budget remainder after
 fixed parts); (2) the whole retrieval block, never mid-JSON; (3) memory hits
 oldest-first, then the whole memory block. The injection-defence scaffolding,
@@ -890,7 +894,10 @@ instruction line that closes every model-initiated tool turn — repeats the
 demand bound to the tool-returned set ("exactly as the tool result
 provided it"). Both refer to posts abstractly and embed no feed-derived
 literal (the CLARIFY/AFFORDANCE hygiene posture above); neither duplicates
-`REPLY_LANGUAGE_DIRECTIVE` (the single source). A
+`REPLY_LANGUAGE_DIRECTIVE` (the single source of the translate-mode
+language contract; native mode's per-turn and fold-back pin, M1-939,
+reasserts the declared-language contract at the positions nearest
+generation rather than adding citation text). A
 marginal-grounding clarify turn asks a narrowing question, so no citation
 demand fires on its per-turn prompt; the framing's demand is conditional
 on the answer relying on posts. The wording's effect on the G5 citation
