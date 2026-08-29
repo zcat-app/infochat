@@ -54,12 +54,34 @@ re-audit loop and no code-reviewer.
      .scratch/tick-review-<ID>-r<round>.tree)` written to
      `.scratch/tick-review-<ID>-r<round>-fix.diff`; that file, not the full
      diff, is what the reviewer evaluates this round
-   - the round's diff file: round 1 → `git diff $(git merge-base main HEAD)
-     > .scratch/tick-review-<ID>-r1.diff`; rounds ≥ 2 → the fix-hunks file
-     above. Then the comment-cap report over it: `python3
-     scripts/tick-comment-cap.py <that file>` — its WARN lines go in the
-     report (they feed the reviewer's MAINTAINABILITY check)
-   - the lint WARNs
+    - the round's diff file: round 1 → `git diff $(git merge-base main HEAD)
+      > .scratch/tick-review-<ID>-r1.diff`; rounds ≥ 2 → the fix-hunks file
+      above. Then the comment-cap report over it: `python3
+      scripts/tick-comment-cap.py <that file>` — its WARN lines go in the
+      report (they feed the reviewer's MAINTAINABILITY check)
+    - placeholder scan over the round's added lines (the M1-949 vacuous-pin
+      lesson: the fixture AND its validator constant both carried
+      `ready=<redacted>;…` and were self-consistently green — no layer
+      looked). Two tiers, both reported with file:line + matched text:
+      tier 1 — fixture/resource paths, where the M1-949 class lives:
+      `git diff $(git merge-base main HEAD) --
+      ':(glob)**/src/*/resources/**' '*.jsonl' '*.sql' | grep -nE
+      "^\+.*<(redacted|[a-z0-9-]+-pin|[a-z0-9-]+-secret)>"` — every hit
+      needs explicit reviewer disposition: a placeholder in a VALUE
+      position (a binding field, a constant) is FAIL material; prose
+      adjacent to the real committed value (e.g. a rationale naming what
+      a pin binds) is dispositioned with justification. Tier 2 — code and
+      docs, where masking IS the correct §13 form in prose/javadoc: the
+      same grep without the path filter, hits listed as masking-evidence
+      for the same disposition.
+    - probe finality (the M1-950 round-2 trap): when the ticket's mandated
+      records (rework items, reviews entries) quote an EVALUATED-AS probe
+      verbatim, re-run every such probe against the FINAL working tree
+      AFTER all record appends and paste the actual result; if the quoted
+      literal itself is the only remaining match, mask the literal in the
+      record (`<replica-port>` style) and re-run. A reported PASS must
+      describe the tree under review, never a pre-append snapshot.
+    - the lint WARNs
    Read it back into the session (the report is small; it substitutes into
    `{{MECHANICAL_REPORT}}`).
 

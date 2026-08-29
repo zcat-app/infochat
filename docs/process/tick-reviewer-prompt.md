@@ -105,8 +105,22 @@ only raises the bar for dropping a finding.
   external surface, at least one assertion lives at the END of that path.
 - Non-vacuity: for each NEW test, name a concrete mutation of the diff's
   own production code that the test would catch.
-- Pitfall coverage: each declared pitfall Pn maps to a test that feeds the
-  failing input and asserts the protected behavior.
+- External-oracle legs (the M1-949 lesson): an acceptance item promising
+  equality with operator-local content (gitignored run records, memory
+  stores) is verifiable only if the oracle VALUE is reachable — quoted in
+  the ticket, or committed where §13 permits (content-addressed
+  public-corpus hashes, fixtures). If neither, WARN and verify internal
+  consistency only, naming the gap explicitly. A committed fixture or
+  string constant carrying a masked placeholder (`<redacted>`,
+  `<…-pin>`) for such an item is a FAIL — the pin is vacuous (fixture ==
+  constant == placeholder passes every internal check while binding
+  nothing). Non-vacuity must also survive TWO-POINT co-mutation: a
+  validator constant introduced by the same diff as the fixture it
+  checks binds nothing when both carry the same wrong value — name the
+  oracle OUTSIDE the diff that the check derives from, or the leg does
+  not count.
+- Pitfall coverage: each declared pitfall Pn maps to a test that feeds
+  the failing input and asserts the protected behavior.
 - Failure-mode presence: the diff's new tests are not happy-path-only.
 A FAIL must name its artifact (`file:line`); an unnamed FAIL is invalid —
 downgrade to WARN or PASS.
