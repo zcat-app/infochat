@@ -255,7 +255,7 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
         final String readyBound = cutoff != null
                 ? "               AND p.ready_at >= ? " : "";
         final String sql =
-            "SELECT uid, title, url, ready_at, distance "
+            "SELECT uid, title, url, ready_at, body_summary, anchored_body, distance "
                 + "  FROM ( "
                 + "    SELECT fused.*, "
                 + "           ROW_NUMBER() OVER "
@@ -268,6 +268,8 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
                 + "           COALESCE(s.title, l.title) AS title, "
                 + "           COALESCE(s.url, l.url) AS url, "
                 + "           COALESCE(s.ready_at, l.ready_at) AS ready_at, "
+                + "           COALESCE(s.body_summary, l.body_summary) AS body_summary, "
+                + "           COALESCE(s.anchored_body, l.anchored_body) AS anchored_body, "
                 + "           s.distance AS distance, "
                 + "           COALESCE(1.0 / (" + RRF_K + " + s.arm_rank), 0) "
                 + "             + COALESCE(1.0 / (" + RRF_K + " + l.arm_rank), 0) AS fused_score, "
@@ -277,6 +279,10 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
                 + "               (ORDER BY distance ASC, post_id ASC) AS arm_rank "
                 + "          FROM ( "
                 + "            SELECT p.uid, p.title, p.url, p.ready_at, p.source_id, pe.post_id AS post_id, "
+                // 1200 chars is a transport bound, not the surfaced cap: the
+                // 400-byte MAX_ENTRY_CONTENT_BYTES cut always bites deeper (400
+                // bytes span at most 400 chars) — keep 1200 above that cap.
+                + "                   p.body_summary, substring(coalesce(p.body_en, p.body) from 1 for 1200) AS anchored_body, "
                 + "                   (pe.embedding <=> ?::vector) AS distance "
                 + "              FROM post_embedding pe "
                 + "              JOIN post p ON p.id = pe.post_id "
@@ -293,6 +299,10 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
                 + "               (ORDER BY lex_score DESC, post_id ASC) AS arm_rank "
                 + "          FROM ( "
                 + "            SELECT p.uid, p.title, p.url, p.ready_at, p.source_id, p.id AS post_id, "
+                // 1200 chars is a transport bound, not the surfaced cap: the
+                // 400-byte MAX_ENTRY_CONTENT_BYTES cut always bites deeper (400
+                // bytes span at most 400 chars) — keep 1200 above that cap.
+                + "                   p.body_summary, substring(coalesce(p.body_en, p.body) from 1 for 1200) AS anchored_body, "
                 + "                   ts_rank(p.search_tsv, "
                 + "                           plainto_tsquery('english', ?)) AS lex_score "
                 + "              FROM post p "
@@ -362,6 +372,10 @@ public class SemanticSearchTool implements ChatToolRegistry.ChatTool {
                          .append(SearchPostsTool.jsonStr(
                                  SearchPostsTool.instantStr(rs.getTimestamp("ready_at"))))
                          .append(",\"similarity\":").append(similarity)
+                         .append(",\"body_summary\":").append(SearchPostsTool.jsonStr(
+                                 SearchPostsTool.boundedEntryContent(
+                                         rs.getString("body_summary"),
+                                         rs.getString("anchored_body"))))
                          .append('}');
                     int entryBytes = entry.toString()
                             .getBytes(StandardCharsets.UTF_8).length + (first ? 0 : 1);

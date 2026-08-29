@@ -642,9 +642,13 @@ grounding-vs-general-knowledge: nothing under the threshold → empty result →
 the model answers from general knowledge. `infochat.chat.semantic-limit`
 (default 16) sizes the grounded set. The retrieved set and its order are
 SQL-decided (D19, strict_order + a distance/post_id re-sort keep it exactly
-deterministic); the result carries `uid/title/url/ready_at/similarity`, never a raw
+deterministic); the result carries `uid/title/url/ready_at/similarity/body_summary`, never a raw
 vector (D5) — the `ready_at` is the same READY-transition timestamp
-`searchPosts` emits, so the model can date what it serves. The tool is also model-callable mid-loop for refined queries
+`searchPosts` emits, so the model can date what it serves, and `body_summary`
+surfaces bounded post content (the stored ingest abstract, else a
+code-truncated excerpt of the English-anchored body, capped per entry at 400
+UTF-8 bytes with the `[TRUNCATED]` marker; `null` when neither exists) so the
+model can quote what a hit actually says without a `getPost` round trip. The tool is also model-callable mid-loop for refined queries
 (registry row in security.md §Prompt-injection defenses); the deterministic
 pre-fetch and the loop share ONE per-turn dispatch context, so the fixed
 call cap and identical-call cache hold across the whole turn.
@@ -696,7 +700,9 @@ when no source exceeds K among the surviving rows the pass is provably
 inert and renders the plain `fused_score DESC, post_id ASC LIMIT limit`
 order byte-for-byte. Emission shape carries each entry's
 `ready_at` between `url` and `similarity`
-(`uid/title/url/ready_at/similarity`); a **lexical-only row emits
+(`uid/title/url/ready_at/similarity/body_summary`); every row — semantic or
+lexical-only — carries the same bounded `body_summary` content field after
+`similarity` that `searchPosts` emits; a **lexical-only row emits
 `"similarity":null` and still carries its `ready_at`** — such a post may
 have NO `post_embedding` row at
 all (embedding-failure posts are released without a vector), so a number
@@ -722,6 +728,16 @@ shipped
 wizard serving slot this narrows the context fit margin until the
 chat-context-budget work lands — recorded here as an inherited cost,
 weighed and accepted by the owner at ticket time.
+
+**Content-bearing entries (`body_summary`).** The content field adds up to
+~400 B of ingest-derived post content per entry (plus the truncation marker
+when cut), moving the per-entry worst case from ~400 B of metadata to
+~0.8 KB metadata + content: the 16 KiB aggregate budget now binds near ~20
+entries instead of ~40, and `searchPosts`' default limit admits fewer
+entries than before at the same cap. Truncation stays order-preserving at
+the tail — an entry dropped by budget drops with its content, and the
+per-entry cut bounds whichever value surfaces (stored abstract or anchored
+excerpt) so every admitted entry's content is whole-to-the-cap.
 
 **Query anchoring to the corpus language (D58, M1-746).** The query text
 reaching both arms is anchored to the corpus anchor language (English,

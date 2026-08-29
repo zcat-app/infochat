@@ -1,15 +1,17 @@
 ---
 id: M1-940
 title: "Surface bounded post content in search tool emissions"
-status: pending
+status: done
 created: 2026-08-26
-last_updated: 2026-08-26
+last_updated: 2026-08-29
 flow: tick
 reproduction: >-
-  Two tests `to-be-written` (child of a 2+ decomposition, analysis
-  docs/plan/m1/tick-analysis/answer-synthesis-language-pinning.md; /tick
-  start converts the markers: write both, run them RED against the
-  unmodified code before any fix code, workflow §0), each stating
+  Two tests (child of a 2+ decomposition, analysis
+  docs/plan/m1/tick-analysis/answer-synthesis-language-pinning.md; both
+  written and run RED against the unmodified code on 2026-08-29 — the
+  five SearchPostsToolTest additions 5/5 red and the two
+  SemanticSearchToolIT additions 2/2 red, every pre-existing test in
+  both classes green), each stating
   today's wrong behavior — a retrieved post's CONTENT is invisible to
   the model on every list-shaped search hit:
   SearchPostsToolTest#entriesCarryBoundedBodySummaryForSynthesis — seeds
@@ -142,11 +144,59 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-29
+    verdict: REWORK
+    checks: 'SPEC-TRUTHNESS: PASS, SECURITY: FAIL (F1 medium — the SQL reads
+      each hit''s FULL body columns and truncates only in Java; bounded at
+      the fetch cap x row count, inherited by the every-turn pre-fetch),
+      TEST-ADEQUACY: PASS, MAINTAINABILITY: FAIL (F2 low — stale
+      golden-provenance comment), SCOPE: PASS; 5 candidate findings
+      falsified-and-dropped (world-boundary leak, wrapper breakout, bind/
+      D19 drift, marker-makes-411-bytes, aggregate-blow); 1
+      RECOMMENDED-NEW-TICKET (M1-950 eval pin drift, TOUCHED-BY-THIS-DIFF:
+      yes, no DECIDE-BEFORE) recorded under Review observations'
+    diff_stats: '9 files, +512/-46 (7 files_scope paths + ticket + board
+      regen)'
+  - round: 2
+    date: 2026-08-29
+    verdict: APPROVE-WITH-FIXES
+    checks: 'SPEC-TRUTHNESS: PASS, SECURITY: PASS, TEST-ADEQUACY: PASS,
+      MAINTAINABILITY: WARN (F1 low — the 1200-char SQL cut''s coupling to
+      MAX_ENTRY_CONTENT_BYTES recorded nowhere), SCOPE: PASS; r1 items
+      dispositioned: 1 SATISFIED, 2 SATISFIED; 4 candidate findings
+      falsified-and-dropped (multibyte emission change, NULL propagation,
+      bind shift, body_summary half-fix)'
+    diff_stats: 'fix hunks: 5 files, +48/-6 (code confined to the 3 named
+      files; ticket + board carry the dispatch records)'
+    fixes_applied: 'F1 comment-only fix at the three SELECT sites
+      (transport-bound coupling note); probes: grep -c ''transport
+      bound'' → SearchPostsTool 1, SemanticSearchTool 2; comment-only
+      verified (every + line is a // line; no docs/spec, docs/design or
+      *.md touched); mvnw -pl infochat-provider -am test-compile BUILD
+      SUCCESS (.scratch/tick-fixes-compile-M1-940.log); r2 full-verify
+      log remains the log of record; fixed-tree snapshot
+      .scratch/tick-fixes-M1-940.tree = 5eb34f5cd70373033900ac08c8261fd8212ad9da'
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  2026-08-29: >-
+    Start-time self-check passed with no blocking question. Every
+    file:line citation in Root cause/Approach verifies in SUBSTANCE at
+    post-sibling-landing line numbers (M1-932/936/938/939 landed after
+    the analysis was drafted: SearchPostsTool SELECT now :176/emission
+    :220-227, SemanticSearchTool emission :358-374, ChatAgent wrappers
+    :912-973/:1165-1172 and collectPostUids :1421, ChatAgentTest fold
+    pins :2650/:2715, design-05 ledger :712-718 — the shapes claimed all
+    hold; only line numbers drifted, as P20 anticipated). Census
+    re-runs clean in substance: the four tool rows sit at
+    security.md:328-331 exactly as enumerated (the ticket's literal
+    grep string misses the backtick before '{' — cosmetic; the
+    enumerated rows and their states are accurate). --parallel module
+    check: no tick ticket is in-progress/in-review, so the
+    infochat-provider scope has no in-flight overlap.
 escalation_reason:
 ---
 
@@ -216,7 +266,8 @@ P19's eval honesty and P20's landing-order context).
   use synthetic entries) — verified, they stay green unmodified.
 - P19: eval honesty — answer quality is not CI-measured (M1-928 is
   retrieval-focused); acceptance is unit pins + owner-run probe; the
-  M1-859 harness drift is the eval lane's extension.
+  M1-859 harness drift is the eval lane's extension (M1-950's landed
+  characterization pin included — see Out-of-scope).
 - P20: landing order — after M1-932/934/935/937/938 (their WHERE-side
   params/window compose with these SELECT-side columns without
   interaction); the §8 pin updates here are against the post-sibling
@@ -327,6 +378,15 @@ pre-existing test artifacts are modified, each §8-authorized in
 acceptance item 9 with the new expected behavior stated in plain
 language; every other pre-existing suite must pass unmodified.
 
+Eval-lane interaction, recorded at start (2026-08-29): M1-950 landed
+mid-ticket and its characterization harness exact-pins the PRE-change
+five-field emission (RetrievalEvalCharacterizationIT's assertEmissionShape,
+`Set.of("uid","title","url","ready_at","similarity")`). That suite is
+`@Tag("retrieval-eval")` — excluded from the default verify, operator-run
+only — so CI stays green and the ticket fence (no eval-lane file edited)
+holds; the pin WILL red on the eval lane's next owner run after this
+lands, and updating it is the eval side's own extension, owner-run.
+
 ## Census
 
 This ticket amends a CLASS of emission sites: every post-corpus SEARCH
@@ -345,6 +405,33 @@ defenses tool table. Rows (verified at draft time):
 - security.md:332-334 `recallMemory`/`listSaves`/`helpLookup` — not
   post-corpus search tools; user-scoped state and the intent index →
   DISPOSED, no row touches them.
+
+## Round 1 rework
+
+REWORK ITEMS (verbatim from .scratch/tick-review-M1-940-r1.txt):
+
+1. FINDING 1: bound the anchored-body read at the SQL layer — replace the
+   plain `coalesce(p.body_en, p.body) AS anchored_body` column with
+   `substring(coalesce(p.body_en, p.body) from 1 for 1200) AS anchored_body`
+   at SearchPostsTool.java:184-185 and SemanticSearchTool.java:282 and :299
+   (behavior-identical emission), evaluated via finding 1's EVALUATED-AS:
+   the two named tests pass unchanged plus the three-site grep probe.
+2. FINDING 2: reword the stale golden-provenance comment at
+   SemanticSearchToolDiversityIT.java:173-175 to state that the set and
+   order are the pre-change fused ORDER BY while the entry shape is
+   regenerated against the landed emission, evaluated via finding 2's grep
+   probe plus test-compile.
+
+## Review observations
+
+- (r1, RECOMMENDED-NEW-TICKET, TOUCHED-BY-THIS-DIFF: yes) The M1-950
+  eval-lane characterization pin exact-pins the PRE-change five-field
+  emission (RetrievalEvalCharacterizationIT.java:269,
+  `Set.of("uid","title","url","ready_at","similarity")`) and will RED on
+  the eval lane's next owner run once this lands; the harness's emission
+  shape assertion must gain `body_summary`. The fence held (no eval file
+  edited; the interaction is recorded above in Out-of-scope) — filing a
+  follow-up ticket is the owner's call.
 
 ## Pre-flight self-check (author-side)
 

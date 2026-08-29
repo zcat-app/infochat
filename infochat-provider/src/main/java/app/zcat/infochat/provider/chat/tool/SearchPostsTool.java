@@ -50,6 +50,11 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
      */
     static final int MAX_RESULT_BYTES = 16 * 1024;
 
+    /** Per-entry cap (UTF-8 bytes) on the surfaced {@code body_summary}
+     *  value, cut by {@link GetPostTool#truncateUtf8} — the same discipline
+     *  getPost's body carries; code constant for the RRF_K no-knob reason. */
+    static final int MAX_ENTRY_CONTENT_BYTES = 400;
+
     // The scope's declared language (D58 (c)): identical SQL to
     // SemanticSearchTool's lookup — a missing row means 'en' (D43).
     private static final String SELECT_SCOPE_LANGUAGE_SQL =
@@ -173,7 +178,14 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
         // approve_quarantine/re-eval, both of which would rank an undated post
         // above the clamp ceiling; fetched_at is the immutable partition key.
         // M1-689 redteam rounds 1-2.
-        sql.append("SELECT p.uid, p.title, p.url, p.ready_at, p.tags ")
+        // coalesce(body_en, body) is the D29 English-anchor read (the
+        // search_tsv precedent) — SELECT-side only, the set and its
+        // order are untouched (D19).
+        sql.append("SELECT p.uid, p.title, p.url, p.ready_at, p.tags, ")
+           // 1200 chars is a transport bound, not the surfaced cap: the
+           // 400-byte MAX_ENTRY_CONTENT_BYTES cut always bites deeper (400
+           // bytes span at most 400 chars) — keep 1200 above that cap.
+           .append("p.body_summary, substring(coalesce(p.body_en, p.body) from 1 for 1200) AS anchored_body ")
            .append("FROM post p ")
            .append("WHERE p.status = 'READY' ")
            .append("AND p.ready_at >= ? ")
@@ -224,6 +236,9 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
                                  instantStr(rs.getTimestamp("ready_at"))))
                          .append(",\"tags\":");
                     appendJsonArray(entry, (String[]) rs.getArray("tags").getArray());
+                    entry.append(",\"body_summary\":").append(jsonStr(
+                            boundedEntryContent(rs.getString("body_summary"),
+                                    rs.getString("anchored_body"))));
                     entry.append('}');
                     int entryBytes = entry.toString()
                             .getBytes(StandardCharsets.UTF_8).length + (first ? 0 : 1);
@@ -331,6 +346,16 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
     static String jsonStr(@Nullable String s) {
         if (s == null) return "null";
         return "\"" + JsonEscaper.escape(s) + "\"";
+    }
+
+    /** The {@code body_summary} one entry surfaces: stored ingest abstract
+     *  when present, else the anchored body — either way bounded by
+     *  {@link #MAX_ENTRY_CONTENT_BYTES}. */
+    static @Nullable String boundedEntryContent(@Nullable String bodySummary,
+                                                @Nullable String anchoredBody) {
+        String content = bodySummary != null ? bodySummary : anchoredBody;
+        return content == null ? null
+                : GetPostTool.truncateUtf8(content, MAX_ENTRY_CONTENT_BYTES);
     }
 
     static void appendJsonArray(StringBuilder sb, String[] items) {

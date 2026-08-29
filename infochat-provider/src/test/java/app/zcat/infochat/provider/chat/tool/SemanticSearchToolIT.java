@@ -12,6 +12,7 @@ import app.zcat.infochat.provider.testsupport.SeedDataSource;
 import app.zcat.infochat.provider.translation.QueryTranslationCache;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -260,8 +261,10 @@ class SemanticSearchToolIT {
 
         assertTrue(json.matches(
                 "\\[\\{\"uid\":\"[^\"]*\",\"title\":\"[^\"]*\",\"url\":\"[^\"]*\","
-                        + "\"ready_at\":\"[^\"]*\",\"similarity\":[0-9.]+\\}\\]"),
-                "each entry must carry exactly uid/title/url/ready_at/similarity; got: " + json);
+                        + "\"ready_at\":\"[^\"]*\",\"similarity\":[0-9.]+,"
+                        + "\"body_summary\":(\"[^\"]*\"|null)\\}\\]"),
+                "each entry must carry exactly "
+                        + "uid/title/url/ready_at/similarity/body_summary; got: " + json);
         assertFalse(json.contains("embedding"),
                 "the raw embedding vector must never be emitted (D5); got: " + json);
     }
@@ -285,16 +288,99 @@ class SemanticSearchToolIT {
         assertTrue(oldEntry.matches(
                         "\\{\"uid\":\"[^\"]*\",\"title\":\"[^\"]*\",\"url\":\"[^\"]*\","
                                 + "\"ready_at\":\"" + olderReady + "\","
-                                + "\"similarity\":[0-9.]+\\}"),
+                                + "\"similarity\":[0-9.]+,"
+                                + "\"body_summary\":(\"[^\"]*\"|null)\\}"),
                 "the dated-old entry must carry exactly its seeded ready_at "
                         + "between url and similarity; got: " + oldEntry);
         String newEntry = entryContaining(json, PREFIX + "dated-new");
         assertTrue(newEntry.matches(
                         "\\{\"uid\":\"[^\"]*\",\"title\":\"[^\"]*\",\"url\":\"[^\"]*\","
                                 + "\"ready_at\":\"" + newerReady + "\","
-                                + "\"similarity\":[0-9.]+\\}"),
+                                + "\"similarity\":[0-9.]+,"
+                                + "\"body_summary\":(\"[^\"]*\"|null)\\}"),
                 "the dated-new entry must carry exactly its seeded ready_at "
                         + "between url and similarity; got: " + newEntry);
+    }
+
+    // Reproduction (M1-940 semanticSearch half): the fused emission carries
+    // the post's content per entry after similarity — the same three value
+    // classes as the searchPosts half, plus lexical-only parity.
+    @Test
+    void fusedEntriesCarryBoundedBodySummaryForSynthesis() throws Exception {
+        UUID userId = seedUser("synth");
+        UUID sourceId = seedSource("synth-src", "Synth source");
+        seedSubscription("dm", userId, sourceId);
+        // The stored-summary post's BODY carries a marker absent from its
+        // summary, so emitting the wrong source fails the stored arm.
+        seedEmbeddedPostWithContent("fused-stored", sourceId, vectorAtAngle(0.2),
+                "Qwen3-32B released under Apache-2.0.", null,
+                "ORIGINAL-BODY-MARKER never to surface while a summary exists");
+        seedEmbeddedPostWithContent("fused-fallback", sourceId, vectorAtAngle(0.3),
+                null, null, "Qwen3-32B released under Apache-2.0.");
+        seedEmbeddedPostWithContent("fused-null", sourceId, vectorAtAngle(0.4),
+                null, null, null);
+        // Lexical-only row: distance 1−cos(1.4) ≈ 0.83 > threshold 0.5
+        // excludes it from the semantic arm; its body mentions the query
+        // so the lexical arm recovers it with similarity null.
+        seedEmbeddedPostWithContent("fused-lexical", sourceId, vectorAtAngle(1.4),
+                null, null, "anything the query mentions verbatim");
+
+        String json = tool.execute(userId, "dm", userId, Map.of("query", "anything"));
+
+        String stored = entryContaining(json, PREFIX + "fused-stored");
+        assertTrue(stored.contains(
+                        "\"body_summary\":\"Qwen3-32B released under Apache-2.0.\""),
+                "a fused entry with a stored body_summary surfaces it verbatim; got: "
+                        + stored);
+        assertFalse(stored.contains("ORIGINAL-BODY-MARKER"),
+                "the stored-summary entry must not surface the raw body instead "
+                        + "(wrong-source mutation); got: " + stored);
+        String fallback = entryContaining(json, PREFIX + "fused-fallback");
+        assertTrue(fallback.contains(
+                        "\"body_summary\":\"Qwen3-32B released under Apache-2.0.\""),
+                "a NULL-summary fused entry surfaces its body as the content; got: "
+                        + fallback);
+        String noContent = entryContaining(json, PREFIX + "fused-null");
+        assertTrue(noContent.contains("\"body_summary\":null"),
+                "a fused entry with neither summary nor body emits JSON null; got: "
+                        + noContent);
+        String lexical = entryContaining(json, PREFIX + "fused-lexical");
+        assertTrue(lexical.contains("\"similarity\":null"),
+                "the lexical-only row keeps its null similarity; got: " + lexical);
+        assertTrue(lexical.contains(
+                        "\"body_summary\":\"anything the query mentions verbatim\""),
+                "a lexical-only row (similarity null) carries the content field "
+                        + "exactly like a semantic row; got: " + lexical);
+        assertEquals(4, json.split("\"body_summary\":", -1).length - 1,
+                "every fused entry carries exactly one body_summary field; got: " + json);
+    }
+
+    // P13 anchored read through the fused query: the NULL-summary fallback
+    // reads the English-anchored body_en first (D29).
+    @Test
+    void nullSummaryFallsBackToTheEnglishAnchoredBody() throws Exception {
+        UUID userId = seedUser("anchor");
+        UUID sourceId = seedSource("anchor-src", "Anchor source");
+        seedSubscription("dm", userId, sourceId);
+        seedEmbeddedPostWithContent("anchor-translated", sourceId, vectorAtAngle(0.2),
+                null, "ANCHORED-MARKER English anchor text shipped from body_en",
+                "ORIGINAL-MARKER original-language body text");
+        seedEmbeddedPostWithContent("anchor-null", sourceId, vectorAtAngle(0.5),
+                null, null, null);
+
+        String json = tool.execute(userId, "dm", userId, Map.of("query", "anything"));
+
+        String anchored = entryContaining(json, PREFIX + "anchor-translated");
+        assertTrue(anchored.contains("ANCHORED-MARKER"),
+                "the fused fallback surfaces the English-anchored body_en; got: "
+                        + anchored);
+        assertFalse(anchored.contains("ORIGINAL-MARKER"),
+                "the anchored read prefers body_en over the original body "
+                        + "(discriminating fixture); got: " + anchored);
+        assertTrue(entryContaining(json, PREFIX + "anchor-null")
+                        .contains("\"body_summary\":null"),
+                "a fused entry with neither summary nor anchored body emits null; "
+                        + "got: " + json);
     }
 
     // Reproduction (M1-938 tool half): the windowed fused search bounds
@@ -474,6 +560,46 @@ class SemanticSearchToolIT {
             ps.setString(8, status);
             ps.setTimestamp(9, Timestamp.from(readyAt));
             ps.setString(10, PREFIX + slug);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                postId = (UUID) rs.getObject(1);
+            }
+        }
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO post_embedding (post_id, embedding, embedding_model, fetched_at) "
+                     + "VALUES (?, ?::vector, 'nomic-embed-text', ?)")) {
+            ps.setObject(1, postId);
+            ps.setString(2, SemanticSearchTool.toVectorLiteral(embedding));
+            ps.setTimestamp(3, Timestamp.from(FETCHED_AT));
+            ps.executeUpdate();
+        }
+    }
+
+    /** READY post with explicit content columns + its embedding row
+     *  (M1-940's value classes: stored summary / anchored body / neither —
+     *  any may be NULL; ready_at is FETCHED_AT like the default overload). */
+    private void seedEmbeddedPostWithContent(String slug, UUID sourceId, float[] embedding,
+                                             @Nullable String bodySummary,
+                                             @Nullable String bodyEn,
+                                             @Nullable String body) throws Exception {
+        UUID postId;
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO post (uid, source_id, title, body, body_summary, body_en, "
+                     + "url, published_at, fetched_at, status, ready_at, tags, upstream_identifier) "
+                     + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'READY', ?, '{}', ?) RETURNING id")) {
+            ps.setString(1, PREFIX + slug);
+            ps.setObject(2, sourceId);
+            ps.setString(3, "Title " + slug);
+            ps.setString(4, body);
+            ps.setString(5, bodySummary);
+            ps.setString(6, bodyEn);
+            ps.setString(7, "https://example.com/" + slug);
+            ps.setTimestamp(8, Timestamp.from(FETCHED_AT));
+            ps.setTimestamp(9, Timestamp.from(FETCHED_AT));
+            ps.setTimestamp(10, Timestamp.from(FETCHED_AT));
+            ps.setString(11, PREFIX + slug);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 postId = (UUID) rs.getObject(1);
