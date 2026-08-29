@@ -31,9 +31,14 @@ ecosystem — re-check the PR states before relying on them.
   **not master** (base branch was switched minutes before merge). A "merged!"
   Reddit post is not shippability.
 - Open bugs at merge time: #27407 (greedy divergence from non-spec baseline
-  under batched verification), #27408 (mtmd image chunks leave holes in the
-  draft KV cache → `llama_decode` rc=-1 → HTTP 500 with draft-dflash — bites
-  image-capable serving, i.e. /image traffic).
+  under batched verification — the one that CAN bite infochat, which serves
+  parallel ≥ 2), #27408 (mtmd image chunks leave holes in the draft KV cache →
+  `llama_decode` rc=-1 → HTTP 500 with draft-dflash — fires ONLY when image
+  chunks reach llama-server as multimodal PROMPT input; infochat's /image flow
+  is ComfyUI-only and never touches the LLM, so it cannot fire there.
+  CORRECTED 2026-08-29: the earlier "i.e. /image traffic" gloss conflated
+  image generation with LLM image input — no image_url/multimodal path exists
+  in code; ImageCommandHandler → ComfyUIClient only).
 - Reference eval (Apple M5 Pro, dense Qwen3.8-27B Q4_K_M, GSM8K-8): 10.4
   bare → 19.3 t/s (1.85x, acceptance ~5/8); draft quant (BF16/Q8_0/Q4_K_M)
   barely matters.
