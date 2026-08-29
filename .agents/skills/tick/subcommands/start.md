@@ -56,7 +56,12 @@ home directory, never `/tmp`. Degrade to sequential if the tool cannot
 operate in another working directory. A worktree does not inherit the
 gitignored `tick-analysis/`: copy the ticket's `analysis_ref:` file from
 the primary into the worktree (untracked in both) BEFORE the step-1a
-lint, or `ANALYSIS-REF-RESOLVABLE` false-blocks the start. Check the module boundary MECHANICALLY, never from memory: list
+lint, or `ANALYSIS-REF-RESOLVABLE` false-blocks the start. The primary
+checkout is NEVER a workspace: do not check the ticket branch out there
+and do not edit ticket files in it — a primary found on a foreign branch
+with a dirty tree belongs to that session; leave it untouched. All
+ticket work happens in the `.worktree/<ID>` worktree, branched off
+`main`. Check the module boundary MECHANICALLY, never from memory: list
 the tick tickets with `status: in-progress` or `in-review` (frontmatter
 under `docs/plan/m1/tick-tickets/`), take the Maven-module root of each
 one's `files_scope` paths (or its worktree's changed modules when the scope

@@ -30,10 +30,17 @@ main). Invocation: `/tick merge <id>`. Idempotent.
 
 ## Squash-merge path
 
-`git checkout main` → `git merge --squash <branch>` →
-`git commit -C <branch-tip>` (reuses the commit message verbatim, keeping
-the `Reviewed-by:` / `Renames:` / `Alternatives considered:` trailers) →
-`git branch -D <branch>`.
+The squash runs where `main` is checked out. From the primary ONLY when
+it sits clean on `main`. A primary on another session's branch — worse,
+a dirty one — is never touched: no checkout, no stash of its WIP (a
+stash round-trip races the live session and `apply --index` does not
+reliably restore staged-ness). Merge from a throwaway worktree instead:
+`git worktree add .worktree/tmp-main main` → `git merge --squash
+<branch>` → `git commit -C <branch-tip>` (reuses the commit message
+verbatim, keeping the `Reviewed-by:` / `Renames:` / `Alternatives
+considered:` trailers) → `git worktree remove .worktree/tmp-main` →
+`git branch -D <branch>` (only after the ticket worktree is removed —
+the branch-delete guard is the worktree, not the primary).
 
 ## Conflicts
 
