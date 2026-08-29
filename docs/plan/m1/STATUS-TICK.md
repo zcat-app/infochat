@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 2 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 160 |
+| done | 161 |
 | deferred | 1 |
 | abandoned | 6 |
 | **total** | **169** |
@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-935 — searchPosts topics filter over search_tags (complexity: medium, risk: medium)
 - M1-955 — Re-pin the retrieval characterization emission shape (complexity: low, risk: low)
 
 ---
@@ -63,6 +62,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-952 | Two-leg baseline record + pre-registered gating rules | 2026-08-30 | round 1 APPROVE |
+| M1-935 | searchPosts topics filter over search_tags | 2026-08-30 | round 2 APPROVE |
 | M1-954 | Re-land the fam replica restore procedure instance-free | 2026-08-29 | round 2 APPROVE |
 | M1-950 | Eval harness two-world extension: per-world fences | 2026-08-29 | round 2 APPROVE-WITH-FIXES |
 | M1-946 | Widen the cross-lingual golden slice to n = 16 | 2026-08-29 | round 2 APPROVE |
@@ -71,7 +71,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-939 | Pin the native reply language per-turn and after fold-backs | 2026-08-29 | round 1 APPROVE |
 | M1-938 | Window the temporal pre-fetch; deterministic window hint | 2026-08-29 | round 2 APPROVE |
 | M1-936 | /topic command and digest topics footer | 2026-08-29 | round 2 APPROVE |
-| M1-953 | Counted temporal form requires a left word boundary | 2026-08-28 | round 1 APPROVE |
 
 ---
 
@@ -277,10 +276,10 @@ M1-928 (done)
   └── M1-930 (done) [see above]
 M1-931 (done)
 M1-932 (done)
-  └── M1-935 (pending) ← runnable
+  └── M1-935 (done)
 M1-933 (done)
 M1-934 (done)
-  ├── M1-935 (pending) [see above]
+  ├── M1-935 (done) [see above]
   └── M1-936 (done)
 M1-937 (done)
   └── M1-938 (done)

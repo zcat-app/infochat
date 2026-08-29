@@ -555,7 +555,12 @@ parameter matching posts whose title or body mention the given English
 terms (prefix lexemes over `post.search_tsv`, composed AND with
 tag/window/world inside the one statement, never reordering), plus the
 temporal-to-window routing sentence — time expressions go to `window`,
-never `text`; `text` carries entity/topic terms only. The guidance lives
+never `text`; `text` carries entity/topic terms only. The same description
+documents the optional `topics` filter: a prefix-tolerant match over
+`post.search_tags` (free tags), composed AND with tag/text/window/world
+inside the one statement and never reordering — `tags` steers the bounded
+category tree, `topics` the specific named things (countries, companies,
+projects, coins). The guidance lives
 only in the
 two catalog strings (`ChatToolCatalog`), single-sourced into both the
 instruction table and the wire declarations.                                                                                                                                                       

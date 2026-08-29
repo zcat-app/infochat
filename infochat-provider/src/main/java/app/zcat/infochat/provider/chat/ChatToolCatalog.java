@@ -39,10 +39,16 @@ final class ChatToolCatalog {
                             + "English keywords — use it with tags and window to focus on "
                             + "named things (companies, products, people). Put time "
                             + "expressions (today, yesterday, last 2h) in `window`, never "
-                            + "in `text`: `text` carries entity/topic terms only.",
+                            + "in `text`: `text` carries entity/topic terms only. An "
+                            + "optional topics filter narrows results to posts carrying "
+                            + "specific free tags (countries, companies, projects, coins) "
+                            + "— prefix-matched, so \"czech\" matches \"czechia\". Use "
+                            + "tags for the bounded category tree and topics for specific "
+                            + "named things.",
                     List.of(new ToolArg("tags", "array", false, "[\"tag1\"]"),
                             new ToolArg("window", "string", false, "\"P7D\""),
                             new ToolArg("text", "string", false, "\"qwen\""),
+                            new ToolArg("topics", "array", false, "[\"czechia\"]"),
                             new ToolArg("limit", "integer", false, "10"))),
             new Tool("semanticSearch",
                     "find posts semantically or by keyword related to a free-text "

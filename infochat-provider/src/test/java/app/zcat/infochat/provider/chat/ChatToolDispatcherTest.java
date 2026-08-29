@@ -146,6 +146,35 @@ class ChatToolDispatcherTest {
                 .reason().contains("'text'"),
                 "the rejection must name the input; got: "
                         + ((ChatToolDispatcher.ToolResult.ValidationError) textResult).reason());
+
+        // The topics list rides the same generic caps: an over-cap single
+        // value and an over-cap list are both rejected typed, naming the
+        // input, before any SQL executes (M1-935, no tool-side validation).
+        Map<String, Object> topicsArgs = new HashMap<>();
+        topicsArgs.put("topics", List.of("a".repeat(11)));
+
+        ChatToolDispatcher.ToolResult topicsResult =
+                d.dispatch("searchPosts", topicsArgs, USER_A, "dm", SCOPE_A);
+
+        assertInstanceOf(ChatToolDispatcher.ToolResult.ValidationError.class, topicsResult);
+        assertTrue(((ChatToolDispatcher.ToolResult.ValidationError) topicsResult)
+                .reason().contains("'topics'"),
+                "the rejection must name the input; got: "
+                        + ((ChatToolDispatcher.ToolResult.ValidationError) topicsResult).reason());
+
+        ChatToolDispatcher dListCapThree = new ChatToolDispatcher(
+                new ChatToolRegistry(), allToolsNoOp(), 500, 200, 3);
+        Map<String, Object> oversizedList = new HashMap<>();
+        oversizedList.put("topics", List.of("a", "b", "c", "d"));
+
+        ChatToolDispatcher.ToolResult listResult =
+                dListCapThree.dispatch("searchPosts", oversizedList, USER_A, "dm", SCOPE_A);
+
+        assertInstanceOf(ChatToolDispatcher.ToolResult.ValidationError.class, listResult);
+        assertTrue(((ChatToolDispatcher.ToolResult.ValidationError) listResult)
+                .reason().contains("maximum size"),
+                "the over-cap topics list must be rejected by the list cap; got: "
+                        + ((ChatToolDispatcher.ToolResult.ValidationError) listResult).reason());
     }
 
     // --- Redteam finding 1: oversized list ---

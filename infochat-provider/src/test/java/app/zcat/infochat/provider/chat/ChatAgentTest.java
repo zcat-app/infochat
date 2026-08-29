@@ -1683,6 +1683,7 @@ class ChatAgentTest {
         assertTrue(instructions.contains("\"window\""), "searchPosts must document window param");
         assertTrue(instructions.contains("\"limit\""), "searchPosts must document limit param");
         assertTrue(instructions.contains("\"text\""), "searchPosts must document text param");
+        assertTrue(instructions.contains("\"topics\""), "searchPosts must document topics param");
     }
 
     @Test
@@ -1745,7 +1746,7 @@ class ChatAgentTest {
     @Test
     void renderedInstructionTableIsByteIdentical() {
         String expected = "- searchPosts {\"tags\": [\"tag1\"], \"window\": \"P7D\","
-                + " \"text\": \"qwen\", \"limit\": 10}"
+                + " \"text\": \"qwen\", \"topics\": [\"czechia\"], \"limit\": 10}"
                 + " — search posts by tags within a time window, newest first. Use this"
                 + " for questions about recent, latest, today's or top news posts —"
                 + " anything with a time dimension. 'Top' means most recent, not most"
@@ -1754,7 +1755,11 @@ class ChatAgentTest {
                 + " mention the given English keywords — use it with tags and window to"
                 + " focus on named things (companies, products, people). Put time"
                 + " expressions (today, yesterday, last 2h) in `window`, never in"
-                + " `text`: `text` carries entity/topic terms only.\n"
+                + " `text`: `text` carries entity/topic terms only. An optional topics"
+                + " filter narrows results to posts carrying specific free tags"
+                + " (countries, companies, projects, coins) — prefix-matched, so"
+                + " \"czech\" matches \"czechia\". Use tags for the bounded category"
+                + " tree and topics for specific named things.\n"
                 + "- semanticSearch {\"query\": \"free-text topic\", \"limit\": 10}"
                 + " — find posts semantically or by keyword related to a free-text query,"
                 + " for topical or theme questions with no time dimension. It has no time"

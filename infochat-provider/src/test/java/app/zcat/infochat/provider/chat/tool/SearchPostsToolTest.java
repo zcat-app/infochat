@@ -918,6 +918,195 @@ class SearchPostsToolTest {
                         + "TRANSLATOR calls; got: " + json);
     }
 
+    // ---------- M1-935: the optional `topics` filter ----------
+
+    @Test
+    void topicsFilterNarrowsWithinWindowToPostsMentioningTheTopic() throws Exception {
+        UUID userId = seedUser("topic-narrow");
+        UUID sourceId = seedSource("topic-narrow-src", "Topic-narrow source");
+        seedSubscription("dm", userId, sourceId);
+        Instant publishedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+                .minus(1, ChronoUnit.HOURS);
+        seedReadyPostWithSearchTags("topic-hit-one", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES),
+                "Prague parade", "body", "czechia");
+        seedReadyPostWithSearchTags("topic-hit-two", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES),
+                "Czech budget passed", "body", "czechia", "prague");
+        seedReadyPostWithTitleAndBody("topic-miss-one", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), "Unrelated title", "body");
+        seedReadyPostWithTitleAndBody("topic-miss-two", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), "Another title", "body");
+
+        String filtered = tool.execute(userId, "dm", userId,
+                Map.of("window", "PT24H", "topics", List.of("czech")));
+
+        assertEquals(Set.of(PREFIX + "topic-hit-one", PREFIX + "topic-hit-two"),
+                uidsFromJson(filtered),
+                "topics=[czech] must return exactly the posts carrying a "
+                        + "czech-prefixed search tag — the prefix value \"czech\" "
+                        + "matching the canonical \"czechia\" is the tolerance the "
+                        + "bounded tags param cannot express; got: " + filtered);
+
+        String unfiltered = tool.execute(userId, "dm", userId, Map.of("window", "PT24H"));
+
+        assertEquals(Set.of(PREFIX + "topic-hit-one", PREFIX + "topic-hit-two",
+                        PREFIX + "topic-miss-one", PREFIX + "topic-miss-two"),
+                uidsFromJson(unfiltered),
+                "the same fixture with no topics arg returns all four — the "
+                        + "compose discriminator (a mutation filtering "
+                        + "unconditionally fails this arm); got: " + unfiltered);
+    }
+
+    @Test
+    void prefixAndContainmentSemantics() throws Exception {
+        UUID userId = seedUser("topic-prefix");
+        UUID sourceId = seedSource("topic-prefix-src", "Topic-prefix source");
+        seedSubscription("dm", userId, sourceId);
+        Instant publishedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+                .minus(1, ChronoUnit.HOURS);
+        seedReadyPostWithSearchTags("prefix-czechia", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), "Czechia post", "body",
+                "czechia");
+        seedReadyPostWithSearchTags("prefix-czech-republic", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), "Czech Republic post", "body",
+                "czech-republic");
+        seedReadyPostWithSearchTags("prefix-qwen3", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), "Qwen3 post", "body", "qwen3");
+
+        String json = tool.execute(userId, "dm", userId,
+                Map.of("window", "PT24H", "topics", List.of("czech")));
+
+        assertEquals(Set.of(PREFIX + "prefix-czechia", PREFIX + "prefix-czech-republic"),
+                uidsFromJson(json),
+                "the prefix relation is STARTS WITH: czech matches czechia and "
+                        + "czech-republic but never qwen3; an exact-equality "
+                        + "mutation loses czechia-prefixed variants, a containment "
+                        + "mutation admits qwen3; got: " + json);
+    }
+
+    @Test
+    void likeMetacharacterValuesNeverWiden() throws Exception {
+        UUID userId = seedUser("topic-like");
+        UUID sourceId = seedSource("topic-like-src", "Topic-like source");
+        seedSubscription("dm", userId, sourceId);
+        Instant publishedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+                .minus(1, ChronoUnit.HOURS);
+        // Stored search_tags are always canonical (the char class has no
+        // % or _), so metacharacter REQUESTS must match nothing: unescaped,
+        // qw%n widens onto qwen3 and a_b onto axb.
+        seedReadyPostWithSearchTags("like-percent", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), "Percent bait", "body",
+                "qwen3");
+        seedReadyPostWithSearchTags("like-underscore", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), "Underscore bait", "body",
+                "axb");
+
+        String json = tool.execute(userId, "dm", userId,
+                Map.of("window", "PT24H", "topics", List.of("qw%n", "a_b")));
+
+        assertEquals(Set.of(), uidsFromJson(json),
+                "literal % and _ in a requested value never widen onto "
+                        + "canonical tags — an escaping-skipping mutation "
+                        + "returns the qwen3/axb posts and fails; got: " + json);
+    }
+
+    @Test
+    void topicsFilterNeverSurfacesOutOfWorldOrNonReadyPosts() throws Exception {
+        UUID userId = seedUser("topic-leak");
+        UUID sourceId = seedSource("topic-leak-src", "Topic-leak source");
+        seedSubscription("dm", userId, sourceId);
+        Instant publishedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+                .minus(1, ChronoUnit.HOURS);
+        // An UNSUBSCRIBED custom source's topic-matching post — outside the
+        // caller's world (D59); never subscribed.
+        UUID strangerSourceId = seedSource("topic-leak-stranger", "Stranger source");
+        seedReadyPostWithSearchTags("leak-stranger", strangerSourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), "Stranger czechia", "body",
+                "czechia");
+        // A subscribed source's topic-matching post still RAW — not READY;
+        // it carries the topic so only the READY predicate can exclude it.
+        seedRawPostWithSearchTags("leak-raw", sourceId, publishedAt,
+                "Raw czechia", "body", "czechia");
+        // The in-world control that must surface.
+        seedReadyPostWithSearchTags("leak-hit", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), "Hit czechia", "body",
+                "czechia");
+
+        String json = tool.execute(userId, "dm", userId,
+                Map.of("window", "PT24H", "topics", List.of("czech")));
+
+        assertEquals(Set.of(PREFIX + "leak-hit"), uidsFromJson(json),
+                "the topics predicate must compose AND inside the one "
+                        + "statement with READY + the world predicate — an "
+                        + "unsubscribed source's or a non-READY topic post must "
+                        + "never surface (the M1-589 leak class); got: " + json);
+    }
+
+    @Test
+    void blankAndUnnormalizableTopicsBehaveAsNoFilter() throws Exception {
+        UUID userId = seedUser("topic-blank");
+        UUID sourceId = seedSource("topic-blank-src", "Topic-blank source");
+        seedSubscription("dm", userId, sourceId);
+        Instant publishedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+                .minus(1, ChronoUnit.HOURS);
+        seedReadyPostWithSearchTags("blank-czechia", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), "Czechia", "body", "czechia");
+        seedReadyPostWithTitleAndBody("blank-other", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), "Unrelated", "body");
+
+        String none = tool.execute(userId, "dm", userId, Map.of("window", "PT24H"));
+        String empty = tool.execute(userId, "dm", userId,
+                Map.of("window", "PT24H", "topics", List.of()));
+
+        assertEquals(uidsFromJson(none), uidsFromJson(empty),
+                "an empty topics list means no filter, not an error; got: "
+                        + empty);
+
+        // Every value here fails the drop rule (whitespace of any kind,
+        // non-ASCII, >48 chars — no trim-first) and must DROP, leaving no
+        // usable value: no filter.
+        String allDropped = tool.execute(userId, "dm", userId,
+                Map.of("window", "PT24H",
+                        "topics", List.of("Česko", "   ", "a".repeat(49), " czech ")));
+
+        assertEquals(uidsFromJson(none), uidsFromJson(allDropped),
+                "an all-dropped topics argument behaves as no filter — "
+                        + "defined degradation, never an error; got: " + allDropped);
+    }
+
+    @Test
+    void punctuationCarryingTopicValuesFilterRatherThanDegrade() throws Exception {
+        UUID userId = seedUser("topic-punct");
+        UUID sourceId = seedSource("topic-punct-src", "Topic-punct source");
+        seedSubscription("dm", userId, sourceId);
+        Instant publishedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS)
+                .minus(1, ChronoUnit.HOURS);
+        seedReadyPostWithSearchTags("punct-czechia", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), "Czechia", "body", "czechia");
+        seedReadyPostWithTitleAndBody("punct-other", sourceId, publishedAt,
+                publishedAt.plus(5, ChronoUnit.MINUTES), "Unrelated", "body");
+
+        // Punctuation names (at&t, s&p500) — exactly the companies the
+        // catalog steers into topics — survive the drop rule and filter
+        // to an honest empty result, never degrade to the unfiltered window.
+        String filtered = tool.execute(userId, "dm", userId,
+                Map.of("window", "PT24H", "topics", List.of("at&t", "s&p500")));
+
+        assertEquals(Set.of(), uidsFromJson(filtered),
+                "punctuation values must survive and match nothing — an "
+                        + "all-dropped degradation returns the whole window "
+                        + "and fails; got: " + filtered);
+
+        String unfiltered = tool.execute(userId, "dm", userId, Map.of("window", "PT24H"));
+
+        assertEquals(Set.of(PREFIX + "punct-czechia", PREFIX + "punct-other"),
+                uidsFromJson(unfiltered),
+                "the same fixture with no topics returns both — the pair "
+                        + "discriminates filter-to-empty from "
+                        + "degrade-to-no-filter; got: " + unfiltered);
+    }
+
     // ---------- helpers ----------
 
     private UUID seedUser(String suffix) throws Exception {
@@ -1083,6 +1272,59 @@ class SearchPostsToolTest {
             ps.setTimestamp(8, Timestamp.from(readyAt));
             ps.setString(9, tagLiteral);
             ps.setString(10, PREFIX + slug);
+            ps.executeUpdate();
+        }
+    }
+
+    /** Seeds a READY post carrying free search_tags directly — the END
+     *  state, never a tagger-output shape (P19). */
+    private void seedReadyPostWithSearchTags(String slug, UUID sourceId,
+                                             Instant publishedAt, Instant readyAt,
+                                             String title, String body,
+                                             String... searchTags) throws Exception {
+        String searchTagLiteral = "{" + String.join(",", searchTags) + "}";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO post (uid, source_id, title, body, url, published_at, "
+                     + "fetched_at, status, ready_at, tags, search_tags, "
+                     + "upstream_identifier) "
+                     + "VALUES (?, ?, ?, ?, ?, ?, ?, 'READY', ?, '{}', ?::TEXT[], ?)")) {
+            ps.setString(1, PREFIX + slug);
+            ps.setObject(2, sourceId);
+            ps.setString(3, title);
+            ps.setString(4, body);
+            ps.setString(5, "https://example.com/" + slug);
+            ps.setTimestamp(6, Timestamp.from(publishedAt));
+            ps.setTimestamp(7, Timestamp.from(FETCHED_AT));
+            ps.setTimestamp(8, Timestamp.from(readyAt));
+            ps.setString(9, searchTagLiteral);
+            ps.setString(10, PREFIX + slug);
+            ps.executeUpdate();
+        }
+    }
+
+    /** A RAW post carrying search_tags: the topic predicate would match
+     *  it, so only the READY predicate can exclude it. */
+    private void seedRawPostWithSearchTags(String slug, UUID sourceId,
+                                           Instant publishedAt, String title,
+                                           String body, String... searchTags)
+            throws Exception {
+        String searchTagLiteral = "{" + String.join(",", searchTags) + "}";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                 "INSERT INTO post (uid, source_id, title, body, url, published_at, "
+                     + "fetched_at, status, ready_at, tags, search_tags, "
+                     + "upstream_identifier) "
+                     + "VALUES (?, ?, ?, ?, ?, ?, ?, 'RAW', NULL, '{}', ?::TEXT[], ?)")) {
+            ps.setString(1, PREFIX + slug);
+            ps.setObject(2, sourceId);
+            ps.setString(3, title);
+            ps.setString(4, body);
+            ps.setString(5, "https://example.com/" + slug);
+            ps.setTimestamp(6, Timestamp.from(publishedAt));
+            ps.setTimestamp(7, Timestamp.from(FETCHED_AT));
+            ps.setString(8, searchTagLiteral);
+            ps.setString(9, PREFIX + slug);
             ps.executeUpdate();
         }
     }

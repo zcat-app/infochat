@@ -45,7 +45,8 @@ class ChatToolCatalogTest {
 
     @Test
     void everyCatalogArgsShapeMatchesToolParsing() {
-        assertArgs("searchPosts", List.of("tags:array", "window:string", "text:string", "limit:integer"));
+        assertArgs("searchPosts", List.of("tags:array", "window:string", "text:string",
+                "topics:array", "limit:integer"));
         assertArgs("semanticSearch", List.of("query:string", "limit:integer"));
         assertArgs("getPost", List.of("uid:string"));
         assertArgs("getReferences", List.of("uid:string", "limit:integer"));
@@ -98,6 +99,21 @@ class ChatToolCatalogTest {
                 "the description must carry the temporal-to-window routing rule");
         assertTrue(description.contains("entity/topic terms only"),
                 "the description must confine text to entity/topic terms");
+    }
+
+    @Test
+    void searchPostsDescriptionDocumentsTheTopicsFilter() {
+        String description = ChatToolCatalog.tool("searchPosts").description();
+        assertTrue(description.contains("topics filter"),
+                "the description must name the topics param");
+        assertTrue(description.contains("specific free tags")
+                        && description.contains("countries, companies, projects, coins"),
+                "the description must state the specific-named-things role");
+        assertTrue(description.contains("\"czech\" matches \"czechia\""),
+                "the description must state the prefix tolerance");
+        assertTrue(description.contains("Use tags for the bounded category tree "
+                        + "and topics for specific named things"),
+                "the description must carry the tags-vs-topics division of labor");
     }
 
     @Test

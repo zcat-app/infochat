@@ -1,15 +1,19 @@
 ---
 id: M1-935
 title: "searchPosts topics filter over search_tags"
-status: pending
+status: done
 created: 2026-08-26
-last_updated: 2026-08-26
+last_updated: 2026-08-30
 flow: tick
 reproduction: >-
-  SearchPostsToolTest#topicsFilterNarrowsWithinWindowToPostsCarryingTheTopic
-  `to-be-written` (child of a 2+ decomposition — needs M1-934's
-  post.search_tags column and writer; /tick start converts the marker:
-  write the test, run it RED against the unmodified code, workflow §0).
+  SearchPostsToolTest#topicsFilterNarrowsWithinWindowToPostsMentioningTheTopic
+  (marker converted 2026-08-30: test written and run RED on unmodified main
+  25ec1382 — `topics=["czech"]` answered with the UNFILTERED window set
+  (all four seeded posts returned); RED log captured at
+  /tmp/m1-935-red.log, 3 failures: the reproduction plus
+  prefixAndContainmentSemantics and likeMetacharacterValuesNeverWiden;
+  the leak and blank-semantics arms pass pre-implementation by
+  construction and discriminate mutations after).
   The wrong behavior it states: a searchPosts call carrying a "topics"
   argument is answered with the UNFILTERED window set. Verified in-tree
   today: SearchPostsTool.execute() reads exactly three args — tags,
@@ -149,11 +153,65 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-30
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS: FAIL; SECURITY: PASS; TEST-ADEQUACY: PASS; MAINTAINABILITY: PASS; SCOPE: PASS"
+    diff_stats: "10 files, +393/-22 (2 prod, 4 test, 2 docs, ticket+board)"
+    notes: >-
+      One low FINDING 1: TOPIC_VALUE_PATTERN ^[a-z0-9%_-]{1,48}$ drops a
+      fourth unstated category (ASCII punctuation like at&t, c++, s&p500)
+      that the approved security.md sentence says survives — all-dropped
+      degrades to no filter, returning the unfiltered window for exactly
+      the company/project names the catalog steers into topics. Fix:
+      printable-whitespace-free-ASCII class per the approved sentence,
+      plus the discriminating test leg. Gate agent run
+      agent_aae3de26-824e-4265-a065-bc91c2e326fd; verdict at
+      .scratch/tick-review-M1-935-r1.txt.
+  - round: 2
+    date: 2026-08-30
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: PASS; MAINTAINABILITY: PASS; SCOPE: PASS"
+    diff_stats: "r2 fix hunks: 3 files, +70/-8 (pattern + comment, new punctuation test leg, ticket bookkeeping)"
+    notes: >-
+      REWORK item 1 SATISFIED (disposition in verdict). Gate agent run
+      agent_7ecdc4a6-55c5-4da2-bf34-63f880aa602e; verdict at
+      .scratch/tick-review-M1-935-r2.txt. Full-suite log r2 green
+      (scripts/verify-serialized.sh, BUILD SUCCESS).
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  2026-08-30: all file:line citations re-verified on main 25ec1382
+  post-M1-932/934/936. The draft-time "exactly three args" claims
+  (SearchPostsTool.java:66-71, ChatToolCatalog.java:32-40,
+  security.md Inputs column) drifted to four with M1-932's text param
+  exactly as P12 anticipated — the §8-authorized pin updates are
+  calibrated to the POST-932 state as the ticket requires. ChatAgent
+  tool-args-in-English instruction now at ChatAgent.java:129 (draft
+  cited :120-122; M1-939/941 shifted lines). Census re-run: 16 paths
+  grep "searchPosts" over provider tests; the 6 beyond the table
+  (ChatAgentPromptExceededTest, ChatAgentProvenanceTest,
+  ChatAgentRefusalInterceptTest, ChatAgentReplyModeTest,
+  ChatAgentToolArgsTest, SemanticSearchToolIT + 2 messaging fixtures)
+  verified dispatch-fixture-only — none asserts the arg set or
+  instruction bytes. blocked_by test trace: M1-932's nine
+  text-filter tests in SearchPostsToolTest never pass topics and the
+  topicless SQL path stays byte-identical; M1-934's tests live in
+  collector/digest surfaces this ticket never touches.
+  ChatToolAllowlistSpecParityTest is names-only set equality — the
+  security.md row amendment keeps it green. Route note (execution,
+  not drift): the read-side normalization shares the tag rule's NFC +
+  Locale.ROOT lowercase steps but NOT the strict ^[a-z0-9-] class —
+  the spec row's drop set (acceptance 5: spaces, non-ASCII, >48
+  chars) keeps % and _ flowing as literals so the LIKE escaping is
+  the load-bearing widening control (acceptance 3's mutation-catching
+  requirement; a strict-class drop would make
+  likeMetacharacterValuesNeverWiden vacuous, §8 non-vacuity). The
+  escaping mirrors EligiblePostQuery.escapeLike (the M1-936 /topic
+  discipline, P10). Analysis pitfalls P9/P10/P12/P13/P19 all present;
+  P20 posture carried in out_of_scope. No blocking ambiguity.
 escalation_reason:
 ---
 
@@ -303,3 +361,29 @@ asserting the arg set or rendered instruction bytes gets a row:
 | SearchPostsToolTest pre-existing tests | **Unchanged** — textless+topicless path byte-identical |
 | SearchPostsToolTopExpansionIT / RetrievalWorldPredicateIT / SearchPostsToolClockTest / StopToolQueryCancellationIT | **Unchanged** — no top-expansion/world/clock/stop semantics touched |
 | ChatToolRegistryTest / ChatToolAllowlistSpecParityTest | **Unchanged** — names-only checks; no tool added |
+
+## Round 1 rework
+
+REWORK ITEMS (verbatim from .scratch/tick-review-M1-935-r1.txt):
+
+1. FINDING 1: change SearchPostsTool's topics drop rule (TOPIC_VALUE_PATTERN
+   at SearchPostsTool.java:63-64 plus the comment at :60-62) to reject only
+   whitespace-containing, non-ASCII, or over-48-character values as the
+   approved security.md sentence states, keeping %, _ and - flowing to the
+   escaper; evaluated via the new
+   SearchPostsToolTest.punctuationCarryingTopicValuesFilterRatherThanDegrade
+   leg (topics=["at&t","s&p500"] → Set.of() while the no-topics call on the
+   same fixture returns the full set), with
+   blankAndUnnormalizableTopicsBehaveAsNoFilter and
+   likeMetacharacterValuesNeverWiden green and unmodified.
+
+## Review observations
+
+- r1 RECOMMENDED-NEW-TICKET (driver-dispositioned, recorded; filing is the
+  user's call): the repo now carries two identical private LIKE escapers —
+  SearchPostsTool.escapeLike (this diff) and EligiblePostQuery.escapeLike
+  (M1-936); a third prefix reader would copy them again and the copies can
+  drift (one gains a metacharacter fix the other misses). Candidate: one
+  shared helper in app.zcat.infochat.core.util beside TagNormalizer, both
+  call sites switched, existing LIKE tests unchanged. TOUCHED-BY-THIS-DIFF:
+  yes; no DECIDE-BEFORE ordering constraint.

@@ -22,6 +22,7 @@ import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -29,6 +30,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @ApplicationScoped
@@ -54,6 +56,12 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
      *  value, cut by {@link GetPostTool#truncateUtf8} — the same discipline
      *  getPost's body carries; code constant for the RRF_K no-knob reason. */
     static final int MAX_ENTRY_CONTENT_BYTES = 400;
+
+    // A topics value survives iff printable, whitespace-free ASCII of
+    // 1-48 chars — the drop conditions the security.md topics sentence
+    // names; punctuation survives, honestly matching nothing canonical.
+    private static final Pattern TOPIC_VALUE_PATTERN =
+            Pattern.compile("^[\\x21-\\x7E]{1,48}$");
 
     // The scope's declared language (D58 (c)): identical SQL to
     // SemanticSearchTool's lookup — a missing row means 'en' (D43).
@@ -93,6 +101,9 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
         int limit = args.containsKey("limit")
                 ? ((Number) args.get("limit")).intValue() : 50;
         String text = args.containsKey("text") ? (String) args.get("text") : null;
+        List<String> topics = args.containsKey("topics")
+                ? (List<String>) args.get("topics") : List.of();
+        List<String> topicPrefixes = normalizedTopicPrefixes(topics);
 
         if (window.compareTo(WINDOW_MIN) < 0) window = WINDOW_MIN;
         if (window.compareTo(WINDOW_MAX) > 0) window = WINDOW_MAX;
@@ -121,7 +132,7 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
             // Follow preferences narrow the digest only — chat search stays
             // world-broad (D59); never wire scope_tag into queryPosts.
             return queryPosts(conn, scopeKind, scopeId, tags, !tags.isEmpty(), cutoff, limit,
-                    anchoredText);
+                    anchoredText, topicPrefixes);
         }
     }
 
@@ -157,7 +168,8 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
     private String queryPosts(Connection conn, String scopeKind, UUID scopeId,
                                List<String> requestedTags, boolean hasTagFilter,
                                Instant cutoff,
-                               int limit, @Nullable String anchoredText) throws SQLException {
+                               int limit, @Nullable String anchoredText,
+                               List<String> topicPrefixes) throws SQLException {
         StringBuilder sql = new StringBuilder();
         // ready_at is the window filter, and the emitted ready_at field
         // carries the ready_at column per the spec's tool catalogue result
@@ -201,6 +213,27 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
         if (hasTagFilter) {
             sql.append("AND p.tags && ").append(TagTreeExpansion.NAMES_EXPANSION_SQL).append(' ');
             params.add(requestedTags.toArray(new String[0]));
+        }
+
+        // Filter-only narrowing (D19): a post qualifies iff ANY of its
+        // search_tags equals a requested value or starts with it,
+        // OR-joined across values — SELECT list, ORDER BY, LIMIT untouched.
+        if (!topicPrefixes.isEmpty()) {
+            sql.append("AND (");
+            for (int i = 0; i < topicPrefixes.size(); i++) {
+                if (i > 0) {
+                    sql.append(" OR ");
+                }
+                sql.append("EXISTS (SELECT 1 FROM unnest(p.search_tags) AS t ")
+                   .append("WHERE t LIKE ? ESCAPE '\\') ");
+            }
+            sql.append(") ");
+            for (String prefix : topicPrefixes) {
+                // Only code appends the wildcard: the escaped value plus
+                // the trailing % — a model-supplied metacharacter stays a
+                // literal and can never widen the match.
+                params.add(escapeLike(prefix) + "%");
+            }
         }
 
         // Filter-only narrowing (D19): the text predicate joins the WHERE
@@ -279,6 +312,42 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
             return null;
         }
         return terms.stream().map(t -> t + ":*").collect(Collectors.joining(" & "));
+    }
+
+    // Topics values ride the tag rule's NFC + lowercase with the spec's
+    // drop set (whitespace, non-ASCII, over-length); % and _ survive as
+    // literals — LIKE escaping, not the char class, is the widening control.
+    static List<String> normalizedTopicPrefixes(List<String> topics) {
+        List<String> prefixes = new ArrayList<>();
+        for (String topic : topics) {
+            String normalized = normalizeTopicValue(topic);
+            if (normalized != null && !prefixes.contains(normalized)) {
+                prefixes.add(normalized);
+            }
+        }
+        return prefixes;
+    }
+
+    static @Nullable String normalizeTopicValue(String raw) {
+        // No trim: a value carrying whitespace drops, exactly as the
+        // security.md topics mechanism sentence states.
+        String lower = Normalizer.normalize(raw, Normalizer.Form.NFC)
+                .toLowerCase(Locale.ROOT);
+        return TOPIC_VALUE_PATTERN.matcher(lower).matches() ? lower : null;
+    }
+
+    /** {@code \% \_ \\} — every LIKE metacharacter in {@code value},
+     *  backslash-escaped; only code appends the wildcard. */
+    private static String escapeLike(String value) {
+        StringBuilder sb = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c == '%' || c == '_' || c == '\\') {
+                sb.append('\\');
+            }
+            sb.append(c);
+        }
+        return sb.toString();
     }
 
     // The scope's declared language — the same SQL and missing-row default
