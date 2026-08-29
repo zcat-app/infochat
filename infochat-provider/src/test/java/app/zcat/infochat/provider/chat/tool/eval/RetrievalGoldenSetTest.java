@@ -42,7 +42,7 @@ class RetrievalGoldenSetTest {
     private static final Map<String, Integer> CLASS_FLOORS = Map.of(
             "temporal-today", 5, "temporal-2h", 5, "temporal-24h", 4,
             "entity-location", 5, "entity-project", 5, "price", 5,
-            "topical", 16, "cross-lingual", 12);
+            "topical", 16, "cross-lingual", 16);
 
     private static final Set<String> LANGS = Set.of("en", "cs", "es", "ru", "tr");
     private static final Set<String> NON_EN = Set.of("cs", "es", "ru", "tr");
@@ -60,9 +60,9 @@ class RetrievalGoldenSetTest {
             "ready=8260;max_ready_at=2026-08-28 15:43:18.001688+00;"
             + "uid_sha256=2b385059297e4fa11cf172f458b4b959d37729619d4efbb8b514415378346d51";
 
-    // Per-world validator parameters (M1-949): tech carries the exact
-    // pre-existing constants (byte-identical tech behavior); fam adds its
-    // own vocabulary/floors/cap and the cs-only xling requirement.
+    // Per-world validator parameters (M1-949): tech's floors/cap re-derived
+    // once by the M1-946 xling extension (floor 16, cap 61-70); fam carries
+    // its own vocabulary/floors/cap and the cs-only xling requirement.
     private record World(String resource, Set<String> classes,
             Map<String, Integer> floors, int capLo, int capHi,
             Set<String> xlingRequiredLangs, String xlingLangNote,
@@ -70,10 +70,11 @@ class RetrievalGoldenSetTest {
             String fingerprint, String fingerprintToken, String capNote) { }
 
     private static final World TECH = new World(GOLDEN_SET, KNOWN_CLASSES,
-            CLASS_FLOORS, 57, 66, NON_EN,
+            CLASS_FLOORS, 61, 70, NON_EN,
             "every information need appears in all four of cs/es/ru/tr",
             Map.of(), 0, TECH_FINGERPRINT, null,
-            "M1-942 re-derived cap");
+            "M1-946 re-derived cap (floors sum 61, cap = floors + 9,"
+            + " the M1-942 headroom precedent)");
 
     private static final Set<String> FAM_CLASSES = Set.of(
             "temporal-today", "temporal-2h", "temporal-24h",
@@ -433,10 +434,11 @@ class RetrievalGoldenSetTest {
         assertEquals(18, successors, "the 2026-08-27 adjudication lands 18 supersedes pairs");
         assertEquals(18, retired, "18 retired targets (4 entity-location + 6 topical relabels"
                 + " + 8 xling cascade)");
-        assertEquals(77, records.size(), "file grows 51 -> 77 lines (18 successors + 8 extensions)");
-        assertEquals(59, records.stream()
+        assertEquals(81, records.size(), "file grows 51 -> 77 -> 81 lines"
+                + " (18 successors + 8 extensions + 4 xling widening rows)");
+        assertEquals(63, records.stream()
                 .filter(r -> !r.path("replaced_by").isTextual()).count(),
-                "59 active records after corrections + extension");
+                "63 active records after corrections + extension + xling widening");
 
         // el-2: the Zcash newsletter (body keyword "prague" = a summit venue)
         // is dropped; the Czech benchmark story is the whole set.
@@ -545,6 +547,25 @@ class RetrievalGoldenSetTest {
                 .filter(r -> "topical".equals(text(r, "class")))
                 .filter(r -> !r.path("replaced_by").isTextual()).count();
         assertEquals(16, activeTopical, "topical class extended 8 -> 16 active needs");
+
+        // The xling widening: four NEW cross-lingual rows — one need (chips)
+        // × cs/es/ru/tr — original records inheriting the ACTIVE sibling's
+        // adjudicated set verbatim (M1-946).
+        for (String id : List.of("xl-chips-cs", "xl-chips-es", "xl-chips-ru", "xl-chips-tr")) {
+            JsonNode r = byId.get(id);
+            assertTrue(r != null, id + " xling widening record exists");
+            assertEquals("cross-lingual", text(r, "class"));
+            assertTrue(r.path("supersedes").isNull() && !r.path("replaced_by").isTextual(),
+                    id + " is an original record, not a correction");
+            assertEquals(uidSet(byId.get("top-chips")), uidSet(r),
+                    id + " inherits the active sibling set verbatim");
+            assertTrue(r.path("notes").asText("").contains("top-chips"),
+                    id + " notes name the active sibling");
+        }
+        long activeXling = records.stream()
+                .filter(r -> "cross-lingual".equals(text(r, "class")))
+                .filter(r -> !r.path("replaced_by").isTextual()).count();
+        assertEquals(16, activeXling, "cross-lingual class widened 12 -> 16 active rows");
     }
 
     @Test
@@ -558,8 +579,9 @@ class RetrievalGoldenSetTest {
                 () -> validateSchema(seventeen));
         assertTrue(e.getMessage().contains("label cap"), e.getMessage());
 
-        // The corrected end state — 59 active records (18 supersedes pairs
-        // are net-zero, 8 extensions add) — must pass the re-derived cap.
+        // The corrected + widened end state — 63 active records (18
+        // supersedes pairs are net-zero, 8 extensions + 4 xling rows add) —
+        // must pass the re-derived cap.
         List<JsonNode> padded = corrupted(rs -> {
             try {
                 ObjectMapper mapper = new ObjectMapper();
@@ -568,7 +590,7 @@ class RetrievalGoldenSetTest {
                 JsonNode seed = rs.stream()
                         .filter(r -> "topical".equals(r.get("class").asText())
                                 && !r.path("replaced_by").isTextual()).findFirst().orElseThrow();
-                for (int i = 0; active + i < 59; i++) {
+                for (int i = 0; active + i < 63; i++) {
                     ObjectNode clone = (ObjectNode) mapper.readTree(
                             mapper.writeValueAsString(seed));
                     clone.remove("replaced_by");
@@ -581,7 +603,7 @@ class RetrievalGoldenSetTest {
                 throw new IllegalStateException(ex);
             }
         });
-        assertEquals(59, padded.stream()
+        assertEquals(63, padded.stream()
                 .filter(r -> !r.path("replaced_by").isTextual()).count());
         validateAll(padded);
     }
@@ -735,6 +757,36 @@ class RetrievalGoldenSetTest {
         AssertionError e = assertThrows(AssertionError.class,
                 () -> validateXling(records));
         assertTrue(e.getMessage().contains("xling-set-drift"), e.getMessage());
+    }
+
+    @Test
+    void failureModeXlingExtensionSetDriftsFromSibling() throws Exception {
+        // The verbatim-inheritance leg must discriminate on the widening's
+        // new rows too, not only the M1-942 cascade: one xl-chips set
+        // drifted by one uid is a frozen-set corruption validateAll rejects.
+        List<JsonNode> records = corrupted(rs -> rs.stream()
+                .filter(r -> "xl-chips-cs".equals(r.get("id").asText()))
+                .findFirst().ifPresent(r -> ((ArrayNode) r.get("expected")
+                        .get("retrieval").get("relevant_uids")).set(0,
+                                rs.get(0).get("expected").get("retrieval")
+                                        .get("relevant_uids").get(0))));
+        AssertionError e = assertThrows(AssertionError.class,
+                () -> validateAll(records));
+        assertTrue(e.getMessage().contains("xling-set-drift"), e.getMessage());
+    }
+
+    @Test
+    void failureModeXlingExtensionFingerprintNotPinned() throws Exception {
+        // New rows bind to the frozen world like every other record: a
+        // drifted labeled_against pin is a mixed-fingerprint set, refused.
+        List<JsonNode> records = corrupted(rs -> rs.stream()
+                .filter(r -> "xl-chips-es".equals(r.get("id").asText()))
+                .findFirst().ifPresent(r -> ((ObjectNode) r.get("labeled_against"))
+                        .put("db_fingerprint", "ready=1;max_ready_at=1970-01-01"
+                                + " 00:00:00.000000+00;uid_sha256=" + "0".repeat(64))));
+        AssertionError e = assertThrows(AssertionError.class,
+                () -> validateFingerprint(TECH, records));
+        assertTrue(e.getMessage().contains("mixed-fingerprint"), e.getMessage());
     }
 
     @Test

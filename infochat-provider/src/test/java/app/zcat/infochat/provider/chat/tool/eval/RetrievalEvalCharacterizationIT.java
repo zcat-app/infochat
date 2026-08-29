@@ -57,7 +57,8 @@ class RetrievalEvalCharacterizationIT {
     private static final Map<String, String> CANONICAL_BY_NEED = Map.of(
             "top-ai-b", "latest artificial intelligence news",
             "top-cyber-b", "latest cybersecurity news",
-            "top-crypto", "latest cryptocurrency news");
+            "top-crypto", "latest cryptocurrency news",
+            "top-chips", "latest semiconductor and chip industry news");
 
     private static final String SCOPE_KIND = "dm";
 
@@ -105,7 +106,7 @@ class RetrievalEvalCharacterizationIT {
         byte[] goldenBytes = goldenSetBytes();
         var goldenSet = RetrievalGoldenSetLoader.load(goldenBytes);
         List<Pair> pairs = pairsWithSiblings(goldenSet, goldenBytes);
-        assertEquals(12, pairs.size(), "the frozen set carries 12 active cross-lingual rows");
+        assertEquals(16, pairs.size(), "the widened frozen set carries 16 active cross-lingual rows");
 
         RetrievalEvalRunnerIT.assertEvalScopesSeeded(dataSource);
         Map<String, Map<String, ArmOutcome>> invocations = new LinkedHashMap<>();

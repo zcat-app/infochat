@@ -1,27 +1,22 @@
 ---
 id: M1-946
 title: "Widen the cross-lingual golden slice to n = 16"
-status: pending
+status: done
 created: 2026-08-27
-last_updated: 2026-08-27
+last_updated: 2026-08-29
 flow: tick
 reproduction: >-
-  Child of a 2+ decomposition (analysis
-  docs/plan/m1/tick-analysis/anchor-leg-query-fidelity.md); /tick start
-  converts the marker: write the test, run it RED against the unmodified
-  golden set before any fixture edit, workflow §0. The wrong behavior: the
-  cross-lingual class is UNGATEABLE — n = 12 active rows against rule G1's
-  decision-grade floor of 16 (docs/measurement/retrieval-eval-baseline.md
-  :66-69, :323-325), so the recorded anchor-leg defect (xl-cyber 0.25 vs
-  sibling 0.75, :386-392) can never clear rule T1's per-class sign test
-  (available on topical only, :396-398) no matter what fix is later
-  chosen. RED test
-  RetrievalGoldenSetTest#classCoverageMeetsFloors with the cross-lingual
-  floor raised 12 → 16 (written FIRST; observed today: "class-below-floor:
-  cross-lingual has 12, floor is 16" — the exact failure shape the
-  existing validator produces, RetrievalGoldenSetTest.java:174-176). Probe
-  today: active cross-lingual rows = 20 class lines − 8 replaced_by
-  retirees = 12 (golden-set.jsonl :40-51 retired, :44-47/:62-69 active).
+  RetrievalGoldenSetTest#classCoverageMeetsFloors, cross-lingual floor
+  raised 12 -> 16 FIRST (authorized by test_plan.modifies): observed RED
+  2026-08-29 in the worktree, "class-below-floor: cross-lingual has 12,
+  floor is 16" (.scratch/tick-red-M1-946.log; mvn exit 1, the only 3
+  failures in the module run are all the floor assertion), greened by the
+  four xl-chips rows. Converted from the child-of-decomposition marker at
+  /tick start (workflow §0). Original premise: the class is UNGATEABLE at
+  n = 12 against G1's decision-grade floor of 16
+  (docs/measurement/retrieval-eval-baseline.md :66-69, :323-325), so the
+  recorded anchor-leg defect (xl-cyber 0.25 vs sibling 0.75, :386-392)
+  cannot clear T1's per-class sign test (:396-398).
 analysis_ref: docs/plan/m1/tick-analysis/anchor-leg-query-fidelity.md
 blocked_by: [M1-945, M1-951]
 files_scope:
@@ -101,11 +96,45 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-29
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: FAIL; MAINTAINABILITY: PASS; SCOPE: PASS"
+    diff_stats: "5 files, +156/-40 (golden-set +4 records, validator +78/-? incl. 2 new legs, char-IT pin, ticket+board)"
+    notes: >-
+      1 REWORK item (medium, 0 critical/high): the widened set breaks the
+      characterization harness's pairing guard — CANONICAL_BY_NEED carries
+      no authored entry for top-chips, so pairsWithSiblings aborts ("no
+      authored canonical phrasing for need top-chips") BEFORE the widened
+      :108 pin this diff itself edited; the pin's only reachable execution
+      was red. Fix: add the authored fixture entry (M1-945 P8 pattern).
+      Verdict on disk: .scratch/tick-review-M1-946-r1.txt (worktree).
+  - round: 2
+    date: 2026-08-29
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: PASS; MAINTAINABILITY: PASS; SCOPE: PASS"
+    diff_stats: "fix diff 3 files, +29/-3 (one CANONICAL_BY_NEED entry; ticket+board bookkeeping); cumulative 5 files, +185/-43"
+    notes: >-
+      REWORK item 1 SATISFIED (probes re-run post-append in the r2
+      mechanical report; retired-row sibling mentions dispositioned).
+      One RECOMMENDED-NEW-TICKET recorded under Review observations.
+      Verdict on disk: .scratch/tick-review-M1-946-r2.txt (worktree).
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  checked: 2026-08-29
+  result: clear
+  notes: >-
+    Acceptance implementable as written; citations spot-checked (validator
+    legs, golden-set regions, G1 floor, 5214 pin now byte-exact on the
+    restored test stack). Three count pins the extension mechanically
+    forces beyond test_plan.modifies — adjudicatedCorrectionsPresent
+    77->81 / 59->63, validatorAcceptsHonestShapes pad-target 59->63,
+    RetrievalEvalCharacterizationIT:108 pairs 12->16 — are the ticket's
+    own arithmetic (acceptance item 4: 63 active) made mechanical;
+    authorized in the commit body per engineering-rules §8.
 escalation_reason:
 ---
 
@@ -237,3 +266,82 @@ pre-existing `RetrievalGoldenSetTest` leg beyond the two authorized in
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-946-anchor-fidelity-2.md
 ```
+
+## Landing record (2026-08-29, at /tick start)
+
+**Need selection (acceptance item 3, P11).** Chosen sibling: **top-chips**
+("semiconductor and chip industry news") — an ACTIVE M1-942 extension
+topical record with an adjudicated 8-uid set, passing the active-record
+legs. Citation from M1-945's characterization record, quoted byte-exact
+(`grep -F` over docs/measurement/anchor-leg-characterization.md returns
+both):
+
+> Arm A window overlap with sibling: **5, 5, 5, 4** (cs, es, ru, tr).
+> (record :111 — the CYBER per-need overlap row)
+
+> The harm is concentrated in cyber; the same
+> (record :154 — the breadth conclusion's line)
+
+Reading: the anchor's measured |Δ| lives where the need's adjudicated set
+is a small relevant island inside a wide near-topic sea (sibling window
+16, anchor overlap 4-5; ai's dense regime sits at −0.062). Among the
+eight eligible extension siblings, top-chips is that regime at its widest
+— its golden-set rationale records "pooled 45 rows on the frozen
+fingerprint" (golden-set.jsonl :73) adjudicated down to 8 keeps, the
+corpus's largest near-topic pool among the extension needs (next widest:
+physics 25, quantum 22; space/climate/drones/gaming/misinfo pool ≤ 12).
+The widening therefore extends the class in the regime the recorded
+defect lives in, not the regime where the anchor is measured inert.
+
+**The four query forms (P14, restated verbatim from the fixture):**
+
+- xl-chips-cs (cs): `zprávy z polovodičového průmyslu`
+- xl-chips-es (es): `noticias del sector de los semiconductores`
+- xl-chips-ru (ru): `новости полупроводниковой отрасли`
+- xl-chips-tr (tr): `yarı iletken endüstrisi haberleri`
+
+**Cap-band re-derivation (acceptance item 4).** Floors sum
+5+5+4+5+5+5+16+16 = **61** (was 57); active records 59 + 4 = **63**; cap
+band = floors + 9 per the M1-942 headroom precedent → **61-70** (was
+57-66); 63 sits inside. CLASS_FLOORS "cross-lingual" 12 → 16.
+
+**Authorized test modifications (engineering-rules §8), all named:**
+
+1. `RetrievalGoldenSetTest.CLASS_FLOORS` ("cross-lingual" 12 → 16) and
+   the TECH cap band (57-66 → 61-70 + capNote arithmetic) — named by
+   test_plan.modifies.
+2. `RetrievalGoldenSetTest.adjudicatedCorrectionsPresent` count pins
+   77 → 81 and 59 → 63, plus its new xling-widening presence block — the
+   ticket's own arithmetic (acceptance item 4: 63 active) made
+   mechanical; the leg pins the same properties at the new size.
+3. `RetrievalGoldenSetTest.validatorAcceptsHonestShapes` pad target
+   59 → 63 (loop bound, assert, comment) — same arithmetic; the leg
+   still proves the re-derived cap admits the honest end state.
+4. `RetrievalEvalCharacterizationIT.threeArmsRideTheProductionTool`
+   pairs pin 12 → 16 — the characterizer pins the active-xling count
+   explicitly (the out-of-scope note had named only the RUNNER as
+   count-deriving); 16 is the widened set's truth. A files_scope
+   departure, surfaced here and in the commit body as a diff-shape line.
+
+## Round 1 rework
+
+REWORK ITEMS (verbatim from .scratch/tick-review-M1-946-r1.txt):
+
+1. Finding 1: add the authored "top-chips" canonical phrasing entry to
+   CANONICAL_BY_NEED (RetrievalEvalCharacterizationIT.java:57-60) so the
+   pairing guard at :310 passes for the four xl-chips pairs and the widened
+   pin at :108 becomes reachable-green — evaluated via
+   `grep -n '"top-chips"' <the IT file>` returning the entry, plus the
+   sibling-id subset probe over golden-set.jsonl named in EVALUATED-AS, and a
+   test-compile of infochat-provider.
+
+## Review observations
+
+- (r2, RECOMMENDED-NEW-TICKET, TOUCHED-BY-THIS-DIFF: no) Nothing in the
+  default mvn verify suite ties CANONICAL_BY_NEED's key set to the golden
+  set's active cross-lingual sibling ids — a future widening that adds a
+  need without a canonical entry ships green and fails only at the next
+  operator characterization run (fail-loud at the guard, but late; this
+  ticket's round 1 is the worked example). Suggested shape: a default-suite
+  leg asserting every active-xling sibling id resolves as a key in the
+  canonical map. Filing is the user's call.
