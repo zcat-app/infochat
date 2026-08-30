@@ -267,7 +267,7 @@ class RetrievalEvalCharacterizationIT {
             throw new IllegalStateException("unparseable tool emission: " + json, e);
         }
         assertTrue(arr.isArray(), "tool emission is a JSON array");
-        Set<String> expectedFields = Set.of("uid", "title", "url", "ready_at", "similarity");
+        Set<String> expectedFields = Set.of("uid", "title", "url", "ready_at", "similarity", "body_summary");
         for (JsonNode row : arr) {
             Set<String> fields = new HashSet<>();
             row.fieldNames().forEachRemaining(fields::add);

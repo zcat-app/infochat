@@ -1,9 +1,9 @@
 ---
 id: M1-955
 title: "Re-pin the retrieval characterization emission shape"
-status: pending
+status: done
 created: 2026-08-29
-last_updated: 2026-08-29
+last_updated: 2026-08-30
 flow: tick
 reproduction: >-
   Single-ticket analysis (analysis_ref: self). The failing test that states
@@ -119,11 +119,59 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-30
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: PASS; MAINTAINABILITY: PASS; SCOPE: PASS"
+    diff_stats: "3 files, +32/-10 (IT one line: expectedFields gains body_summary; ticket frontmatter + clarity_check + this entry; board regen)"
+    notes: >-
+      0 rework items, 0 critical/high. Gate read the RED log (five-field
+      expected vs six-field actual at assertEmissionShape:274, pre-edit) and
+      the GREEN log (2/2 @Tests post-edit), confirmed the exact-equality
+      assertion shape is preserved (both discrimination directions live),
+      the CI-exclusion (0 mentions of the IT in the verify log), and the
+      one-hunk one-file fence. Falsified-and-dropped by the gate: the
+      overtaken sequencing leg (the landed M1-946/M1-952 runs are
+      scored-lane and never execute this pin — parseToolJson :57-76 reads
+      uid/similarity/ready_at only; the worktree artifact store holds
+      exactly this ticket's own two characterization runs, git_commit
+      f9a76203); the §13 port-naming concern (15432/18080/18081 are the
+      frozen eval stack's fixture ports, already committed verbatim in six
+      landed tickets and the IT's own javadoc :41); the content-leak
+      masking concern (the pin compares field NAMES only — assertEquals at
+      :274 — and never asserted content bounds in either version; the
+      byte-cap contract is spec-owned, security.md:329, and pinned in
+      M1-940's own test files). One RECOMMENDED-NEW-TICKET recorded under
+      Review observations (scorer javadoc doc-rot; TOUCHED-BY-THIS-DIFF:
+      no; no DECIDE-BEFORE).
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  >-
+    Start-time self-check 2026-08-30, on the post-merge tree (M1-940 done at
+    a916cbec; worktree gone; lint 0 findings). (1) Premise verified live:
+    security.md:329 semanticSearch Output column carries body_summary,
+    SemanticSearchTool.java:375 appends it, the IT still pins five fields —
+    the sole `Set.of("uid"` site repo-wide (census re-run clean). (2) Citation
+    drift, non-load-bearing: M1-946's merged canonical entry shifted the IT
+    by +1 line — the Set.of sits at :270 and the assertEquals at :274 (ticket
+    cites :269/:273); the same commit already widened the 12-pairs pin to 16
+    and added the top-chips canonical (§8-authorized in M1-946's landing
+    record), pre-clearing the P3 landmine this ticket had flagged. (3)
+    Acceptance item 5's backward leg is overtaken by events: M1-946's
+    labeling and M1-952's two-leg record landed 2026-08-30 while this ticket
+    sat pending. No red fired — those were scored-lane runs (parseToolJson's
+    additive-field tolerance, :57-76) that never execute this pin, and the
+    characterization IT itself has not run post-merge (no characterization
+    artifacts cite a commit >= a916cbec). The forward leg — done before the
+    NEXT retrieval-eval lane run (the width-32 re-reads, next campaign step)
+    — is intact and satisfiable; no in-flight tickets exist to serialize
+    against (M1-954 done). No hurdle trigger; proceeding. (4) Eval stack
+    confirmed left UP after M1-952's runs (postgres 15432 + llamacpp 18081
+    + embeddings 18080); passwords from the test checkout's secrets.env,
+    never printed.
 escalation_reason:
 ---
 
@@ -361,3 +409,14 @@ over the repo. Rows (verified at draft time):
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-955-eval-characterization-emission-pin.md
 ```
+
+## Review observations
+
+- Round 1 (APPROVE) recommended-ticket observation, TOUCHED-BY-THIS-DIFF:
+  no, no DECIDE-BEFORE — `RetrievalEvalScorer.java:53-55` (the
+  `parseToolJson` javadoc) still documents the five-field emission shape
+  `{uid,title,url,ready_at,similarity}`; a reader of the parser's contract
+  today is told the emission lacks `body_summary`, while
+  `SemanticSearchTool.java:368-379` appends it to every row. Pre-existing
+  doc rot for whoever next touches the scorer — this ticket's §Census
+  already flagged that line DISPOSED out of the binding one-line scope.
