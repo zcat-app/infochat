@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 1 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 162 |
 | deferred | 1 |
 | abandoned | 6 |
-| **total** | **170** |
+| **total** | **174** |
 
 ---
 
@@ -26,6 +26,9 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-956 — Pin the /topic LIKE escaper; share one escapeLike helper (complexity: low, risk: low)
+- M1-957 — Arm the eval lane's temporal window + widening guard (complexity: medium, risk: medium)
+- M1-958 — Long-stream finalize degrade: enforce the label revert (complexity: medium, risk: medium)
+- M1-960 — Rename fam-replica-restore.sh to replica-restore.sh (complexity: low, risk: low)
 
 ---
 
@@ -42,7 +45,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-959 — blocked_by: M1-957 (pending)
 
 ---
 
@@ -307,4 +310,8 @@ M1-953 (done)
 M1-954 (done)
   └── M1-952 (done) [see above]
 M1-956 (pending) ← runnable
+M1-957 (pending) ← runnable
+  └── M1-959 (pending)
+M1-958 (pending) ← runnable
+M1-960 (pending) ← runnable
 ```
