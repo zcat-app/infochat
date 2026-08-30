@@ -50,9 +50,11 @@ public final class RetrievalEvalScorer {
     }
 
     /**
-     * Parse a SemanticSearchTool emission: a JSON array of
-     * {@code {uid,title,url,ready_at,similarity}} rows (similarity null =
-     * lexical-only row; ready_at ISO-8601 or null).
+     * Parse a SemanticSearchTool emission: a JSON array of rows whose field
+     * set is the semanticSearch Output column (docs/spec/security.md —
+     * currently uid, title, url, ready_at, similarity, body_summary).
+     * Reads only uid/similarity/ready_at (similarity null = lexical-only
+     * row; ready_at ISO-8601 or null) and tolerates additive fields.
      */
     public static List<ToolRow> parseToolJson(String json) {
         try {
