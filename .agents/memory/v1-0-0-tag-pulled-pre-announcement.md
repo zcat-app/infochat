@@ -27,3 +27,7 @@ tag is now the expected state, not a sign something was lost. The authoritative
 release-state record remains `docs/plan/v1-verification-truth.md` — see
 [[release-state-source-ranking]] for how to rank sources. Re-tagging is owed
 once M1-687..690 land.
+
+**UPDATE 2026-08-29 (owner): the project has moved on to v2** — this note is
+history, not current state. Do not reason or speak in "v1 posture" terms; check
+for v2 planning docs before citing v1-era release state.
