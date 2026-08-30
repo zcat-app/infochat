@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 0 |
+| pending | 1 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 162 |
 | deferred | 1 |
 | abandoned | 6 |
-| **total** | **169** |
+| **total** | **170** |
 
 ---
 
@@ -25,7 +25,7 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-_(none — all pending tickets are blocked)_
+- M1-956 — Pin the /topic LIKE escaper; share one escapeLike helper (complexity: low, risk: low)
 
 ---
 
@@ -306,4 +306,5 @@ M1-951 (done)
 M1-953 (done)
 M1-954 (done)
   └── M1-952 (done) [see above]
+M1-956 (pending) ← runnable
 ```
