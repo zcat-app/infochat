@@ -81,20 +81,45 @@ python3 rank.py --task all                   # pairwise significance vs incumben
 
 | arm | quant | GiB | dec. tok/s | tagger | class. | entity | judge | sum-body | prose | rollup | chat | compress (probe) | grouping |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **incumbent** (remote DeepSeek-V4-Flash) | full/API | — | — | 35.7% | 40.0% | 53.3% | 83.3% ✓ | 63.3% | 100% | 85.7% | 80.8% | 100% (0.69) | 6.2% |
+| deepseek-v4-flash-local | UD-IQ3_XXS | 95.9 | 12.5 | 7.1% | 22.9% | 43.3% | 45.8% ⚠ | 66.7% | 92.9% | 85.7% | 57.7% | 27.8% (0.29) | 18.8% |
+| gemma-4-26b-a4b | UD-Q6_K_XL | 21.7 | 48.5 | **57.1%** | **51.4%** | 63.3% | 83.3% ✓ | 86.7% | 100% | 71.4% | 73.1% | 100% (0.70) | 25.0% |
 | glm-4.7-flash | UD-Q6_K_XL | 24.4 | 52.3 | 32.1% | 40.0% | **73.3%** | 70.8% ⚠ | 80.0% | 100% | 50.0% | 76.9% | 100% (0.63) | 31.2% |
 | glm-4.7-flash-reap | UD-Q6_K_XL | 18.8 | 52.3 | 25.0% | 40.0% | 60.0% | 79.2% ⚠ | **90.0%** | 92.9% | 57.1% | 80.8% | 100% (0.65) | 25.0% |
+| hauhau-gemma-4-26b-qat † | QAT Q4_K_M (uncens.) | 15.6 | **59.6** | 51.8% | 40.0% | 60.0% | 83.3% ✓ | **96.7%** | 100% | 71.4% | 80.8% | 100% (0.708) | 18.8% |
+| hauhau-gemma-4-26b-qat-mtp † | QAT Q4_K_M (uncens.) + MTP sidecar | 15.6 | 50.3 | 44.6% | 45.7% | 63.3% | 83.3% ✓ | **96.7%** | 100% | 71.4% | 88.5% | 100% (0.718) | 12.5% |
+| **incumbent** (remote DeepSeek-V4-Flash) | full/API | — | — | 35.7% | 40.0% | 53.3% | 83.3% ✓ | 63.3% | 100% | 85.7% | 80.8% | 100% (0.69) | 6.2% |
+| laguna-s-2.1 | UD-Q4_K_XL | 68.4 | 30.6 | 23.2% | 48.6% | 60.0% | 79.2% ⚠ | 10.0% | 100% | 71.4% | 61.5% | 100% (0.71) | 43.8% |
+| ling-3.0-flash-rfpx § | ROCmFP4-FAST (MTP off) | 73.9 | **47.1** | 28.6% | 37.1% | 56.7% | 70.8% ✓ | 26.7% | 100% | 64.3% | 65.4% | 100% (0.69) | 37.5% |
+| nemotron-3-super-120b | UD-Q3_K_XL | 58.3 | 19.3 | 33.9% | 45.7% | 56.7% | 75.0% ⚠ | 33.3% | 92.9% | 71.4% | 88.5% | 100% (0.68) | 31.2% |
+| pliny-qwen3.8-27b-mtp † | OBLITERATED Q6_K (merged MTP, dense) | 20.9 | 21.0 | 46.4% | 45.7% | 46.7% | 58.3% ⚠ | 60.0% | 92.9% | 64.3% | 80.8% | 100% (0.634) | 12.5% |
+| qwen3.5-122b-a10b | UD-Q4_K_XL | 73.2 | 23.2 | 39.3% | 48.6% | 66.7% | 83.3% ✓ | 43.3% | 92.9% | 64.3% | **96.2%** | 100% (**0.72**) | 18.8% |
 | qwen3.6-27b (dense) | UD-Q6_K_XL | 24.2 | 8.9 | 41.1% | 42.9% | 56.7% | 79.2% ⚠ | 53.3% | 92.9% | 42.9% | 88.5% | 94.4% (0.71) | **50.0%** |
 | qwen3.6-35b-a3b | UD-Q6_K_XL | 30.4 | 58.0 | 41.1% | 40.0% | 56.7% | 83.3% ✓ | 66.7% | 92.9% | 71.4% | 88.5% | 100% (0.64) | 12.5% |
-| gemma-4-26b-a4b | UD-Q6_K_XL | 21.7 | 48.5 | **57.1%** | **51.4%** | 63.3% | 83.3% ✓ | 86.7% | 100% | 71.4% | 73.1% | 100% (0.70) | 25.0% |
-| laguna-s-2.1 | UD-Q4_K_XL | 68.4 | 30.6 | 23.2% | 48.6% | 60.0% | 79.2% ⚠ | 10.0% | 100% | 71.4% | 61.5% | 100% (0.71) | 43.8% |
-| nemotron-3-super-120b | UD-Q3_K_XL | 58.3 | 19.3 | 33.9% | 45.7% | 56.7% | 75.0% ⚠ | 33.3% | 92.9% | 71.4% | 88.5% | 100% (0.68) | 31.2% |
-| qwen3.5-122b-a10b | UD-Q4_K_XL | 73.2 | 23.2 | 39.3% | 48.6% | 66.7% | 83.3% ✓ | 43.3% | 92.9% | 64.3% | **96.2%** | 100% (**0.72**) | 18.8% |
-| deepseek-v4-flash-local | UD-IQ3_XXS | 95.9 | 12.5 | 7.1% | 22.9% | 43.3% | 45.8% ⚠ | 66.7% | 92.9% | 85.7% | 57.7% | 27.8% (0.29) | 18.8% |
+| qwen3.8-flash-next ‡ | UD-IQ4_XS | 88.0 | 22.4 | 55.4% | 45.7% | **83.3%** | 83.3% ✓ | 23.3% | 92.9% | 71.4% | 88.5% | 100% (0.736) | 37.5% |
+| qwen3.8-flash-q2-rfk-bare § | UD-Q2_K_XL (bare) | 73.5 | 30.7 | 50.0% | 40.0% | 76.7% | 75.0% ⚠ | **3.3%** | 100% | 42.9% | 88.5% | 100% (0.741) | 43.8% |
+| qwen3.8-flash-rfk-mtp § | IQ4_XS + jockeva MTP | 88.0 | 26.3 | **58.9%** | 42.9% | 76.7% | 83.3% ✓ | **0.0%** | 100% | 64.3% | 84.6% | 100% (0.704) | 43.8% |
 
 ✓ = zero `not_released` gate violations (judge slot eligible). ⚠ = ≥1
 `not_released` violation — **judge slot disqualified** (released content gold
 quarantines; a hard-fail gate, exempt from the window arithmetic).
+
+† = later-round arms recovered into this table 2026-08-31 from the
+gitignored bench working copy (they ran after this file's run-1 write-up on
+the SAME pinned b10221 runtime, run-1 serve shape and default sampling;
+files sha256-verified at download). Their spec-off pair
+pliny-qwen3.8-27b aborted after 6 calls — NO DATA. ‡ = qwen3.8-flash-next
+ran on the PR-27742 runtime (the arch rejected by b10221) with unsloth
+sampling pins baked in — runtime AND sampling divergence from every other
+row; its speed lineage carries the re-arm contamination caveat (see rearm-winners-screening.md).
+§ = 2026-08-31 screening arms, measured at their OWN max-optimized
+configurations per owner directive (the exact config each won its speed
+battery on — NOT the run-1 common shape): qwen3.8-flash-rfk-mtp =
+apepojken fork + jockeva MTP head + unsloth sampling row;
+ling-3.0-flash-rfpx = ROCmFPX fork, **MTP off** (its measured optimum),
+card sampling 0.6/0.95/20; qwen3.8-flash-q2-rfk-bare = UD-Q2_K_XL BARE on
+the apepojken fork (Q2's optimum: MTP not a stable bump on Q2) with the
+unsloth instruct sampling row (owner-requested unsloth-recommended
+config). Serve commands and full provenance in rearm-winners-screening.md.
 
 ### 3.2 Blocked on the pinned runtime — not quality readings
 
@@ -118,19 +143,30 @@ constraint, not a term.
 
 | arm | prefill tok/s | decode tok/s | TTFT ms | load s | peak GTT GiB | CPU-fallback ops |
 |---|---|---|---|---|---|---|
+| deepseek-v4-flash-local | 95.3 | 12.5 | 4760 | 124.6 | 96.1 | **4** |
+| gemma-4-26b-a4b | 394.4 | 48.5 | 1263 | 18.0 | 21.8 | 0 |
 | glm-4.7-flash | 545.8 | 52.3 | 581 | 6.0 | 24.2 | 0 |
 | glm-4.7-flash-reap | 623.0 | 52.3 | 504 | 14.0 | 18.6 | 0 |
+| hauhau-gemma-4-26b-qat † | 716.9 | **59.6** | 658 | 12.0 | 41.2 | 0 |
+| hauhau-gemma-4-26b-qat-mtp † | 421.1 | 50.3 | 924 | 6.0 | 41.5 | 0 |
+| laguna-s-2.1 | 219.5 | 30.6 | 2083 | 82.1 | 68.2 | 0 |
+| ling-3.0-flash-rfpx § | 327.7 | 47.1 | 1432 | 58.0 | 70.9 | 0 |
+| nemotron-3-super-120b | 134.6 | 19.3 | 3437 | 42.1 | 57.8 | 0 |
+| pliny-qwen3.8-27b-mtp † | 197.6 | 21.0 | 2372 | 12.0 | 46.2 | 0 |
+| qwen3.5-122b-a10b | 196.3 | 23.2 | 2339 | 84.4 | 71.0 | 0 |
 | qwen3.6-27b | 121.0 | **8.9** | 4005 | 6.0 | 22.8 | 0 |
 | qwen3.6-35b-a3b | 402.3 | **58.0** | 1191 | 20.0 | 29.2 | 0 |
-| gemma-4-26b-a4b | 394.4 | 48.5 | 1263 | 18.0 | 21.8 | 0 |
-| laguna-s-2.1 | 219.5 | 30.6 | 2083 | 82.1 | 68.2 | 0 |
-| nemotron-3-super-120b | 134.6 | 19.3 | 3437 | 42.1 | 57.8 | 0 |
-| qwen3.5-122b-a10b | 196.3 | 23.2 | 2339 | 84.4 | 71.0 | 0 |
-| deepseek-v4-flash-local | 95.3 | 12.5 | 4760 | 124.6 | 96.1 | **4** |
+| qwen3.8-flash-next ‡ | 162.4 | 22.4 | 2901 | 68.0 | 60.7 | 0 |
+| qwen3.8-flash-rfk-mtp § | 252.6 | 26.3 | 1807 | 78.1 | 65.7 | 0 |
+| qwen3.8-flash-q2-rfk-bare § | 182.1 | 30.7 | 2667 | 62.0 | 46.9 | 0 |
 
 **T6 kills the interactive slots for:** qwen3.6-27b (8.9), deepseek-local
 (12.5), nemotron (19.3), qwen3.5-122b (23.2), laguna (30.6). Surviving:
-qwen3.6-35b-a3b, glm, glm-reap, gemma-4-26b-a4b.
+qwen3.6-35b-a3b, glm, glm-reap, gemma-4-26b-a4b. *(Later-round rows †:
+hauhau-qat 59.6 and hauhau-qat-mtp 50.3 also SURVIVE — hauhau-qat is the
+fastest arm ever run through this bench; pliny-mtp 21.0 and
+qwen3.8-flash-next 22.4 are killed. ‡ 08-31 rows: Ling 47.1 survives,
+qwen-rfk-mtp 26.3 killed — see rearm-winners-screening.md.)*
 
 ---
 
@@ -217,3 +253,4 @@ keep incumbent (T2).
 - `serve.py` health-wait hang after an immediate model-load failure: kill
   `serve.py` by PID (the llama-server child exits on its own) — recorded in the
   handoff so it is not re-discovered.
+
