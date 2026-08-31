@@ -54,7 +54,7 @@ class RetrievalEvalCharacterizationIT {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /** Authored canonical phrasings (P8): committed fixtures, never translator output — D58 (d). */
-    private static final Map<String, String> CANONICAL_BY_NEED = Map.of(
+    static final Map<String, String> CANONICAL_BY_NEED = Map.of(
             "top-ai-b", "latest artificial intelligence news",
             "top-cyber-b", "latest cybersecurity news",
             "top-crypto", "latest cryptocurrency news",
@@ -281,8 +281,8 @@ class RetrievalEvalCharacterizationIT {
     // ---- golden-set pairing ----
 
     /** xling rows paired with the ACTIVE English sibling their notes name (token match, M1-942 legs). */
-    private static List<Pair> pairsWithSiblings(RetrievalGoldenSetLoader.GoldenSet goldenSet,
-                                                byte[] goldenBytes) throws IOException {
+    static List<Pair> pairsWithSiblings(RetrievalGoldenSetLoader.GoldenSet goldenSet,
+                                        byte[] goldenBytes) throws IOException {
         Map<String, String> notesById = new LinkedHashMap<>();
         Set<String> activeIds = new HashSet<>();
         for (String line : new String(goldenBytes, java.nio.charset.StandardCharsets.UTF_8).split("\n")) {

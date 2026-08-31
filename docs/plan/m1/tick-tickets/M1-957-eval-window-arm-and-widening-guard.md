@@ -1,9 +1,9 @@
 ---
 id: M1-957
 title: "Arm the eval lane's temporal window + widening guard"
-status: pending
+status: done
 created: 2026-08-30
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 flow: tick
 reproduction: >-
   Child of a 2+ decomposition (analysis
@@ -20,18 +20,30 @@ reproduction: >-
   re-baseline, docs/measurement/retrieval-eval-baseline.md:333-334, vs the
   2026-08-30 two-leg tech reading, docs/measurement/
   retrieval-eval-two-leg.md tech table :184-185). M1-938's acceptance item
-  15 records the owed extension verbatim ("a post-landing harness re-run
+  15   records the owed extension verbatim ("a post-landing harness re-run
   whose temporal arm passes the window — the harness extension is the eval
   lane's own"; its P16: "no eval fixture/harness/record edits; the flip is
-  the owner-run delta"). Intended entry (to-be-written, converted at start,
-  compile-RED like M1-950's `cannot find symbol`):
+  the owner-run delta"). Entry converted at start 2026-08-31 (the M1-950
+  marker discipline):
   RetrievalGoldenSetTest#activeTemporalRowsParseToPinnedWindowsAtTheWorldNow
   — a default-suite unit leg driving the PRODUCTION
   TemporalExpressionParser.parse over every active temporal row of BOTH
   golden sets at (ZoneOffset.UTC, the world's pinned now) and asserting the
   pinned per-row window map (26 parse hits, 2 grammar misses named:
   t24-4 "security news from the past day", fam-t24-3 "environment news
-  from the past day").
+  from the past day"). RED conversion record: the parse-map leg compiles
+  against the EXISTING seams (production parser + world seam), so the
+  draft's compile-RED prediction did not hold for THAT leg — it pins
+  production truth and greens immediately (the exact-pin discriminator reds
+  on any future grammar/fixture drift); the family's compile-RED instead
+  came from the widening-guard leg written in the same step —
+  .scratch/tick-red-M1-957.log: test-compile fails
+  `pairsWithSiblings(GoldenSet,byte[]) has private access in
+  RetrievalEvalCharacterizationIT` (the M1-946 r1 aborting guard,
+  unreachable at build time before the widen). Mutation check
+  .scratch/tick-guard-red-M1-957.log: removing the top-chips canonical
+  entry reds the guard leg in the DEFAULT suite with the M1-946 r1 abort
+  message.
 analysis_ref: docs/plan/m1/tick-analysis/retrieval-campaign-followups.md
 blocked_by: []
 files_scope:
@@ -116,11 +128,31 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-31
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: PASS; MAINTAINABILITY: PASS; SCOPE: PASS — 6 falsification candidates dropped with citations (Clock-mock reachability defeated by @ApplicationScoped proxying + install-before-first-dispatch + the recorded runs' non-empty short windows and 126/126, 92/92 uid identity; QuarkusMock-vs-§8 defeated by §9 prescribing the pattern verbatim; record §13 defeated by the pins being byte-equal restatements of already-committed fixture-world pins; window_zone=Z vs acceptance's UTC defeated by ZoneOffset.UTC.getId() identity + the record's 'Z (UTC)' disclosure; fam-unguarded defeated by CANONICAL_BY_NEED keying exactly the tech set the characterizer consumes; worldNow-helper duplication defeated by the runner method being private + the exact-pin leg red-ing on drift). Verdict: .scratch/tick-review-M1-957-r1.txt"
+    diff_stats: "6 files, +351/-26 (RetrievalGoldenSetTest.java +106 three new default-suite legs, RetrievalEvalRunnerIT.java +46/-14 window arm + pins, RetrievalEvalCharacterizationIT.java 2-modifier visibility widen, retrieval-eval-two-leg.md +166 append-only dated section, ticket frontmatter bookkeeping, board regen)"
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  checked: 2026-08-31
+  result: >-
+    Self-check clean, no blocking question. Lint 0 findings. All file:line
+    citations spot-checked true: RetrievalEvalRunnerIT.java:239 exact
+    {query} dispatch, :222/:465 worldMaxReadyAt, :264-336 fences;
+    TemporalExpressionParser.java:49 pure public parse; SemanticSearchTool
+    :93-94 @Inject Clock + :170 cutoff; RetrievalEvalCharacterizationIT
+    :57-61/:124/:311-313/:349. Census re-ran clean (CANONICAL_BY_NEED:
+    one file, four rows; the runner's :239 the arm's only seam — the
+    characterization IT's :253 dispatch is the M1-945 anchor-leg
+    instrument, deliberately unwindowed and visibility-only here per
+    acceptance item 6). Analysis P1-P9 all landed in the ticket; P17/P18
+    restated in out_of_scope. blocked_by empty, replaces empty.
+    Parse-map verified against the committed fixtures: 13 hits per leg +
+    t24-4/fam-t24-3 misses at the two pinned world nows.
 escalation_reason:
 ---
 
@@ -309,3 +341,14 @@ constructs semanticSearch args (grep over the eval package).
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-957-eval-window-arm-and-widening-guard.md
 ```
+
+## Review observations
+
+- (r1, RECOMMENDED-NEW-TICKET, TOUCHED-BY-THIS-DIFF: no) The production
+  temporal grammar misses "… news from the past day" phrasings: COUNTED
+  requires a digit and no calendar token matches, so a user asking
+  "security news from the past day" gets an unwindowed chat pre-fetch
+  (TemporalExpressionParser.java:26-29). This ticket pins the miss in the
+  default suite (t24-4, fam-t24-3) and flags it as a production
+  observation; a grammar widening is a production behavior change needing
+  its own analysis and decision. Filing is the user's call.

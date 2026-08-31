@@ -2,11 +2,13 @@ package app.zcat.infochat.provider.chat.tool.eval;
 
 import app.zcat.infochat.llm.ModelTask;
 import app.zcat.infochat.provider.chat.tool.SemanticSearchTool;
+import app.zcat.infochat.provider.chat.tool.TemporalExpressionParser;
 import app.zcat.infochat.provider.chat.tool.eval.RetrievalGoldenSetLoader.GoldenRow;
 import app.zcat.infochat.provider.translation.QueryTranslationCache;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.NullNode;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
@@ -23,6 +25,7 @@ import java.security.MessageDigest;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -53,6 +56,9 @@ import static org.junit.jupiter.api.Assertions.fail;
  * World selection (M1-950): -Deval.world=tech (default; the frozen set,
  * byte-identical to the pre-M1-950 behavior) or fam (the fam replica set
  * via the replica's eval.db.url); an unknown name refuses, never falls back.
+ * Window arm (M1-957): en rows ride the PRODUCTION temporal parse at the
+ * world's pinned now (one Clock.fixed instant drives the parse and the
+ * tool's cutoff alike); parse misses and non-en rows dispatch unchanged.
  * Never in the default suite: @Tag("retrieval-eval") + the POM's failsafe
  * excludedGroups (engineering-rules §8/§5); stack bring-up and the
  * residual-divergence disclosure live in .bench/retrieval-eval/README.md.
@@ -136,7 +142,7 @@ class RetrievalEvalRunnerIT {
     }
 
     record QueryOutcome(List<RetrievalEvalScorer.ToolRow> rows, String cacheState, String anchoredText,
-                        double translatorCallDelta) {}
+                        double translatorCallDelta, String window) {}
 
     @Inject
     SemanticSearchTool tool;
@@ -179,23 +185,28 @@ class RetrievalEvalRunnerIT {
 
         Map<String, String> scopeLangs = assertEvalScopesSeeded(dataSource);
         String fingerprint1 = dbFingerprint(dataSource);
+        // One pinned instant drives BOTH the arm's parse and the tool's
+        // ready_at cutoff (llm.md §Determinism boundary; §9) — a wall
+        // clock would empty every short window on this frozen world.
+        Instant worldNow = worldMaxReadyAt(fingerprint1);
+        QuarkusMock.installMockForType(Clock.fixed(worldNow, ZoneOffset.UTC), Clock.class);
         Map<String, QueryOutcome> pass1 = new LinkedHashMap<>();
         // Deduplicated across the two determinism passes: it names RECORDS,
         // not executions (per-pass state lives in queries.jsonl's cache field).
         java.util.Set<String> fallbackRecords = new java.util.LinkedHashSet<>();
         for (GoldenRow row : golden) {
-            pass1.put(row.id(), executeGolden(row, scopeLangs, fallbackRecords));
+            pass1.put(row.id(), executeGolden(row, scopeLangs, fallbackRecords, worldNow));
         }
         String fingerprint2 = dbFingerprint(dataSource);
         Map<String, QueryOutcome> pass2 = new LinkedHashMap<>();
         for (GoldenRow row : golden) {
-            pass2.put(row.id(), executeGolden(row, scopeLangs, fallbackRecords));
+            pass2.put(row.id(), executeGolden(row, scopeLangs, fallbackRecords, worldNow));
         }
 
         boolean labelMatch = golden.stream()
                 .allMatch(r -> r.labeledFingerprint().equals(fingerprint1));
         writeArtifacts(resultsDir, world, goldenSet, pass1, pass2, fingerprint1, fingerprint2,
-                labelMatch, fallbackRecords);
+                labelMatch, fallbackRecords, worldNow);
 
         assertNoInterPassDrift(fingerprint1, fingerprint2);
         assertLabelFingerprintMatch(labelMatch, fingerprint1);
@@ -219,7 +230,6 @@ class RetrievalEvalRunnerIT {
         assertEnLegsIssuedZeroTranslatorCalls(enCalled);
         assertZeroTranslatorFallbacks(fallbackRecords);
 
-        Instant worldNow = worldMaxReadyAt(fingerprint1);
         RetrievalEvalScorer.Scores scores = RetrievalEvalScorer.score(
                 golden.stream().map(GoldenRow::toScorerRecord).toList(),
                 pass1.entrySet().stream().collect(java.util.stream.Collectors.toMap(
@@ -229,14 +239,27 @@ class RetrievalEvalRunnerIT {
     }
 
     private QueryOutcome executeGolden(GoldenRow row, Map<String, String> scopeLangs,
-                                       java.util.Set<String> fallbackRecords) throws Exception {
+                                       java.util.Set<String> fallbackRecords, Instant worldNow)
+            throws Exception {
         UUID scopeId = EVAL_SCOPES.get(row.scopeLang());
         boolean xling = !"en".equals(row.scopeLang());
         var cachedBefore = xling
                 ? anchorCache.get(row.query(), row.scopeLang(), "dm", scopeId)
                 : java.util.Optional.<String>empty();
+        // The window arm mirrors the dispatch layer (commands.md §Chat
+        // mode, D19): parse-GATED through the PRODUCTION parser, so a
+        // miss or a non-en row keeps exactly the pre-arm dispatch.
+        String window = null;
+        Map<String, Object> args = Map.of("query", row.query());
+        if (!xling) {
+            var parsed = TemporalExpressionParser.parse(row.query(), ZoneOffset.UTC, worldNow);
+            if (parsed.isPresent()) {
+                window = parsed.get().window().toString();
+                args = Map.of("query", row.query(), "_window", window);
+            }
+        }
         double callsBefore = translatorCallCount();
-        String json = tool.execute(EVAL_USER_ID, "dm", scopeId, Map.of("query", row.query()));
+        String json = tool.execute(EVAL_USER_ID, "dm", scopeId, args);
         double delta = translatorCallCount() - callsBefore;
         List<RetrievalEvalScorer.ToolRow> rows = RetrievalEvalScorer.parseToolJson(json);
         String cacheState;
@@ -256,7 +279,7 @@ class RetrievalEvalRunnerIT {
                 fallbackRecords.add(row.id());
             }
         }
-        return new QueryOutcome(rows, cacheState, anchored, delta);
+        return new QueryOutcome(rows, cacheState, anchored, delta, window);
     }
 
     private double translatorCallCount() {
@@ -486,7 +509,8 @@ class RetrievalEvalRunnerIT {
                                 RetrievalGoldenSetLoader.GoldenSet goldenSet,
                                 Map<String, QueryOutcome> pass1, Map<String, QueryOutcome> pass2,
                                 String fingerprint1, String fingerprint2,
-                                boolean labelMatch, java.util.Set<String> fallbackRecords) throws Exception {
+                                boolean labelMatch, java.util.Set<String> fallbackRecords,
+                                Instant worldNow) throws Exception {
         List<GoldenRow> golden = goldenSet.activeRows();
         Map<String, Object> manifest = new LinkedHashMap<>();
         manifest.put("ts", Instant.now().toString());
@@ -511,6 +535,9 @@ class RetrievalEvalRunnerIT {
         manifest.put("golden_set_active_records", golden.size());
         manifest.put("golden_set_retired_records", goldenSet.retiredCount());
         manifest.put("world_embedding_coverage", worldEmbeddingCoverage(dataSource));
+        manifest.put("window_arm", true);
+        manifest.put("window_zone", ZoneOffset.UTC.getId());
+        manifest.put("world_now", worldNow.toString());
         MAPPER.writerWithDefaultPrettyPrinter()
                 .writeValue(dir.resolve("manifest.json").toFile(), manifest);
 
@@ -525,6 +552,7 @@ class RetrievalEvalRunnerIT {
                     line.put("scope_lang", row.scopeLang());
                     line.put("cache", o.cacheState());
                     line.put("anchored_text", o.anchoredText());
+                    line.put("window", o.window());
                     line.put("translator_call_delta", o.translatorCallDelta());
                     line.put("returned", o.rows().stream()
                             .map(RetrievalEvalScorer.ToolRow::uid).toList());

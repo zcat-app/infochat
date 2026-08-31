@@ -1,17 +1,22 @@
 package app.zcat.infochat.provider.chat.tool.eval;
 
+import app.zcat.infochat.provider.chat.tool.TemporalExpressionParser;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -927,5 +932,106 @@ class RetrievalGoldenSetTest {
         AssertionError e = assertThrows(AssertionError.class,
                 () -> validateAll(FAM, records));
         assertTrue(e.getMessage().contains("class-below-floor"), e.getMessage());
+    }
+
+    // ---- the eval lane's window arm pins (the runner's parse-gated arm
+    // mirrors the production parse; these legs pin its inputs) ----
+
+    private static final Set<String> TEMPORAL_CLASSES = Set.of(
+            "temporal-today", "temporal-2h", "temporal-24h");
+
+    /** The world's pinned now rides its fingerprint pin (max_ready_at) —
+     * one instant drives the arm's parse AND the tool's ready_at cutoff
+     * (docs/spec/llm.md §Determinism boundary). */
+    private static Instant worldNow(String fingerprint) {
+        String rendered = fingerprint.substring(fingerprint.indexOf("max_ready_at=") + 13,
+                fingerprint.indexOf(";uid_sha256="));
+        return Instant.parse(rendered.replace(" ", "T").replaceFirst("\\+00$", "Z"));
+    }
+
+    @Test
+    void activeTemporalRowsParseToPinnedWindowsAtTheWorldNow() throws Exception {
+        // The pinned per-row parse map over BOTH committed golden sets at
+        // (ZoneOffset.UTC, each world's pinned now); t24-4/fam-t24-3 are
+        // the grammar's "from the past day" misses, pinned as misses.
+        Map<String, String> tech = new LinkedHashMap<>();
+        List.of("tt-1", "tt-2", "tt-3", "tt-4", "tt-5")
+                .forEach(id -> tech.put(id, "PT16H57.001472S"));
+        List.of("t2h-1", "t2h-2", "t2h-3", "t2h-4", "t2h-5")
+                .forEach(id -> tech.put(id, "PT2H"));
+        List.of("t24-1", "t24-2", "t24-3").forEach(id -> tech.put(id, "PT24H"));
+        tech.put("t24-4", null);
+
+        Map<String, String> fam = new LinkedHashMap<>();
+        List.of("fam-tt-1", "fam-tt-2", "fam-tt-3", "fam-tt-4", "fam-tt-5")
+                .forEach(id -> fam.put(id, "PT15H43M18.001688S"));
+        List.of("fam-t2h-1", "fam-t2h-2", "fam-t2h-3", "fam-t2h-4", "fam-t2h-5")
+                .forEach(id -> fam.put(id, "PT2H"));
+        List.of("fam-t24-1", "fam-t24-2", "fam-t24-4")
+                .forEach(id -> fam.put(id, "PT24H"));
+        fam.put("fam-t24-3", null);
+
+        assertTemporalParseMap(TECH, tech);
+        assertTemporalParseMap(FAM, fam);
+    }
+
+    private static void assertTemporalParseMap(World world, Map<String, String> pinnedWindows)
+            throws Exception {
+        Instant now = worldNow(world.fingerprint());
+        Map<String, String> actual = new LinkedHashMap<>();
+        for (JsonNode r : load(world)) {
+            if (r.path("replaced_by").isTextual()
+                    || !TEMPORAL_CLASSES.contains(text(r, "class"))) {
+                continue;
+            }
+            actual.put(text(r, "id"), TemporalExpressionParser
+                    .parse(text(r, "query"), ZoneOffset.UTC, now)
+                    .map(w -> w.window().toString()).orElse(null));
+        }
+        assertEquals(pinnedWindows.keySet(), actual.keySet(),
+                "the active temporal rows of " + world.resource()
+                + " must match the pinned map exactly (no row added, none missing)");
+        pinnedWindows.forEach((id, window) -> assertEquals(window, actual.get(id),
+                "temporal row " + id + " parse outcome at the world's pinned now"
+                + " (a grammar or fixture drift reds this leg)"));
+    }
+
+    @Test
+    void activeTemporalRowsAreEnScoped() throws Exception {
+        // The arm parses with no LLM anchor (en anchoring is the D58 no-op);
+        // a non-en temporal row would leave the arm's en-only scope
+        // incomplete, so the first one reds this leg.
+        for (World world : List.of(TECH, FAM)) {
+            for (JsonNode r : load(world)) {
+                if (r.path("replaced_by").isTextual()
+                        || !TEMPORAL_CLASSES.contains(text(r, "class"))) {
+                    continue;
+                }
+                assertEquals("en", text(r, "scope_lang"),
+                        "temporal row " + text(r, "id") + " must be en-scoped");
+            }
+        }
+    }
+
+    @Test
+    void everyActiveXlingSiblingIdHasAnAuthoredCanonicalPhrasing() throws Exception {
+        // The characterization IT's OWN pairing guard — the exact code path
+        // that aborted at the next operator run when the M1-946 widening
+        // shipped without a canonical entry — now reachable at build time.
+        byte[] techBytes = goldenSetBytes(TECH);
+        List<RetrievalEvalCharacterizationIT.Pair> pairs = RetrievalEvalCharacterizationIT
+                .pairsWithSiblings(RetrievalGoldenSetLoader.load(techBytes), techBytes);
+        assertEquals(16, pairs.size(),
+                "the widened frozen set carries 16 active cross-lingual rows");
+    }
+
+    private static byte[] goldenSetBytes(World world) throws IOException {
+        try (InputStream in = RetrievalGoldenSetTest.class
+                .getResourceAsStream(world.resource())) {
+            if (in == null) {
+                throw new IllegalStateException(world.resource() + " not on classpath");
+            }
+            return in.readAllBytes();
+        }
     }
 }

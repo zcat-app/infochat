@@ -315,3 +315,169 @@ baseline, not an outcome of it.
 
 None. Both golden sets were consumed read-only; their identities are
 pinned above and asserted by all four runs' manifests.
+
+## Window-armed reading — 2026-08-31 (M1-957)
+
+The first reading with the eval lane's temporal window ARMED: the runner
+now derives per-row dispatch args through the PRODUCTION
+`TemporalExpressionParser` at (ZoneOffset.UTC, the world's pinned now) —
+parse-GATED, never class-gated — and one pinned `Clock.fixed(worldNow)`
+instant drives both the parse and the tool's ready_at cutoff alike
+(docs/spec/llm.md §Determinism boundary). A parse hit dispatches
+`{query, _window}`; a parse miss or a non-en row dispatches exactly
+`{query}` (byte-identical to the pre-arm runs). This is the M1-938
+creditor leg: before the arm, the temporal classes scored byte-identically
+across M1-938's landing because the instrument ran every row unwindowed —
+the landed windowing was invisible to it. Both legs ran twice (determinism
+legs), same engine boot pattern as the first reading; all four runs green
+with every fence asserted (label-fingerprint match, zero translator
+fallbacks, en-zero translator calls, inter-pass drift identity).
+
+### Tech leg — window-armed reading
+
+| pin | value |
+|---|---|
+| repo / harness commit | `a99d57fd` (main) + the M1-957 window-arm diff (test-scope only, uncommitted at run time; zero production-path diffs) |
+| DB fingerprint | `ready=5214;max_ready_at=2026-08-24 16:00:57.001472+00;uid_sha256=06ed0de15eefad172062b4b6e3dfb11713e02017b103cc8ab8e064ffbe489727` — byte-equal to the 2026-08-30 reading; both passes, both invocations |
+| label fingerprint match | yes — harness-asserted in both invocations |
+| golden-set pin | `golden_set_sha256 = ccea13baa4c7e0938be6307f78774c6739e14cb9cbccb282bd7cb7bd2400d725` — byte-equal; **63 active / 18 retired** |
+| `world_embedding_coverage` | 1908 / 5214 — byte-equal |
+| semantic threshold / limit | 0.40 / 16 — byte-equal |
+| window arm | `window_arm = true`, `window_zone = Z` (UTC), `world_now = 2026-08-24T16:00:57.001472Z` — one instant for parse and cutoff; 15 rows armed (13 temporal parse hits + 2 non-temporal, below), 48 rows dispatch unchanged |
+| run timestamps | run 1 `2026-08-31T11:16:22Z` (all numbers below quote run 1); run 2 `2026-08-31T11:19:03Z` (determinism leg); artifacts under `.bench/retrieval-eval/results-957/{20260831-111600,20260831-111845}/` (operator-local) |
+
+**Determinism leg.** Two separate invocations on the pinned fingerprint:
+per-query uid lists byte-identical across the two runs — 0 of 126
+(pass, record) rows differ — the per-row `window` values byte-identical,
+and all 32 anchored texts byte-identical across the two boots. The
+runner's internal pass-1/pass-2 fingerprint and uid-identity self-checks
+passed inside each run.
+
+Per-class results — `none_expected` rows scored by over-return only;
+smoke/decision marks per rule G1 at THIS leg's own n (unchanged from the
+first reading: topical and cross-lingual decision-grade, the rest smoke).
+
+| class | n | signal | capped R@16 | raw R | MRR | over-ret mean count | over-ret median age (h) | lexical-only share |
+|---|---|---|---|---|---|---|---|---|
+| overall | 63 | — | 0.359 | 0.359 | 0.592 | 1.667 | 83.8 | 0.089 |
+| temporal-today | 5 | smoke | 0.225 | 0.225 | 0.400 | — | — | 0.000 |
+| temporal-2h | 5 | smoke | 0.175 | 0.175 | 0.400 | — | — | 0.000 |
+| temporal-24h | 4 | smoke | 0.4375 | 0.4375 | 0.625 | — | — | 0.000 |
+| entity-location | 6 | smoke | 0.313 | 0.313 | 0.600 | 0.0 | — | 0.143 |
+| entity-project | 6 | smoke | 0.4375 | 0.4375 | 0.667 | — | — | 0.320 |
+| price | 5 | smoke | — | — | — | 2.0 | 83.8 | 0.100 |
+| topical | 16 | **decision-grade** | 0.399 | 0.399 | 0.688 | — | — | 0.094 |
+| cross-lingual | 16 | **decision-grade** | 0.384 | 0.384 | 0.578 | — | — | 0.051 |
+
+**Movement vs the 2026-08-30 unwindowed reading is a paired INSTRUMENT
+delta (same golden set, matching fingerprint and coverage pin; the single
+variable is the window arm) — and it is DESCRIPTIVE: 4 recall-discordant
+temporal queries, 4 up / 0 down, below rule T1's floor of 6
+one-directional discordant queries, so no decision is taken on it.** The
+discordant rows, absolute recalls: `tt-1` 0.125 → 0.625, `tt-3` 0.375 →
+0.500 (temporal-today), `t2h-2` 0.125 → 0.500 (temporal-2h), `t24-2`
+0.125 → 0.625 (temporal-24h); the other 10 temporal rows are unchanged
+(7 score 0 → 0 both sides). The parse gate also armed two NON-temporal
+rows whose queries carry a temporal phrase — `el-1` "what happened in
+Czech today" and `pr-3` "how much is zcash worth today" (since-midnight
+window); a class-gated arm would have missed both. Their recalls are
+`none_expected` rows: their over-returns shrank (entity-location
+over-return mean 1.0 → 0.0; price 2.2 → 2.0, the surviving over-return
+ages 71.4 h → 83.8 h). Every row whose query parses to NOTHING stayed
+byte-identical to the 2026-08-30 run — 48 of 48 uid lists unchanged (the
+consistency proof; the two armed non-temporal rows above are the only
+non-temporal movement). `t24-4` ("security news from the past day")
+parse-misses by grammar and ran unwindowed — pinned in the default-suite
+parse-map leg, byte-identical to the pre-arm run (0.125 → 0.125).
+
+### Fam leg — window-armed reading
+
+| pin | value |
+|---|---|
+| repo / harness commit | same harness as the tech leg |
+| DB fingerprint | `ready=8260;max_ready_at=2026-08-28 15:43:18.001688+00;uid_sha256=2b385059297e4fa11cf172f458b4b959d37729619d4efbb8b514415378346d51` — byte-equal to the first reading; both passes, both invocations |
+| label fingerprint match | yes — harness-asserted in both invocations |
+| golden-set pin | `golden_set_sha256 = cd28bf61d5d114dfec467dae98e661efc76843fd36a2a955d26f848e5fff1255` — byte-equal; **46 active / 0 retired** |
+| `world_embedding_coverage` | 8260 / 8260 — byte-equal |
+| semantic threshold / limit | 0.40 / 16 — byte-equal |
+| window arm | `window_arm = true`, `window_zone = Z` (UTC), `world_now = 2026-08-28T15:43:18.001688Z`; 13 rows armed (the 13 temporal parse hits), 33 rows dispatch unchanged |
+| run timestamps | run 1 `2026-08-31T11:21:47Z` (all numbers below quote run 1); run 2 `2026-08-31T11:24:33Z` (determinism leg); artifacts under `.bench/retrieval-eval/results-fam-957/{20260831-112125,20260831-112411}/` (operator-local) |
+
+**Determinism leg.** Two separate invocations: 0 of 92 (pass, record)
+uid lists differ, per-row `window` values byte-identical, all 32 anchored
+texts byte-identical across the two boots — including `fam-xl-economy-cs`,
+which diverged across the first reading's two boots (the disclosed greedy
+decode variance). This session's two boots both anchored "economy and
+business news"; the first reading's run 1 anchored "news from economy and
+business" — the cross-session difference is that same disclosed residual
+(anchored text is an LLM output upstream of retrieval), and the row's
+class-recall is unchanged across both readings.
+
+Per-class results — smoke/decision marks per rule G1 at THIS leg's own n
+(unchanged from the first reading).
+
+| class | n | signal | capped R@16 | raw R | MRR | lexical-only share |
+|---|---|---|---|---|---|---|
+| overall | 46 | — | 0.118 | 0.118 | 0.483 | 0.168 |
+| temporal-today | 5 | smoke | 0.116 | 0.116 | 0.600 | 0.125 |
+| temporal-2h | 5 | smoke | 0.049 | 0.049 | 0.400 | 0.000 |
+| temporal-24h | 4 | smoke | 0.166 | 0.166 | 0.675 | 0.000 |
+| topical | 16 | **decision-grade** | 0.132 | 0.132 | 0.487 | 0.199 |
+| cross-lingual | 16 | **decision-grade** | 0.116 | 0.116 | 0.419 | 0.176 |
+
+**Movement vs the first reading — DESCRIPTIVE, same pairing as the tech
+leg: 1 recall-discordant temporal query, 1 up / 0 down, below the T1
+floor of 6.** The discordant row, absolute recalls: `fam-t24-2` 0.0667 →
+0.2000; the other 13 temporal rows are recall-unchanged. The window DID
+re-rank inside two classes without moving recall: temporal-today MRR
+0.400 → 0.600 and temporal-2h MRR 0.150 → 0.400 (relevant rows climbed
+when the out-of-window rows left the fused window). Every un-armed row
+stayed byte-identical to the first reading — 32 of 33 uid lists unchanged;
+the one difference is the `fam-xl-economy-cs` decode variance disclosed
+above, not an arm effect. `fam-t24-3` ("environment news from the past
+day") parse-misses by grammar and ran unwindowed — pinned in the
+default-suite parse-map leg, byte-identical (0.3333 → 0.3333).
+
+### Cross-leg reading (DESCRIPTIVE only — rule TL3)
+
+Armed vs unwindowed, each leg at its own fingerprint and coverage pin:
+tech overall 0.333 → 0.359 capped recall (MRR 0.564 → 0.592), fam overall
+0.115 → 0.118 (MRR 0.411 → 0.483). These two movements never enter one
+sign test (TL3) and are not pooled: two legs, two paired instrument
+deltas, each below its own T1 floor, each leg-scoped. What the arm
+settles is not a product claim but the instrument's own debt: the
+temporal classes now respond to the landed windowing, in both worlds, in
+the direction the windowing was built for — and the next retrieval change
+(the width-32 lever) reads against an instrument that can see temporal
+behavior.
+
+### Disclosures of this reading
+
+- **Parse-miss rows ran unwindowed BY DESIGN.** `t24-4` and `fam-t24-3`
+  ("… news from the past day") carry no digit and no calendar token, so
+  the production grammar parse-misses them; the arm dispatched them
+  exactly `{query}`. The production chat dispatch layer misses the same
+  phrasings — flagged to the driver as a production observation; the
+  grammar is NOT widened in the eval lane.
+- **Non-en rows are un-armed because en anchoring is identity.** The arm
+  parses with no LLM anchor (the D58 no-op), so only en rows can carry a
+  window; no non-en temporal row exists in either set (pinned by the
+  default-suite leg).
+- **The fam leg's one cross-session uid difference** is the disclosed
+  greedy decode variance of `fam-xl-economy-cs` (the first reading's
+  do-not-settle names it), not a determinism-boundary breach: within each
+  M1-957 invocation the identity held (92/92).
+
+### What this reading does not settle
+
+**The width-32 lever remains NOT product-decided.** These window-armed
+runs are the pairing 16-side for that lever's future delta (the
+single-variable rule: a width change never shares a sign test with the
+window arm); before any `infochat.chat.semantic-limit` change, the lever
+still re-reads as owner-run deltas on BOTH legs — T1 per leg (same golden
+set, matching fingerprint and coverage pin, floor 6 one-directional
+discordant queries) — and the change decision remains a SEPARATE
+decision/ticket. The temporal movements above are below the T1 floor on
+both legs and settle nothing beyond the instrument's own visibility; the
+first reading's confidence-interval paragraph stands unchanged for both
+legs' ns.
