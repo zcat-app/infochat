@@ -24,6 +24,7 @@ import app.zcat.infochat.provider.llm.LlmOutputSanitizer;
 import app.zcat.infochat.provider.testsupport.AnchorTranslatorDoubles;
 import app.zcat.infochat.provider.testsupport.SanitizerTestDoubles;
 import app.zcat.infochat.provider.translation.TranslationPipeline;
+import org.jboss.logmanager.LogContext;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
@@ -38,7 +39,12 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.SimpleFormatter;
 
 import static app.zcat.infochat.provider.testsupport.TranslationFixtures.newRealBundleLoader;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -250,6 +256,149 @@ class StageProgressNotifierLiveTextTest {
                 "every live update passes through the outbound link-adjacency guard");
         assertTrue(updates.stream().anyMatch(body -> body.contains("] (")),
                 "the live update carries the broken adjacency on the wire");
+    }
+
+    /** REPRODUCTION (M1-958, P10): at the real 600 ms floor the streamed label
+     *  revert must ship between the last live answer edit and an emptied-reply
+     *  degrade terminal — today the revert is coalesced away. */
+    @Test
+    void emptiedFinalTurnNeverReplacesPublishedLiveTextWithoutTheLabelRevert() throws Exception {
+        LiveTextRig rig = newRig(true, true, "en", ChatReplyMode.TRANSLATE);
+        setField(rig.notifier(), "minEditIntervalMs", 600L);
+        rig.provider.streamingSequences = List.of(
+                List.of("Here is the full answer.", "\n\nTOOL_CALL: searchPosts {\"tags\": []}"),
+                List.of(""));
+
+        ChatAgent.ChatTurnResult result =
+                rig.agent.handleTurn(USER_ID, "dm", SCOPE_ID, "hello", DM);
+
+        String degrade = newRealBundleLoader().get(
+                app.zcat.infochat.provider.bundle.BundleKeys.ERROR_CHAT_UNAVAILABLE, "en");
+        assertEquals(degrade, result.reply(),
+                "the emptied final turn takes the step-9c degrade (spec-following terminal)");
+        rig.notifier.completeDelivered(DM, result.reply());
+
+        List<InMemoryAdapter.UpdateEvent> history =
+                rig.adapter.updateHistory(handleOf(rig.adapter));
+        assertEquals(1, rig.adapter.sentMessages().size(),
+                "the live answer ships as the one placeholder send");
+        assertEquals("Here is the full answer.", rig.adapter.sentMessages().get(0).text(),
+                "the placeholder carries the live answer, never protocol bytes");
+        String generating = newRealBundleLoader().get(
+                app.zcat.infochat.provider.bundle.BundleKeys.PROGRESS_GENERATING, "en");
+        List<String> nonFinalBodies = history.stream()
+                .filter(event -> !event.isFinal())
+                .map(InMemoryAdapter.UpdateEvent::body)
+                .toList();
+        assertEquals(List.of("Here is the full answer.", generating), nonFinalBodies,
+                "the revert label ships between the live answer and the terminal");
+        InMemoryAdapter.UpdateEvent terminal = history.get(history.size() - 1);
+        assertTrue(terminal.isFinal(), "the wire closes with the terminal finalize");
+        assertEquals(degrade, terminal.body(),
+                "the terminal carries the degrade, never the streamed prefix");
+        assertTrue(history.stream().map(InMemoryAdapter.UpdateEvent::body)
+                        .allMatch(body -> !body.contains("TOOL_CALL:")),
+                "tool protocol bytes never ship on the wire");
+    }
+
+    /** P11 mechanism (b): a budget-break blank final call must meet the same
+     *  invariant — the revert label on the wire before the degrade terminal. */
+    @Test
+    void budgetBreakEmptiedFinalizeStillShipsTheLabelRevert() throws Exception {
+        LiveTextRig rig = newRig(true, true, "en", ChatReplyMode.TRANSLATE);
+        setField(rig.notifier(), "minEditIntervalMs", 600L);
+        String longProse = "word ".repeat(6_000);
+        rig.provider.streamingSequences = List.of(
+                List.of(longProse, "\n\nTOOL_CALL: searchPosts {\"tags\": []}"),
+                List.of(""));
+
+        ChatAgent.ChatTurnResult result =
+                rig.agent.handleTurn(USER_ID, "dm", SCOPE_ID, "hello", DM);
+
+        String degrade = newRealBundleLoader().get(
+                app.zcat.infochat.provider.bundle.BundleKeys.ERROR_CHAT_UNAVAILABLE, "en");
+        assertEquals(degrade, result.reply(),
+                "the budget-break blank final takes the step-9c degrade");
+        rig.notifier.completeDelivered(DM, result.reply());
+
+        List<InMemoryAdapter.UpdateEvent> history =
+                rig.adapter.updateHistory(handleOf(rig.adapter));
+        assertEquals(longProse, rig.adapter.sentMessages().get(0).text(),
+                "the live prose ships as the placeholder send");
+        String generating = newRealBundleLoader().get(
+                app.zcat.infochat.provider.bundle.BundleKeys.PROGRESS_GENERATING, "en");
+        List<String> nonFinalBodies = history.stream()
+                .filter(event -> !event.isFinal())
+                .map(InMemoryAdapter.UpdateEvent::body)
+                .toList();
+        assertEquals(List.of(longProse, generating), nonFinalBodies,
+                "the revert label ships between the live prose and the degrade terminal");
+        InMemoryAdapter.UpdateEvent terminal = history.get(history.size() - 1);
+        assertTrue(terminal.isFinal(), "the wire closes with the terminal finalize");
+        assertEquals(degrade, terminal.body(),
+                "the terminal carries the degrade, never the streamed prefix");
+    }
+
+    /** P10 failure-mode discriminator: an ordinary in-floor live update stays
+     *  coalesced — a mutation force-transmitting everything reds this leg. */
+    @Test
+    void anOrdinaryInFloorLiveUpdateStaysCoalescedAtTheRealFloor() throws Exception {
+        LiveTextRig rig = newRig(true, true, "en", ChatReplyMode.TRANSLATE);
+        setField(rig.notifier(), "minEditIntervalMs", 600L);
+        rig.provider.chunks = List.of("First part.", " Second part.");
+
+        ChatAgent.ChatTurnResult result =
+                rig.agent.handleTurn(USER_ID, "dm", SCOPE_ID, "hello", DM);
+
+        assertNotNull(result.reply(), "the ordinary streamed turn still computes a reply");
+        assertEquals(1, rig.adapter.sentMessages().size(), "one placeholder send");
+        List<String> nonFinalBodies = rig.adapter.updateHistory(handleOf(rig.adapter)).stream()
+                .filter(event -> !event.isFinal())
+                .map(InMemoryAdapter.UpdateEvent::body)
+                .toList();
+        assertEquals(List.of("First part."), nonFinalBodies,
+                "the in-floor ordinary live update is coalesced: one body on the wire, not two");
+    }
+
+    /** P12 attribution (D37): the streamed emptied-reply degrade emits exactly
+     *  one scope-redacted WARN — no user prose, no reply bytes. */
+    @Test
+    void streamedEmptiedReplyDegradeEmitsOneScopeRedactedWarn() throws Exception {
+        LiveTextRig rig = newRig(true, true, "en", ChatReplyMode.TRANSLATE);
+        setField(rig.notifier(), "minEditIntervalMs", 600L);
+        rig.provider.streamingSequences = List.of(
+                List.of("Here is the full answer.", "\n\nTOOL_CALL: searchPosts {\"tags\": []}"),
+                List.of(""));
+
+        CapturingHandler logCapture = new CapturingHandler();
+        org.jboss.logmanager.Logger jbossLogger =
+                LogContext.getLogContext().getLogger(ChatAgent.class.getName());
+        jbossLogger.addHandler(logCapture);
+        java.util.logging.Logger julLogger =
+                java.util.logging.Logger.getLogger(ChatAgent.class.getName());
+        julLogger.addHandler(logCapture);
+        ChatAgent.ChatTurnResult result;
+        try {
+            result = rig.agent.handleTurn(USER_ID, "dm", SCOPE_ID, "hello", DM);
+        } finally {
+            jbossLogger.removeHandler(logCapture);
+            julLogger.removeHandler(logCapture);
+        }
+
+        String degrade = newRealBundleLoader().get(
+                app.zcat.infochat.provider.bundle.BundleKeys.ERROR_CHAT_UNAVAILABLE, "en");
+        assertEquals(degrade, result.reply(), "the reproduction turn takes the degrade");
+        // jboss-logmanager substitutes its own Level instances: compare by value.
+        List<LogRecord> warns = logCapture.records.stream()
+                .filter(record -> record.getLevel().intValue() == Level.WARNING.intValue())
+                .toList();
+        assertEquals(1, warns.size(), "exactly one WARN attributes the streamed degrade");
+        String line = formattedWithParameters(warns.get(0));
+        assertTrue(line.contains("CHAT_AGENT"), "the WARN names the class");
+        assertTrue(line.contains(USER_ID.toString()), "the WARN names the scope id");
+        assertFalse(line.contains("Here is the full answer."), "no user prose in the WARN");
+        assertFalse(line.contains(degrade), "no reply bytes in the WARN");
+        assertFalse(line.contains("TOOL_CALL:"), "no anchored text in the WARN");
     }
 
     private static void assertCollapsed(LiveTextRig rig, ScopeRef scope) {
@@ -504,5 +653,34 @@ class StageProgressNotifierLiveTextTest {
             }
             return new LlmResponse(assembled.toString());
         }
+    }
+
+    private static String formattedWithParameters(LogRecord record) {
+        StringBuilder sb = new StringBuilder(new SimpleFormatter().format(record));
+        if (record.getParameters() != null) {
+            for (Object parameter : record.getParameters()) {
+                sb.append(" param=").append(parameter);
+            }
+        }
+        return sb.toString();
+    }
+
+    private static final class CapturingHandler extends Handler {
+        final List<LogRecord> records = new CopyOnWriteArrayList<>();
+
+        CapturingHandler() {
+            setLevel(Level.ALL);
+        }
+
+        @Override
+        public void publish(LogRecord record) {
+            records.add(record);
+        }
+
+        @Override
+        public void flush() {}
+
+        @Override
+        public void close() {}
     }
 }

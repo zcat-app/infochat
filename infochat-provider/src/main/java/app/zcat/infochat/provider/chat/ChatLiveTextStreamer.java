@@ -185,7 +185,9 @@ public class ChatLiveTextStreamer {
                 return;
             }
             labelShown = true;
-            notifier.publishStageText(scope,
+            // Forced: the revert must not be coalesced away while live text
+            // is displayed (security.md §Streamed surfaces, M1-958).
+            notifier.publishStageTextForced(scope,
                     bundleLoader.get(BundleKeys.PROGRESS_GENERATING, language));
         }
 

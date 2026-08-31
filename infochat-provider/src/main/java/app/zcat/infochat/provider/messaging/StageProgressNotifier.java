@@ -142,7 +142,7 @@ public class StageProgressNotifier implements ProgressNotifier {
             // turning off.
             return;
         }
-        publishText(adapter, scope, text);
+        publishText(adapter, scope, text, false, false);
     }
 
     /** Transports caller-sanitized live prefixes through the stage lifecycle. */
@@ -152,10 +152,22 @@ public class StageProgressNotifier implements ProgressNotifier {
                 || !adapter.capabilities().supportsLiveText()) {
             return;
         }
-        publishText(adapter, scope, text);
+        publishText(adapter, scope, text, true, false);
     }
 
-    private void publishText(MessagingAdapter adapter, ScopeRef scope, String text) {
+    /** The protocol label revert's publish (security.md §Streamed surfaces):
+     * force-transmits over the edit floor when the last shipped body was live
+     * text, so the revert cannot be coalesced away (M1-958); lifecycle is publish's. */
+    public void publishStageTextForced(ScopeRef scope, String text) {
+        MessagingAdapter adapter = resolveAdapter();
+        if (!adapter.capabilities().supportsMessageEdit()) {
+            return;
+        }
+        publishText(adapter, scope, text, false, true);
+    }
+
+    private void publishText(MessagingAdapter adapter, ScopeRef scope, String text,
+                             boolean liveText, boolean forced) {
         String operationId = inboundContext.operationId();
         ScopeState state = states.computeIfAbsent(operationId, id -> new ScopeState());
         // Register the request-end safety net before any outbound work: if
@@ -182,6 +194,7 @@ public class StageProgressNotifier implements ProgressNotifier {
                 }
                 state.handle = handle;
                 state.lastEditAt = Instant.now();
+                state.lastShippedWasLiveText = liveText;
                 adapter.setTyping(scope, true);
                 return;
             }
@@ -192,16 +205,22 @@ public class StageProgressNotifier implements ProgressNotifier {
             // per docs/spec/messaging.md §Progress notifications: the
             // adapter's declared minEditInterval (SimpleX's 600ms) wins when
             // it is the stricter of the two.
+            // The protocol label revert (forced) bypasses the floor when the
+            // last shipped body was live text: the revert is a spec promise,
+            // and coalescing it away leaves stale live text displayed (M1-958).
+            boolean forcedRevertOverLiveText = forced && state.lastShippedWasLiveText;
             long effectiveEditIntervalMs = Math.max(
                     minEditIntervalMs, adapter.capabilities().minEditInterval().toMillis());
             Instant now = Instant.now();
-            if (Duration.between(state.lastEditAt, now).toMillis() < effectiveEditIntervalMs) {
+            if (!forcedRevertOverLiveText
+                    && Duration.between(state.lastEditAt, now).toMillis() < effectiveEditIntervalMs) {
                 adapterMetrics.updateOutcome(adapter.name(), scope,
                         AdapterMetrics.UpdateOutcome.COALESCED);
                 return;
             }
             if (outboundDelivery.updateInPlace(adapter, state.handle, text)) {
                 state.lastEditAt = now;
+                state.lastShippedWasLiveText = liveText;
                 adapterMetrics.updateOutcome(adapter.name(), scope,
                         AdapterMetrics.UpdateOutcome.OK);
                 // §6.12 update lag: this publish's entry to the edit on
@@ -407,5 +426,6 @@ public class StageProgressNotifier implements ProgressNotifier {
     private static final class ScopeState {
         @Nullable MessageHandle handle;
         Instant lastEditAt = Instant.EPOCH;
+        boolean lastShippedWasLiveText;
     }
 }

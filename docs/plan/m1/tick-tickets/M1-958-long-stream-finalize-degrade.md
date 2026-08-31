@@ -1,9 +1,9 @@
 ---
 id: M1-958
 title: "Long-stream finalize degrade: enforce the label revert"
-status: pending
+status: done
 created: 2026-08-30
-last_updated: 2026-08-30
+last_updated: 2026-09-01
 flow: tick
 reproduction: >-
   Child of a 2+ decomposition (analysis
@@ -121,11 +121,43 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-09-01
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: PASS; MAINTAINABILITY: PASS; SCOPE: PASS — 3 falsification candidates dropped with citations (WARN-not-via-SafeLog defeated by the refusal-arm analog ChatAgent.java:768 + SafeLog.java:69-71 having no throwable-less signature + a constant message whose only parameter is the userId UUID; budget-break-leg-shape divergence defeated by 30000 chars = 7500 tokens > the 6144 rig budget driving the post-break final call at ChatAgent.java:1198-1203 — the acceptance's own cited path — while a literal plain-tool-call first iteration would publish no live text and pin nothing; coalescing-leg timing flake defeated by the stub delivering both chunks back-to-back in one synchronous loop, StageProgressNotifierLiveTextTest.java:642-655). Verdict: .scratch/tick-review-M1-958-r1.txt"
+    diff_stats: "6 files, +238/-15 (StageProgressNotifier.java +28 forced-revert publish; ChatLiveTextStreamer.java 2-line revert call-site switch; ChatAgent.java +7 step-9c streamed-degrade WARN; StageProgressNotifierLiveTextTest.java +178 four new legs — reproduction, budget-break, coalescing discriminator, WARN log-capture; ticket frontmatter bookkeeping; board regen)"
+    notes: >-
+      0 rework items, 0 critical/high. Gate confirmed the revert reaches
+      the wire before any terminal when the last shipped body was live
+      text, ordinary in-floor updates stay coalesced byte-identically, the
+      WARN carries no user-derived byte (constant message + userId UUID
+      only), all 11 live-text legs green in the full-suite verify log
+      (BUILD SUCCESS, finished 2026-09-01T01:18:19), and no file outside
+      files_scope + bookkeeping touched. Full-suite mvn verify green from
+      the repo root (target/tick-test-M1-958-r1.log).
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  checked: 2026-09-01
+  result: >-
+    Self-check clean, no blocking question. Lint 0 findings. All file:line
+    citations spot-checked true: StageProgressNotifier.java :105-106 floor
+    default 600, :188-202 silent in-floor discard, :355-377 terminate
+    finalizeInPlace; ChatLiveTextStreamer.java :131-140 opener revert,
+    :170-176 onIterationToolCall; ChatAgent.java :492/:513 logging catch
+    arms, :768 refusal arm, :835-838 step-9c no-log degrade, :1146-1149
+    runToolLoop revert call, :1191-1196 budget-break/cap final call;
+    InboundRouter.java :1390-1391 completeDelivered terminal. Census grep
+    re-runs clean, all four rows match. Analysis P10-P14 all landed; every
+    preserves leg exists in-tree. One shorthand resolved: the acceptance
+    literal writes the reproduction's first sequence as one chunk holding
+    answer + opener, but onChunk never publishes live text once the prefix
+    carries an opener, so the described wire (answer shipped, revert
+    coalesced away) requires the opener in a LATER chunk of the same call
+    — the reproduction splits the first sequence into [answer, opener]
+    chunks (the literal's <full answer> token is a placeholder either way).
 escalation_reason:
 ---
 

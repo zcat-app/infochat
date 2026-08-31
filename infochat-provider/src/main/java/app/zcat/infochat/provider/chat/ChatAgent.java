@@ -833,6 +833,13 @@ public class ChatAgent {
         // and no deterministic block matched — degrades like the refusal
         // intercept: localized unavailable string, null commit, null notice.
         if (reply.isBlank()) {
+            // The only error.chat.unavailable return without attribution: on a
+            // streamed turn it finalizes over the streamed display. D37 shape —
+            // class + scope id only, never user content.
+            if (reveal != null) {
+                log.warn("CHAT_AGENT emptied-reply degrade on a live-streamed turn for userId={};"
+                        + " degrading turn", userId);
+            }
             return new ChatTurnResult(
                     bundleLoader.get(BundleKeys.ERROR_CHAT_UNAVAILABLE, scopeLanguage), null, null);
         }
