@@ -597,6 +597,38 @@ class EligiblePostQueryIT {
                 "tags remain independently projected");
     }
 
+    @Test
+    void topicPrefixMetacharacterValuesNeverWiden() throws Exception {
+        UUID userId = insertUser("topic-like-user");
+        UUID sourceId = insertSource("topic-like-src", "Topic-like source");
+        insertSubscription("dm", userId, sourceId);
+        Instant publishedAt = PINNED_NOW.minus(Duration.ofHours(1));
+        // Stored search_tags are canonical (no % or _), so metacharacter
+        // prefixes must match nothing: unescaped, qw%n widens onto qwen3
+        // and a_b onto axb; the qwen arm discriminates a broken fixture.
+        insertReadyPostWithSearchTags("topic-like-percent", sourceId, "Percent bait",
+                publishedAt, "qwen3");
+        insertReadyPostWithSearchTags("topic-like-underscore", sourceId, "Underscore bait",
+                publishedAt, "axb");
+
+        Result percentArm = query.fetchByTopicPrefix("dm", userId, "qw%n", Duration.ofHours(24));
+        assertTrue(percentArm.posts().isEmpty(),
+                "literal % in the prefix never widens onto qwen3 — an escaping-skipping "
+                        + "mutation returns the post and fails");
+        assertEquals(0, percentArm.totalBeforeCap());
+
+        Result underscoreArm = query.fetchByTopicPrefix("dm", userId, "a_b", Duration.ofHours(24));
+        assertTrue(underscoreArm.posts().isEmpty(),
+                "literal _ in the prefix never widens onto axb");
+        assertEquals(0, underscoreArm.totalBeforeCap());
+
+        Result companionArm = query.fetchByTopicPrefix("dm", userId, "qwen", Duration.ofHours(24));
+        assertEquals(1, companionArm.totalBeforeCap(),
+                "the plain-prefix companion on the same fixture catches a broken or "
+                        + "over-narrow query that would fake the empty arms");
+        assertEquals(PREFIX + "topic-like-percent", companionArm.posts().get(0).uid());
+    }
+
     // ----- helpers ------------------------------------------------------
 
     private UUID insertUser(String suffix) throws Exception {
@@ -730,6 +762,30 @@ class EligiblePostQueryIT {
             ps.setTimestamp(6, Timestamp.from(fetchedAt));
             ps.setTimestamp(7, Timestamp.from(readyAt));
             ps.setArray(8, conn.createArrayOf("TEXT", tags.toArray(new String[0])));
+            ps.setString(9, PREFIX + uidSuffix);
+            ps.executeUpdate();
+        }
+    }
+
+    /** Seeds a READY post carrying canonical search_tags — the /topic
+     *  drill-down reads that column; the tags helpers above leave it
+     *  at its V87 default '{}'. */
+    private void insertReadyPostWithSearchTags(String uidSuffix, UUID sourceId, String title,
+                                               Instant publishedAt, String... searchTags)
+            throws Exception {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO post (uid, source_id, title, body, published_at, fetched_at, "
+                             + "ready_at, status, tags, search_tags, upstream_identifier) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, ?, 'READY', '{}', ?, ?)")) {
+            ps.setString(1, PREFIX + uidSuffix);
+            ps.setObject(2, sourceId);
+            ps.setString(3, title);
+            ps.setString(4, "Body for " + title);
+            ps.setTimestamp(5, Timestamp.from(publishedAt));
+            ps.setTimestamp(6, Timestamp.from(publishedAt));
+            ps.setTimestamp(7, Timestamp.from(publishedAt));
+            ps.setArray(8, conn.createArrayOf("TEXT", searchTags));
             ps.setString(9, PREFIX + uidSuffix);
             ps.executeUpdate();
         }

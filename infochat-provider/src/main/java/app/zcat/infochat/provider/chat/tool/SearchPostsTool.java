@@ -2,6 +2,7 @@ package app.zcat.infochat.provider.chat.tool;
 
 import app.zcat.infochat.core.log.SafeLog;
 import app.zcat.infochat.core.util.JsonEscaper;
+import app.zcat.infochat.core.util.LikeEscaper;
 import app.zcat.infochat.provider.chat.CancellationService;
 import app.zcat.infochat.provider.chat.ChatToolRegistry;
 import app.zcat.infochat.provider.summary.TagTreeExpansion;
@@ -232,7 +233,7 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
                 // Only code appends the wildcard: the escaped value plus
                 // the trailing % — a model-supplied metacharacter stays a
                 // literal and can never widen the match.
-                params.add(escapeLike(prefix) + "%");
+                params.add(LikeEscaper.escapeLike(prefix) + "%");
             }
         }
 
@@ -334,20 +335,6 @@ public class SearchPostsTool implements ChatToolRegistry.ChatTool {
         String lower = Normalizer.normalize(raw, Normalizer.Form.NFC)
                 .toLowerCase(Locale.ROOT);
         return TOPIC_VALUE_PATTERN.matcher(lower).matches() ? lower : null;
-    }
-
-    /** {@code \% \_ \\} — every LIKE metacharacter in {@code value},
-     *  backslash-escaped; only code appends the wildcard. */
-    private static String escapeLike(String value) {
-        StringBuilder sb = new StringBuilder(value.length());
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            if (c == '%' || c == '_' || c == '\\') {
-                sb.append('\\');
-            }
-            sb.append(c);
-        }
-        return sb.toString();
     }
 
     // The scope's declared language — the same SQL and missing-row default

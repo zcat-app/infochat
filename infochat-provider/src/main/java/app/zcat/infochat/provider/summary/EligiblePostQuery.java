@@ -1,5 +1,6 @@
 package app.zcat.infochat.provider.summary;
 
+import app.zcat.infochat.core.util.LikeEscaper;
 import app.zcat.infochat.messaging.ScopeRef;
 import app.zcat.infochat.provider.chat.CancellationService;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -395,19 +396,6 @@ public class EligiblePostQuery {
         }
     }
 
-    /** {@code \% \_ \\} — every LIKE metacharacter in {@code value}, backslash-escaped. */
-    private static String escapeLike(String value) {
-        StringBuilder sb = new StringBuilder(value.length());
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            if (c == '%' || c == '_' || c == '\\') {
-                sb.append('\\');
-            }
-            sb.append(c);
-        }
-        return sb.toString();
-    }
-
     // ----- private SQL helpers ------------------------------------------
 
     /** Bounded row set plus the true pre-LIMIT match count. */
@@ -494,7 +482,7 @@ public class EligiblePostQuery {
             // literal + code-owned wildcard (see fetchByTopicPrefix).
             sql.append("   AND EXISTS (SELECT 1 FROM unnest(p.search_tags) AS t")
                .append("                WHERE t LIKE ? || '%') ");
-            params.add(escapeLike(topicPrefix));
+            params.add(LikeEscaper.escapeLike(topicPrefix));
         }
 
         // COALESCE, not a bare published_at: published_at is nullable and

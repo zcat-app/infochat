@@ -1,9 +1,9 @@
 ---
 id: M1-956
 title: "Pin the /topic LIKE escaper; share one escapeLike helper"
-status: pending
+status: done
 created: 2026-08-30
-last_updated: 2026-08-30
+last_updated: 2026-08-31
 flow: tick
 reproduction: >-
   Mutation probe (executed 2026-08-30 on clean main f9a76203; full log
@@ -119,11 +119,30 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-08-31
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: PASS; MAINTAINABILITY: PASS; SCOPE: PASS — 4 falsification candidates dropped with citations (acceptance-2 example literal defeated by the same item's normative text + byte-identical consolidation premise + security.md:328 mechanism sentence; DB-tier backslash arm defeated by P5's own mapping + LikeEscaperTest.backslashGainsAPrecedingBackslash; post-verify-log javadoc mtimes defeated by comment-only diff + both modules test-compile green + flow's comment-edit rule; acceptance-4 LIKE-grep probe defeated by the census row disposing the javadoc mentions + all SQL literals byte-identical). Verdict: .scratch/tick-review-M1-956-r1.txt"
+    diff_stats: "7 files, +139/-39 (LikeEscaper.java +22 new, LikeEscaperTest.java +37 new, SearchPostsTool.java -16 net, EligiblePostQuery.java -15 net, EligiblePostQueryIT.java +56 additive, ticket frontmatter bookkeeping, board regen)"
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  checked: 2026-08-31
+  result: >-
+    Self-check clean, no blocking question. Lint 0 findings. All file:line
+    citations spot-checked true: SearchPostsTool.java:228 LIKE ? ESCAPE '\',
+    :235 bind, :341-351 private escapeLike; EligiblePostQuery.java:496
+    LIKE ? || '%', :497 bind, :399-409 private escapeLike; sole production
+    caller TopicCommandHandler.java:206; TopicArgs else-branch gate
+    (normalize+isValid -> BUNDLE_TAG_MALFORMED) confirmed; provider pom
+    depends on infochat-core; core.util family shape (JsonEscaper) confirmed;
+    EligiblePostQueryIT insertPost helpers seed tags but NOT search_tags
+    (new additive helper needed, as planned); SearchPostsToolTest mirror
+    seeds qwen3/axb confirmed. Census re-ran clean: exactly two LIKE sites
+    in all src/main, SIMILAR TO/~~ grep empty. analysis_ref: self — no
+    cross-read. blocked_by empty, replaces empty — nothing to trace.
 escalation_reason:
 ---
 
@@ -392,3 +411,16 @@ Mechanical enumeration over every module's `src/main`:
 Re-runnable after the change: `grep -rn 'String escapeLike' --include='*.java'`
 over all modules' `src/main` returns exactly
 `infochat-core/.../core/util/LikeEscaper.java`.
+
+## Review observations
+
+- Round 1 RECOMMENDED-NEW-TICKET (TOUCHED-BY-THIS-DIFF: no, no DECIDE-BEFORE):
+  acceptance item 2's example expected-literal is the escape applied twice
+  (decoded: a\%b\\_c\\\\d) and contradicts the same item's normative text
+  ("every %, _ and \ gains a preceding backslash"). The diff implements the
+  normative single-pass contract, which LikeEscaperTest pins
+  (everyMetacharacterInOneValueIsEscaped asserts escapeLike("a%b_c\d") =
+  "a\%b\_c\\d"); the reviewer confirmed this is the only reading consistent
+  with the byte-identical consolidation and security.md's mechanism
+  sentence. A frontmatter-text correction to the example literal is the
+  driver/user's discretion; no code change involved, no ticket filed.
