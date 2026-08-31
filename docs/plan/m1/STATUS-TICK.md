@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 164 |
 | deferred | 1 |
 | abandoned | 6 |
-| **total** | **174** |
+| **total** | **175** |
 
 ---
 
@@ -28,6 +28,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-958 — Long-stream finalize degrade: enforce the label revert (complexity: medium, risk: medium)
 - M1-959 — Re-read width-32 as owner deltas on both legs (complexity: medium, risk: low)
 - M1-960 — Rename fam-replica-restore.sh to replica-restore.sh (complexity: low, risk: low)
+- M1-961 — Extend temporal grammar for digit-less day-scale phrases (complexity: low, risk: low)
 
 ---
 
@@ -313,4 +314,5 @@ M1-957 (done)
   └── M1-959 (pending) ← runnable
 M1-958 (pending) ← runnable
 M1-960 (pending) ← runnable
+M1-961 (pending) ← runnable
 ```
