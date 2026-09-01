@@ -1,6 +1,6 @@
 ---
 name: qwen38-specdec-landscape
-description: "Qwen3.8 speculative-decoding state (2026-08-27): Vulkan spec-decode benchmarks taken before llama.cpp PR #27812 are INVALID (issue #27805 graph-optimizer bug, wrong output at temp 0); DFlash2 merged to staging branch xsn/dflash2, NOT master, with open correctness bugs; DFlash2 sidecar GGUFs exist for dense 27B only — no draft head for Flash-Next; --n-cpu-ffn is a discrete-VRAM tool, no-op on UMA."
+description: "Qwen3.8 speculative-decoding state (updated 2026-09-01): Vulkan spec-decode benchmarks taken before llama.cpp PR #27812 are INVALID (issue #27805 graph-optimizer bug, wrong output at temp 0); DFlash2 merged to staging branch xsn/dflash2, NOT master, with open correctness bugs; DFlash2 sidecar GGUFs exist for dense 27B only; unsloth NOW ships standalone Flash-Next MTP head GGUFs (2026-09-01) but no official statement names a runtime that runs the qwen4exp MTP graph — load-probe before believing; --n-cpu-ffn is a discrete-VRAM tool, no-op on UMA."
 metadata:
   node_type: memory
   type: project
@@ -55,6 +55,19 @@ ecosystem — re-check the PR states before relying on them.
   rotation). Mainline + PR-27742 builds cannot load it. Claimed acceptance
   50-70% at `--spec-draft-n-max 2` (1-layer head) → expect only ~1.3-1.5x
   decode, not a step change. Vontra/Jundot MTP builds are MLX (Apple-only).
+- **UPDATE 2026-09-01: unsloth ships the MTP weights themselves** —
+  `unsloth/Qwen3.8-Flash-Next-GGUF` carries standalone head files
+  (BF16/Q8_0/Q4_K_M) plus "shared" variants beside the full quant ladder and
+  mmproj projectors. Head files inside the main repo, not a separate
+  embedded `-MTP` repo. It is a WEIGHTS release only: unsloth's card/docs
+  show a plain `llama serve -hf unsloth/Qwen3.8-Flash-Next-GGUF:UD-Q4_K_XL`
+  with no MTP flags, no inference provider hosts the model, and the runtime
+  question is unchanged — drluoto ("mainline `-md` works post-#27742") vs
+  agentionai ("#27739 not upstream") still unsettled, and r/unsloth threads
+  are asking the same. Treat as load-probe material, not a shippable
+  speedup. (Base `Qwen/Qwen3.8-Flash-Next` + official blog live since
+  08-24 — the "experimental preview of the Qwen4 arch" framing is Qwen's
+  own.)
 - **PR #27742 (qwen4exp arch) merged to ggml-org master 2026-08-27** —
   Flash-Next GGUFs now load in mainline; PR-branch builds are superseded
   and deserve a re-measure (kernels may mature post-merge).
@@ -90,4 +103,6 @@ ecosystem — re-check the PR states before relying on them.
 - cafe-llama.cpp's qwen4exp MTP support landing in mainline (or the fork
   gaining a Vulkan-verified build) → Flash-Next decode re-try with the
   quimmedes sidecar (memory-local flash entry holds the recipe and rollback
-  context).
+  context). 2026-09-01: the WEIGHTS half of this trigger fired (unsloth head
+  GGUFs, see above) — the runtime half is still open; any re-try is a load
+  probe of `-md`/`--spec-type draft-mtp` on a pinned build first.
