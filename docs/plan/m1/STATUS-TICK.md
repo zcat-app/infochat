@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 165 |
 | deferred | 1 |
 | abandoned | 6 |
-| **total** | **175** |
+| **total** | **178** |
 
 ---
 
@@ -28,6 +28,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-959 — Re-read width-32 as owner deltas on both legs (complexity: medium, risk: low)
 - M1-960 — Rename fam-replica-restore.sh to replica-restore.sh (complexity: low, risk: low)
 - M1-961 — Extend temporal grammar for digit-less day-scale phrases (complexity: low, risk: low)
+- M1-962 — Enforce the partition-insert lint in the Maven build (complexity: medium, risk: medium)
+- M1-963 — Pin tracker test seeds to the injected Clock (complexity: low, risk: low)
 
 ---
 
@@ -44,7 +46,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-964 — blocked_by: M1-962 (pending), M1-963 (pending)
 
 ---
 
@@ -314,4 +316,8 @@ M1-957 (done)
 M1-958 (done)
 M1-960 (pending) ← runnable
 M1-961 (pending) ← runnable
+M1-962 (pending) ← runnable
+  └── M1-964 (pending)
+M1-963 (pending) ← runnable
+  └── M1-964 (pending) [see above]
 ```
