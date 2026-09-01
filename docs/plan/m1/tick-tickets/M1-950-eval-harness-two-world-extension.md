@@ -375,7 +375,7 @@ commit stages exactly the ticket's file set).
   tallies — §13-class material; M1-948/949's ticket bodies carry
   redaction markers (a scrub event this analysis doc escaped). Candidate
   scrub ticket, user's call.
-- M1-948's committed artifacts are absent (scripts/fam-replica-restore.sh,
+- M1-948's committed artifacts are absent (scripts/replica-restore.sh,
   FamReplicaRestoreWiringTest.java) against a done ticket whose acceptance
   references both — the replica bring-up is not reproducible from a fresh
   checkout. Known to the user: the squash-merge dropped the code; re-land

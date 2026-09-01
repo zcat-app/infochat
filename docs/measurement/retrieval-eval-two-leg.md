@@ -481,3 +481,5 @@ decision/ticket. The temporal movements above are below the T1 floor on
 both legs and settle nothing beyond the instrument's own visibility; the
 first reading's confidence-interval paragraph stands unchanged for both
 legs' ns.
+
+Correction (2026-09-01, M1-960): the replica-restore procedure cited above is committed as `scripts/replica-restore.sh` — the script was renamed for §13 placement; its content is unchanged and the citations above are historical.

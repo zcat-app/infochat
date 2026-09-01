@@ -1,5 +1,5 @@
 #!/bin/bash
-# fam-replica-restore.sh — dump, restore, and pin-fingerprint an isolated
+# replica-restore.sh — dump, restore, and pin-fingerprint an isolated
 # broad-leg replica postgres; instance values never commit (§13) and live in
 # the gitignored operator store (D34).
 
@@ -34,7 +34,7 @@ TARGET_PORT=""
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/fam-replica-restore.sh <verb> [flags] [args]
+Usage: scripts/replica-restore.sh <verb> [flags] [args]
 
 Verbs:
   dump                          READ-ONLY in-container pg_dump -F c of the

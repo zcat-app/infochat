@@ -20,7 +20,7 @@ import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
-/** Pins the contract of {@code scripts/fam-replica-restore.sh} (M1-954), the instance-free replica dump/restore/fingerprint instrument. */
+/** Pins the contract of {@code scripts/replica-restore.sh} (M1-954), the instance-free replica dump/restore/fingerprint instrument. */
 class ReplicaRestoreWiringTest {
 
     private static final String[] REAL_TOOLS =
@@ -555,7 +555,7 @@ class ReplicaRestoreWiringTest {
     }
 
     private Path scriptPath() {
-        return repoRoot().resolve("scripts/fam-replica-restore.sh");
+        return repoRoot().resolve("scripts/replica-restore.sh");
     }
 
     /** Extract the flyway_checksum function verbatim from a script (the

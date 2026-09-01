@@ -1,9 +1,9 @@
 ---
 id: M1-960
 title: "Rename fam-replica-restore.sh to replica-restore.sh"
-status: pending
+status: done
 created: 2026-08-30
-last_updated: 2026-08-30
+last_updated: 2026-09-01
 flow: tick
 reproduction: >-
   Probe (instrument ticket, the M1-954 posture — the §13-compliant artifact
@@ -99,11 +99,55 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-09-01
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: NOT-APPLICABLE (no new test; the two path strings are the §8-authorized modify, assertions byte-identical); MAINTAINABILITY: PASS; SCOPE: PASS — 4 falsification candidates dropped with citations (clarity_check naming the operator-local store defeated by §13's own permission clause + P21; 8-of-12 substitution in M1-954 defeated by the pre-declared keeps — operator-store mentions and the ticket's own filename keep their names; record diff = 2 insertions defeated by the blank markdown paragraph separator being zero-content append-only shape; the (M1-954) javadoc tag defeated by §11's permitted-pointer list). Verdict: .scratch/tick-review-M1-960-r1.txt"
+    diff_stats: "8 files, +67/-28 (git mv fam-replica-restore.sh -> replica-restore.sh at 99% similarity with only the two self-refs, ReplicaRestoreWiringTest two path strings, M1-948 6 + M1-950 1 + M1-954 8 string-only substitutions, record +1 correction line +1 blank separator, ticket frontmatter/clarity_check, board regen)"
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  lint: "tick-lint: 0 finding(s), 0 BLOCKER(s)"
+  self_check: >-
+    Start pass in the .worktree/M1-960 worktree 2026-09-01. Citations
+    spot-checked against main: script is 496 lines with self-refs at :2/:37;
+    ReplicaRestoreWiringTest.java :23 javadoc + :558 repoRoot().resolve, 16
+    @Test legs, checksum leg pins prod/scripts/restore.sh (:196) — a
+    different path; record :34 confirmed. Analysis cross-read: P19-P22 all
+    landed, numbered identically. blocked_by empty — no seam tests to
+    trace; test_plan.preserves enforced by touching only the two path
+    strings. Census re-run: git grep returns 39 hits across 8 paths — the
+    census's 24-across-6 surface matches exactly; the extra 15 are this
+    ticket's own self-description (14) and the STATUS-TICK.md board line
+    (1), flow bookkeeping written after the census was taken (the analysis
+    verified IDs 957-960 unused pre-filing), no missing surface. Two
+    execution-mechanics notes, no contract change: (1) the acceptance-2
+    named command `mvn -pl infochat-provider -am test -Dtest=...` trips the
+    parent POM's failIfNoTests=true cross-module tripwire (pom.xml:240, no
+    module opt-out; the M1-446 design) — the named command is attempted
+    first, and if the tripwire fires before reaching infochat-provider the
+    minimal surefire disarm for filtered runs is applied; the RED/GREEN
+    contract and the .scratch/tick-red-M1-960.log path are unchanged.
+    (2) acceptance-1's "git grep returns ZERO matches" cannot hold over
+    ALL tracked files: acceptance-4 itself mandates the record's :34 hit
+    survives, and this ticket's own prose + the regenerated board title
+    necessarily name the old name. The census's dispositions force the
+    reading: the zero-hit fence applies to the census's FIX surface (the
+    24 refs) — post-rename the grep must return ONLY the intentional
+    survivors (record :34, this ticket's self-description, the board
+    line, plus M1-954's four P21-forced keeps: the two
+    .agents/memory-local/fam-replica-restore.sh path mentions, the
+    memory-local MEMORY.md entry mention at :90, and the ticket's own
+    filename M1-954-fam-replica-restore-reland.md at :457 — the
+    operator-local store and the landed ticket file keep their names),
+    i.e. zero remaining functional references to the old path.
+    Substitution mechanics: only the `scripts/`-prefixed committed-path
+    strings were substituted (8 in M1-954, 6 in M1-948, 1 in M1-950);
+    the record's appended correction is ONE content line plus the blank
+    markdown paragraph separator the record's correction precedent
+    requires.
 escalation_reason:
 ---
 

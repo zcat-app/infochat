@@ -7,7 +7,7 @@ last_updated: 2026-08-28
 flow: tick
 reproduction: >-
   Probe (instrument ticket; no procedure can exist before it is written — the
-  M1-844/M1-859/M1-928 posture): `ls scripts/fam-replica-restore.sh` returns
+  M1-844/M1-859/M1-928 posture): `ls scripts/replica-restore.sh` returns
   "No such file or directory" (verified 2026-08-28; scripts/ holds
   eval-scopes-seed.sql and the lint/gate scripts only) and no committed
   procedure anywhere names an isolated fam eval postgres — `grep -rn
@@ -25,7 +25,7 @@ reproduction: >-
 analysis_ref: docs/plan/m1/tick-analysis/two-world-retrieval-instrument.md
 blocked_by: []
 files_scope:
-  - scripts/fam-replica-restore.sh
+  - scripts/replica-restore.sh
   - infochat-provider/src/test/java/app/zcat/infochat/provider/wiring/FamReplicaRestoreWiringTest.java
 complexity: medium
 risk: medium
@@ -60,10 +60,10 @@ out_of_scope:
     content (deployment.md §Backups, D34): it stays operator-local under
     gitignored .bench/, encrypted-at-rest per the operator posture.
 acceptance:
-  - "The script exists with three verbs — dump (pg_dump -F c of the fam DB via docker exec in the fam postgres container, PGPASSWORD from the container env, no secret on the host, output to .bench/retrieval-eval/fam-replica/fam-<ts>.pgc — the backup.sh:135-138 shape; the dump's handling follows docs/spec/deployment.md §Backups, rotation, secrets — sensitive operator material, encrypted-at-rest posture, never committed, D34), restore (bring up an ISOLATED postgres: own compose project, own volume, own host port, loopback-published; docker cp the dump in; pg_restore the in-container path), fingerprint (print the world fingerprint + embedding coverage + embedding_metadata identity + scope_preferences language census) — probe: `scripts/fam-replica-restore.sh -h` prints usage for all three verbs; set -euo pipefail, executable 0755, shellcheck-clean (author-run)."
+  - "The script exists with three verbs — dump (pg_dump -F c of the fam DB via docker exec in the fam postgres container, PGPASSWORD from the container env, no secret on the host, output to .bench/retrieval-eval/fam-replica/fam-<ts>.pgc — the backup.sh:135-138 shape; the dump's handling follows docs/spec/deployment.md §Backups, rotation, secrets — sensitive operator material, encrypted-at-rest posture, never committed, D34), restore (bring up an ISOLATED postgres: own compose project, own volume, own host port, loopback-published; docker cp the dump in; pg_restore the in-container path), fingerprint (print the world fingerprint + embedding coverage + embedding_metadata identity + scope_preferences language census) — probe: `scripts/replica-restore.sh -h` prints usage for all three verbs; set -euo pipefail, executable 0755, shellcheck-clean (author-run)."
   - "ISOLATION FENCES (failure-mode, analysis P2/P14): the script REFUSES (exit nonzero, naming the offending value) a target port equal to 15432 (test stack) or 25432 (live fam), a target volume that is not empty/fresh, a missing dump file, and a restore attempted while any app container is attached to the target; the isolated postgres runs in its OWN compose project + network with NO join to the source network or infochat-prod_default (the DB-reach boundary of docs/spec/security.md §Threat model — only the two services and the operator reach a DB — holds by construction) — probe: FamReplicaRestoreWiringTest refusal legs (fake-docker argv pattern, the M1-819 RestoreWiringTest precedent) fire on each hostile input; an operator `docker network inspect` of the replica network shows no fam/prod network members."
   - "RESTORE ORDER (analysis P3/P4): the wiring test's fake-docker argv log proves the sequence postgres-up ALONE → docker cp → pg_restore of the in-container path → schema steps → eval-scope seed → fingerprint read — pg_restore precedes every schema/seed step and the dump is NEVER piped over stdin (grep of the argv log: no `pg_restore` with the dump on stdin)."
-  - "Schema reconciliation without an app boot (analysis P5): the script verifies the restored flyway_schema_history against the checkout's migration set (the restore.sh M1-819 checksum-gate posture) and, when the fam dump (prod rev ae295434) is BEHIND the checkout head, applies the pending migrations via a NO-APP-BOOT mechanism (a flyway CLI container over the checkout's migration directory — never a collector/provider boot: a collector boot runs ingest/eval workers and mutates the replica); an incompatible history (applied version absent from the checkout, checksum drift) refuses loud with the M1-819-style message — probes: wiring test feeds a fake history and asserts both the apply path argv and the refusal; `grep -c 'collector\|provider' scripts/fam-replica-restore.sh` shows no app-service boot step."
+  - "Schema reconciliation without an app boot (analysis P5): the script verifies the restored flyway_schema_history against the checkout's migration set (the restore.sh M1-819 checksum-gate posture) and, when the fam dump (prod rev ae295434) is BEHIND the checkout head, applies the pending migrations via a NO-APP-BOOT mechanism (a flyway CLI container over the checkout's migration directory — never a collector/provider boot: a collector boot runs ingest/eval workers and mutates the replica); an incompatible history (applied version absent from the checkout, checksum drift) refuses loud with the M1-819-style message — probes: wiring test feeds a fake history and asserts both the apply path argv and the refusal; `grep -c 'collector\|provider' scripts/replica-restore.sh` shows no app-service boot step."
   - "Eval-scope seeding: the five fixed-UUID scopes of scripts/eval-scopes-seed.sql (instance-agnostic, idempotent) are applied to the replica and the script's probe readout returns 5/0/0 (scopes/subscriptions/exclusions) — probe: the fingerprint verb's output contains the 5/0/0 probe lines (operator run record)."
   - "PIN READOUT (analysis P6 + brief ASSUMPTION-class facts re-derived): the fingerprint verb prints, and the operator run record under .bench/retrieval-eval/fam-replica/ restates: the world fingerprint in the runner's exact render (ready=…;max_ready_at=…;uid_sha256=… over the D59 world, the RetrievalEvalRunnerIT.dbFingerprint :397-429 SQL shape — ready count expected ~7300, brief-given, re-derived here), world_embedding_coverage (READY-world posts WITH a post_embedding row / total READY-world posts), the embedding_metadata singleton (model identifier + dimension — the identity discipline of docs/spec/llm.md §Embedding pipeline), and the scope_preferences language census (expected <redacted-language-census> + the five seeded eval scopes, brief-given, re-derived) — probe: two consecutive fingerprint reads are byte-identical (frozen by construction) and every key resolves in the run record."
   - "mvn verify from repo root is green (FamReplicaRestoreWiringTest runs in the default suite, plain JUnit, no DB, no docker); git diff --name-only names exactly the files_scope paths plus board/frontmatter regen; no path under .opencode/worktrees/** is touched (analysis P16) — probe: git status --porcelain."
@@ -147,7 +147,7 @@ that M1-949's labels, M1-950's manifest pins, and M1-952's record all cite.
 ## Root cause
 
 Not a code defect — a missing operator instrument (the M1-928 posture).
-Verified: no `scripts/fam-replica-restore.sh` exists (scripts/ holds
+Verified: no `scripts/replica-restore.sh` exists (scripts/ holds
 `eval-scopes-seed.sql` + lint/gate scripts); no committed procedure names an
 isolated fam postgres. The mechanics exist as prior art and are adopted, not
 re-invented: in-container `pg_dump -F c` with the password from container env
@@ -277,4 +277,4 @@ REWORK ITEMS:
    docker-cp line) is the pinned position, evaluated via
    FamReplicaRestoreWiringTest.restoreOrderingPostgresAloneDockerCpRestoreSchemaSeedPinLast:
    green on the unchanged script, RED under the mutation "move
-   scripts/fam-replica-restore.sh:283 to immediately after :286".
+   scripts/replica-restore.sh:283 to immediately after :286".
