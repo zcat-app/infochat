@@ -1,9 +1,11 @@
 package app.zcat.infochat.collector.stream.nostr;
 
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
@@ -11,8 +13,9 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
+import java.time.ZoneOffset;
 import java.util.OptionalLong;
 import java.util.UUID;
 
@@ -30,13 +33,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>Fixture convention from ReEvaluationJobWindowTest: below-floor rows
  * sit in the oldest bootstrap partition (May 2026), always older than
- * the ~32-day retention+slack floor; in-window rows are fetched at
- * {@code now()} (current-month partition, provisioned at startup).
+ * the retention+slack floor under the pinned clock; the in-window row is
+ * fetched at PINNED_NOW, a fixed bootstrap-partition instant.
  */
 @QuarkusTest
 class NostrSinceCursorIT {
 
     private static final Instant BELOW_FLOOR_FETCHED_AT = Instant.parse("2026-05-01T00:00:00Z");
+
+    // The registrar derives the scan floor from the injected Clock, so the
+    // clock is pinned: BELOW_FLOOR (May 1) stays below PINNED_NOW −
+    // (retention + slack); the in-window seed sits at the pin (June).
+    private static final Instant PINNED_NOW = Instant.parse("2026-06-20T12:00:00Z");
 
     @Inject
     @SeedDataSource
@@ -48,10 +56,17 @@ class NostrSinceCursorIT {
     @ConfigProperty(name = "infochat.partitions.retention-days.post")
     int postRetentionDays;
 
+    @BeforeEach
+    void pinClock() {
+        // NostrStreamSource binds the fetched_at floor from the injected
+        // Clock (§9); pin it so the fixture and the floor agree on one now.
+        QuarkusMock.installMockForType(Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
+    }
+
     @Test
     void recentSourceCursorIsItsMaxPublishedAt() throws Exception {
         UUID sourceUuid = seedNostrSource("nostr-cursor-test/recent");
-        Instant fetchedAt = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        Instant fetchedAt = PINNED_NOW;
         Instant olderPublished = fetchedAt.minusSeconds(7200);
         Instant newerPublished = fetchedAt.minusSeconds(3600);
         seedPost(sourceUuid, "cursor-recent-older", fetchedAt, olderPublished);
@@ -66,7 +81,7 @@ class NostrSinceCursorIT {
     @Test
     void staleSourceFallsBackToUnboundedScan() throws Exception {
         assertTrue(BELOW_FLOOR_FETCHED_AT.isBefore(
-                Instant.now().minusSeconds((postRetentionDays + 2L) * 86400)),
+                PINNED_NOW.minusSeconds((postRetentionDays + 2L) * 86400)),
             "test fixture invalid: BELOW_FLOOR_FETCHED_AT is inside the scan window");
         UUID sourceUuid = seedNostrSource("nostr-cursor-test/stale");
         Instant stalePublished = Instant.parse("2026-04-30T12:00:00Z");

@@ -1,7 +1,7 @@
 ---
 id: M1-962
 title: "Enforce the partition-insert lint in the Maven build"
-status: pending
+status: done
 created: 2026-09-01
 last_updated: 2026-09-01
 flow: tick
@@ -127,11 +127,38 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-09-01
+    verdict: REWORK
+    checks: >-
+      SPEC-TRUTHNESS FAIL; SECURITY PASS; TEST-ADEQUACY PASS;
+      MAINTAINABILITY FAIL; SCOPE PASS
+    diff_stats: 10 files, +160/-37
+    rework_items: 2
+  - round: 2
+    date: 2026-09-01
+    verdict: APPROVE
+    checks: >-
+      SPEC-TRUTHNESS PASS; SECURITY PASS; TEST-ADEQUACY PASS;
+      MAINTAINABILITY PASS; SCOPE PASS
+    diff_stats: fix hunks only (ticket record + 1-word docstring fix);
+      full diff 10 files, +187/-39
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  2026-09-01: >-
+    Pass. All file:line citations spot-checked true (lint DEFAULT_ROOTS :71-74,
+    docstring posture :12-15, ReEvaluationJob Clock seam :114-118,
+    ScheduledPathIT pin precedent :54-77, NostrStreamSource scan floor :637-650,
+    all five fixture sites). Census re-run at start returned exactly the five
+    cited collector violations; provider/core clean. One execution judgment,
+    not an ambiguity: SchemaHardeningIT's touched INSERT also carries
+    status_changed_at = now() (not named in test_plan.modifies) — bound to the
+    same fixed bootstrap-month constant so acceptance-4's no-now()-in-touched-
+    seed-statements grep holds; assertions untouched; no schema CHECK reads
+    the column (V50:119 is an UPDATE, not a constraint).
 escalation_reason:
 ---
 
@@ -304,3 +331,20 @@ tracker family) is OUT OF SCOPE here → M1-964 / M1-963.
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-962-partition-insert-lint-full-coverage-enforced.md
 ```
+
+## Round 1 rework
+
+REWORK ITEMS (verbatim from `.scratch/tick-review-M1-962-r1.txt`):
+
+1. Finding 1: obtain and record the user's explicit §12 approval of the
+   landed D72 withdrawal sentence (or re-land the user-approved verbatim
+   quote and adjust acceptance-5's probe under the same approval), evaluated
+   via the round-2 mechanical report quoting the user's yes on the final
+   text — or `grep -n "structurally immune" docs/spec/decisions.md`
+   returning exactly the approved quoted withdrawal with the probe change
+   recorded in the same approval.
+2. Finding 2: drop "author-side" from
+   scripts/lint-partitioned-test-inserts.py:50, evaluated via `grep -n
+   "author-side" scripts/lint-partitioned-test-inserts.py` returning
+   nothing (exit 1) and `python3 scripts/lint-partitioned-test-inserts.py
+   --self-test` printing "self-test PASSED".

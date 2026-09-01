@@ -3,6 +3,7 @@ package app.zcat.infochat.collector.eval.reeval;
 import app.zcat.infochat.collector.eval.testing.StubLlmProvider;
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.llm.LlmProvider;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -15,8 +16,10 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -49,6 +52,12 @@ class ReEvaluationJobCooldownTest {
     @Inject
     LlmProvider llmProvider;
 
+    // Fixed clock + fixed seeds (the ReEvaluationJobScheduledPathIT
+    // pairing): the job reads the injected Clock, so pinning the clock —
+    // not relative-dating the fixture — makes the verdicts deterministic.
+    private static final Instant PINNED_NOW = Instant.parse("2026-05-25T09:00:00Z");
+    private static final Instant FETCHED_AT = Instant.parse("2026-05-23T09:00:00Z");
+
     // Whatever the resolved profile value is, the test backdates relative to
     // it so the assertions hold for any cooldown the active profile sets.
     @ConfigProperty(name = "infochat.reeval.cooldown")
@@ -67,15 +76,22 @@ class ReEvaluationJobCooldownTest {
         clearReEvalCandidates();
     }
 
+    @BeforeEach
+    void pinClock() {
+        // The injected Clock the job reads (M1-444), pinned so every
+        // last_reeval_at below is judged against a fixed now.
+        QuarkusMock.installMockForType(Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
+    }
+
     @Test
     void infraFailureCandidate_excludedWithinCooldown_reEnumeratedAfterItElapses() throws Exception {
         // Three otherwise-identical in-window infra-failure posts; last_reeval_at
         // is the only discriminator. NULL = never attempted; within = just
         // attempted; beyond = cooldown elapsed.
         UUID neverAttempted = seedInfraFailurePost("never", null);
-        UUID withinCooldown = seedInfraFailurePost("within", Instant.now());
+        UUID withinCooldown = seedInfraFailurePost("within", PINNED_NOW);
         UUID beyondCooldown = seedInfraFailurePost("beyond",
-            Instant.now().minus(cooldown).minus(Duration.ofMinutes(1)));
+            PINNED_NOW.minus(cooldown).minus(Duration.ofMinutes(1)));
 
         Set<UUID> enumerated = enumeratedPostIds();
 
@@ -174,9 +190,9 @@ class ReEvaluationJobCooldownTest {
             ps.setObject(2, sourceId);
             ps.setString(3, "upstream-cooldown-" + slug);
             ps.setString(4, "Cooldown " + slug);
-            // fetched_at = now(): the current-month partition, comfortably
-            // inside the candidate scan window.
-            ps.setTimestamp(5, Timestamp.from(Instant.now()));
+            // fetched_at: fixed bootstrap-month instant, two days inside the
+            // PINNED_NOW − (retention + slack) candidate-scan window.
+            ps.setTimestamp(5, Timestamp.from(FETCHED_AT));
             ps.setTimestamp(6, lastReEvalAt == null ? null : Timestamp.from(lastReEvalAt));
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
@@ -226,10 +242,12 @@ class ReEvaluationJobCooldownTest {
     }
 
     private void backdateLastReEval(UUID postId, Duration age) throws Exception {
+        // Pin-relative, not SQL now(): the cooldown gate reads the pinned
+        // clock, so the stamp must share it — one clock per decision (§9).
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                 "UPDATE post SET last_reeval_at = now() - ?::INTERVAL WHERE id = ?")) {
-            ps.setString(1, age.toSeconds() + " seconds");
+                 "UPDATE post SET last_reeval_at = ? WHERE id = ?")) {
+            ps.setTimestamp(1, Timestamp.from(PINNED_NOW.minus(age)));
             ps.setObject(2, postId);
             ps.executeUpdate();
         }

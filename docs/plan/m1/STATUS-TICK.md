@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 4 |
+| pending | 3 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 167 |
+| done | 168 |
 | deferred | 1 |
 | abandoned | 6 |
 | **total** | **178** |
@@ -27,7 +27,7 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-959 — Re-read width-32 as owner deltas on both legs (complexity: medium, risk: low)
 - M1-961 — Extend temporal grammar for digit-less day-scale phrases (complexity: low, risk: low)
-- M1-962 — Enforce the partition-insert lint in the Maven build (complexity: medium, risk: medium)
+- M1-964 — Partition lint: catch indirect ambient key bindings (complexity: medium, risk: medium)
 
 ---
 
@@ -44,7 +44,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-- M1-964 — blocked_by: M1-962 (pending), M1-963 (done)
+_(none)_
 
 ---
 
@@ -64,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
 | M1-963 | Pin tracker test seeds to the injected Clock | 2026-09-01 | round 1 APPROVE |
+| M1-962 | Enforce the partition-insert lint in the Maven build | 2026-09-01 | round 2 APPROVE |
 | M1-960 | Rename fam-replica-restore.sh to replica-restore.sh | 2026-09-01 | round 1 APPROVE |
 | M1-958 | Long-stream finalize degrade: enforce the label revert | 2026-09-01 | round 1 APPROVE |
 | M1-957 | Arm the eval lane's temporal window + widening guard | 2026-08-31 | round 1 APPROVE |
@@ -72,7 +73,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-952 | Two-leg baseline record + pre-registered gating rules | 2026-08-30 | round 1 APPROVE |
 | M1-935 | searchPosts topics filter over search_tags | 2026-08-30 | round 2 APPROVE |
 | M1-954 | Re-land the fam replica restore procedure instance-free | 2026-08-29 | round 2 APPROVE |
-| M1-950 | Eval harness two-world extension: per-world fences | 2026-08-29 | round 2 APPROVE-WITH-FIXES |
 
 ---
 
@@ -314,8 +314,8 @@ M1-957 (done)
 M1-958 (done)
 M1-960 (done)
 M1-961 (pending) ← runnable
-M1-962 (pending) ← runnable
-  └── M1-964 (pending)
+M1-962 (done)
+  └── M1-964 (pending) ← runnable
 M1-963 (done)
   └── M1-964 (pending) [see above]
 ```

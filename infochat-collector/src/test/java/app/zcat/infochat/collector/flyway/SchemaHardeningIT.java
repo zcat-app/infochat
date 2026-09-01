@@ -2,8 +2,10 @@ package app.zcat.infochat.collector.flyway;
 
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.core.audit.ProcedureOnlyAction;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
@@ -15,7 +17,10 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -50,9 +55,23 @@ class SchemaHardeningIT {
 
     private static final String V27_AUDIT_VERB = "D47_GROUP_ONLY_PREBAN_CONVERSION";
 
+    // Fixed bootstrap-month instant: no decision reads these timestamps,
+    // but the partitioned-table INSERT must bind its key (fetched_at) to
+    // a fixed instant, leaving no DB clock in the statement (D72).
+    private static final Instant FETCHED_AT = Instant.parse("2026-06-10T12:00:00Z");
+
     @Inject
     @SeedDataSource
     DataSource dataSource;
+
+    @BeforeEach
+    void pinClock() {
+        // ScanWindowFixtureGuardTest requires an absolute-instant fixture to
+        // pin the Clock; no component here reads it yet, so the pin just
+        // fixes the file's time if a gate ever appears.
+        QuarkusMock.installMockForType(
+            Clock.fixed(FETCHED_AT.plus(Duration.ofHours(1)), ZoneOffset.UTC), Clock.class);
+    }
 
     @Test
     void stage2VerdictCheckAcceptsClosedSetAndNull() throws SQLException {
@@ -133,7 +152,7 @@ class SchemaHardeningIT {
                      + "  stage2_verdict"
                      + ") VALUES ("
                      + "  gen_random_uuid(), ?, ?, ?, 'title', 'body',"
-                     + "  ?, 'QUARANTINED', now(),"
+                     + "  ?, 'QUARANTINED', ?,"
                      + "  TRUE, TRUE, TRUE, FALSE,"
                      + "  FALSE, FALSE, FALSE, '{}', 0,"
                      + "  ?"
@@ -141,8 +160,9 @@ class SchemaHardeningIT {
             ps.setString(1, uid);
             ps.setObject(2, sourceId);
             ps.setString(3, "upstream-" + uid);
-            ps.setTimestamp(4, Timestamp.from(Instant.now()));
-            ps.setString(5, stage2Verdict);
+            ps.setTimestamp(4, Timestamp.from(FETCHED_AT));
+            ps.setTimestamp(5, Timestamp.from(FETCHED_AT));
+            ps.setString(6, stage2Verdict);
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return (UUID) rs.getObject(1);

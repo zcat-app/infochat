@@ -208,12 +208,15 @@ class LinkingJobSemanticProbeIT {
     }
 
     private void seedSemanticReference(UUID fromPost, UUID toPost) throws Exception {
+        // created_at is post_reference's partition key — named and bound to
+        // the fixed FETCHED_AT, never left to DEFAULT now() (D72).
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                 "INSERT INTO post_reference (from_post, to_post, link_type, score) "
-                     + "VALUES (?, ?, 'semantic', 1.0)")) {
+                 "INSERT INTO post_reference (from_post, to_post, link_type, score, created_at) "
+                     + "VALUES (?, ?, 'semantic', 1.0, ?)")) {
             ps.setObject(1, fromPost);
             ps.setObject(2, toPost);
+            ps.setTimestamp(3, Timestamp.from(FETCHED_AT));
             ps.executeUpdate();
         }
     }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Author-side static linter for partitioned-table test INSERTs (M1-740).
+"""Static linter for partitioned-table test INSERTs (rule D72, M1-740).
 
 The five monthly-partitioned tables (post, post_embedding, post_entity,
 post_reference, price_snapshot) have no DEFAULT partition (Invariant 6) and
@@ -9,14 +9,16 @@ suite on the 1st of the first month the migrations do not cover. This linter
 rejects that shape at author time, so the next ``Instant.now()`` in a seed
 helper fails fast instead of next month.
 
-Invocation posture is the same as ``scripts/lint-ticket.py``: a manual,
-author-side check. Nothing runs it from the Maven build or a git hook — the
-/m1-tick developer (or a human author) runs it before review, and the ticket
-reviewer re-runs it against the diff's tree. Run it from the repo root.
+Invocation posture: enforced by the Maven build (D72) — the ROOT pom binds
+this script to the validate phase via exec-maven-plugin
+(<inherited>false</inherited>, so it runs once with the repo root as cwd and
+the scan roots resolve), failing the build on any violation; python3 is a
+build-time dependency. A manual run from the repo root, and the ticket
+reviewer's re-run against the diff's tree, remain free.
 
 Usage:
   scripts/lint-partitioned-test-inserts.py
-      # scans infochat-provider/src/test and infochat-core/src/test
+      # scans every module's test tree (the six DEFAULT_ROOTS below)
   scripts/lint-partitioned-test-inserts.py <dir-or-file> [<dir-or-file> ...]
       # scans the given roots instead
   scripts/lint-partitioned-test-inserts.py --self-test
@@ -45,7 +47,7 @@ the test trees are checked directly):
     binding (matched by ``?`` ordinal) whose argument expression calls
     ``Instant.now()`` / ``OffsetDateTime.now()`` / ``LocalDateTime.now()``.
 
-Known limits (by design — it is a heuristic author-side guard, not a Java
+Known limits (by design — it is a heuristic static guard, not a Java
 parser): local-variable indirection is traced ONE hop (``Instant t =
 Instant.now()...; ... Timestamp.from(t)``); anything deeper (method
 parameters, fields assigned in another helper) is not. The ``?``-ordinal
@@ -69,8 +71,12 @@ PARTITION_KEYS = {
 }
 
 DEFAULT_ROOTS = [
-    "infochat-provider/src/test",
     "infochat-core/src/test",
+    "infochat-ssrf/src/test",
+    "infochat-llm-adapter/src/test",
+    "infochat-messaging-adapter/src/test",
+    "infochat-collector/src/test",
+    "infochat-provider/src/test",
 ]
 
 INSERT_RE = re.compile(

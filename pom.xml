@@ -260,6 +260,43 @@
                 </plugin>
             </plugins>
         </pluginManagement>
+        <plugins>
+            <!--
+                 Partitioned-table test INSERT lint (D72): build-enforced,
+                 fail-closed. ONE execution at the root aggregator — the
+                 script scans repo-relative roots, so it must run with the
+                 repo root as cwd; a module-scoped or inherited binding would
+                 re-run it per module from each module's cwd and break the
+                 roots (corollary: `mvn -pl <module>` reactor runs bypass it;
+                 the gate that matters is repo-root `mvn verify`). exec:exec
+                 fails the build on the script's non-zero exit, and a missing
+                 python3 fails it too — no WARN-only mode, no skip (python3 is
+                 a build-time dependency, same as the scripts/ process
+                 tooling). Build-time plugin — no effect on shipped runtime
+                 artifacts.
+            -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <inherited>false</inherited>
+                <executions>
+                    <execution>
+                        <id>lint-partitioned-test-inserts</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>python3</executable>
+                            <arguments>
+                                <argument>scripts/lint-partitioned-test-inserts.py</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
     </build>
 
     <!--

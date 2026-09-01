@@ -17,7 +17,11 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
+import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
@@ -74,6 +78,12 @@ class ReEvaluationJobInfraFailureFanOutIT {
     @ConfigProperty(name = "infochat.partitions.retention-days.post")
     int postRetentionDays;
 
+    // Fixed clock + fixed fetched_at (the ReEvaluationJobScheduledPathIT
+    // pairing): the hand-assembled job reads its clock field for the
+    // candidate-scan window — deterministic on any wall-clock run date.
+    private static final Instant PINNED_NOW = Instant.parse("2026-05-25T09:00:00Z");
+    private static final Instant FETCHED_AT = Instant.parse("2026-05-23T09:00:00Z");
+
     private CountingStage2Worker stubWorker;
     private ReEvaluationJob job;
 
@@ -93,6 +103,10 @@ class ReEvaluationJobInfraFailureFanOutIT {
         job.needsReviewDepthThreshold = needsReviewDepthThreshold;
         job.reEvalCooldown = reEvalCooldown;
         job.postRetentionDays = postRetentionDays;
+        // The hand-assembled job keeps the field initializer's systemUTC()
+        // clock; pin it so FETCHED_AT sits deterministically inside the scan
+        // window the job derives from it.
+        job.clock = Clock.fixed(PINNED_NOW, ZoneOffset.UTC);
     }
 
     @AfterEach
@@ -165,8 +179,8 @@ class ReEvaluationJobInfraFailureFanOutIT {
 
     private UUID seedInfraFailurePost(String slug) throws Exception {
         UUID sourceId = seedSource(slug);
-        // fetched_at = now() so the fixture always sits inside the retention +
-        // slack scan window regardless of the wall-clock date the suite runs.
+        // fetched_at: fixed bootstrap-month instant, inside the retention +
+        // slack scan window the pinned clock derives.
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                  "INSERT INTO post ("
@@ -176,7 +190,7 @@ class ReEvaluationJobInfraFailureFanOutIT {
                      + "  tagger_done, tagger_fallback, embedding_done, tags, re_eval_attempts"
                      + ") VALUES ("
                      + "  gen_random_uuid(), ?, ?, ?, ?, 'body',"
-                     + "  now(), 'RAW',"
+                     + "  ?, 'RAW',"
                      + "  TRUE, TRUE, TRUE, TRUE,"
                      + "  FALSE, FALSE, FALSE, '{}', 0"
                      + ") RETURNING id")) {
@@ -184,6 +198,7 @@ class ReEvaluationJobInfraFailureFanOutIT {
             ps.setObject(2, sourceId);
             ps.setString(3, "upstream-fanout-" + slug);
             ps.setString(4, "ReEval FanOut " + slug);
+            ps.setTimestamp(5, Timestamp.from(FETCHED_AT));
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return (UUID) rs.getObject(1);
