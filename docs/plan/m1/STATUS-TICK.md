@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 6 |
+| pending | 5 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 168 |
+| done | 169 |
 | deferred | 1 |
 | abandoned | 6 |
 | **total** | **181** |
@@ -27,7 +27,6 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 
 - M1-959 — Re-read width-32 as owner deltas on both legs (complexity: medium, risk: low)
 - M1-961 — Extend temporal grammar for digit-less day-scale phrases (complexity: low, risk: low)
-- M1-964 — Partition lint: catch indirect ambient key bindings (complexity: medium, risk: medium)
 - M1-965 — Make the provenance notice count only admitted grounding (complexity: medium, risk: medium)
 - M1-966 — Fit ladder history by rendered estimate before block drop (complexity: medium, risk: medium)
 
@@ -65,6 +64,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-964 | Partition lint: catch indirect ambient key bindings | 2026-09-01 | round 2 APPROVE |
 | M1-963 | Pin tracker test seeds to the injected Clock | 2026-09-01 | round 1 APPROVE |
 | M1-962 | Enforce the partition-insert lint in the Maven build | 2026-09-01 | round 2 APPROVE |
 | M1-960 | Rename fam-replica-restore.sh to replica-restore.sh | 2026-09-01 | round 1 APPROVE |
@@ -74,7 +74,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-955 | Re-pin the retrieval characterization emission shape | 2026-08-30 | round 1 APPROVE |
 | M1-952 | Two-leg baseline record + pre-registered gating rules | 2026-08-30 | round 1 APPROVE |
 | M1-935 | searchPosts topics filter over search_tags | 2026-08-30 | round 2 APPROVE |
-| M1-954 | Re-land the fam replica restore procedure instance-free | 2026-08-29 | round 2 APPROVE |
 
 ---
 
@@ -317,9 +316,9 @@ M1-958 (done)
 M1-960 (done)
 M1-961 (pending) ← runnable
 M1-962 (done)
-  └── M1-964 (pending) ← runnable
+  └── M1-964 (done)
 M1-963 (done)
-  └── M1-964 (pending) [see above]
+  └── M1-964 (done) [see above]
 M1-965 (pending) ← runnable
   └── M1-967 (pending)
 M1-966 (pending) ← runnable

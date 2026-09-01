@@ -1,7 +1,7 @@
 ---
 id: M1-964
 title: "Partition lint: catch indirect ambient key bindings"
-status: pending
+status: done
 created: 2026-09-01
 last_updated: 2026-09-01
 flow: tick
@@ -119,11 +119,54 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-09-01
+    verdict: REWORK
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: FAIL; MAINTAINABILITY: PASS; SCOPE: PASS — 1 rework item (low, TEST-ADEQUACY): the widened .java entry gate has no durable probe (self-test bypasses check_file; reviewer mutation-reverted the gate in /tmp and the self-test stayed green while a split-literal bomb shape went unflagged). 4 falsification candidates dropped with citations (field-assigned-in-method escape, sibling-name attribution, two-clock status_changed_at, ScanWindowFixtureGuardTest scope drift) + tree-identity re-verification (snapshot ff3cdfbf == index tree; green log 22:03 newer than every staged file). Verdict: .scratch/tick-review-M1-964-r1.txt"
+    diff_stats: "8 files, +327/-52 (lint trace extension + 4 self-test fixtures + gate widening; four disposal fixtures pinned/fixed; ScanWindowFixtureGuardTest baseline row + count; ticket frontmatter/clarity_check; STATUS-TICK regen)"
+    notes: >-
+      Verify dossier: full-suite attempts 1+2 red solely on the
+      M1-809-documented ComfyUIClientTest race (logs preserved:
+      .scratch/tick-test-M1-964-r1-attempt1-flake.log, attempt2); module-
+      scoped provider run green 2118/2118; M1-962's identical-tree full
+      verify green at 21:07 same evening; attempt 3 (log of record) green
+      BUILD SUCCESS. Race recurrence = RECOMMENDED-NEW-TICKET
+      (TOUCHED-BY-THIS-DIFF: no), recorded under Review observations.
+  - round: 2
+    date: 2026-09-01
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: PASS; MAINTAINABILITY: PASS; SCOPE: PASS — round-1 item 1 dispositioned SATISFIED (reviewer re-ran both probes on the final tree: self-test OK incl. the new split-literal case; gate-reverted mutant FAILs, exit 1); 4 falsification candidates dropped with citations (cases-list placement wording, temp-file leak, comment provenance tag, tree identity). Verdict: .scratch/tick-review-M1-964-r2.txt"
+    diff_stats: "fix hunks r1→r2: 2 files, +78/-1 (self-test fixture + check_file-routed case + imports; ticket round-1 record keeping); cumulative 8 files, +405/-53"
+    notes: >-
+      Round-2 verify green on first attempt (no flake recurrence;
+      ComfyUIClientTest 15/15). Reviewer re-verified tree identity:
+      r2 snapshot f02ae9f4 == index tree; fix diff byte-identical to the
+      reviewed hunks; green log newer than every staged file.
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  checked: 2026-09-01
+  result: >-
+    Self-check clean, no blocking question. Lint 0 BLOCKERs (1 WARN: empty
+    spec_refs — legal, the reproduction is the contract). Both reproduction
+    legs re-run RED live (lint exits 0 on ReEvaluationJobTest and on
+    UnresolvedRepostEdgeUniqueIT despite the ambient bindings). Citations
+    verified: lint docstring :48-53, ReEvaluationJobTest :322/:338/:341/:342
+    + setter :527, UnresolvedRepostEdgeUniqueIT :40-41 static field,
+    ReEvaluationJob :115-117 / EmbeddingWorker :212-219 / NostrStreamSource
+    :640-650 Clock seams, ScheduledPathIT :52-59/:79 pin precedent,
+    AdminReviewTtlJobTest :73-74 clean shape, %test scheduler halted
+    (application.properties:466 — the pruner-fear comment IS stale; M1-963's
+    merged June-2026 IT pins passing verify are empirical proof). Census
+    grep re-runs clean. Analysis slice P8/P9/P4/P2/P3/P12 landed. Diff-shape
+    departure planned (files_scope addition, guard-sanctioned): the fixed
+    CREATED_AT constant makes UnresolvedRepostEdgeUniqueIT enter
+    ScanWindowFixtureGuardTest's found-set unpinned — one BENIGN_BASELINE
+    row with inline census-row justification grows in the same commit (the
+    guard javadoc's prescribed path; the seed feeds no pickup gate, only a
+    unique-index collision, so "pin the Clock" does not apply).
 escalation_reason:
 ---
 
@@ -289,3 +332,23 @@ INSERTs in the other three modules: none (grep verified).
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-964-partition-insert-lint-indirect-trace.md
 ```
+
+## Round 1 rework
+
+1. Finding 1: add a check_file-routed split-literal self-test case to
+   scripts/lint-partitioned-test-inserts.py (fixture + one case in the
+   self_test() list), evaluated via
+   `python3 scripts/lint-partitioned-test-inserts.py --self-test`
+   (new case OK; reverting the pre-gate at :513 to the strict INSERT_RE form
+   must turn that case FAIL and the self-test exit 1).
+
+## Review observations
+
+- Round 1 (REWORK) RECOMMENDED-NEW-TICKET entry, TOUCHED-BY-THIS-DIFF: no:
+  ComfyUIClientTest.overCapResponseBodyIsRefusedBeforeAnyBytesAreRetained
+  failed twice under full-suite scheduling (2026-09-01, both red attempts
+  "the stub managed to push 65536 of 65536 bytes"; module-scoped run and the
+  final full-suite log green) — the M1-809-documented context-dependent
+  race. Either a deterministic synchronization fix in the test stub (defect
+  ticket) or an explicitly recorded leave-it decision; filing is the user's
+  call.

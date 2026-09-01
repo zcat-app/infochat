@@ -1,9 +1,11 @@
 package app.zcat.infochat.collector.eval.reeval;
 
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
@@ -11,7 +13,9 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -34,11 +38,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ReEvaluationJobWindowTest {
 
     // The oldest bootstrap partition (May 2026, created by V7 and recreated
-    // on every fresh test DB) — always more than the ~32-day window before
-    // any test-run date, so this post is always below the floor. PartitionPruner
+    // on every fresh test DB) — more than the ~32-day window before
+    // PINNED_NOW, so this post is always below the floor. PartitionPruner
     // runs only on a 24h schedule (no startup hook), so the partition survives
     // the test run.
     private static final Instant BELOW_FLOOR = Instant.parse("2026-05-01T00:00:00Z");
+
+    // The candidate scan floors on the injected Clock; the pin keeps the
+    // in-window seed calendar-proof (the ScheduledPathIT seam).
+    private static final Instant PINNED_NOW = Instant.parse("2026-06-20T12:00:00Z");
 
     @Inject
     @SeedDataSource
@@ -50,6 +58,11 @@ class ReEvaluationJobWindowTest {
     @ConfigProperty(name = "infochat.partitions.retention-days.post")
     int postRetentionDays;
 
+    @BeforeEach
+    void pinClock() {
+        QuarkusMock.installMockForType(Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
+    }
+
     @Test
     void candidateOlderThanFetchedAtFloorIsNotEnumeratedWhileInWindowIs() throws Exception {
         // enumerateCandidates returns a LIMIT-capped, fetched_at-ordered slice
@@ -60,15 +73,15 @@ class ReEvaluationJobWindowTest {
 
         UUID sourceId = seedSource("window");
         // Both posts satisfy the UNKNOWN re-eval predicate; fetched_at is the
-        // ONLY discriminator. In-window: fetched now() (current-month partition,
-        // provisioned at startup by PartitionCreator), comfortably newer than
+        // ONLY discriminator. In-window: fetched at PINNED_NOW (the June 2026
+        // migration-provisioned bootstrap month), comfortably newer than
         // the ~32-day floor. Below-floor: the fixed May 2026 partition.
-        UUID inWindowPostId = seedUnknownQuarantinedPost(sourceId, "in-window", Instant.now());
+        UUID inWindowPostId = seedUnknownQuarantinedPost(sourceId, "in-window", PINNED_NOW);
         UUID belowFloorPostId = seedUnknownQuarantinedPost(sourceId, "below-floor", BELOW_FLOOR);
 
         // Sanity-check the floor the assertion rests on: BELOW_FLOOR must be
         // older than now() - (horizon + slack), or the test proves nothing.
-        assertTrue(BELOW_FLOOR.isBefore(Instant.now().minusSeconds((postRetentionDays + 2L) * 86400)),
+        assertTrue(BELOW_FLOOR.isBefore(PINNED_NOW.minusSeconds((postRetentionDays + 2L) * 86400)),
             "test fixture invalid: BELOW_FLOOR is inside the candidate window");
 
         Set<UUID> enumerated = reEvaluationJob.enumerateCandidates().stream()

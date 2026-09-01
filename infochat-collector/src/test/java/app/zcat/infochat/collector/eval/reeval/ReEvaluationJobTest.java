@@ -4,6 +4,7 @@ import app.zcat.infochat.collector.eval.testing.StubLlmProvider;
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
 import app.zcat.infochat.llm.LlmProvider;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -19,7 +20,9 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -48,12 +51,18 @@ class ReEvaluationJobTest {
     @ConfigProperty(name = "infochat.partitions.retention-days.post")
     int postRetentionDays;
 
+    // The depth count and candidate scan floor on the injected Clock
+    // (scanWindowFloor(clock.instant())); the pin keeps the seeds' window
+    // placement calendar-proof (the ScheduledPathIT seam).
+    private static final Instant PINNED_NOW = Instant.parse("2026-06-20T12:00:00Z");
+
     private StubLlmProvider stub() {
         return (StubLlmProvider) llmProvider;
     }
 
     @BeforeEach
     void reset() {
+        QuarkusMock.installMockForType(Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
         stub().reset();
     }
 
@@ -314,12 +323,11 @@ class ReEvaluationJobTest {
 
     @Test
     void needsReviewDepthAlert_firesWhenQueueExceedsThreshold() throws Exception {
-        // Seed posts exceeding threshold (5). fetched_at = now(): the depth
+        // Seed posts exceeding threshold (5). fetched_at = PINNED_NOW: the depth
         // count is bounded by the retention+slack scan window, so the rows
-        // must sit inside it (a fixed past date would rot out of the window
-        // as the wall clock advances).
+        // must sit inside it relative to the pinned clock the floor reads.
         for (int i = 0; i < 6; i++) {
-            seedNeedsReviewPost("depth-" + i, Instant.now());
+            seedNeedsReviewPost("depth-" + i, PINNED_NOW);
         }
 
         reEvaluationJob.checkNeedsReviewDepth();
@@ -335,11 +343,11 @@ class ReEvaluationJobTest {
         // is always below the ~32-day floor, same fixture convention as
         // ReEvaluationJobWindowTest.
         Instant belowFloor = Instant.parse("2026-05-01T00:00:00Z");
-        assertTrue(belowFloor.isBefore(Instant.now().minusSeconds((postRetentionDays + 2L) * 86400)),
+        assertTrue(belowFloor.isBefore(PINNED_NOW.minusSeconds((postRetentionDays + 2L) * 86400)),
             "test fixture invalid: belowFloor is inside the depth scan window");
         clearNeedsReviewPosts();
-        seedNeedsReviewPost("count-in-window-a", Instant.now());
-        seedNeedsReviewPost("count-in-window-b", Instant.now());
+        seedNeedsReviewPost("count-in-window-a", PINNED_NOW);
+        seedNeedsReviewPost("count-in-window-b", PINNED_NOW);
         seedNeedsReviewPost("count-below-floor", belowFloor);
 
         assertEquals(2, reEvaluationJob.countNeedsReviewWithinScanWindow(),

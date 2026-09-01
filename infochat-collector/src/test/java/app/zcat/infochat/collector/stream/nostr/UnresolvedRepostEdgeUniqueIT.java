@@ -12,7 +12,6 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -31,14 +30,13 @@ class UnresolvedRepostEdgeUniqueIT {
     private static final String TEST_TARGET_MARKER = "unresolved-edge-unique-it-target";
 
     /**
-     * Pinned created_at inside the current-month partition. A fixed past
-     * date cannot work here: the PartitionPruner drops a month's partitions
-     * once they age past retention (02-schema.md §2.4.4) — the V29 May-2026
-     * bootstrap partition is already gone by IT time.
+     * Fixed created_at inside a migration-provisioned bootstrap month
+     * (June 2026): schedulers stay halted under the test profile, so the
+     * pruner never drops the partition mid-IT (02-schema.md §2.4.4).
      * The value is captured once so both INSERTs collide on the same key.
      */
     private static final Timestamp CREATED_AT =
-        Timestamp.from(Instant.now().truncatedTo(ChronoUnit.SECONDS));
+        Timestamp.from(Instant.parse("2026-06-20T12:00:00Z"));
 
     @Inject
     @SeedDataSource

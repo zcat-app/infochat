@@ -1,9 +1,11 @@
 package app.zcat.infochat.collector.eval.embedding;
 
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
@@ -11,7 +13,9 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -35,11 +39,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class EmbeddingWorkerPickupFloorIT {
 
     // The fixed May-2026 bootstrap partition (created by V7, recreated on
-    // every fresh test DB). Always more than the ~32-day window before any
-    // test-run date, so this post is always below the floor. PartitionPruner
+    // every fresh test DB). More than the ~32-day window before
+    // PINNED_NOW, so this post is always below the floor. PartitionPruner
     // runs only on a 24h schedule, so the partition survives the test run.
     // Same anchor ReEvaluationJobWindowTest uses.
     private static final Instant BELOW_FLOOR = Instant.parse("2026-05-01T00:00:00Z");
+
+    // The pickup floor is computed from the injected Clock; the pin keeps
+    // the in-window seed calendar-proof (the ScheduledPathIT seam).
+    private static final Instant PINNED_NOW = Instant.parse("2026-06-20T12:00:00Z");
 
     @Inject
     @SeedDataSource
@@ -51,17 +59,22 @@ class EmbeddingWorkerPickupFloorIT {
     @ConfigProperty(name = "infochat.partitions.retention-days.post")
     int postRetentionDays;
 
+    @BeforeEach
+    void pinClock() {
+        QuarkusMock.installMockForType(Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
+    }
+
     @Test
     void postBelowFetchedAtFloorIsNotPickedUpWhileInWindowOneIs() throws Exception {
         UUID sourceId = seedRssSource();
         // Both posts satisfy the embedding pickup predicate (RAW, tagger_done,
         // embedding_done=FALSE); fetched_at is the only discriminator.
-        UUID inWindowId = seedPickupReadyPost(sourceId, "in-window", Instant.now());
+        UUID inWindowId = seedPickupReadyPost(sourceId, "in-window", PINNED_NOW);
         UUID belowFloorId = seedPickupReadyPost(sourceId, "below-floor", BELOW_FLOOR);
 
         // Sanity-check the floor the assertion rests on: BELOW_FLOOR must be
         // older than now() - (horizon + slack), or the test proves nothing.
-        assertTrue(BELOW_FLOOR.isBefore(Instant.now().minusSeconds((postRetentionDays + 2L) * 86400)),
+        assertTrue(BELOW_FLOOR.isBefore(PINNED_NOW.minusSeconds((postRetentionDays + 2L) * 86400)),
             "test fixture invalid: BELOW_FLOOR is inside the pickup window");
 
         // Huge limit so neither post can be crowded out of the LIMIT slice by

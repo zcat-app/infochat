@@ -66,8 +66,9 @@ class ScanWindowFixtureGuardTest {
             Pattern.compile("Instant\\.parse\\(\"20\\d\\d-");
 
     /**
-     * The 55 unpinned collector test sources the M1-602 census verified benign
-     * (§(B)). Add an entry ONLY for a genuinely benign absolute instant — one
+     * The 56 unpinned collector test sources verified benign (55 by the
+     * M1-602 census §(B), one by M1-964). Add an entry ONLY for a genuinely
+     * benign absolute instant — one
      * that never feeds an unpinned
      * now-derived gate — and record the justification as a census row in the
      * same commit. If the seed gates worker pickup, pin the Clock instead.
@@ -128,7 +129,10 @@ class ScanWindowFixtureGuardTest {
             "app.zcat.infochat.collector.stream.nostr.Kind6RepostResolutionIT",
             "app.zcat.infochat.collector.stream.nostr.NostrEventTest",
             "app.zcat.infochat.collector.stream.nostr.NostrSinceCursorIT",
-            "app.zcat.infochat.collector.stream.nostr.RelayHealthTrackerTest");
+            "app.zcat.infochat.collector.stream.nostr.RelayHealthTrackerTest",
+            // Unique-index collision IT: the fixed created_at is the
+            // collision key no pickup gate ever reads (M1-964 census row).
+            "app.zcat.infochat.collector.stream.nostr.UnresolvedRepostEdgeUniqueIT");
 
     @Test
     void noUnpinnedAbsoluteInstantFixtureOutsideBenignBaseline() throws IOException {
