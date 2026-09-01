@@ -1,7 +1,7 @@
 ---
 id: M1-963
 title: "Pin tracker test seeds to the injected Clock"
-status: pending
+status: done
 created: 2026-09-01
 last_updated: 2026-09-01
 flow: tick
@@ -26,6 +26,11 @@ files_scope:
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval/PerSourceUnknownTrackerTest.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/stream/nostr/AutoDisableStopBeforeNotifyIT.java
   - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval/PerSourceUnknownTrackerUpgradeIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/reeval/FirstPassStage2RowBenignCloseIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/stage2/Stage2FirstPassQuarantineRowIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/outbox/EvalQueueOverflowIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/stage1/Stage1BodyTextIT.java
+  - infochat-collector/src/test/java/app/zcat/infochat/collector/eval/stage1/Stage1BodyRemediationIT.java
 complexity: low
 risk: low
 round_cap: 2
@@ -58,11 +63,12 @@ out_of_scope:
     replicates) and Stage1Worker's SQL-now() stale-RAW sweep (pre-existing
     §9 migration backlog per M1-447, not this class).
 acceptance:
-  - "REPRODUCTION closed: `./mvnw -pl infochat-collector test -Dtest=PerSourceUnknownTrackerTest -Dsurefire.failIfNoSpecifiedTests=false` is green 4/4 with deterministic seeds, and `mvn verify` from the repo root passes with all three touched classes green."
-  - "NO WALL CLOCK left in the family: `grep -n \"Instant.now()\" PerSourceUnknownTrackerTest.java AutoDisableStopBeforeNotifyIT.java PerSourceUnknownTrackerUpgradeIT.java` returns NOTHING, and no `now()` remains in the three post seed SQL statements — status_changed_at becomes a bound, pin-relative parameter (analysis P2; engineering-rules §9 no-two-clock)."
+  - "REPRODUCTION closed: `./mvnw -pl infochat-collector test -Dtest=PerSourceUnknownTrackerTest -Dsurefire.failIfNoSpecifiedTests=false` is green 4/4 with deterministic seeds, and `mvn verify` from the repo root passes with all eight touched classes green."
+  - "NO WALL CLOCK left in the family: `grep -n \"Instant.now()\"` over the eight touched files returns NOTHING, and no `now()` remains in any of their seed SQL — status_changed_at becomes a bound, pin-relative parameter where the tracker family seeds it (analysis P2; engineering-rules §9 no-two-clock)."
   - "FAILURE-MODE (discrimination preserved): in oldPartitionPost_excludedFromRate_sourceNotDisabled the old post's pinned fetched_at stays BELOW the tracker's fetched floor — derived from the injected `infochat.reeval.unknown-rate-window` + `PartitionScan.PARTITION_SCAN_SLACK` per PerSourceUnknownTrackerClockIT.java:79-87, NOT hardcoded 49h/50h literals — while its pinned status_changed_at stays above the status floor, and `assertSourceStatus(sourceId, \"active\")` still fails the test if the production `p.fetched_at >= ?` bound were dropped (the old post would count, the source would auto-disable). After pinning, the INSERT no longer explodes on a partition error, so THIS assertion is the only remaining guard and must keep discriminating."
-  - "PIN HYGIENE: `grep -n 'Instant.parse(\"2026-0'` over the three files shows ONLY 2026-05/06/07 bootstrap-month constants (analysis P3 — pins outside the migration-provisioned months re-arm the bomb forward)."
+  - "PIN HYGIENE: `grep -n 'Instant.parse(\"2026-0'` over the eight files shows ONLY 2026-05/06/07 bootstrap-month constants, and no 2026-08 remains in executable code — the only grep survivors are historical citations in comments (the redteam ID M1-739-2026-08-01 and a census verification date), stable pointers that stay verbatim (analysis P3 — pins outside the migration-provisioned months re-arm the bomb forward)."
   - "NOTIFIER CONTROLS untouched: the two-sources test's per-source coalescing assertions (`throttledAdminNotifier.getState(...)`, `assertEquals(0L, stateA.get().suppressedCount(), ...)`) pass unmocked; AutoDisableStopBeforeNotifyIT's RecordingNotifier ORDER assertion (stop signal before admin notify) passes unchanged."
+  - "AUGUST-PIN DISPOSAL (refine 2026-09-01, user-approved): the five fixed-August partition-key pins that went red at the Sept-1 calendar flip — FirstPassStage2RowBenignCloseIT (:39), Stage2FirstPassQuarantineRowIT (:48), EvalQueueOverflowIT (:285 SQL literal), Stage1BodyTextIT (:95), Stage1BodyRemediationIT (:55); pristine-main evidence .scratch/m1-963-probe-main-august.log — move inside May–July 2026, each file's straddle/window intent preserved by reading its production seam first (plain constant shift where nothing time-bounds the row; Clock pin + pin-relative seeds where the code under test reads the injected Clock); all five classes green with assertions unchanged."
   - "`mvn verify` from the repo root is green."
 test_plan:
   adds: []
@@ -90,6 +96,34 @@ test_plan:
       `now()` (:157) becomes a bound pin-relative parameter;
       setNextReprobeAt/selectDueReprobes args become pin-relative
       constants). All D42 upgrade-guard assertions unchanged.
+    - >-
+      FirstPassStage2RowBenignCloseIT (AUTHORIZED by refine 2026-09-01:
+      FETCHED_AT (:39) moves 2026-08-01T11:00:00Z → 2026-06-01T11:00:00Z —
+      plain bootstrap-month shift; the value is a pass-through partition
+      key (post seed, Stage2VerdictHandler.apply arg, hand-built
+      ReEvalCandidate) with no time-window logic reading it; assertions
+      unchanged).
+    - >-
+      Stage2FirstPassQuarantineRowIT (AUTHORIZED by refine 2026-09-01:
+      FETCHED_AT (:48) → 2026-06-01T10:00:00Z; same pass-through shape
+      including the quarantine.post_fetched_at denormalized copy and the
+      id+fetched_at partition-pruning lookup; assertions unchanged).
+    - >-
+      EvalQueueOverflowIT (AUTHORIZED by refine 2026-09-01: the
+      bulkInsertRawPosts SQL literal (:285) TIMESTAMPTZ '2026-08-01
+      00:00:00+00' → '2026-06-01 00:00:00+00'; the per-row millisecond
+      spread follows; fetched_at rides the PersistedPostKey opaquely;
+      assertions unchanged).
+    - >-
+      Stage1BodyTextIT (AUTHORIZED by refine 2026-09-01: SEED_FETCHED_AT
+      (:95) 2026-08-06T13:00:00Z → 2026-06-06T13:00:00Z; the existing
+      @BeforeEach Clock pin derives from the constant and follows; exact-key
+      process() calls; assertions unchanged).
+    - >-
+      Stage1BodyRemediationIT (AUTHORIZED by refine 2026-09-01:
+      SEED_FETCHED_AT (:55) 2026-08-07T13:00:00Z →
+      2026-06-07T13:00:00Z; same — Clock pin follows; the job gates on the
+      marker column, not a time window; assertions unchanged).
   preserves:
     - >-
       PerSourceUnknownTrackerClockIT (the seam proof), the tracker's
@@ -107,11 +141,41 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-09-01
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: PASS; MAINTAINABILITY: PASS; SCOPE: PASS — 3 falsification candidates dropped with citations (ClockIT-seem pointer-form concern defeated by §11 itself: the parenthetical names the same-package reference implementation as current truth, no stale-able historical claim; the Stage2FirstPass :190 `updated_at = now()` concern defeated by §9's pure-audit-write exemption and the line being untouched by this diff; the two-clock-skew concern defeated by PerSourceUnknownTracker.java:131-139 binding both floors from ONE injected-Clock sample and the unchanged parked_at equality assertion proving COALESCE(parked_at, now()) non-participating). Verdict: .scratch/tick-review-M1-963-r1.txt"
+    diff_stats: "10 files, +185/-57 (3 tracker-family fixtures Clock-pinned with pin-relative two-column seeds and config-derived floors; 5 fixed-August partition-key constants shifted into June 2026; ticket frontmatter incl. the refine records; STATUS-TICK regen)"
+    notes: >-
+      0 rework items, 0 critical/high. Reviewer re-verified the round
+      identity (snapshot be27206c tree == staged tree), re-ran the
+      acceptance greps against the final tree, re-checked the
+      discrimination arithmetic against the real test-profile config
+      (threshold 0.5 / window PT1H / min-sample 3 / slack 2d), confirmed
+      all §10 controls byte-identical and §8 authorization complete for
+      all 8 files, confirmed the refine provenance (red-august log: 29
+      partition errors across exactly the five absorbed files; pristine-
+      main probe: identical signature), and re-checked the migration
+      horizon (nothing provisioned past July 2026 — the June pins cannot
+      re-arm). One RECOMMENDED-NEW-TICKET observation recorded under
+      Review observations below.
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  checked: 2026-09-01
+  result: >-
+    Self-check clean, no blocking question. Lint 0 BLOCKERs (1 WARN: empty
+    spec_refs — legal for a defect ticket whose contract is its
+    reproduction). All load-bearing file:line citations verified exact
+    (Test :102/:163, AutoDisable :113, Upgrade :157, ClockIT
+    :52/:69-75/:79-87, tracker :64-65/:131-135, PartitionDdl :97-99); two
+    seed-range citations drift 1-3 lines but the behavior claims hold.
+    Census grep re-runs clean (all three returned paths in files_scope);
+    the "10 sites" label miscounts its own correct ranges (14 Test-class
+    call sites) — enumeration complete, binding check is the acceptance
+    grep. Analysis pitfall slice P1/P2/P3/P10/P11/P12 all landed.
 escalation_reason:
 ---
 
@@ -194,6 +258,19 @@ Analysis-document numbering (partition-month-boundary-test-timebomb.md):
 
 Order: 1 → 2 → 3 (largest first; identical mechanical pattern).
 
+**Refine (2026-09-01, user-approved via /tick hurdle → refine):** the
+round-1 full verify went red on five MORE census-CLEAN files holding
+fixed-August partition-key pins that detonated at the Sept-1 calendar
+flip (August stopped being the active/next provisioned month; pristine
+main fails identically — .scratch/m1-963-probe-main-august.log). The
+analysis census verified those constants were FIXED but never that they
+were bootstrap-month (its own P3 rule, applied only to ambient sites).
+Per-file seam read: all five are pass-through partition keys with zero
+time-window logic — the Stage1 pair already pins its Clock at the
+constant +1h (following it), and ScanWindowFixtureGuardTest's baseline is
+unaffected (no pin added or removed). Fix: plain month shift Aug→Jun,
+same day-of-month/time (see test_plan.modifies). No assertion changes.
+
 **Controls to preserve (§10):** notification coalescing-key assertions,
 min-sample exclusion semantics, D42 park-upgrade guard, U-03 ORDER
 assertion — byte-identical. Tests ARE the controls here; no assertion is
@@ -263,8 +340,29 @@ here (FIX: pin-relative). The wider collector census (5 lint-visible +
 4 lint-invisible ambient sites, all partition-safe-today) is disposed in
 M1-962/M1-964; provider/core are clean (analysis document, Ground truth).
 
+Refine correction (2026-09-01): the census's CLEAN bucket itself held five
+fixed-AUGUST pins (FirstPassStage2RowBenignCloseIT :39,
+Stage2FirstPassQuarantineRowIT :48, EvalQueueOverflowIT :285,
+Stage1BodyTextIT :95, Stage1BodyRemediationIT :55) — green only while the
+calendar provisioned August, red from the Sept-1 flip; the analysis P3
+month-check was applied to ambient sites only. Those five files are
+disposed by this ticket per the refine above. (Second-order finding for
+M1-964: a fixed literal in an unprovisioned month is lint-invisible — the
+strengthened trace flags ambient bindings only.)
+
 ## Pre-flight self-check (author-side)
 
 ```bash
 python3 scripts/tick-lint.py docs/plan/m1/tick-tickets/M1-963-persource-tracker-fixture-pinned-clock.md
 ```
+
+## Review observations
+
+- Round 1 (APPROVE) recommended-new-ticket entry, no decision requested:
+  `PerSourceUnknownTrackerClockIT`'s class javadoc
+  (PerSourceUnknownTrackerClockIT.java:30-31) still says the Test class's
+  "seeds use {@code Instant.now()} / DB {@code now()}" — falsified by this
+  diff (all three tracker-family files now pin the Clock). A comment-only
+  fix in a file this ticket's out_of_scope deliberately keeps untouched;
+  natural vehicle is the M1-962/M1-964 census/lint work or a standalone
+  one-liner. Filing is the user's call.

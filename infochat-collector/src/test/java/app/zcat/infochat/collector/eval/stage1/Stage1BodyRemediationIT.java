@@ -52,7 +52,7 @@ class Stage1BodyRemediationIT {
         Pattern.compile("\\[REDACTED:[A-Z2-7]{26}\\]");
 
     /** Partition key every seeded post shares. */
-    private static final Instant SEED_FETCHED_AT = Instant.parse("2026-08-07T13:00:00Z");
+    private static final Instant SEED_FETCHED_AT = Instant.parse("2026-06-07T13:00:00Z");
 
     @Inject
     @SeedDataSource

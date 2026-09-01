@@ -17,7 +17,9 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -48,6 +50,11 @@ class AutoDisableStopBeforeNotifyIT {
     static final String STOP_SIGNAL = "stop-signal";
     static final String ADMIN_NOTIFY = "admin-notify";
 
+    // The instant every seed is relative to, pinned via the injected Clock
+    // (the PerSourceUnknownTrackerClockIT seam) so partition placement is
+    // calendar-independent — June 2026 is migration-provisioned forever.
+    private static final Instant PINNED_NOW = Instant.parse("2026-06-20T12:00:00Z");
+
     @Inject
     @SeedDataSource
     DataSource dataSource;
@@ -59,17 +66,18 @@ class AutoDisableStopBeforeNotifyIT {
     void installRecordingNotifier() {
         ORDER.clear();
         QuarkusMock.installMockForType(new RecordingNotifier(), ThrottledAdminNotifier.class);
+        QuarkusMock.installMockForType(Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
     }
 
     @Test
     void stopSignalIsDispatchedBeforeAdminNotify() throws Exception {
         UUID sourceId = seedSource("stop-before-notify");
-        Instant now = Instant.now();
+        Instant now = PINNED_NOW;
         // Three UNKNOWN stage-2 posts in-window: 3/3 = 100% > 0.5 threshold and
         // count 3 >= the test min-sample (3), so the source is auto-disabled.
-        seedStage2UnknownPost(sourceId, now.minusSeconds(60));
-        seedStage2UnknownPost(sourceId, now.minusSeconds(120));
-        seedStage2UnknownPost(sourceId, now.minusSeconds(180));
+        seedStage2UnknownPost(sourceId, now.minusSeconds(60), now.minusSeconds(60));
+        seedStage2UnknownPost(sourceId, now.minusSeconds(120), now.minusSeconds(120));
+        seedStage2UnknownPost(sourceId, now.minusSeconds(180), now.minusSeconds(180));
 
         // onTick() is the public scheduled entry point; it runs the same
         // source scan + disableSource path checkAllSources does.
@@ -98,7 +106,8 @@ class AutoDisableStopBeforeNotifyIT {
         }
     }
 
-    private void seedStage2UnknownPost(UUID sourceId, Instant fetchedAt) throws Exception {
+    private void seedStage2UnknownPost(UUID sourceId, Instant fetchedAt,
+                                       Instant statusChangedAt) throws Exception {
         String uid = "sbn-" + UUID.randomUUID().toString().substring(0, 8);
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
@@ -110,7 +119,7 @@ class AutoDisableStopBeforeNotifyIT {
                      + "  stage2_verdict"
                      + ") VALUES ("
                      + "  gen_random_uuid(), ?, ?, ?, 'title', 'body',"
-                     + "  ?, 'QUARANTINED', now(),"
+                     + "  ?, 'QUARANTINED', ?,"
                      + "  TRUE, TRUE, TRUE, FALSE,"
                      + "  FALSE, FALSE, FALSE, '{}', 0,"
                      + "  'UNKNOWN'"
@@ -119,6 +128,7 @@ class AutoDisableStopBeforeNotifyIT {
             ps.setObject(2, sourceId);
             ps.setString(3, "upstream-" + uid);
             ps.setTimestamp(4, Timestamp.from(fetchedAt));
+            ps.setTimestamp(5, Timestamp.from(statusChangedAt));
             ps.executeUpdate();
         }
     }

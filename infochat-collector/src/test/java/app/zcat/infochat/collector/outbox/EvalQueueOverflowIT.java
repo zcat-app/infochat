@@ -282,7 +282,7 @@ class EvalQueueOverflowIT {
                 + "  NULL,"
                 + "  NULL,"
                 + "  NULL,"
-                + "  TIMESTAMPTZ '2026-08-01 00:00:00+00' + (i * INTERVAL '1 millisecond'),"
+                + "  TIMESTAMPTZ '2026-06-01 00:00:00+00' + (i * INTERVAL '1 millisecond'),"
                 + "  'RAW',"
                 + "  FALSE, FALSE, FALSE, FALSE,"
                 + "  FALSE, FALSE, FALSE,"

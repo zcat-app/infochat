@@ -36,7 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @QuarkusTest
 class FirstPassStage2RowBenignCloseIT {
 
-    private static final Instant FETCHED_AT = Instant.parse("2026-08-01T11:00:00Z");
+    private static final Instant FETCHED_AT = Instant.parse("2026-06-01T11:00:00Z");
     private static final String UID = "firstpass-stage2-close-it/unknown-arc";
     private static final String BODY = "first-pass UNKNOWN arc body";
     private static final String JUDGED_BODY = "the exact body the first-pass judge saw";

@@ -3,6 +3,7 @@ package app.zcat.infochat.collector.eval.reeval;
 import app.zcat.infochat.collector.fetch.SourceRepository;
 import app.zcat.infochat.collector.testsupport.SeedDataSource;
 import app.zcat.infochat.core.notifier.ThrottledAdminNotifier;
+import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
@@ -16,7 +17,9 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -41,6 +44,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class PerSourceUnknownTrackerUpgradeIT {
 
     private static final String SOURCE_PREFIX = "https://m1-754-upgrade.example/";
+
+    // The instant every seed is relative to, pinned via the injected Clock
+    // (the PerSourceUnknownTrackerClockIT seam) so partition placement is
+    // calendar-independent — June 2026 is migration-provisioned forever.
+    private static final Instant PINNED_NOW = Instant.parse("2026-06-20T12:00:00Z");
 
     /**
      * Written by {@link UpgradeDisableRecorder}. Static on the test
@@ -72,6 +80,7 @@ class PerSourceUnknownTrackerUpgradeIT {
     @BeforeEach
     void cleanup() throws Exception {
         DISABLED_IDS.clear();
+        QuarkusMock.installMockForType(Clock.fixed(PINNED_NOW, ZoneOffset.UTC), Clock.class);
         try (Connection conn = dataSource.getConnection()) {
             exec(conn, "DELETE FROM post WHERE source_id IN "
                 + "(SELECT id FROM source WHERE identifier LIKE ?)", SOURCE_PREFIX + "%");
@@ -83,15 +92,15 @@ class PerSourceUnknownTrackerUpgradeIT {
     void fetchFailureParkUpgradesToUnknownRate() throws Exception {
         // Millisecond truncation so the timestamptz round-trip (micros)
         // preserves the value exactly for the equality assertion below.
-        Instant parkedAt = Instant.now().minusSeconds(7200)
+        Instant parkedAt = PINNED_NOW.minusSeconds(7200)
             .truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
         UUID sourceId = seedFetchFailureParked("victim", parkedAt);
         // Rate 1.0 over the test-profile min-sample of 3 — above the 0.5
         // threshold. The posts are in-window Stage 2 UNKNOWN verdicts.
-        Instant now = Instant.now();
-        seedStage2UnknownPost(sourceId, now.minusSeconds(60));
-        seedStage2UnknownPost(sourceId, now.minusSeconds(120));
-        seedStage2UnknownPost(sourceId, now.minusSeconds(180));
+        Instant now = PINNED_NOW;
+        seedStage2UnknownPost(sourceId, now.minusSeconds(60), now.minusSeconds(60));
+        seedStage2UnknownPost(sourceId, now.minusSeconds(120), now.minusSeconds(120));
+        seedStage2UnknownPost(sourceId, now.minusSeconds(180), now.minusSeconds(180));
 
         tracker.checkAllSources();
 
@@ -114,9 +123,9 @@ class PerSourceUnknownTrackerUpgradeIT {
 
         // The upgraded row must be invisible to the re-probe ladder even
         // with a due probe slot on the row.
-        setNextReprobeAt(sourceId, Instant.now().minusSeconds(60));
+        setNextReprobeAt(sourceId, PINNED_NOW.minusSeconds(60));
         List<SourceRepository.ReprobeCandidate> due =
-            sourceRepository.selectDueReprobes(Instant.now(), reprobeCap);
+            sourceRepository.selectDueReprobes(PINNED_NOW, reprobeCap);
         assertFalse(due.stream().anyMatch(c -> c.uuid().equals(sourceId)),
             "after the upgrade the re-probe selection must never pick the row — "
                 + "the automatic way back in is exactly what the control closes");
@@ -142,7 +151,8 @@ class PerSourceUnknownTrackerUpgradeIT {
         }
     }
 
-    private void seedStage2UnknownPost(UUID sourceId, Instant fetchedAt) throws Exception {
+    private void seedStage2UnknownPost(UUID sourceId, Instant fetchedAt,
+                                       Instant statusChangedAt) throws Exception {
         String uid = "m1754u-" + UUID.randomUUID().toString().substring(0, 8);
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
@@ -154,7 +164,7 @@ class PerSourceUnknownTrackerUpgradeIT {
                      + "  stage2_verdict"
                      + ") VALUES ("
                      + "  gen_random_uuid(), ?, ?, ?, 'title', 'body',"
-                     + "  ?, 'QUARANTINED', now(),"
+                     + "  ?, 'QUARANTINED', ?,"
                      + "  TRUE, TRUE, TRUE, FALSE,"
                      + "  FALSE, FALSE, FALSE, '{}', 0,"
                      + "  'UNKNOWN')")) {
@@ -162,6 +172,7 @@ class PerSourceUnknownTrackerUpgradeIT {
             ps.setObject(2, sourceId);
             ps.setString(3, "upstream-" + uid);
             ps.setTimestamp(4, Timestamp.from(fetchedAt));
+            ps.setTimestamp(5, Timestamp.from(statusChangedAt));
             ps.executeUpdate();
         }
     }

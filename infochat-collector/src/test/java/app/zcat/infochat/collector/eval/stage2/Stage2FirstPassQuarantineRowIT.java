@@ -45,7 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @QuarkusTest
 class Stage2FirstPassQuarantineRowIT {
 
-    private static final Instant FETCHED_AT = Instant.parse("2026-08-01T10:00:00Z");
+    private static final Instant FETCHED_AT = Instant.parse("2026-06-01T10:00:00Z");
     private static final String UID_PREFIX = "stage2-firstpass-row-it/";
     private static final String JUDGED_BODY = "the exact body the judge saw <script>alert(1)</script>";
 
