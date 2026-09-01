@@ -109,6 +109,53 @@ class RetrievalEvalScorerTest {
     }
 
     @Test
+    void capsRecallAtTheRunsEffectiveLimitNotTheHardcodedDefault() {
+        var expected = new java.util.ArrayList<String>();
+        for (int i = 0; i < 20; i++) {
+            expected.add("wide" + i);
+        }
+        var r = record("wide", "wideClass", List.copyOf(expected));
+
+        String[] rows = new String[32];
+        for (int i = 0; i < 32; i++) {
+            rows[i] = i < 20
+                    ? row("wide" + i, "2026-08-24T15:00:00Z", 0.9)
+                    : row("junk" + i, "2026-08-24T15:00:00Z", 0.5);
+        }
+
+        var scores = RetrievalEvalScorer.score(List.of(r),
+                Map.of("wide", RetrievalEvalScorer.parseToolJson(json(rows))),
+                WORLD_NOW, 32);
+
+        // All 20 expected returned; cap at the run's limit: min(20, 32) = 20.
+        assertEquals(1.0, scores.overall().cappedRecall(), 1e-9);
+        assertEquals(1.0, scores.overall().rawRecall(), 1e-9);
+    }
+
+    @Test
+    void overloadAtDefaultLimitReproducesStaticPins() {
+        var expected = new java.util.ArrayList<String>();
+        for (int i = 0; i < 20; i++) {
+            expected.add("big" + i);
+        }
+        var r = record("big", "bigClass", List.copyOf(expected));
+
+        String[] rows = new String[16];
+        for (int i = 0; i < 16; i++) {
+            rows[i] = row("big" + i, "2026-08-24T15:00:00Z", 0.9);
+        }
+
+        var scores = RetrievalEvalScorer.score(List.of(r),
+                Map.of("big", RetrievalEvalScorer.parseToolJson(json(rows))),
+                WORLD_NOW, RetrievalEvalScorer.K);
+
+        assertEquals(1.0, scores.overall().cappedRecall(), 1e-9);
+        assertEquals(0.8, scores.overall().rawRecall(), 1e-9);
+        assertEquals(20.0, scores.overall().meanLabelSize(), 1e-9);
+        assertEquals(1.0, scores.overall().mrr(), 1e-9);
+    }
+
+    @Test
     void expectedBeyondCapReportsCappedAndRaw() {
         var expected = new java.util.ArrayList<String>();
         for (int i = 0; i < 20; i++) {

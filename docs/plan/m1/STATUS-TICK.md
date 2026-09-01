@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 11 |
+| pending | 10 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 170 |
+| done | 171 |
 | deferred | 1 |
 | abandoned | 6 |
 | **total** | **188** |
@@ -25,7 +25,6 @@
 
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
-- M1-959 — Re-read width-32 as owner deltas on both legs (complexity: medium, risk: low)
 - M1-965 — Make the provenance notice count only admitted grounding (complexity: medium, risk: medium)
 - M1-966 — Fit ladder history by rendered estimate before block drop (complexity: medium, risk: medium)
 - M1-968 — Measure KB-miss rate and query-class mix (M0) + Brave spike (complexity: low, risk: low)
@@ -70,6 +69,7 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 
 | ID | Title | Done date | Verdict |
 |---|---|---|---|
+| M1-959 | Re-read width-32 as owner deltas on both legs | 2026-09-02 | round 1 APPROVE |
 | M1-964 | Partition lint: catch indirect ambient key bindings | 2026-09-01 | round 2 APPROVE |
 | M1-963 | Pin tracker test seeds to the injected Clock | 2026-09-01 | round 1 APPROVE |
 | M1-962 | Enforce the partition-insert lint in the Maven build | 2026-09-01 | round 2 APPROVE |
@@ -79,7 +79,6 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-957 | Arm the eval lane's temporal window + widening guard | 2026-08-31 | round 1 APPROVE |
 | M1-956 | Pin the /topic LIKE escaper; share one escapeLike helper | 2026-08-31 | round 1 APPROVE |
 | M1-955 | Re-pin the retrieval characterization emission shape | 2026-08-30 | round 1 APPROVE |
-| M1-952 | Two-leg baseline record + pre-registered gating rules | 2026-08-30 | round 1 APPROVE |
 
 ---
 
@@ -317,7 +316,7 @@ M1-954 (done)
   └── M1-952 (done) [see above]
 M1-956 (done)
 M1-957 (done)
-  └── M1-959 (pending) ← runnable
+  └── M1-959 (done)
 M1-958 (done)
 M1-960 (done)
 M1-961 (done)

@@ -12,13 +12,14 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Pure metric math for the retrieval eval: capped+raw Recall@16, MRR,
+ * Pure metric math for the retrieval eval: capped+raw Recall@k, MRR,
  * none_expected over-return, and lexical-only share over the tool's own
  * JSON emission. No CDI, no DB — CI-covered by RetrievalEvalScorerTest;
  * the live runner only feeds it captured output. Metric contracts (docs/
  * plan/m1/tick-analysis/golden-set-retrieval-eval.md P5/P12): recall is
- * capped at min(|E|,16) because |E| &gt; k makes full recall mechanically
- * impossible; none_expected rows never enter a recall or MRR denominator.
+ * capped at min(|E|,k) because |E| &gt; k makes full recall mechanically
+ * impossible; k is the run's effective result limit, {@link #K} by default;
+ * none_expected rows never enter a recall or MRR denominator.
  */
 public final class RetrievalEvalScorer {
 
@@ -77,26 +78,35 @@ public final class RetrievalEvalScorer {
         }
     }
 
-    /**
-     * Score records against their returned rows. {@code worldNow} is the
-     * fingerprint's max ready_at — the pinned corpus "now" the temporal
-     * labels were authored against (P7), never the wall clock.
-     */
+    /** Score at the production default limit {@link #K}. */
     public static Scores score(List<GoldenRecord> records,
                                Map<String, List<ToolRow>> results,
                                Instant worldNow) {
-        Slice overall = slice("overall", records, results, worldNow);
+        return score(records, results, worldNow, K);
+    }
+
+    /**
+     * Score records against their returned rows. {@code worldNow} is the
+     * fingerprint's max ready_at — the pinned corpus "now" the temporal
+     * labels were authored against (P7), never the wall clock. {@code k} is
+     * the run's effective result limit — the recall cap follows the run, not
+     * the production default.
+     */
+    public static Scores score(List<GoldenRecord> records,
+                               Map<String, List<ToolRow>> results,
+                               Instant worldNow, int k) {
+        Slice overall = slice("overall", records, results, worldNow, k);
         Map<String, Slice> byClass = new LinkedHashMap<>();
         for (GoldenRecord r : records) {
             byClass.computeIfAbsent(r.clazz(), c ->
                     slice(c, records.stream().filter(x -> c.equals(x.clazz())).toList(),
-                            results, worldNow));
+                            results, worldNow, k));
         }
         return new Scores(overall, new ArrayList<>(byClass.values()));
     }
 
     private static Slice slice(String name, List<GoldenRecord> records,
-                               Map<String, List<ToolRow>> results, Instant worldNow) {
+                               Map<String, List<ToolRow>> results, Instant worldNow, int k) {
         int noneExpectedN = 0;
         double recallSum = 0;
         double cappedSum = 0;
@@ -139,7 +149,7 @@ public final class RetrievalEvalScorer {
                 }
             }
             recallSum += (double) hits / r.expectedUids().size();
-            cappedSum += (double) hits / Math.min(r.expectedUids().size(), K);
+            cappedSum += (double) hits / Math.min(r.expectedUids().size(), k);
             mrrSum += firstRank > 0 ? 1.0 / firstRank : 0.0;
         }
         return new Slice(name, records.size(), noneExpectedN,

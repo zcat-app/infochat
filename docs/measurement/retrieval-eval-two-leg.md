@@ -598,3 +598,158 @@ queries) — and the change decision remains a SEPARATE decision/ticket.
 The movements above are below the T1 floor on both legs and settle
 nothing beyond the two rows' own arm status; the first reading's
 confidence-interval paragraph stands unchanged for both legs' ns.
+
+## Width-32 delta reading — 2026-09-01 (M1-959)
+
+The pre-registered width-32 lever re-read as owner-run deltas on BOTH
+legs (the binding rule this record carries from its first section):
+`infochat.chat.semantic-limit` 16→32 was the ONLY variable — same golden
+sets, same frozen fingerprints and coverage pins, same window arm, same
+anchored texts (all byte-verified below). The harness gained one
+test-scope change first: the scorer's recall cap parameterized on the
+run's effective limit (repo `258e94ae` (main) + the M1-959 diff
+— scorer k-bearing overload + runner call site, test-scope only,
+uncommitted at run time; zero production-path diffs). Each leg ran a
+FRESH 16-side control and then the 32-side twice (determinism leg), one
+engine boot serving all six invocations; all six green with every fence
+asserted (label-fingerprint match, zero translator fallbacks, en-zero
+translator calls, inter-pass drift identity).
+
+**Pairing (single variable, per the M1-961 section's pairing note).**
+Each leg's 16-side is the fresh control run on the SAME engine boot as
+that leg's 32-side pair — and both controls are byte-identical to the
+M1-961 day-scale reading's run 1 (tech `20260901-213158`, fam
+`20260901-213640`): 63/63 and 46/46 (pass, record) uid lists, per-row
+window values, and all 32 anchored texts byte-equal per leg. The paired
+runs are same-boot, so the disclosed cross-boot decode variance cannot
+enter the comparison; the single variable is the limit.
+
+### Tech leg — width-32 delta reading
+
+| pin | value |
+|---|---|
+| repo / harness commit | `258e94ae` (main) + the M1-959 scorer diff (test-scope only, uncommitted at run time; zero runner arm/tool/dispatch diffs) |
+| DB fingerprint | `ready=5214;max_ready_at=2026-08-24 16:00:57.001472+00;uid_sha256=06ed0de15eefad172062b4b6e3dfb11713e02017b103cc8ab8e064ffbe489727` — byte-equal to the 2026-09-01 reading; both passes, all three invocations |
+| label fingerprint match | yes — harness-asserted in all three invocations |
+| golden-set pin | `golden_set_sha256 = ccea13baa4c7e0938be6307f78774c6739e14cb9cbccb282bd7cb7bd2400d725` — byte-equal; **63 active / 18 retired** |
+| `world_embedding_coverage` | 1908 / 5214 — byte-equal |
+| semantic threshold / limit | 0.40 / **32** (the 16-side control: 0.40 / 16, pinned in its manifest) |
+| window arm | `window_arm = true`, `window_zone = Z` (UTC), `world_now = 2026-08-24T16:00:57.001472Z`; 16 rows armed, 47 dispatch unchanged — byte-identical to the 2026-09-01 reading |
+| run timestamps | 16-side control `2026-09-01T22:28:40Z`; 32-side run 1 `2026-09-01T22:30:05Z` (all numbers below quote 32-side run 1); run 2 `2026-09-01T22:32:10Z` (determinism leg); artifacts under `.bench/retrieval-eval/results-959/{20260901-222829,20260901-222952,20260901-223155}/` (operator-local) |
+
+**Determinism leg.** Two separate 32-side invocations on the pinned
+fingerprint: per-query uid lists byte-identical across the two runs —
+0 of 126 (pass, record) rows differ — per-row `window` values
+byte-identical, all 32 anchored texts byte-identical across the two
+boots. The runner's internal pass-1/pass-2 fingerprint and uid-identity
+self-checks passed inside each run.
+
+Per-class results (32-side run 1; capped R@32 equals raw R at this
+leg's label sizes — max |E| = 16; smoke/decision marks per rule G1 at
+THIS leg's own n, unchanged):
+
+| class | n | signal | capped R@32 | raw R | MRR | over-ret mean count | over-ret median age (h) | lexical-only share |
+|---|---|---|---|---|---|---|---|---|
+| overall | 63 | — | 0.392 | 0.392 | 0.602 | 1.667 | 83.8 | 0.054 |
+| temporal-today | 5 | smoke | 0.300 | 0.300 | 0.410 | — | — | 0.000 |
+| temporal-2h | 5 | smoke | 0.175 | 0.175 | 0.400 | — | — | 0.000 |
+| temporal-24h | 4 | smoke | 0.469 | 0.469 | 0.750 | — | — | 0.000 |
+| entity-location | 6 | smoke | 0.313 | 0.313 | 0.600 | 0.0 | — | 0.143 |
+| entity-project | 6 | smoke | 0.458 | 0.458 | 0.667 | — | — | 0.230 |
+| price | 5 | smoke | — | — | — | 2.0 | 83.8 | 0.100 |
+| topical | 16 | **decision-grade** | 0.399 | 0.399 | 0.688 | — | — | 0.056 |
+| cross-lingual | 16 | **decision-grade** | 0.463 | 0.463 | 0.578 | — | — | 0.019 |
+
+**Movement vs the same-boot 16-side control is a paired INSTRUMENT
+delta (same golden set, matching fingerprint and coverage pin; the
+single variable is the limit) — T1 APPLIES: 12 recall-discordant
+queries, 12 up / 0 down, above the floor of 6 one-directional
+discordant queries; the two-sided sign test over the 12 discordant
+queries gives p = 0.0005.** The discordant rows, absolute recalls
+(16-side → 32-side): `tt-1` 0.625 → 0.875, `tt-4` 0.000 → 0.125
+(temporal-today), `t24-2` 0.625 → 0.750 (temporal-24h), `ep-1`
+0.625 → 0.750 (entity-project), `xl-ai-cs-b` / `xl-ai-es-b` /
+`xl-ai-ru-b` / `xl-ai-tr-b` 0.688 → 0.750 each, `xl-cyber-cs-b` /
+`xl-cyber-es-b` 0.250 → 0.563 each, `xl-cyber-ru-b` 0.250 → 0.313,
+`xl-cyber-tr-b` 0.250 → 0.313 (cross-lingual; the sixteen-expected
+rows gain most — their grounding sets exceed the 16-slot return). The
+other 45 expected-uid rows are recall-unchanged; the none_expected
+rows' over-returns are size-unchanged (price 2.0 → 2.0,
+entity-location 0.0 → 0.0). Per-class movement is DESCRIPTIVE:
+cross-lingual 0.384 → 0.463, temporal-today 0.225 → 0.300,
+temporal-24h 0.438 → 0.469, entity-project 0.438 → 0.458, overall
+0.359 → 0.392; topical, temporal-2h, and entity-location are
+recall-unchanged; overall MRR 0.601 → 0.602.
+
+### Fam leg — width-32 delta reading
+
+| pin | value |
+|---|---|
+| repo / harness commit | same harness as the tech leg |
+| DB fingerprint | `ready=8260;max_ready_at=2026-08-28 15:43:18.001688+00;uid_sha256=2b385059297e4fa11cf172f458b4b959d37729619d4efbb8b514415378346d51` — byte-equal to the 2026-09-01 reading; both passes, all three invocations |
+| label fingerprint match | yes — harness-asserted in all three invocations |
+| golden-set pin | `golden_set_sha256 = cd28bf61d5d114dfec467dae98e661efc76843fd36a2a955d26f848e5fff1255` — byte-equal; **46 active / 0 retired** |
+| `world_embedding_coverage` | 8260 / 8260 — byte-equal |
+| semantic threshold / limit | 0.40 / **32** (the 16-side control: 0.40 / 16, pinned in its manifest) |
+| window arm | `window_arm = true`, `window_zone = Z` (UTC), `world_now = 2026-08-28T15:43:18.001688Z`; 14 rows armed, 32 dispatch unchanged — byte-identical to the 2026-09-01 reading |
+| run timestamps | 16-side control `2026-09-01T22:34:35Z`; 32-side run 1 `2026-09-01T22:36:40Z` (all numbers below quote 32-side run 1); run 2 `2026-09-01T22:38:10Z` (determinism leg); artifacts under `.bench/retrieval-eval/results-fam-959/{20260901-223413,20260901-223621,20260901-223801}/` (operator-local) |
+
+**Determinism leg.** Two separate 32-side invocations: 0 of 92
+(pass, record) uid lists differ, per-row `window` values
+byte-identical, all 32 anchored texts byte-identical across the two
+boots — `fam-xl-economy-cs` anchored "economy and business news" in
+both (the M1-957 session's rendering; the first-reading cross-boot
+divergence did not recur, the disclosed residual stands).
+
+Per-class results (32-side run 1; capped R@32 equals raw R at this
+leg's label sizes — max |E| = 15; marks unchanged):
+
+| class | n | signal | capped R@32 | raw R | MRR | lexical-only share |
+|---|---|---|---|---|---|---|
+| overall | 46 | — | 0.133 | 0.133 | 0.485 | 0.169 |
+| temporal-today | 5 | smoke | 0.116 | 0.116 | 0.600 | 0.125 |
+| temporal-2h | 5 | smoke | 0.049 | 0.049 | 0.400 | 0.000 |
+| temporal-24h | 4 | smoke | 0.182 | 0.182 | 0.675 | 0.000 |
+| topical | 16 | **decision-grade** | 0.158 | 0.158 | 0.490 | 0.183 |
+| cross-lingual | 16 | **decision-grade** | 0.129 | 0.129 | 0.422 | 0.197 |
+
+**Movement vs the same-boot 16-side control — same pairing, T1
+APPLIES: 8 recall-discordant queries, 8 up / 0 down, above the floor
+of 6; the two-sided sign test over the 8 discordant queries gives
+p = 0.008.** The discordant rows, absolute recalls (16-side →
+32-side): `fam-t24-2` 0.200 → 0.267 (temporal-24h), `fam-top-ai`
+0.133 → 0.333, `fam-top-cyber` 0.071 → 0.143, `fam-top-football`
+0.067 → 0.133, `fam-top-middle-east` 0.000 → 0.077 (topical),
+`fam-xl-football-cs` / `fam-xl-football-es` 0.067 → 0.133 each,
+`fam-xl-middle-east-cs` 0.000 → 0.077 (cross-lingual). The other 30
+expected-uid rows are recall-unchanged. Per-class movement is
+DESCRIPTIVE: topical 0.132 → 0.158, cross-lingual 0.116 → 0.129,
+temporal-24h 0.166 → 0.182, overall 0.118 → 0.133; temporal-today,
+temporal-2h, and overall MRR (0.483 → 0.485) are effectively
+unchanged.
+
+### Cross-leg reading (DESCRIPTIVE only — rule TL3)
+
+Both legs' movements are above the T1 floor and one-directional (12 up
+/ 0 down tech; 8 up / 0 down fam), and both legs' discordant queries
+sit overwhelmingly in the classes whose grounding sets meet or exceed
+the 16-slot return (cross-lingual on the tech set, topical and
+cross-lingual on the fam set). The two legs are NEVER pooled (TL3):
+each leg's sign test stands on its own discordant count, and any
+product-wide claim about the limit needs both legs' owner-run deltas
+read together under TL1 — which this section provides, without
+deciding.
+
+### What this reading does not settle
+
+**The width-32 lever remains NOT product-decided by these deltas
+(restated): every movement above is a paired instrument delta on a
+frozen world, not a product reading; before any
+`infochat.chat.semantic-limit` change, the change decision is a
+SEPARATE decision/ticket.** A result on one leg stays leg-scoped
+(rule TL2): the tech leg's cross-lingual gain does not transfer to
+the fam leg's distribution, and the fam leg's topical gain does not
+transfer to the tech leg's; absolute counts only (N1), never
+percentage points. The two legs' runs share one engine boot and
+byte-equal pins on every key this record pins; the runs execute the
+production tool bean under the runner's refusals, unchanged.

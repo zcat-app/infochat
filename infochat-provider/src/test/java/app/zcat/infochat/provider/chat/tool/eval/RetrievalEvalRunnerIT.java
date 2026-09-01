@@ -234,7 +234,7 @@ class RetrievalEvalRunnerIT {
                 golden.stream().map(GoldenRow::toScorerRecord).toList(),
                 pass1.entrySet().stream().collect(java.util.stream.Collectors.toMap(
                         Map.Entry::getKey, e -> e.getValue().rows())),
-                worldNow);
+                worldNow, limit);
         writeScores(resultsDir, scores, worldNow, fingerprint1);
     }
 

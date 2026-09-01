@@ -1,9 +1,9 @@
 ---
 id: M1-959
 title: "Re-read width-32 as owner deltas on both legs"
-status: pending
+status: done
 created: 2026-08-30
-last_updated: 2026-08-30
+last_updated: 2026-09-02
 flow: tick
 reproduction: >-
   Child of a 2+ decomposition (analysis
@@ -110,11 +110,22 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-09-02
+    verdict: APPROVE
+    checks: [SPEC-TRUTHNESS-CHECK: PASS, SECURITY-CHECK: PASS, TEST-ADEQUACY-CHECK: PASS, MAINTAINABILITY-CHECK: PASS, SCOPE-CHECK: PASS]
+    diff_stats: '6 files, +235/-20 (record pure additions; scorer overload + runner call site; 2 new scorer test legs; ticket/board regen)'
+
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  result: clear
+  notes: >-
+    RunnerIT citations drifted (semantic-limit @ConfigProperty at :161, manifest
+    pin at :526, scorer call at :233) — content verified present; not blocking.
+    No in-flight tickets, so --parallel module check is vacuously clean.
 escalation_reason:
 ---
 
