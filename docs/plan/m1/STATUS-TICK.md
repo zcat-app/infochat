@@ -10,14 +10,14 @@
 
 | Status | Count |
 |---|---|
-| pending | 3 |
+| pending | 6 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
 | done | 168 |
 | deferred | 1 |
 | abandoned | 6 |
-| **total** | **178** |
+| **total** | **181** |
 
 ---
 
@@ -28,6 +28,8 @@ Tickets where `status: pending` AND every entry in `blocked_by` has `status: don
 - M1-959 — Re-read width-32 as owner deltas on both legs (complexity: medium, risk: low)
 - M1-961 — Extend temporal grammar for digit-less day-scale phrases (complexity: low, risk: low)
 - M1-964 — Partition lint: catch indirect ambient key bindings (complexity: medium, risk: medium)
+- M1-965 — Make the provenance notice count only admitted grounding (complexity: medium, risk: medium)
+- M1-966 — Fit ladder history by rendered estimate before block drop (complexity: medium, risk: medium)
 
 ---
 
@@ -44,7 +46,7 @@ _(none)_
 
 Tickets with `status: pending` AND at least one `blocked_by` entry not yet done.
 
-_(none)_
+- M1-967 — blocked_by: M1-965 (pending)
 
 ---
 
@@ -318,4 +320,7 @@ M1-962 (done)
   └── M1-964 (pending) ← runnable
 M1-963 (done)
   └── M1-964 (pending) [see above]
+M1-965 (pending) ← runnable
+  └── M1-967 (pending)
+M1-966 (pending) ← runnable
 ```
