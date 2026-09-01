@@ -483,3 +483,118 @@ first reading's confidence-interval paragraph stands unchanged for both
 legs' ns.
 
 Correction (2026-09-01, M1-960): the replica-restore procedure cited above is committed as `scripts/replica-restore.sh` — the script was renamed for §13 placement; its content is unchanged and the citations above are historical.
+
+## Day-scale grammar delta reading — 2026-09-01 (M1-961)
+
+The digit-less day-scale family now parses: the production grammar
+gained one rolling-24h arm ("past/last/previous day" — the counted
+"past 24 hours" without the digit), so `t24-4` (tech) and `fam-t24-3`
+(fam), the two rows the 2026-08-31 reading disclosed as grammar misses,
+armed through the SAME parse-gated runner arm with zero runner change.
+Single variable vs the 2026-08-31 window-armed reading: this grammar
+extension (repo `c7f58dee` (main) + the M1-961 diff — one production
+pattern constant, one window constant, one collect call, uncommitted at
+run time; zero runner/tool/dispatch diffs). Both legs ran twice
+(determinism legs), one engine boot serving all four invocations; all
+four green with every fence asserted (label-fingerprint match, zero
+translator fallbacks, en-zero translator calls, inter-pass drift
+identity).
+
+### Tech leg — day-scale delta reading
+
+| pin | value |
+|---|---|
+| repo / harness commit | `c7f58dee` (main) + the M1-961 grammar diff (production parser, uncommitted at run time; zero runner/tool/dispatch diffs) |
+| DB fingerprint | `ready=5214;max_ready_at=2026-08-24 16:00:57.001472+00;uid_sha256=06ed0de15eefad172062b4b6e3dfb11713e02017b103cc8ab8e064ffbe489727` — byte-equal to the 2026-08-31 reading; both passes, both invocations |
+| label fingerprint match | yes — harness-asserted in both invocations |
+| golden-set pin | `golden_set_sha256 = ccea13baa4c7e0938be6307f78774c6739e14cb9cbccb282bd7cb7bd2400d725` — byte-equal; **63 active / 18 retired** |
+| `world_embedding_coverage` | 1908 / 5214 — byte-equal |
+| semantic threshold / limit | 0.40 / 16 — byte-equal |
+| window arm | `window_arm = true`, `window_zone = Z` (UTC), `world_now = 2026-08-24T16:00:57.001472Z`; 16 rows armed (was 15 — `t24-4` is the one newly armed), 47 rows dispatch unchanged |
+| run timestamps | run 1 `2026-09-01T21:32:18Z` (all numbers below quote run 1); run 2 `2026-09-01T21:34:40Z` (determinism leg); artifacts under `.bench/retrieval-eval/results-961/{20260901-213158,20260901-213419}/` (operator-local) |
+
+**Determinism leg.** Two separate invocations on the pinned fingerprint:
+per-query uid lists byte-identical across the two runs — 0 of 126
+(pass, record) rows differ — the per-row `window` values byte-identical,
+and all 32 anchored texts byte-identical across the two boots (and
+byte-identical to the 2026-08-31 reading). The runner's internal
+pass-1/pass-2 fingerprint and uid-identity self-checks passed inside
+each run.
+
+**Movement vs the 2026-08-31 reading is a paired INSTRUMENT delta (same
+golden set, matching fingerprint and coverage pin; the single variable
+is the grammar extension) — and it is DESCRIPTIVE, below rule T1's floor
+of 6 one-directional discordant queries BY CONSTRUCTION: exactly one
+newly-armed row, its recall unchanged (0.125 → 0.125).** The row's
+grounding set shrank to its window — `t24-4` returned 7 posts
+unwindowed, 2 windowed, the one relevant post climbing rank 2 → 1 — so
+overall capped recall is unchanged (0.359 → 0.359) and overall MRR
+moved 0.592 → 0.601 (exactly the row's rank-2 → rank-1 step over the 57
+expected rows). Every OTHER row's dispatch is byte-identical to the
+2026-08-31 run — 62 of 63 uid lists unchanged; the armed row is the only
+movement.
+
+### Fam leg — day-scale delta reading
+
+| pin | value |
+|---|---|
+| repo / harness commit | same harness as the tech leg |
+| DB fingerprint | `ready=8260;max_ready_at=2026-08-28 15:43:18.001688+00;uid_sha256=2b385059297e4fa11cf172f458b4b959d37729619d4efbb8b514415378346d51` — byte-equal to the 2026-08-31 reading; both passes, both invocations |
+| label fingerprint match | yes — harness-asserted in both invocations |
+| golden-set pin | `golden_set_sha256 = cd28bf61d5d114dfec467dae98e661efc76843fd36a2a955d26f848e5fff1255` — byte-equal; **46 active / 0 retired** |
+| `world_embedding_coverage` | 8260 / 8260 — byte-equal |
+| semantic threshold / limit | 0.40 / 16 — byte-equal |
+| window arm | `window_arm = true`, `window_zone = Z` (UTC), `world_now = 2026-08-28T15:43:18.001688Z`; 14 rows armed (was 13 — `fam-t24-3` is the one newly armed), 32 rows dispatch unchanged |
+| run timestamps | run 1 `2026-09-01T21:37:02Z` (all numbers below quote run 1); run 2 `2026-09-01T21:39:26Z` (determinism leg); artifacts under `.bench/retrieval-eval/results-fam-961/{20260901-213640,20260901-213903}/` (operator-local) |
+
+**Determinism leg.** Two separate invocations: 0 of 92 (pass, record)
+uid lists differ, per-row `window` values byte-identical, all 32
+anchored texts byte-identical across the two boots — `fam-xl-economy-cs`
+anchored "economy and business news" in both, the M1-957 session's
+rendering; the first reading's cross-boot divergence did not recur (the
+disclosed greedy decode variance remains the recorded residual).
+
+**Movement — DESCRIPTIVE, same pairing, below the T1 floor by
+construction: 0 recall-discordant queries.** `fam-t24-3` returned 16
+posts on both sides with the same 5 hits (recall 0.3333 → 0.3333); the
+window re-ordered the set — the in-window posts climbed, hit ranks 1, 2,
+7, 11, 13 → 1, 2, 4, 8, 9 — without moving the first-relevant rank, so
+overall capped recall (0.118 → 0.118) and MRR (0.483 → 0.483) are both
+unchanged. Every other row's dispatch is byte-identical to the
+2026-08-31 reading — 45 of 46 uid lists unchanged.
+
+### Disclosures of this reading
+
+- **The two parse-miss rows of the 2026-08-31 reading are now ARMED.**
+  `t24-4` and `fam-t24-3` ("… news from the past day") parse to a
+  rolling PT24H through the new grammar arm and dispatched
+  `{query, _window=PT24H}`; the M1-957 section's parse-miss disclosure
+  is superseded IN CURRENT STATE (its text stands, append-only) — the
+  production chat dispatch layer windows the same phrasings this change
+  ships, per the same parse.
+- **The non-en anchored-translation widening (M1-961's recorded
+  judgment).** The parse runs over the anchored query, so a non-en
+  day-scale ask whose greedy rendering lands in the family now windows
+  while a rendering that paraphrases away misses — an already-open,
+  boot-dependent class bounded by the same determinism boundary as
+  every digit-bearing phrasing. No non-en row in either set carries the
+  family (all active temporal rows are en, pinned by the default-suite
+  leg); this reading's anchored texts were byte-identical across boots
+  and vs the 2026-08-31 reading.
+- **M1-959 pairing note.** M1-959 (pending) pairs its 32-side against
+  "the post-M1-957 16-side runs"; with this reading landed first, the
+  single-variable rule makes THIS reading's runs the 16-side pairing
+  base — M1-959's owner runs re-read both sides fresh (the rule governs
+  the paired runs, not history).
+
+### What this reading does not settle
+
+**The width-32 lever remains NOT product-decided** (restated): these
+runs are a grammar-extension delta, never a width reading; before any
+`infochat.chat.semantic-limit` change, the lever still re-reads as
+owner-run deltas on BOTH legs — T1 per leg (same golden set, matching
+fingerprint and coverage pin, floor 6 one-directional discordant
+queries) — and the change decision remains a SEPARATE decision/ticket.
+The movements above are below the T1 floor on both legs and settle
+nothing beyond the two rows' own arm status; the first reading's
+confidence-interval paragraph stands unchanged for both legs' ns.

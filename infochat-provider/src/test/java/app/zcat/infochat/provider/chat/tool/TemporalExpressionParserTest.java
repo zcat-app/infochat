@@ -165,4 +165,45 @@ class TemporalExpressionParserTest {
         assertWindow("thin last 3 days", UTC,
                 Duration.ofHours(72), "last 3 days");
     }
+
+    @Test
+    void dayScalePhrasesParseToARollingDayWindow() {
+        // The digit-less day-scale family is the sibling of the counted
+        // "past 24 hours": a ROLLING 24h window, never a since-midnight
+        // calendar day — fixed PT24H at this NOW under any zone.
+        assertWindow("security news from the past day", UTC,
+                Duration.ofHours(24), "the past day");
+        assertWindow("environment news from the past day", UTC,
+                Duration.ofHours(24), "the past day");
+        assertWindow("past day", UTC, Duration.ofHours(24), "past day");
+        assertWindow("over the last day", UTC,
+                Duration.ofHours(24), "over the last day");
+        assertWindow("in the previous day", UTC,
+                Duration.ofHours(24), "in the previous day");
+        assertWindow("FROM THE PAST DAY", UTC,
+                Duration.ofHours(24), "THE PAST DAY");
+        assertWindow("the past day", PRAGUE, Duration.ofHours(24), "the past day");
+
+        // Family edges stay non-matches: the plural carries no definite
+        // count (analysis P8), and a "day" without last/past/previous is
+        // not a recency phrase ("today" is the calendar token).
+        assertNoMatch("the past days", UTC);
+        assertNoMatch("in the last days", UTC);
+        assertNoMatch("a day ago", UTC);
+        assertNoMatch("this day", UTC);
+        assertNoMatch("next day", UTC);
+
+        // Coexistence with the digit path: a digit between keyword and
+        // unit keeps the counted arm the only match.
+        assertWindow("past 1 day", UTC, Duration.ofHours(24), "past 1 day");
+        assertWindow("in the last 24 hours", UTC,
+                Duration.ofHours(24), "in the last 24 hours");
+
+        // The new candidate rides the existing comparator: narrowest
+        // window wins, equal windows resolve first-mentioned.
+        assertWindow("what happened today and the past day", UTC,
+                Duration.ofHours(9), "today");
+        assertWindow("the past day and the last 24 hours", UTC,
+                Duration.ofHours(24), "the past day");
+    }
 }

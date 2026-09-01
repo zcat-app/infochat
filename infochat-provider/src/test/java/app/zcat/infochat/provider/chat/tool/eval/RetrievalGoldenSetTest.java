@@ -953,23 +953,21 @@ class RetrievalGoldenSetTest {
     void activeTemporalRowsParseToPinnedWindowsAtTheWorldNow() throws Exception {
         // The pinned per-row parse map over BOTH committed golden sets at
         // (ZoneOffset.UTC, each world's pinned now); t24-4/fam-t24-3 are
-        // the grammar's "from the past day" misses, pinned as misses.
+        // the digit-less "past day" rows, pinned to their rolling PT24H.
         Map<String, String> tech = new LinkedHashMap<>();
         List.of("tt-1", "tt-2", "tt-3", "tt-4", "tt-5")
                 .forEach(id -> tech.put(id, "PT16H57.001472S"));
         List.of("t2h-1", "t2h-2", "t2h-3", "t2h-4", "t2h-5")
                 .forEach(id -> tech.put(id, "PT2H"));
-        List.of("t24-1", "t24-2", "t24-3").forEach(id -> tech.put(id, "PT24H"));
-        tech.put("t24-4", null);
+        List.of("t24-1", "t24-2", "t24-3", "t24-4").forEach(id -> tech.put(id, "PT24H"));
 
         Map<String, String> fam = new LinkedHashMap<>();
         List.of("fam-tt-1", "fam-tt-2", "fam-tt-3", "fam-tt-4", "fam-tt-5")
                 .forEach(id -> fam.put(id, "PT15H43M18.001688S"));
         List.of("fam-t2h-1", "fam-t2h-2", "fam-t2h-3", "fam-t2h-4", "fam-t2h-5")
                 .forEach(id -> fam.put(id, "PT2H"));
-        List.of("fam-t24-1", "fam-t24-2", "fam-t24-4")
+        List.of("fam-t24-1", "fam-t24-2", "fam-t24-3", "fam-t24-4")
                 .forEach(id -> fam.put(id, "PT24H"));
-        fam.put("fam-t24-3", null);
 
         assertTemporalParseMap(TECH, tech);
         assertTemporalParseMap(FAM, fam);

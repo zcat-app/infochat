@@ -10,11 +10,11 @@
 
 | Status | Count |
 |---|---|
-| pending | 5 |
+| pending | 4 |
 | in-progress | 0 |
 | in-review | 0 |
 | escalated | 0 |
-| done | 169 |
+| done | 170 |
 | deferred | 1 |
 | abandoned | 6 |
 | **total** | **181** |
@@ -26,7 +26,6 @@
 Tickets where `status: pending` AND every entry in `blocked_by` has `status: done`.
 
 - M1-959 — Re-read width-32 as owner deltas on both legs (complexity: medium, risk: low)
-- M1-961 — Extend temporal grammar for digit-less day-scale phrases (complexity: low, risk: low)
 - M1-965 — Make the provenance notice count only admitted grounding (complexity: medium, risk: medium)
 - M1-966 — Fit ladder history by rendered estimate before block drop (complexity: medium, risk: medium)
 
@@ -67,13 +66,13 @@ Showing the 10 most recently `done` tickets (full history is git-log-derivable v
 | M1-964 | Partition lint: catch indirect ambient key bindings | 2026-09-01 | round 2 APPROVE |
 | M1-963 | Pin tracker test seeds to the injected Clock | 2026-09-01 | round 1 APPROVE |
 | M1-962 | Enforce the partition-insert lint in the Maven build | 2026-09-01 | round 2 APPROVE |
+| M1-961 | Extend temporal grammar for digit-less day-scale phrases | 2026-09-01 | round 1 APPROVE |
 | M1-960 | Rename fam-replica-restore.sh to replica-restore.sh | 2026-09-01 | round 1 APPROVE |
 | M1-958 | Long-stream finalize degrade: enforce the label revert | 2026-09-01 | round 1 APPROVE |
 | M1-957 | Arm the eval lane's temporal window + widening guard | 2026-08-31 | round 1 APPROVE |
 | M1-956 | Pin the /topic LIKE escaper; share one escapeLike helper | 2026-08-31 | round 1 APPROVE |
 | M1-955 | Re-pin the retrieval characterization emission shape | 2026-08-30 | round 1 APPROVE |
 | M1-952 | Two-leg baseline record + pre-registered gating rules | 2026-08-30 | round 1 APPROVE |
-| M1-935 | searchPosts topics filter over search_tags | 2026-08-30 | round 2 APPROVE |
 
 ---
 
@@ -314,7 +313,7 @@ M1-957 (done)
   └── M1-959 (pending) ← runnable
 M1-958 (done)
 M1-960 (done)
-M1-961 (pending) ← runnable
+M1-961 (done)
 M1-962 (done)
   └── M1-964 (done)
 M1-963 (done)

@@ -1,15 +1,17 @@
 ---
 id: M1-961
 title: "Extend temporal grammar for digit-less day-scale phrases"
-status: pending
+status: done
 created: 2026-08-31
-last_updated: 2026-08-31
+last_updated: 2026-09-01
 flow: tick
 reproduction: >-
   TemporalExpressionParserTest#dayScalePhrasesParseToARollingDayWindow
-  (`to-be-written`: /tick start writes it and runs it RED against the merged
-  grammar before any fix code — plain JUnit; the test class exists, the
-  M1-953 marker discipline). Observed wrong behavior (mechanical trace of the
+  (written and run RED at /tick start 2026-09-01 before any fix code, the
+  M1-953 marker discipline: module-scoped unfiltered provider suite, 2119
+  tests, exactly this method failing — "expected a match for <security
+  news from the past day>", Optional.empty as predicted; worktree log
+  .scratch/tick-red-M1-961.log). Observed wrong behavior (mechanical trace of the
   merged grammar, re-verified 2026-08-31):
   TemporalExpressionParser.parse("security news from the past day",
   ZoneOffset.UTC, Instant.parse("2026-08-26T09:00:00Z")) returns
@@ -137,11 +139,38 @@ abandoned_reason:
 spec_amend_for:
 spec_amend_parent:
 remediates:
-reviews: []
+reviews:
+  - round: 1
+    date: 2026-09-01
+    verdict: APPROVE
+    checks: "SPEC-TRUTHNESS: PASS; SECURITY: PASS; TEST-ADEQUACY: PASS; MAINTAINABILITY: PASS; SCOPE: PASS — 4 falsification candidates dropped with citations (the 'last day of August' calendar-named read defeated by the recorded narrows-grounding trade-off at TemporalExpressionParserTest.java:72-73 + the class javadoc's negation-blind residual; record §13 defeated by the pins being byte-equal restatements of already-committed values, grep-proven against the c7f58dee base; the record mtime postdating the verify log defeated by the no-test-reads-the-record probe + the four green eval-leg builds over the same tree; the calendar()-helper hosting a rolling pattern defeated by LAST_WEEK/LAST_MONTH already riding it). Reviewer verified the RED log, regex semantics by hand, the compose path (dispatch/header/hint/clamp), the additions-only and fence probes, the two-pin flip's byte-identity, and the owner-run arithmetic. Verdict: .scratch/tick-review-M1-961-r1.txt"
+    diff_stats: "6 files, +205/-17 (TemporalExpressionParser.java +12 the new arm; TemporalExpressionParserTest.java +41 one new @Test additions-only; RetrievalGoldenSetTest.java +8/-4 the §8 two-pin flip + comment sync; retrieval-eval-two-leg.md +115 append-only dated section; ticket frontmatter bookkeeping; board regen)"
 overrides: []
 aborted_attempts: []
 reopens: []
-clarity_check: {}
+clarity_check:
+  checked: 2026-09-01
+  result: >-
+    Self-check clean, no blocking question. Lint 1 WARN 0 BLOCKERs (the
+    legal spec_refs-empty defect-ticket posture). Citations spot-checked
+    true against c7f58dee: COUNTED's mandatory (\d+) and the six calendar
+    tokens (TemporalExpressionParser.java:26-36); the two null pins at
+    RetrievalGoldenSetTest.java:963/:972 with the :954-956 comment;
+    SearchPostsTool :41/:43-44 clamp source; SemanticSearchTool's _window
+    gate + clamp + clock.instant().minus(window) cutoff; the runner's
+    parse-gated arm (RetrievalEvalRunnerIT.java:249-260 area); the two-leg
+    record's :389-391/:437-439/:456-461 disclosures with the 0.125/0.3333
+    unwindowed baselines. ChatAgent line drift only (parse call now :944,
+    windowHint :995 vs cited :937/:988 — post-filing commits; every claim
+    holds). Census re-ran clean (all six grep sites have rows).
+    Disjointness probe: grep 'past day|last day|previous day' over
+    infochat-provider/src returns the two golden rows, the parse-map
+    comment, AND two case-insensitive prose hits in DigestWorker.java:417
+    / DigestWorkerTest.java:354 ("PREVIOUS day's evening slot") — digest
+    scheduling comments, never parser input; no fixture carries the
+    family, so the additions-only claim stands. --parallel module check:
+    no tick ticket is in-progress/in-review and no other worktree exists
+    — infochat-provider is uncontended.
 escalation_reason:
 ---
 

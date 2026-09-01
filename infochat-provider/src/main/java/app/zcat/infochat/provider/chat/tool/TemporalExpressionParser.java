@@ -35,10 +35,21 @@ public final class TemporalExpressionParser {
     private static final Pattern LAST_WEEK = calendar("\\blast week\\b");
     private static final Pattern LAST_MONTH = calendar("\\blast month\\b");
 
+    // The digit-less day-scale family; the prefix and "the" junctions
+    // reuse COUNTED's closed lists, so a prefixed match carries its
+    // preposition in the phrase and composes with the skeletons' strip.
+    private static final Pattern DAY_SCALE = calendar(
+            "\\b(?:(?:in|within|over|during)\\s+)?(?:the\\s+)?(?:last|past|previous)\\s+day\\b");
+
     // "last week"/"last month" read colloquially as rolling windows, not
     // calendar-anchored ones; 30d matches the clamp vocabulary's month.
     private static final Duration LAST_WEEK_WINDOW = Duration.ofDays(7);
     private static final Duration LAST_MONTH_WINDOW = Duration.ofDays(30);
+
+    // "past/last day" reads as a rolling 24h — parity with the counted
+    // "past 24 hours"; NOT a calendar day, which is what today/yesterday
+    // anchor to.
+    private static final Duration DAY_SCALE_WINDOW = Duration.ofDays(1);
 
     private static final Comparator<Candidate> NARROWEST_THEN_FIRST_MENTIONED =
             Comparator.comparing(Candidate::window).thenComparingInt(Candidate::start);
@@ -103,6 +114,7 @@ public final class TemporalExpressionParser {
                         .atStartOfDay(zone).toInstant(), now), out);
         collect(LAST_WEEK, text, LAST_WEEK_WINDOW, out);
         collect(LAST_MONTH, text, LAST_MONTH_WINDOW, out);
+        collect(DAY_SCALE, text, DAY_SCALE_WINDOW, out);
     }
 
     private static void collect(Pattern pattern, String text, Duration window,
