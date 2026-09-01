@@ -1,6 +1,6 @@
 ---
 name: qwen38-specdec-landscape
-description: "Qwen3.8 speculative-decoding state (updated 2026-09-01): Vulkan spec-decode benchmarks taken before llama.cpp PR #27812 are INVALID (issue #27805 graph-optimizer bug, wrong output at temp 0); DFlash2 merged to staging branch xsn/dflash2, NOT master, with open correctness bugs; DFlash2 sidecar GGUFs exist for dense 27B only; unsloth NOW ships standalone Flash-Next MTP head GGUFs (2026-09-01) but no official statement names a runtime that runs the qwen4exp MTP graph — load-probe before believing; --n-cpu-ffn is a discrete-VRAM tool, no-op on UMA."
+description: "Qwen3.8 speculative-decoding state (updated 2026-09-01): Vulkan spec-decode benchmarks taken before llama.cpp PR #27812 are INVALID (issue #27805 graph-optimizer bug, wrong output at temp 0); DFlash2 lives on staging branch xsn/dflash2, NOT master, with open correctness bugs; unsloth ships standalone Flash-Next MTP head GGUFs (use the NON-shared files) but master still has NO draft-mtp — the runtime gate is open PRs #27836/#28104/#28097 (merged same day: graph fixes #28123/#28023); --n-cpu-ffn is a discrete-VRAM tool, no-op on UMA."
 metadata:
   node_type: memory
   type: project
@@ -68,6 +68,25 @@ ecosystem — re-check the PR states before relying on them.
   speedup. (Base `Qwen/Qwen3.8-Flash-Next` + official blog live since
   08-24 — the "experimental preview of the Qwen4 arch" framing is Qwen's
   own.)
+- **UPDATE 2026-09-01 (later — r/LocalLLaMA thread 1w42biu + GitHub API;
+  resolves the drluoto/agentionai conflict into NAMED PRs; states verified
+  against the API same day).** MERGED ~04:24 UTC: #28123 (recurrent state
+  rollback — per its numbers, THE fix for "MTP slower than bare": no-draft
+  108 t/s; before 123 code/83 prose; after 183 code/144 prose) and #28023
+  (indexer-head slices, prefill fix). STILL OPEN — and these three ARE the
+  runtime gate: #27836 (`--spec-type draft-mtp` NextN head for
+  Flash-Next), #28104 (port NextN/MTP spec-dec to master, claims +50%
+  decode at 70k ctx), #28097 (draft-head-only GGUFs = the UNSLOTH LAYOUT +
+  draft-load regression fix). Perf stack behind them, all open: #28136
+  (lazy-PLE direct reads, >2x prefill on GB10), #27992 (kv-cache
+  (seq,pos) index → O(log n) n-gram lookups), #27941, #28121. So
+  "drluoto: mainline `-md` works" was PR-branch builds, not master —
+  master still has no draft-mtp for this arch and still rejects the
+  unsloth head-only files. SHARED vs standard head files: shared = only
+  blk.48 weights, reuses the base model's token_embd/output (smaller;
+  engine must link them) — NOT supported on main branch; download the
+  STANDARD self-contained files (own emb/output copies). Ref for shared:
+  unslothai/llama.cpp#142.
 - **PR #27742 (qwen4exp arch) merged to ggml-org master 2026-08-27** —
   Flash-Next GGUFs now load in mainline; PR-branch builds are superseded
   and deserve a re-measure (kernels may mature post-merge).
@@ -105,4 +124,7 @@ ecosystem — re-check the PR states before relying on them.
   quimmedes sidecar (memory-local flash entry holds the recipe and rollback
   context). 2026-09-01: the WEIGHTS half of this trigger fired (unsloth head
   GGUFs, see above) — the runtime half is still open; any re-try is a load
-  probe of `-md`/`--spec-type draft-mtp` on a pinned build first.
+  probe of `-md`/`--spec-type draft-mtp` on a pinned build first. The
+  runtime half now has NAMES: #27836 + #28104 + #28097 all merged = the
+  trigger; probe on a build of that PR stack (e.g. `refs/pull/28104/head`),
+  not master and not the old 035e227 build.
